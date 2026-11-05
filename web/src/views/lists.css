@@ -1,0 +1,249 @@
+/* The desktop's card rows (board.ts), the Coming filter chips (coming-filter.ts) and a Coming item's sheet
+   (coming-sheet.ts). */
+
+/* Coming filter */
+
+.cfilter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.cfilter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 11px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.cfilter-chip:hover {
+  color: var(--text);
+  border-color: rgba(255, 240, 225, 0.25);
+}
+
+.cfilter-chip.on {
+  border-color: var(--text);
+  background: var(--text);
+  color: var(--bg);
+}
+
+.cfilter-chip:focus-visible {
+  outline: 2px solid var(--apricot);
+  outline-offset: 2px;
+}
+
+.cfilter-n {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+}
+
+/* A Coming row opens its sheet; the chevron at its end says so. */
+button.qc-coming {
+  position: relative;
+  padding-right: 22px;
+  border-width: 0 0 1px;
+  border-radius: 0;
+  background: none;
+}
+
+button.qc-coming::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  width: 7px;
+  height: 7px;
+  border-top: 2px solid var(--muted);
+  border-right: 2px solid var(--muted);
+  opacity: 0.7;
+  transform: translateY(-50%) rotate(45deg);
+}
+
+button.qc-coming:hover {
+  background: rgba(255, 240, 225, 0.05);
+}
+
+/* A Coming item's sheet */
+
+.cs {
+  --stage: var(--muted);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cs[data-stage="building"] {
+  --stage: var(--later);
+}
+
+.cs[data-stage="review"] {
+  --stage: var(--note);
+}
+
+.cs:is([data-stage="owner-ok"], [data-stage="merging"]) {
+  --stage: var(--apricot);
+}
+
+.cs:is([data-stage="deploying"], [data-stage="shipped"]) {
+  --stage: var(--yes);
+}
+
+.cs-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.cs-what {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.cs-where {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.cs-stage {
+  color: var(--stage);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.cs-pct {
+  color: var(--muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cs-quiet {
+  color: var(--apricot);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.cs > .qc-bar {
+  position: relative;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 240, 225, 0.1);
+}
+
+.cs-facts {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px 16px;
+  margin: 4px 0 0;
+  font-size: 14px;
+}
+
+.cs-fact {
+  display: contents;
+}
+
+.cs-fact dt {
+  color: var(--muted);
+}
+
+.cs-fact dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.cs-pr {
+  color: var(--apricot);
+  font-weight: 800;
+}
+
+.cs-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.cs-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cs-actions .btn {
+  flex: 1 1 120px;
+  min-height: 44px;
+}
+
+.cs-next {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  color: var(--muted);
+  font-size: var(--fs-body);
+  list-style: none;
+}
+
+.cs-next strong {
+  color: var(--text);
+}
+
+.cs-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.cs-status:empty {
+  display: none;
+}
+
+/* Coming items with no update for two days, folded under the list rather than dropped. */
+.cstale {
+  margin-top: 10px;
+}
+
+.cstale-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-height: 44px;
+  padding: 6px 2px;
+  color: var(--muted);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.cstale-n {
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--line);
+  font-variant-numeric: tabular-nums;
+}
+
+.cstale-why {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.cstale .qc-coming {
+  opacity: 0.75;
+}

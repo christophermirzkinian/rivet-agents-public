@@ -1,0 +1,210 @@
+/* Your asks (your-asks.ts); every word at 14px or more. */
+.your-asks {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 4px 16px 0;
+}
+
+.asks-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ask-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 12px;
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 11px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+}
+
+button.ask-row {
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.ask-title {
+  grid-column: 1;
+  font-size: var(--fs-l);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.ask-when {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  max-width: 13em;
+  font-size: var(--fs-body);
+  font-weight: 700;
+  text-align: right;
+}
+
+.ask-row.is-long .ask-when {
+  grid-column: 1 / -1;
+  grid-row: auto;
+  max-width: none;
+  margin-top: 3px;
+  text-align: left;
+}
+
+.ask-row.is-long .ask-title,
+.ask-row.is-long .ask-sub {
+  grid-column: 1 / -1;
+}
+
+.ask-when.is-needs {
+  color: var(--apricot);
+}
+
+.ask-row.is-counted .ask-when {
+  color: var(--apricot);
+}
+
+.ask-when.is-finished {
+  color: var(--yes);
+}
+
+.ask-sub {
+  grid-column: 1;
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--fs-body);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ask-bar {
+  grid-column: 1 / -1;
+  height: 4px;
+  margin-top: 8px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--line);
+}
+
+.ask-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--yes);
+}
+
+.ask-has-dismiss {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.ask-has-dismiss .ask-row {
+  flex: 1;
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+/*
+ * A wide window reads Your asks as a table (plan §3g, target/desktop-progress.png): ask · stage · time · PR and chat,
+ * one line each, the rest of a moved time on a second line. The sub line's and the time's spans become the cells.
+ * The table needs the list's own width, not the window's: its three fixed columns are 552px with their gaps, so a
+ * 640px sheet (In hand on a wide window) left the title one letter wide. From 900px the title keeps
+ * 314px past the row's padding and border, room for a Dismiss button beside it; narrower, the rows keep the
+ * phone's shape: the title with the time beside it, the stage and PR under the title.
+ */
+.asks-rows {
+  container: asks / inline-size;
+}
+
+@container asks (min-width: 900px) {
+  .desktop .ask-row {
+    grid-template-columns: minmax(0, 1fr) 150px 170px 190px;
+    column-gap: 14px;
+    padding: 11px 16px;
+  }
+
+  .desktop .ask-row .ask-title {
+    grid-column: 1;
+    grid-row: 1;
+    font-size: var(--fs-l);
+  }
+
+  .desktop .ask-sub:not(.is-note),
+  .desktop .ask-row.is-long .ask-when {
+    display: contents;
+  }
+
+  .desktop .ask-dot,
+  .desktop .ask-comma {
+    display: none;
+  }
+
+  .desktop .ask-stage {
+    grid-column: 2;
+    grid-row: 1;
+    font-size: var(--fs-l);
+    font-weight: 700;
+  }
+
+  .desktop .ask-row .ask-when,
+  .desktop .ask-now {
+    grid-column: 3;
+    grid-row: 1;
+    max-width: none;
+    margin: 0;
+    font-size: var(--fs-l);
+    text-align: left;
+  }
+
+  .desktop .ask-who {
+    grid-column: 4;
+    grid-row: 1;
+    color: var(--muted);
+    font-size: var(--fs-body);
+    text-align: right;
+    overflow-wrap: anywhere;
+  }
+
+  /* Done today has no time column of its own: its time sits at the right, beside the PR and chat, as on the phone. */
+  .desktop .done-rows .ask-row {
+    grid-template-columns: minmax(0, 1fr) 150px 190px 170px;
+  }
+
+  .desktop .done-rows .ask-who {
+    grid-column: 3;
+  }
+
+  .desktop .done-rows .ask-row .ask-when {
+    grid-column: 4;
+    text-align: right;
+  }
+
+  .desktop .ask-was,
+  .desktop .ask-sub.is-note {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    margin-top: 4px;
+    color: var(--muted);
+    font-size: var(--fs-body);
+    font-weight: 600;
+    white-space: normal;
+  }
+
+  /* A moved record has both: the rest of its time keeps the second line, and its why takes the third. */
+  .desktop .ask-row.is-long .ask-sub.is-note {
+    grid-row: 3;
+  }
+}
+
+.asks-empty {
+  margin: 0 2px 8px;
+  color: var(--muted);
+  font-size: var(--fs-body);
+}

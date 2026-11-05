@@ -1,0 +1,312 @@
+/* The Chat tab (chat.ts): Chat with Rivet, its search, and the card lines in a thing's page. Body text 16 px, nothing
+   under 14 px, every tap target 44 px or more. */
+
+.chat-head[hidden],
+.conv-head-box[hidden],
+.chat-topics-row[hidden],
+.chat-topics[hidden],
+.chat-thread[hidden],
+.chat-compose-box[hidden] {
+  display: none;
+}
+
+.conv-earlier {
+  display: block;
+  min-height: 44px;
+  margin: 0 auto 8px;
+  font-size: var(--fs-body);
+}
+
+.conv-earlier[hidden] {
+  display: none;
+}
+
+.chat-card-open {
+  min-width: var(--tap);
+  padding: 6px 10px;
+  border-color: transparent;
+  font-size: var(--fs-body);
+}
+
+/* Rivet's "Card: … ›" line: the whole line opens its update card. */
+.chat-card-line {
+  display: block;
+  width: 100%;
+  min-height: var(--tap);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--apricot);
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Chat's search: under More topics; on a desktop on top of Chat and over an open thing too. */
+.chat-search {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.chat-search[hidden] {
+  display: none;
+}
+
+.desktop .side .chat-search {
+  display: flex;
+}
+
+.chat.searching .chat-search {
+  flex: 1;
+  min-height: 0;
+}
+
+.chat.searching .chat-scroll,
+.chat.searching .chat-compose-box,
+.chat.searching .chat-topics,
+.chat.topics .chat-scroll,
+.chat.topics .chat-compose-box {
+  display: none;
+}
+
+/* More topics: one row over Chat; open, the conversations stand in for its messages. */
+.chat-topics-row {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.chat-topics-open {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 8px 14px;
+  font-size: var(--fs-xl);
+  text-align: left;
+}
+
+.chat-topics-label {
+  flex: 1;
+  font-weight: 800;
+}
+
+.chat-topics-new {
+  color: var(--apricot);
+  font-weight: 700;
+}
+
+.chat-topics-open .btn-icon {
+  width: 20px;
+  height: 20px;
+}
+
+.chat-topics-title {
+  flex: 1;
+  margin: 0;
+  font-size: var(--fs-3xl);
+  font-weight: 800;
+}
+
+.chat-topics {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  margin: 0;
+  padding: 0 0 8px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+}
+
+.chat-topic {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  min-height: 56px;
+  padding: 10px 13px 11px;
+  border: 2px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-topic-title {
+  font-size: var(--fs-2xl);
+  font-weight: 700;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.chat-topic-last {
+  color: var(--muted);
+  font-size: var(--fs-l);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.chat-topic-meta {
+  color: var(--muted);
+  font-size: var(--fs-body);
+}
+
+.chat-topic-meta.needs-you {
+  color: var(--apricot);
+  font-weight: 700;
+}
+
+.chat-topics-group,
+.chat-topics-empty {
+  margin: 8px 4px 0;
+  color: var(--muted);
+  font-size: var(--fs-xl);
+}
+
+.chat-topics-more {
+  width: 100%;
+  min-height: 48px;
+  font-size: var(--fs-xl);
+}
+
+.chat-search-field {
+  position: relative;
+}
+
+.chat-search-input {
+  width: 100%;
+  min-height: 48px;
+  padding: 10px 52px 10px 16px;
+  border: 2px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-xl);
+}
+
+.chat-search-input:focus {
+  outline: 3px solid var(--apricot);
+  outline-offset: 1px;
+}
+
+.chat-search-input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.chat-search-clear {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+}
+
+.chat-search-clear[hidden],
+.chat-search-body[hidden],
+.chat-search-status:empty {
+  display: none;
+}
+
+.chat-search-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.chat-search-status {
+  margin: 4px 4px 8px;
+  color: var(--muted);
+  font-size: var(--fs-xl);
+}
+
+.chat-search-results {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0 0 8px;
+  list-style: none;
+}
+
+.chat-search-hit {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 13px 11px;
+  border: 2px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-search-title {
+  font-size: var(--fs-xl);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.chat-search-hit.is-conversation .chat-search-title {
+  font-size: var(--fs-2xl);
+  font-weight: 700;
+}
+
+.chat-search-detail {
+  color: var(--muted);
+  font-size: var(--fs-l);
+}
+
+/* A card Rivet put in the conversation: its kind, its title and its ask, and Open card while it is on the board. */
+.chat-msg.posted {
+  border-color: color-mix(in srgb, var(--apricot) 45%, var(--line));
+}
+
+.chat-posted {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.chat-posted-kind {
+  color: var(--apricot);
+  font-size: var(--fs-body);
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.chat-posted-title {
+  font-size: var(--fs-xl);
+  font-weight: 800;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.chat-posted-ask {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-body);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.chat-posted .chat-posted-open {
+  align-self: flex-start;
+  min-height: 44px;
+  margin-top: 6px;
+  font-size: var(--fs-body);
+}

@@ -1,0 +1,12 @@
+# Test-only, first-party solid-colour clips made with ffmpeg. No external artwork or footage. MIT (see LICENSE).
+assets:
+  - file: feed-portrait.webm
+    source: first-party
+    origin: "ffmpeg -f lavfi -i color=c=steelblue:s=540x720:r=2 -t 1 -c:v libvpx -b:v 40k -an feed-portrait.webm"
+    license: MIT
+    notes: "One-second solid-colour VP8 fixture for browser layout tests."
+  - file: feed-landscape.webm
+    source: first-party
+    origin: "ffmpeg -f lavfi -i color=c=teal:s=1920x1080:r=2 -t 1 -c:v libvpx -b:v 40k -an feed-landscape.webm"
+    license: MIT
+    notes: "One-second solid-colour VP8 fixture for browser layout tests."

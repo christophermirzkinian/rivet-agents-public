@@ -1,0 +1,154 @@
+/* Compact Needs you and Coming cards (queue-cards.ts), on the desktop board list and the phone's HQ queues. */
+
+.qc-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.qc {
+  --accent: var(--apricot);
+  display: flex;
+  width: 100%;
+  min-height: 44px;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.3;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.qc:focus-visible {
+  outline: 2px solid var(--apricot);
+  outline-offset: 2px;
+}
+
+div.qc {
+  cursor: default;
+}
+
+/* Coming: rows on the page split by hairlines, each under its own stage word, with a flat bar in the stage's colour.
+   Rows stay in the order the app gives them. */
+
+.qc-list:has(> li > .qc-coming) {
+  gap: 0;
+}
+
+.qc-coming {
+  --stage: var(--muted);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 2px 12px;
+  padding: 10px 2px 11px;
+  border-bottom: 1px solid var(--line);
+}
+
+.qc-coming:hover {
+  background: rgba(255, 240, 225, 0.04);
+}
+
+.qc-coming:has(.s-building) {
+  --stage: var(--later);
+}
+
+.qc-coming:has(.s-review) {
+  --stage: var(--note);
+}
+
+.qc-coming:has(:is(.s-owner-ok, .s-merging)) {
+  --stage: var(--apricot);
+}
+
+.qc-coming:has(:is(.s-deploying, .s-live, .s-merged)) {
+  --stage: var(--yes);
+}
+
+.qc-coming > *,
+.qc-foot > * {
+  grid-column: 1 / -1;
+}
+
+.qc-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.qc-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qc-pr {
+  flex: none;
+  color: var(--apricot);
+  font-size: 13px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.qc-what {
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qc-coming > .qc-bar {
+  grid-column: 1;
+  position: relative;
+  height: 6px;
+  margin: 6px 0 2px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 240, 225, 0.1);
+}
+
+.qc-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: var(--stage);
+}
+
+/* The five joins between the six stages. */
+.qc-tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--bg);
+}
+
+/* The stage word heads the row; the ETA sits at the bar's end. */
+.qc-foot {
+  display: contents;
+}
+
+.qc-foot > .qc-stage {
+  order: -1;
+  color: var(--stage);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.qc-foot > .qc-quiet {
+  grid-column: 2;
+  color: var(--apricot);
+  font-size: 13px;
+  font-weight: 700;
+}

@@ -1,0 +1,359 @@
+/* A project's backlog sheet (backlog-sheet.ts): rows with a coloured tag, a title and one line under it. */
+.backlog-head {
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 10px;
+}
+
+.backlog-head-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.backlog-head-sub {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: var(--fs-l);
+  font-weight: 600;
+}
+
+.backlog-body {
+  padding: 0 0 12px;
+}
+
+.backlog-note {
+  margin: 12px 4px 0;
+  color: var(--muted);
+  font-size: var(--fs-m);
+}
+
+.backlog-heading {
+  display: flex;
+  justify-content: space-between;
+  margin: 14px 4px 6px;
+  color: var(--muted);
+  font-size: var(--fs-s);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.backlog-count {
+  color: var(--apricot);
+  letter-spacing: 0;
+}
+
+.backlog-rows {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+}
+
+.backlog-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: var(--tap);
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--bg-2);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+}
+
+.backlog-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.backlog-title,
+.backlog-sub {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.backlog-title {
+  font-size: var(--fs-body);
+}
+
+.backlog-sub {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: var(--fs-s);
+}
+
+.backlog-go {
+  color: var(--muted);
+  font-size: var(--fs-3xl);
+}
+
+.backlog-tag {
+  flex: none;
+  padding: 3px 7px;
+  border-radius: 8px;
+  font-size: var(--fs-s);
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.backlog-tag.is-start {
+  background: rgba(255, 194, 61, 0.16);
+  color: var(--apricot);
+}
+
+.backlog-tag.is-parked {
+  background: rgba(199, 155, 255, 0.16);
+  color: var(--note);
+}
+
+.backlog-tag.is-call {
+  background: rgba(127, 168, 255, 0.16);
+  color: var(--later);
+}
+
+.backlog-tag.is-issue {
+  background: rgba(214, 205, 255, 0.1);
+  color: var(--muted);
+}
+
+.backlog-tag.is-pr {
+  background: rgba(47, 214, 123, 0.14);
+  color: var(--yes);
+}
+
+.backlog-more {
+  display: block;
+  width: 100%;
+  min-height: var(--tap);
+  border: 0;
+  background: none;
+  color: var(--apricot);
+  font: inherit;
+  font-size: var(--fs-m);
+  font-weight: 700;
+}
+
+.backlog-foot {
+  flex: none;
+  padding: 10px 0 4px;
+  border-top: 1px solid var(--line);
+}
+
+.backlog-all {
+  display: grid;
+  place-items: center;
+  min-height: var(--tap);
+  border-radius: 14px;
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: var(--fs-body);
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.backlog-row.is-started {
+  border-color: rgba(47, 214, 123, 0.45);
+}
+
+.backlog-tag.is-started {
+  background: rgba(47, 214, 123, 0.16);
+  color: var(--yes);
+}
+
+/* An issue opened in the sheet (backlog-issue.ts). */
+.decide-close.backlog-issue-back .btn-icon {
+  transform: none;
+}
+
+.backlog-issue-body {
+  padding: 12px 2px;
+}
+
+.backlog-issue-title {
+  margin: 0 0 8px;
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.backlog-issue-meta {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-l);
+  line-height: 1.5;
+}
+
+.backlog-issue-meta b {
+  color: var(--text);
+}
+
+.backlog-issue-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0;
+}
+
+.backlog-issue-chips:empty {
+  display: none;
+}
+
+.backlog-tag.is-label {
+  padding: 4px 9px;
+  background: rgba(127, 168, 255, 0.14);
+  color: var(--later);
+  font-size: var(--fs-l);
+}
+
+.backlog-issue-chat {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--bg-2);
+  color: var(--muted);
+  font-size: var(--fs-l);
+}
+
+.backlog-issue-chat[hidden] {
+  display: none;
+}
+
+.backlog-issue-on {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: var(--tap);
+  border: 0;
+  background: none;
+  color: var(--yes);
+  font: inherit;
+  font-size: var(--fs-2xl);
+  font-weight: 800;
+  text-align: left;
+}
+
+.backlog-md {
+  margin-top: 10px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-xl);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.backlog-md p,
+.backlog-md ul,
+.backlog-md ol,
+.backlog-md blockquote,
+.backlog-md pre {
+  margin: 10px 0;
+}
+
+.backlog-md h1,
+.backlog-md h2,
+.backlog-md h3,
+.backlog-md h4 {
+  margin: 14px 0 6px;
+  font-size: var(--fs-2xl);
+  line-height: 1.3;
+}
+
+.backlog-md code {
+  padding: 1px 5px;
+  border-radius: 6px;
+  background: var(--panel-2);
+  font-size: var(--fs-l);
+}
+
+.backlog-md pre {
+  overflow-x: auto;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--panel-2);
+}
+
+.backlog-md pre code {
+  padding: 0;
+  background: none;
+}
+
+.backlog-md a {
+  color: var(--apricot);
+}
+
+.backlog-md img {
+  max-width: 100%;
+}
+
+.backlog-md-plain {
+  white-space: pre-wrap;
+}
+
+.backlog-btns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.backlog-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 52px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel-2);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-2xl);
+  font-weight: 800;
+  text-align: center;
+  text-decoration: none;
+}
+
+.backlog-btn.is-primary {
+  grid-column: 1 / -1;
+  min-height: 56px;
+  border: 0;
+  background: var(--apricot);
+  color: #1a1300;
+  font-size: var(--fs-3xl);
+}
+
+.backlog-btn.is-done {
+  border: 1px solid rgba(47, 214, 123, 0.4);
+  background: rgba(47, 214, 123, 0.16);
+  color: var(--yes);
+}
+
+.backlog-btn.is-wide {
+  grid-column: 1 / -1;
+}
+
+.backlog-btn.is-close {
+  border-color: rgba(255, 77, 94, 0.4);
+  color: var(--no);
+}
+
+.backlog-btn.is-armed {
+  border: 0;
+  background: var(--no);
+  color: #fff;
+}
+
+.backlog-issue-note {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: var(--fs-l);
+  text-align: center;
+}
+
+.backlog-issue-note[hidden] {
+  display: none;
+}

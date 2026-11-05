@@ -1,0 +1,893 @@
+/* The desks: a dotted floor, Rivet's desk at the top, a desk per project at work, dashed slots for the rest. */
+.desks {
+  position: absolute;
+  inset: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  /* The floor's top space, under the OK pill: taller while Not OK says why (floor.ts). */
+  padding: var(--paper-top, 70px) 14px 20px;
+  background:
+    radial-gradient(circle at 1px 1px, rgba(214, 205, 255, 0.16) 1.2px, transparent 1.6px) 0 0 / 22px 22px,
+    radial-gradient(70% 40% at 50% 12%, rgba(255, 194, 61, 0.1), transparent 70%),
+    var(--bg);
+}
+
+/* A band under the OK pill, the floor's top space kept as it scrolls: what scrolls up goes under it, never under the pill. */
+.desks::before {
+  content: "";
+  position: sticky;
+  /* Sticky measures from inside the floor's padding: minus it is the floor's very top. */
+  top: calc(-1 * var(--paper-top, 70px));
+  z-index: 2;
+  flex: none;
+  align-self: stretch;
+  height: var(--paper-top, 70px);
+  margin: calc(-1 * var(--paper-top, 70px)) -14px -18px;
+  background: linear-gradient(var(--bg) 80%, transparent);
+  pointer-events: none;
+}
+
+.desktop .desks::before {
+  display: none;
+}
+
+/* Sized to the floor's scrolled content by desks.ts, so a line reaches a desk below the fold. */
+/* The lines pulse as a whole: an opacity on the SVG itself runs on the compositor, where moving the dashes repainted
+   the floor-sized SVG every frame. */
+.desks-lines {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  overflow: visible;
+  animation: desks-flow 1.6s ease-in-out infinite;
+}
+
+.desks-lines path {
+  fill: none;
+  stroke: #ffc23d;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-dasharray: 0.1 9;
+}
+
+.desks-home,
+.desks-grid,
+.desks-idle {
+  position: relative;
+  z-index: 1;
+}
+
+.desks-grid {
+  /* One row of project boxes: more than fit side-scroll, the next box's edge showing. */
+  display: flex;
+  align-items: flex-start;
+  justify-content: safe center;
+  gap: 14px;
+  align-self: stretch;
+  flex: none;
+  margin: 10px -14px 0;
+  padding: 0 14px 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  scroll-padding: 0 14px;
+  scrollbar-width: none;
+}
+
+.desks-grid::-webkit-scrollbar {
+  display: none;
+}
+
+.desks-grid > .desk.is-project {
+  flex: 0 0 min(82vw, 340px);
+  scroll-snap-align: center;
+}
+
+.desk {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* Rivet's desk is a button: a tap opens what is on (rivet-summary.ts). */
+button.desk.is-rivet {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+button.desk.is-rivet:focus-visible {
+  outline: 3px solid var(--accent, #ffc93c);
+  outline-offset: 6px;
+  border-radius: 16px;
+}
+
+/* Rivet's pop-up: the pipeline text in big type, a card per group, then Copy. No small text. */
+.rivet-sum-text {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.rivet-sum-lead {
+  margin: 0;
+  font-size: var(--fs-l);
+  font-weight: 800;
+}
+
+.rivet-sum-group {
+  padding: 10px 12px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+}
+
+.rivet-sum-title {
+  margin: 0;
+  font-size: var(--fs-l);
+  font-weight: 800;
+}
+
+.rivet-sum-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 8px 0 0;
+  padding-left: 22px;
+  font-size: var(--fs-body);
+  line-height: 1.3;
+}
+
+.rivet-sum-lines li {
+  overflow-wrap: anywhere;
+}
+
+.desk.is-rivet .rivet {
+  margin-bottom: -14px;
+  z-index: 1;
+}
+
+.desk-slab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 170px;
+  height: 40px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #3a3150, #2a2339);
+  border: 1px solid rgba(214, 205, 255, 0.16);
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.35);
+}
+
+.desk-screen {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  width: 44px;
+  height: 24px;
+  padding: 0 7px;
+  border-radius: 6px;
+  background: #ffc23d;
+  box-shadow: 0 0 14px rgba(255, 194, 61, 0.5);
+}
+
+/* Typing: each line grows from the left in steps, a scale the compositor runs (a clip-path repainted). */
+.desk-screen i {
+  display: block;
+  height: 2px;
+  border-radius: 2px;
+  background: #3a2a0f;
+  transform-origin: left;
+  animation: desk-type 2.4s steps(6) infinite;
+}
+
+.desk-screen i:nth-child(2) {
+  width: 70%;
+  animation-delay: 0.6s;
+}
+
+.desk-screen i:nth-child(3) {
+  width: 45%;
+  animation-delay: 1.2s;
+}
+
+.desk.is-rivet .desk-name {
+  margin-top: 10px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  font-weight: 700;
+  font-size: var(--fs-l);
+  text-align: center;
+}
+
+.desk-mood {
+  display: block;
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.desk-mood.is-asking {
+  color: #ffc23d;
+}
+
+.desk.is-project {
+  gap: 10px;
+  padding: 12px 12px 14px;
+  border-radius: 20px;
+  background: #28213a;
+  border: 1px solid rgba(110, 230, 200, 0.35);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.2), 0 12px 28px rgba(0, 0, 0, 0.35);
+}
+
+.desk.is-project .desk-slab {
+  width: 100%;
+  height: 30px;
+}
+
+.desk.is-project .desk-screen {
+  width: 34px;
+  height: 18px;
+}
+
+.desk.is-spawn {
+  animation: desk-spawn 0.7s cubic-bezier(0.25, 1.5, 0.5, 1) var(--spawn-delay, 0s) both;
+}
+
+.desk-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 8px;
+  width: 100%;
+}
+
+.desk-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.desk-head .desk-name {
+  font-weight: 800;
+  font-size: var(--fs-xl);
+}
+
+.desk-count {
+  padding: 3px 9px;
+  font-size: 13px;
+  color: #a5f0dc;
+  background: rgba(79, 199, 168, 0.14);
+  border: 1px solid rgba(79, 199, 168, 0.35);
+}
+
+.desk-count.is-asking {
+  color: #ffd27a;
+  background: rgba(255, 194, 61, 0.14);
+  border-color: rgba(255, 194, 61, 0.45);
+}
+
+.desk-agents {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.desk-agent {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.desk-agent .rivet {
+  animation: desk-wander 7s ease-in-out infinite;
+  animation-delay: var(--rv-delay, 0s);
+  transition: transform var(--trip-ms, 1.4s) cubic-bezier(0.45, 0.05, 0.3, 1);
+}
+
+/* The copy that flies on the floor's layer, above the boxes' row. */
+.desks-flyer {
+  position: absolute;
+  margin: 0;
+  z-index: 5;
+  transition: transform var(--trip-ms, 1.4s) cubic-bezier(0.45, 0.05, 0.3, 1);
+}
+
+/* On a trip to another desk (desks-life.ts): over the floor, hovering quicker while it flies. */
+.desk-agent .rivet.is-away {
+  z-index: 5;
+}
+
+.desk-agent .rivet.is-away .rivet-hover {
+  animation-duration: 1.1s, 0.55s;
+}
+
+/* Its place at the desk while it is away. */
+.desk-agent.has-away {
+  position: relative;
+}
+
+.desk-agent.has-away::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: var(--ghost);
+  height: var(--ghost);
+  translate: 0 -50%;
+  border: 2px dashed rgba(165, 240, 220, 0.3);
+  border-radius: 30%;
+}
+
+/* A cheer: Rivet, and the agent whose PR merged, hop. */
+.desk.is-rivet.is-cheer .rivet,
+.desk-agent .rivet.is-cheer {
+  animation: desk-hop 0.7s cubic-bezier(0.3, 1.4, 0.5, 1) 2;
+}
+
+.desk.is-cheer .desk-mood {
+  color: #ffd25c;
+}
+
+/* Rivet glances at an agent come to his desk. */
+.desk.is-rivet .rivet.is-glance-l .rv-look,
+.desk.is-rivet .rivet.is-glance-r .rv-look {
+  animation: none;
+  transition: translate 0.4s ease;
+}
+
+.desk.is-rivet .rivet.is-glance-l .rv-look {
+  translate: -5% 1%;
+}
+
+.desk.is-rivet .rivet.is-glance-r .rv-look {
+  translate: 5% 1%;
+}
+
+/* The cheer's burst: small rounded squares out from behind Rivet, inside his box, never over the words. */
+.desk-burst {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+
+.desk-burst i {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 9px;
+  height: 9px;
+  margin: -4.5px;
+  border-radius: 3px;
+  background: #ffd25c;
+  rotate: var(--a);
+  animation: desk-burst 0.9s cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
+}
+
+.desk-burst i:nth-child(even) {
+  background: #a5f0dc;
+}
+
+/* The speech bubbles' layer, over the desks; sized to nothing so it never makes the floor scroll. */
+.desks-talk {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+/* What an agent is doing, in its record's own words. Body size at least: no small text. */
+.desks-say {
+  position: absolute;
+  width: max-content;
+  padding: 8px 12px;
+  border-radius: 14px;
+  background: #f3efff;
+  color: #1d1730;
+  font-size: var(--fs-body);
+  font-weight: 700;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  scale: 0.85;
+  transition:
+    opacity 0.25s ease,
+    scale 0.3s cubic-bezier(0.3, 1.5, 0.5, 1);
+}
+
+.desks-say.is-in {
+  opacity: 1;
+  scale: 1;
+}
+
+.desks-say.is-out {
+  opacity: 0;
+  scale: 0.92;
+}
+
+.desks-say.is-news {
+  background: #ffd25c;
+  color: #3a2a0f;
+}
+
+.desks-say::after {
+  content: "";
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: inherit;
+  rotate: 45deg;
+}
+
+.desks-say[data-side="above"] {
+  transform-origin: var(--tail) 100%;
+}
+
+.desks-say[data-side="above"]::after {
+  bottom: -5px;
+  left: calc(var(--tail) - 6px);
+}
+
+.desks-say[data-side="below"] {
+  transform-origin: var(--tail) 0;
+}
+
+.desks-say[data-side="below"]::after {
+  top: -5px;
+  left: calc(var(--tail) - 6px);
+}
+
+.desks-say[data-side="right"] {
+  transform-origin: 0 var(--tail);
+}
+
+.desks-say[data-side="right"]::after {
+  left: -5px;
+  top: calc(var(--tail) - 6px);
+}
+
+.desks-say[data-side="left"] {
+  transform-origin: 100% var(--tail);
+}
+
+.desks-say[data-side="left"]::after {
+  right: -5px;
+  top: calc(var(--tail) - 6px);
+}
+
+.desktop .desks-say {
+  font-size: var(--fs-l);
+}
+
+.desk-agent-tip {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.desk-agent-what {
+  font-size: var(--fs-body);
+  font-weight: 700;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.desk-agent-meta {
+  font-size: var(--fs-body);
+  color: var(--muted);
+}
+
+/* Its box is only its worktree's repo: quiet and dashed, unlike the needs-you "?". */
+.desk-agent-guess {
+  display: inline-grid;
+  place-items: center;
+  width: 1.4em;
+  height: 1.4em;
+  margin-left: 6px;
+  border: 1px dashed var(--muted);
+  border-radius: 50%;
+  color: var(--muted);
+  font-size: var(--fs-m);
+  font-weight: 700;
+  line-height: 1;
+  vertical-align: 0.1em;
+}
+
+/* Amber as its ask row: Needs you, No time yet, or a time moved twice (the Progress mark's rule). */
+.desk-agent-meta.is-needs,
+.desk-agent-meta.is-asked,
+.desk-agent-meta.is-moved {
+  color: #ffc23d;
+  font-weight: 700;
+}
+
+.desk-agent.is-asking .desk-agent-meta {
+  color: #ffc23d;
+  font-weight: 700;
+}
+
+.desk-agent-bar {
+  display: block;
+  height: 4px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+
+.desk-agent-fill {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #4fc7a8, #a5f0dc);
+}
+
+/* A crowded map's last row: one plain row at the grid's width, never a strip of chips. */
+.desks-more {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 980px;
+  min-height: 52px;
+  padding: 12px 16px;
+  border: 1px solid rgba(110, 230, 200, 0.35);
+  border-radius: 20px;
+  background: #28213a;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-xl);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.desks-more:focus-visible {
+  outline: 2px solid #ffc23d;
+  outline-offset: 2px;
+}
+
+.desktop .desks-more {
+  max-width: 1240px;
+}
+
+/* The "N more" sheet: the map's own rows under each project's name. */
+.desks-rest {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding-bottom: 8px;
+}
+
+.desks-rest-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.desks-rest-group .desk-name {
+  margin: 0;
+  font-size: var(--fs-xl);
+  font-weight: 800;
+}
+
+/* These rows fill the sheet: their tap targets have no horizontal gutter to extend into. */
+.desks-rest .desk-agent-tap {
+  inset-inline: 0;
+}
+
+/* Every project's name under the boxes: full strength while it has a box, dimmed while it is quiet. */
+.desks-idle {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0 10px;
+  max-width: 980px;
+}
+
+/* A tap opens the project's backlog (backlog-sheet.ts); the edge is drawn inside the 44px tap target. */
+.desk-slot {
+  position: relative;
+  min-height: var(--tap);
+  padding: 6px 12px;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-weight: 700;
+  font-size: var(--fs-body);
+}
+
+.desk-slot::before {
+  content: "";
+  position: absolute;
+  inset: 5px 0;
+  border-radius: 14px;
+  border: 2px solid rgba(214, 205, 255, 0.35);
+  pointer-events: none;
+}
+
+.desk-slot.is-quiet {
+  color: var(--muted);
+}
+
+.desk-slot.is-quiet::before {
+  border-style: dashed;
+  border-color: rgba(214, 205, 255, 0.22);
+}
+
+.desktop .desks-idle {
+  max-width: 1240px;
+}
+
+@keyframes desk-spawn {
+  from {
+    opacity: 0;
+    translate: 0 -60px;
+    scale: 0.4;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+    scale: 1;
+  }
+}
+
+@keyframes desk-hop {
+  0%,
+  100% {
+    translate: 0 0;
+    scale: 1 1;
+  }
+  35% {
+    translate: 0 -18px;
+    scale: 0.94 1.06;
+  }
+  70% {
+    translate: 0 0;
+    scale: 1.08 0.92;
+  }
+}
+
+@keyframes desk-burst {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(0.4);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(calc(var(--rv-size) * -0.8)) scale(1);
+  }
+}
+
+@keyframes desk-wander {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+  33% {
+    translate: 3px -2px;
+  }
+  66% {
+    translate: -2px 2px;
+  }
+}
+
+@keyframes desk-type {
+  0% {
+    scale: 0 1;
+  }
+  100% {
+    scale: 1 1;
+  }
+}
+
+@keyframes desks-flow {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* A crowded map: Rivet's desk shrinks and each row is one line, its bot, title and time, under its stage's heading. */
+.desks.is-crowded {
+  padding-top: 6px;
+}
+
+.desks.is-crowded .desk.is-rivet .desk-slab {
+  width: 105px;
+  height: 25px;
+  border-radius: 9px;
+}
+
+.desks.is-crowded .desk.is-rivet .desk-screen {
+  width: 27px;
+  height: 15px;
+  gap: 2px;
+  padding: 0 4px;
+  border-radius: 4px;
+}
+
+.desks.is-crowded .desk.is-rivet .rivet {
+  margin-bottom: -9px;
+}
+
+.desks.is-crowded .desks-grid {
+  margin-top: -14px;
+}
+
+.desks.is-crowded .desk-agents {
+  gap: 1px;
+}
+
+.desk-stage {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: #9fe8d3;
+}
+
+.desk-agent.is-line {
+  gap: 8px;
+  min-height: 28px;
+  padding-block: 2px;
+}
+
+.desk-agent.is-line .rivet {
+  flex: none;
+  animation: none;
+}
+
+.desk-agent.is-line .desk-agent-tip {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.desk-agent.is-line .desk-agent-what {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.2;
+}
+
+.desk-agent.is-line .desk-agent-meta {
+  flex: none;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+/* A computer: Rivet's desk at the top, the project desks fanned out across the floor under him. */
+.desktop .desks {
+  padding: 24px 32px 32px;
+  gap: 40px;
+}
+
+.desktop .desk.is-rivet .desk-slab {
+  width: 280px;
+  height: 56px;
+}
+
+.desktop .desk.is-rivet .rivet {
+  margin-bottom: -22px;
+}
+
+.desktop .desk.is-project {
+  padding: 18px 18px 20px;
+  gap: 14px;
+}
+
+.desktop .desk-agent-what {
+  font-size: var(--fs-xl);
+}
+
+.desktop .desk-agent-meta {
+  font-size: var(--fs-body);
+}
+
+.desktop .desks-grid {
+  gap: 28px;
+  margin: 0 -32px;
+  padding: 0 32px 10px;
+  scroll-padding: 0 32px;
+  scrollbar-width: thin;
+}
+
+.desktop .desks-grid > .desk.is-project {
+  flex: 0 0 380px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .desks *,
+  .desks-lines {
+    animation: none !important;
+  }
+
+  .desks-say,
+  .desk-agent .rivet {
+    transition: none;
+  }
+}
+
+/* An agent holding an open card (decide-sheet.ts): a gold ? on its seat, a mark and never a count (decision
+   2026-10-24), and the whole row opens its Decide sheet. */
+.desk-agent.has-card,
+.desk-agent.has-chat {
+  position: relative;
+  min-height: var(--tap);
+}
+
+.desk-agent-ask {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--bg);
+  border-radius: 50%;
+  background: #ffc23d;
+  color: #3a2a0f;
+  font-size: var(--fs-body);
+  font-weight: 900;
+  line-height: 1;
+}
+
+.desk-agent-tap {
+  position: absolute;
+  inset: -4px -6px;
+  z-index: 2;
+  padding: 0;
+  border: 0;
+  border-radius: 14px;
+  background: none;
+  cursor: pointer;
+}
+
+.desk-agent-tap:active {
+  background: rgba(255, 194, 61, 0.1);
+}
+
+.desk-agent.has-chat .desk-agent-tap:active {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.desk-agent-tap:focus-visible {
+  outline: 2px solid #ffc23d;
+  outline-offset: 2px;
+}
+
+/* An ask past its time (its row's No time yet): a red ring on the seat. */
+.desk-agent.is-late .rivet {
+  border-radius: 30%;
+  outline: 3px solid var(--no);
+  outline-offset: 3px;
+}

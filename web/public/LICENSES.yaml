@@ -1,0 +1,68 @@
+# LICENSES.yaml: licence record for every shipped asset in web/public.
+# Everything here is first-party and released under the repository's MIT licence (see LICENSE).
+assets:
+  - file: icon.svg
+    source: first-party
+    origin: "Hand-written SVG: Rivet, the app's robot face"
+    license: MIT
+    notes: "App icon; simple vector shapes, no third-party marks or imagery."
+  - file: badge.svg
+    source: first-party
+    origin: "Hand-written SVG: Rivet's silhouette"
+    license: MIT
+    notes: "Android notification badge source: one white shape on a transparent ground."
+  - file: badge-96.png
+    source: first-party
+    origin: "Rendered from badge.svg by scripts/render-icons.mjs"
+    license: MIT
+    notes: "96 px Android notification badge."
+  - file: badge-72.png
+    source: first-party
+    origin: "Rendered from badge.svg by scripts/render-icons.mjs"
+    license: MIT
+    notes: "72 px Android notification badge."
+  - file: badge-48.png
+    source: first-party
+    origin: "Rendered from badge.svg by scripts/render-icons.mjs"
+    license: MIT
+    notes: "48 px Android notification badge."
+  - file: apple-touch-icon.png
+    source: first-party
+    origin: "Rendered from icon.svg by scripts/render-icons.mjs"
+    license: MIT
+    notes: "180 px Home Screen icon for iOS."
+  - file: icon-192.png
+    source: first-party
+    origin: "Rendered from icon.svg by scripts/render-icons.mjs"
+    license: MIT
+    notes: "192 px PWA icon."
+  - file: icon-512.png
+    source: first-party
+    origin: "Rendered from icon.svg by scripts/render-icons.mjs"
+    license: MIT
+    notes: "512 px PWA icon."
+  - file: icon-maskable-512.png
+    source: first-party
+    origin: "Rendered from icon.svg by scripts/render-icons.mjs"
+    license: MIT
+    notes: "512 px maskable PWA icon, artwork inside the safe zone."
+  - file: manifest.webmanifest
+    source: first-party
+    origin: "Hand-written web app manifest"
+    license: MIT
+    notes: "Install metadata for the Rivet Agents PWA."
+  - file: sw.js
+    source: first-party
+    origin: "Hand-written service worker"
+    license: MIT
+    notes: "Push-only service worker; it caches nothing."
+  - file: sw-logic.js
+    source: first-party
+    origin: "Hand-written service worker helper"
+    license: MIT
+    notes: "The service worker's push decisions, loaded with importScripts."
+  - file: boot.css
+    source: first-party
+    origin: "Hand-written stylesheet"
+    license: MIT
+    notes: "First-paint styles."

@@ -1,0 +1,493 @@
+/* More › Rivet's mind (mind.ts): the map fills the page under its search and chips; a tapped dot's words rise in a
+   sheet on a phone and sit in a panel on the right once the page is 760px wide. force-graph's own <style> is refused by the CSP, so the
+   two rules it needs are here. */
+.mind {
+  --mind-feedback: #ffc23d;
+  --mind-project: #7fa8ff;
+  --mind-reference: #c79bff;
+  --mind-user: #2fd67b;
+  --mind-note: #ff6b7d;
+  --mind-decision: #3fd0c9;
+  --mind-context: #f6f4ff;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 12px 0;
+}
+
+/* A menu page's sheet hugs its page; the map takes it to full height, as Rivet's chat does. */
+.sheet.page-sheet:has(.mind-stage) {
+  height: calc(var(--vv-h, 100dvh) - 40px);
+}
+
+.mind-empty {
+  padding: 24px 16px;
+}
+
+.mind-note {
+  margin: 8px 4px;
+  font-size: 16px;
+  color: var(--muted);
+}
+
+.mind-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 4px;
+}
+
+.mind-sub {
+  min-width: 0;
+  margin: 0;
+  font-size: 15px;
+  color: var(--muted);
+}
+
+.mind-views {
+  display: flex;
+  flex: none;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.mind-view {
+  min-width: 56px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 0;
+  background: var(--panel);
+  color: var(--text);
+  font: 700 15px var(--font);
+  cursor: pointer;
+}
+
+.mind-view[aria-pressed="true"] {
+  background: var(--apricot);
+  color: var(--bg);
+}
+
+.mind-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.mind-q {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 96px 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--text);
+  font: 600 16px var(--font);
+}
+
+.mind-q::placeholder {
+  color: var(--muted);
+}
+
+.mind-q:focus {
+  outline: 2px solid var(--apricot);
+  outline-offset: 1px;
+}
+
+.mind-hits {
+  position: absolute;
+  right: 14px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--apricot);
+  pointer-events: none;
+}
+
+.mind-chips {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-bottom: 2px;
+}
+
+.mind-chips::-webkit-scrollbar {
+  display: none;
+}
+
+.mind-chip {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 7px;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--text);
+  font: 700 15px var(--font);
+  cursor: pointer;
+}
+
+.mind-chip.is-off {
+  opacity: 0.45;
+}
+
+.mind-chip.is-mode.is-on {
+  border-color: var(--apricot);
+  background: var(--apricot);
+  color: var(--bg);
+}
+
+.mind-n {
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.mind-chip.is-on .mind-n {
+  color: inherit;
+  opacity: 0.75;
+}
+
+.mind-dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.t-feedback {
+  background: var(--mind-feedback);
+}
+.t-project {
+  background: var(--mind-project);
+}
+.t-reference {
+  background: var(--mind-reference);
+}
+.t-user {
+  background: var(--mind-user);
+}
+.t-note {
+  background: var(--mind-note);
+}
+.t-decision {
+  background: var(--mind-decision);
+}
+.t-context {
+  background: var(--mind-context);
+}
+
+.mind-stage {
+  position: relative;
+  margin: 0 -12px;
+  overflow: hidden;
+  background: radial-gradient(ellipse at 50% 40%, var(--bg-2), var(--bg) 70%);
+  touch-action: none;
+}
+
+.mind-graph,
+.mind-graph canvas {
+  display: block;
+}
+
+.mind-graph {
+  user-select: none;
+}
+
+.mind-banner {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  right: 10px;
+  display: none;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(31, 27, 49, 0.92);
+  font-size: 15px;
+  line-height: 1.35;
+  pointer-events: none;
+}
+
+.mind-banner.is-shown {
+  display: block;
+}
+
+.mind-banner b {
+  color: var(--apricot);
+}
+
+.mind-zoom {
+  position: absolute;
+  right: 10px;
+  bottom: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mind-zoom-btn {
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(31, 27, 49, 0.92);
+  color: var(--text);
+  font: 700 22px var(--font);
+  cursor: pointer;
+}
+
+.mind-sheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  max-height: 58%;
+  overflow-y: auto;
+  padding: 8px 16px 20px;
+  border-radius: 20px 20px 0 0;
+  background: var(--panel);
+  box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.45);
+  transform: translateY(105%);
+  transition: transform 0.25s ease;
+}
+
+.mind-sheet.is-open {
+  transform: none;
+}
+
+.mind-sheet.is-open ~ .mind-zoom {
+  display: none;
+}
+
+.mind-grab {
+  width: 40px;
+  height: 5px;
+  margin: 2px auto 8px;
+  border-radius: 3px;
+  background: var(--line);
+}
+
+.mind-close {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: 700 26px var(--font);
+  cursor: pointer;
+}
+
+.mind-title {
+  margin: 0 48px 8px 0;
+  font-size: 20px;
+  line-height: 1.25;
+}
+
+.mind-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.mind-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.mind-tag.is-in {
+  background: var(--apricot);
+  color: var(--bg);
+}
+
+.mind-desc {
+  margin: 0 0 10px;
+  font-size: 16px;
+  line-height: 1.45;
+}
+
+.mind-desc.is-waiting {
+  color: var(--muted);
+}
+
+.mind-body {
+  max-height: 9.5em;
+  margin: 0 0 6px;
+  overflow: hidden;
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  mask-image: linear-gradient(#000 70%, transparent);
+}
+
+.mind-body.is-all {
+  max-height: none;
+  mask-image: none;
+}
+
+.mind-more {
+  min-height: 44px;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--apricot);
+  font: 700 15px var(--font);
+  cursor: pointer;
+}
+
+.mind-lh {
+  margin: 12px 0 8px;
+  font-size: 15px;
+  color: var(--muted);
+}
+
+.mind-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.mind-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel-2);
+  color: var(--text);
+  font: 600 14px var(--font);
+  text-align: left;
+  cursor: pointer;
+}
+
+.mind.is-wide .mind-sheet {
+  top: 0;
+  left: auto;
+  width: 380px;
+  max-height: none;
+  border-radius: 0;
+  box-shadow: -10px 0 30px rgba(0, 0, 0, 0.45);
+  transform: translateX(105%);
+}
+
+.mind.is-wide .mind-sheet.is-open {
+  transform: none;
+}
+
+.mind.is-wide .mind-sheet.is-open ~ .mind-zoom {
+  display: flex;
+  right: 392px;
+}
+
+.mind.is-wide .mind-grab {
+  display: none;
+}
+
+/* The list view: the map stays mounted behind it, hidden and paused, and the sheet is the map's own. */
+.mind-list {
+  display: none;
+}
+
+.mind.is-list .mind-graph,
+.mind.is-list .mind-zoom,
+.mind.is-wide.is-list .mind-sheet.is-open ~ .mind-zoom {
+  display: none;
+}
+
+.mind.is-list .mind-stage {
+  display: flex;
+  flex-direction: column;
+  background: none;
+  touch-action: auto;
+}
+
+.mind.is-list .mind-banner {
+  position: static;
+  flex: none;
+  margin: 0 12px 8px;
+}
+
+.mind.is-list .mind-list {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 2px 12px 16px;
+}
+
+.mind.is-wide.is-list:has(.mind-sheet.is-open) .mind-list {
+  padding-right: 392px;
+}
+
+.mind-sec {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 48px;
+  padding: 6px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--text);
+  font: 700 16px var(--font);
+  text-align: left;
+  cursor: pointer;
+}
+
+.mind-sec-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.mind-sec-mark {
+  flex: none;
+  width: 14px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.mind-sec[aria-expanded="true"] .mind-sec-mark {
+  transform: rotate(90deg);
+}
+
+.mind-row {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  width: calc(100% - 14px);
+  min-height: 44px;
+  margin-left: 14px;
+  padding: 6px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: none;
+  color: var(--text);
+  font: 600 15px var(--font);
+  text-align: left;
+  cursor: pointer;
+}

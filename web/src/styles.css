@@ -1,0 +1,2281 @@
+:root {
+  --bg: #100e19;
+  --bg-2: #161325;
+  --panel: #1f1b31;
+  --panel-2: #292440;
+  --line: rgba(214, 205, 255, 0.12);
+  --text: #f6f4ff;
+  --muted: #c4bed8;
+  --apricot: #ffc23d;
+  --accent: #ffc23d;
+  --pom: #e0324b;
+  --yes: #2fd67b;
+  --no: #ff4d5e;
+  --later: #7fa8ff;
+  --note: #c79bff;
+  --wa: #25d366;
+  --radius: 16px;
+  /* Normal phone-app density (Gmail/Slack): Rivet is the owner's alone, not sized for small phones.
+     Body 14, secondary 12; buttons and taps 44, never bigger. */
+  --fs-xs: 11px;
+  --fs-s: 12px;
+  --fs-m: 13px;
+  --fs-body: 14px;
+  --fs-l: 15px;
+  --fs-xl: 16px;
+  --fs-2xl: 17px;
+  --fs-3xl: 18px;
+  --fs-4xl: 20px;
+  --fs-5xl: 22px;
+  --fs-6xl: 26px;
+  --tap: 44px;
+  --tap-big: 44px;
+  --font: ui-rounded, "SF Pro Rounded", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* The one card style, on every screen, phone and desktop (card option C "Photo first"; The owner:
+   no thick left line): a 1px line, a 10px radius, the panel fill and no shadow. A state shows only in the
+   border colour, through --edge: red when broken, apricot when it needs a look or is waiting, green while working.
+   --edge does not inherit, so an ok card inside a red one (a briefing item) keeps the plain line. */
+@property --edge {
+  syntax: "*";
+  inherits: false;
+}
+
+.box {
+  border: 1px solid var(--edge, var(--line));
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: none;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--fs-body);
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+
+body {
+  background:
+    radial-gradient(120% 60% at 0% 0%, rgba(120, 92, 255, 0.22), transparent 60%),
+    radial-gradient(90% 50% at 100% 100%, rgba(255, 194, 61, 0.12), transparent 60%),
+    radial-gradient(80% 50% at 100% 0%, rgba(63, 107, 255, 0.16), transparent 60%),
+    var(--bg);
+}
+
+button,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+a {
+  color: var(--apricot);
+}
+
+.icon svg,
+.tab-icon svg,
+.icon-btn-icon svg,
+.btn-icon svg,
+.title-icon svg,
+.install-icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Buttons */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: var(--tap);
+  padding: 8px 14px;
+  border: 1.5px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel-2);
+  font-size: var(--fs-body);
+  font-weight: 700;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: transform 0.12s ease, background 0.2s ease;
+}
+
+.btn:active {
+  transform: scale(0.97);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.btn.big {
+  width: 100%;
+  min-height: var(--tap);
+  font-size: var(--fs-l);
+}
+
+.btn.primary {
+  border-color: transparent;
+  background: linear-gradient(135deg, var(--apricot), #ffa31a);
+  color: #2a1204;
+}
+
+.btn.danger {
+  border-color: transparent;
+  background: linear-gradient(135deg, #ff5c6c, var(--pom));
+  color: #fff;
+}
+
+.btn.ghost {
+  background: transparent;
+}
+
+.btn-icon {
+  width: 20px;
+  height: 20px;
+}
+
+/* Sign-in gate */
+
+.app {
+  min-height: 100%;
+}
+
+.gate {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  max-width: 420px;
+  margin: 0 auto;
+  padding: max(64px, env(safe-area-inset-top)) 20px 40px;
+  text-align: center;
+}
+
+.gate-icon {
+  width: 112px;
+  height: 112px;
+  border-radius: 28px;
+  box-shadow: 0 20px 60px rgba(255, 194, 61, 0.35);
+}
+
+.gate-name {
+  margin: 8px 0 0;
+  font-size: var(--fs-6xl);
+  font-weight: 900;
+  letter-spacing: 0.02em;
+}
+
+.gate-lede {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: var(--fs-xl);
+}
+
+.gate-status {
+  min-height: 1.4em;
+  color: var(--muted);
+}
+
+/* Shell */
+
+.app.signed-in {
+  position: relative;
+  display: grid;
+  /* One column the screen's width: a wide header or row never widens the page past it. */
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 10px;
+  padding: calc(env(safe-area-inset-top) + 4px) 14px 4px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.brand-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+}
+
+.brand-name,
+.brand-title {
+  font-size: var(--fs-4xl);
+  font-weight: 900;
+  letter-spacing: 0.01em;
+}
+
+.brand-title {
+  margin: 0;
+  /* Readable where the header floats with no bar behind it. */
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.55);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* With too little room on the phone's row, this end goes under the title. */
+.topbar-end {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: 1 1 0;
+  min-width: min-content;
+}
+
+.icon-btn {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 2px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+  color: inherit;
+  cursor: pointer;
+}
+
+.icon-btn-icon {
+  width: 20px;
+  height: 20px;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 11px;
+  border-radius: 999px;
+  background: var(--panel);
+  font-size: var(--fs-s);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--no);
+  box-shadow: 0 0 10px var(--no);
+}
+
+.ok > .dot {
+  background: var(--yes);
+  box-shadow: 0 0 10px var(--yes);
+}
+
+/* Pull to refresh draws its own bounce at the top, so the view's is off. */
+.view {
+  position: relative;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.ptr {
+  position: absolute;
+  left: 50%;
+  z-index: 4;
+  width: 34px;
+  height: 34px;
+  margin-left: -17px;
+  padding: 7px;
+  border-radius: 50%;
+  background: var(--panel-2);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  transform: translateY(calc(var(--pull, 0) * 18px)) scale(calc(0.6 + var(--pull, 0) * 0.4));
+  pointer-events: none;
+}
+
+.ptr.shown {
+  opacity: 1;
+}
+
+.ptr-ring {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 3px solid rgba(255, 247, 238, 0.25);
+  border-top-color: var(--apricot);
+  border-radius: 50%;
+  transform: rotate(calc(var(--pull, 0) * 300deg));
+}
+
+.ptr.armed .ptr-ring {
+  border-color: var(--apricot);
+  border-right-color: rgba(255, 247, 238, 0.25);
+}
+
+.ptr.spinning .ptr-ring {
+  animation: ptr-spin 0.8s linear infinite;
+}
+
+@keyframes ptr-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.ptr-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+/* The phone's Cards scrolls past the cards to Coming, Chats and Shipped; the desktop's never scrolls as a page. */
+.desktop .view[data-tab="cards"] {
+  overflow: hidden;
+}
+
+.tabs {
+  display: grid;
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
+  gap: 4px;
+  padding: 2px 8px calc(env(safe-area-inset-bottom) + 2px);
+  background: linear-gradient(to top, var(--bg) 60%, transparent);
+}
+
+.tab {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  min-height: 44px;
+  min-width: 0;
+  padding: 2px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.tab.on {
+  border-color: rgba(255, 194, 61, 0.5);
+  background: linear-gradient(135deg, rgba(255, 194, 61, 0.25), rgba(120, 92, 255, 0.24));
+  color: var(--text);
+}
+
+.tab-icon {
+  width: 19px;
+  height: 19px;
+}
+
+.tab .badge {
+  position: absolute;
+  top: -8px;
+  right: -4px;
+}
+
+/* The phone's four tabs, Cards · Progress · Chat · More: the icon over the name. A quarter of a 320 px Display Zoom
+   phone each; every other page lives in More. */
+.tabs.phone-tabs {
+  /* A tab is never narrower than its whole name: at 320 px Progress takes the room Cards and More spare, never "Progr…". */
+  grid-auto-columns: minmax(min-content, 1fr);
+  gap: 4px;
+  padding-inline: 6px;
+}
+
+.tabs.phone-tabs .tab {
+  justify-content: flex-start;
+  gap: 2px;
+  min-height: 56px;
+  padding: 5px 2px 3px;
+  font-size: var(--fs-xl);
+  line-height: 1.15;
+}
+
+.tabs.phone-tabs .tab-icon {
+  width: 22px;
+  height: 22px;
+}
+
+.tabs.phone-tabs .tab-label {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tabs.phone-tabs .tab .badge {
+  top: 0;
+  right: auto;
+  left: calc(50% + 6px);
+}
+
+.badge {
+  min-width: 24px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--pom);
+  color: #fff;
+  font-size: var(--fs-s);
+  font-weight: 900;
+  text-align: center;
+}
+
+/* A tab's mark when only amber is on it ("!" in place of a count): the same badge, in the app's amber. */
+.badge.t-warn {
+  background: var(--apricot);
+  color: var(--bg);
+}
+
+/* Toasts sit over the header so the action buttons stay free while Undo runs. */
+.toasts {
+  position: fixed;
+  left: 50%;
+  top: calc(env(safe-area-inset-top) + 8px);
+  z-index: 30;
+  width: min(560px, calc(100% - 24px));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.toast {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 10px 14px 14px;
+  border-radius: 18px;
+  background: #0b0809;
+  border: 2px solid var(--line);
+  box-shadow: 0 16px 50px rgba(0, 0, 0, 0.6);
+  pointer-events: auto;
+  animation: toast-in 0.22s ease-out;
+}
+
+.toast.yes {
+  border-color: var(--yes);
+}
+
+.toast.no {
+  border-color: var(--no);
+}
+
+.toast.later {
+  border-color: var(--later);
+}
+
+.toast.note {
+  border-color: var(--note);
+}
+
+.toast.flash {
+  padding-bottom: 10px;
+  font-weight: 700;
+}
+
+.toast.flash.error {
+  border-color: var(--no);
+}
+
+.toast.flash.warn {
+  border-color: var(--apricot);
+}
+
+.toast-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.toast-text strong {
+  font-size: var(--fs-xl);
+}
+
+.toast.yes strong {
+  color: var(--yes);
+}
+
+.toast.no strong {
+  color: var(--no);
+}
+
+.toast.later strong {
+  color: var(--later);
+}
+
+.toast-title {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--fs-s);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.undo-btn {
+  flex: none;
+  min-width: 88px;
+  min-height: var(--tap-big);
+  border-color: transparent;
+  background: var(--text);
+  color: var(--bg);
+  font-size: var(--fs-l);
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.toast-bar {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 6px;
+  width: 100%;
+  background: var(--apricot);
+  transform-origin: left;
+  animation: drain linear forwards;
+}
+
+@keyframes drain {
+  to {
+    transform: scaleX(0);
+  }
+}
+
+@keyframes toast-in {
+  from {
+    transform: translateY(-20px);
+    opacity: 0;
+  }
+}
+
+/* Feed */
+
+.feed {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 2px 12px 0;
+}
+
+/* The cards fill the screen but for a strip, where the Coming heading peeks to say the list follows. */
+.feed:has(+ .fsec-list) {
+  height: calc(100% - 52px);
+}
+
+.fsec-list {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 8px 16px 24px;
+}
+
+.fsec {
+  scroll-margin-top: 8px;
+}
+
+.fsec-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: var(--fs-3xl);
+  font-weight: 900;
+}
+
+.fsec-n {
+  color: var(--muted);
+  font-size: var(--fs-xl);
+  font-variant-numeric: tabular-nums;
+}
+
+.feed-quiet {
+  margin: 10px 4px 0;
+  color: var(--text);
+  font-size: var(--fs-xl);
+  font-weight: 600;
+}
+
+.upd {
+  --edge: rgba(47, 214, 123, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+}
+
+.upd-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.upd-tag {
+  flex: none;
+  color: var(--muted);
+  font-size: var(--fs-s);
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.upd-tag.fix {
+  color: var(--apricot);
+}
+
+.upd-age {
+  flex: none;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: var(--fs-m);
+  font-weight: 600;
+}
+
+.upd-title {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--fs-2xl);
+  font-weight: 800;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.upd-line {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-body);
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* A "• " line: its wrap lines up under its text, not under the bullet. */
+.upd-li {
+  display: inline-block;
+  padding-left: 0.6em;
+  text-indent: -0.6em;
+}
+
+.upd .media {
+  margin-top: 4px;
+}
+
+.upd-meta {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: var(--fs-m);
+}
+
+.upd-meta b {
+  color: var(--apricot);
+  font-weight: 700;
+}
+
+.upd-note {
+  margin: 2px 0 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-2);
+  color: var(--text);
+  font-size: var(--fs-body);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.upd-note b {
+  color: var(--note);
+}
+
+.upd-note.h b {
+  color: var(--apricot);
+}
+
+.install {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+  padding: 10px 10px 10px 12px;
+  --edge: rgba(127, 168, 255, 0.5);
+  background: rgba(63, 107, 255, 0.16);
+}
+
+.install-icon {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  color: var(--later);
+}
+
+.install-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-s);
+}
+
+.install-text strong {
+  font-size: var(--fs-m);
+}
+
+.install .btn {
+  flex: none;
+  min-height: 44px;
+  padding: 8px 12px;
+  font-size: var(--fs-s);
+}
+
+/* Notifications reach no phone, or this one blocks them (ask 98z7p): loud, above everything, with the way back. */
+.push-off {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 12px 14px;
+  --edge: color-mix(in srgb, var(--no) 70%, transparent);
+  background: color-mix(in srgb, var(--no) 16%, var(--panel));
+}
+
+.push-off-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--fs-xl);
+}
+
+.push-off-icon {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  color: var(--no);
+}
+
+.push-off-icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.push-off-why,
+.push-off-note {
+  margin: 0;
+  font-size: var(--fs-body);
+  color: var(--text);
+}
+
+.push-off-steps {
+  margin: 0;
+  padding-left: 22px;
+  font-size: var(--fs-body);
+  line-height: 1.45;
+}
+
+.push-off .btn {
+  min-height: var(--tap);
+}
+
+.set > .push-off {
+  margin-bottom: 0;
+}
+
+.deck {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.stack {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.card {
+  --accent: var(--apricot);
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.card.k-decision {
+  --accent: #7f8bff;
+}
+
+.card.k-question {
+  --accent: #3fd0c9;
+}
+
+.card.k-todo {
+  --accent: #ffd166;
+}
+
+.card.k-other {
+  --accent: var(--note);
+}
+
+/* A merge-ready card's yes merges its PR: green, edged, its label boxed, so it never reads as an ordinary decision. */
+.card.k-merge-ready {
+  --accent: #3ddc84;
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.chip.kind.k-merge-ready {
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #06210f;
+  letter-spacing: 0.06em;
+}
+
+.card.top {
+  z-index: 2;
+}
+
+.card.top.entering {
+  animation: card-in 0.22s ease-out;
+}
+
+.card.risky {
+  --edge: var(--no);
+}
+
+@keyframes card-in {
+  from {
+    transform: translateY(14px) scale(0.94);
+  }
+}
+
+.card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px 10px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: var(--fs-s);
+  font-weight: 800;
+}
+
+.chip.kind,
+.chip.risk {
+  padding: 0;
+  border-radius: 0;
+  font-size: var(--fs-body);
+}
+
+.chip.kind {
+  color: var(--accent);
+}
+
+.chip.risk {
+  color: #ff8a95;
+}
+
+/* The card's thread and round: one line, cut short, opening the thread. */
+.card-thread {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-body);
+  font-weight: 700;
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-color: var(--muted);
+  text-underline-offset: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.card-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 14px 14px;
+}
+
+/* On the phone the Feed scrolls as a page, past the cards to Later, Coming, Chats and Shipped: a card or all clear at
+   its end hands the swipe on to the page, or a finger on the card could never reach the lists. The desktop board never
+   scrolls as a page, so there they keep the swipe. */
+.desktop :is(.card-body, .feed > .clear) {
+  overscroll-behavior: contain;
+}
+
+.card-meta {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: var(--fs-s);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.card-title {
+  margin: 0 0 8px;
+  font-size: var(--fs-2xl);
+  font-weight: 800;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+/* A URL inside running text: underlined in the text's own colour, and free to break anywhere so a long one wraps. */
+.text-link {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 2px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  unicode-bidi: isolate;
+}
+
+/* The links in a choice's detail, under its button: the button answers, so a link cannot sit inside it. */
+.choice-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: -2px 6px 4px;
+  font-size: var(--fs-m);
+  color: var(--muted);
+}
+
+.card-ask {
+  margin: 0 0 12px;
+  font-size: var(--fs-body);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.card-body:not(.with-media) > .card-ask + .card-meta {
+  margin: -6px 0 12px;
+}
+
+.todo-steps {
+  margin: 0 0 14px;
+  padding-left: 28px;
+  color: var(--text);
+  font-size: var(--fs-xl);
+  line-height: 1.4;
+}
+
+.todo-steps li {
+  margin-bottom: 8px;
+  padding-left: 4px;
+  overflow-wrap: anywhere;
+}
+
+.todo-steps li::marker {
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.todo-open {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--tap);
+  padding: 10px 16px;
+  border: 2px solid #ffd166;
+  border-radius: 14px;
+  color: #ffd166;
+  font-size: var(--fs-xl);
+  font-weight: 800;
+  text-align: center;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+
+.choices {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.btn.choice {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  width: 100%;
+  padding: 10px 14px;
+  text-align: left;
+  overflow-wrap: anywhere;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+/* Rivet's pick: a green box, as the cards plan's mock; a risky card's too since the owner. */
+.btn.choice.rec {
+  border-color: var(--yes);
+  box-shadow: inset 0 0 0 1px var(--yes);
+  background: rgba(47, 214, 123, 0.08);
+}
+
+.choice-top {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: 100%;
+}
+
+.choice-top:empty {
+  display: none;
+}
+
+.choice-rec {
+  color: var(--yes);
+  font-size: var(--fs-s);
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.choice-label {
+  font-size: var(--fs-l);
+  font-weight: 800;
+}
+
+.choice-detail {
+  color: var(--muted);
+  font-size: var(--fs-s);
+  font-weight: 500;
+}
+
+/* "(waits for the Mac)" on a button that sends while the Mac is offline: its own line. */
+.btn:has(> .waits) {
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+
+.btn .waits {
+  display: block;
+  flex-basis: 100%;
+  color: var(--apricot);
+  font-size: var(--fs-body);
+  font-weight: 700;
+}
+
+/* On a filled button the apricot would vanish into the fill: the button's own ink says it. */
+.btn.primary .waits,
+.btn.danger .waits,
+.btn.pick.yes .waits {
+  color: inherit;
+}
+
+.btn.card-message {
+  gap: 8px;
+  min-height: 44px;
+  margin-bottom: 12px;
+  font-size: var(--fs-body);
+}
+
+/* Share on a card: a full tap target with its word; on the open card it sits in the card's tools
+   row now, still with its word (feed.css .card-tools). */
+.btn.card-share-top,
+.btn.upd-share-solo {
+  width: 100%;
+  margin-bottom: 12px;
+  font-size: var(--fs-l);
+}
+
+.btn.upd-share-solo {
+  margin: 4px 0 0;
+}
+
+.card-share-icon {
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+}
+
+.card-share-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.card-message-icon {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+}
+
+.card-message-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.card-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.card-link {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  min-height: var(--tap);
+  padding: 8px 14px;
+  border: 2px solid var(--line);
+  border-radius: 14px;
+  color: var(--text);
+  font-size: var(--fs-m);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.card-link.primary {
+  border-color: var(--apricot);
+  color: var(--apricot);
+}
+
+.card-note {
+  --edge: var(--note);
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  background: rgba(199, 155, 255, 0.12);
+  font-size: var(--fs-m);
+  overflow-wrap: anywhere;
+}
+
+.card-error {
+  --edge: var(--no);
+  margin: 0;
+  padding: 10px 14px;
+  background: rgba(255, 77, 94, 0.16);
+  color: #ffb3bb;
+  font-size: var(--fs-m);
+  font-weight: 700;
+}
+
+.more-cue {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  z-index: 1;
+  padding: 6px 16px;
+  border-radius: 999px;
+  background: var(--apricot);
+  color: #1a1614;
+  font-size: var(--fs-s);
+  font-weight: 900;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  transform: translateX(-50%);
+  transition: opacity 0.2s;
+  pointer-events: none;
+}
+
+.card.more .more-cue {
+  opacity: 1;
+}
+
+.card.more .card-body {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 96px), transparent calc(100% - 46px));
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 96px), transparent calc(100% - 46px));
+}
+
+.card.scrolled .card-body {
+  -webkit-mask-image: linear-gradient(to bottom, transparent 8px, #000 60px);
+  mask-image: linear-gradient(to bottom, transparent 8px, #000 60px);
+}
+
+.card.scrolled.more .card-body {
+  -webkit-mask-image: linear-gradient(to bottom, transparent 8px, #000 60px, #000 calc(100% - 96px), transparent calc(100% - 46px));
+  mask-image: linear-gradient(to bottom, transparent 8px, #000 60px, #000 calc(100% - 96px), transparent calc(100% - 46px));
+}
+
+.confirm {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px 20px;
+  background:
+    linear-gradient(rgba(20, 6, 10, 0.9), rgba(20, 6, 10, 0.94)),
+    repeating-linear-gradient(135deg, var(--no) 0 18px, #5a0f1a 18px 36px);
+  text-align: center;
+  animation: card-in 0.18s ease-out;
+}
+
+.confirm-risk {
+  margin: 0;
+  color: var(--no);
+  font-size: var(--fs-5xl);
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.confirm-q {
+  margin: 0;
+  font-size: var(--fs-2xl);
+  font-weight: 800;
+}
+
+.confirm-title {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: var(--fs-body);
+  overflow-wrap: anywhere;
+}
+
+/* Decision buttons stay big and apart: the anti-mis-tap part of the feed. */
+.actions {
+  /* Above the top card, whose shadow would otherwise grey the buttons under it. */
+  position: relative;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 0 6px;
+}
+
+.pick-row,
+.mini-row {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.pick-row.n1 {
+  grid-template-columns: 1fr;
+}
+
+.pick-row.n3,
+.mini-row.n3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+/* Just after an answer the next card's buttons ignore taps; they look it. */
+.deck.locked .btn {
+  opacity: 0.45;
+}
+
+.btn.pick {
+  min-height: 44px;
+  padding: 6px 12px;
+  border: 2px solid var(--yes);
+  color: var(--text);
+  font-size: var(--fs-l);
+  font-weight: 900;
+  line-height: 1.15;
+  /* An answer shows whole: it wraps onto as many lines as it needs and the row grows to the tallest. */
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
+.btn.pick.yes {
+  border-color: transparent;
+  background: linear-gradient(135deg, #36e08a, #1fae62);
+  color: #06210f;
+}
+
+.btn.pick.rec {
+  border-color: var(--apricot);
+  background: rgba(255, 194, 61, 0.18);
+}
+
+.pick-more {
+  margin: -8px 0 0;
+  color: var(--muted);
+  font-size: var(--fs-s);
+  font-weight: 700;
+  text-align: center;
+}
+
+.btn.mini {
+  min-height: var(--tap-big);
+  padding: 6px 8px;
+  background: none;
+  font-size: var(--fs-l);
+  font-weight: 800;
+}
+
+.btn.mini.no {
+  border-color: rgba(255, 77, 94, 0.45);
+  color: var(--no);
+}
+
+.btn.mini.later {
+  color: var(--later);
+}
+
+.btn.mini.note {
+  color: var(--note);
+}
+
+/* All clear */
+
+.clear {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  gap: 10px;
+  max-width: 480px;
+  width: 100%;
+  margin: 0 auto;
+  padding-bottom: 20px;
+  text-align: center;
+}
+
+/* The cards' screen never scrolls, so the deck fits; on the phone, all clear scrolls on its own when it runs long. */
+.feed > .clear {
+  min-height: 0;
+  justify-content: safe center;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.clear-art {
+  width: min(250px, 70vw);
+}
+
+.clear-art svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.steam path {
+  animation: steam 2.4s ease-in-out infinite;
+}
+
+.steam path:nth-child(2) {
+  animation-delay: 0.5s;
+}
+
+.steam path:nth-child(3) {
+  animation-delay: 1s;
+}
+
+@keyframes steam {
+  0%,
+  100% {
+    opacity: 0.2;
+    transform: translateY(6px);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-4px);
+  }
+}
+
+.clear-title {
+  margin: 0;
+  font-size: var(--fs-6xl);
+  font-weight: 900;
+  background: linear-gradient(90deg, #ffd25c, #ffb020);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.clear-lede {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: var(--fs-l);
+}
+
+/* Every card minimised: the empty state sits over their title lines at its own height. */
+.feed > .clear.over-min {
+  flex: none;
+  overflow: visible;
+}
+
+/* "Show them ›" under the all-minimised heading: a tap to the first minimised card. */
+.clear-show {
+  margin: 0 0 6px;
+}
+
+.clear-min {
+  display: block;
+  min-height: 44px;
+  margin: 4px auto 0;
+  padding: 8px 14px;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: var(--apricot);
+  -webkit-text-fill-color: var(--apricot);
+  font: inherit;
+  font-size: var(--fs-l);
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.clear-min:focus-visible {
+  outline: 3px solid var(--apricot);
+  outline-offset: 2px;
+}
+
+/* The breaks agents are on: one amber line under the lede, never red. */
+.clear-agents {
+  margin: 0 0 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--apricot);
+  border-radius: 999px;
+  color: var(--apricot);
+  font-size: var(--fs-body);
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+/* The cheer for the last card answered: confetti bursts from behind Rivet and stays inside his box, off the words. */
+.clear-cheer {
+  position: relative;
+  display: grid;
+  place-items: center;
+  /* Confetti may fly sideways but stops short of the pills above and the words below. */
+  clip-path: inset(-16px -100vw);
+}
+
+.clear-cheer > .clear-art {
+  position: relative;
+  z-index: 1;
+}
+
+.clear-confetti {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.clear-confetti i {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 10px;
+  height: 14px;
+  margin: -7px 0 0 -5px;
+  border-radius: 3px;
+  background: var(--c);
+  opacity: 0;
+  animation: confetti 1.8s cubic-bezier(0.15, 0.7, 0.3, 1) calc(var(--t, 0ms) + var(--d)) both;
+}
+
+@keyframes confetti {
+  0% {
+    opacity: 1;
+    transform: rotate(var(--a)) translateY(0) rotate(0deg);
+  }
+  75% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: rotate(var(--a)) translateY(var(--r)) rotate(540deg);
+  }
+}
+
+/* Comment sheet */
+
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  --sheet-dim: rgba(0, 0, 0, 0.6);
+}
+
+/* The dim is a layer of its own under the panel, so it fades on the compositor. */
+:is(.sheet-backdrop, .scene-sheet-backdrop)::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--sheet-dim);
+  pointer-events: none;
+  animation: sheet-dim 0.24s ease-out;
+  /* Its layer stays for the sheet's whole life: dropped as the fade ends, the phone repainted the screen and showed
+     the page under it for two frames (a glitchy flash). */
+  will-change: opacity;
+}
+
+/* A sheet slides up from the foot of the screen whole, over a dim that fades in, and slides back down as it closes
+   (sheet.ts leave): no fade on the panel, so the screen under it never shows through (the owner). */
+@keyframes sheet-dim {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes sheet-undim {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+}
+
+@keyframes sheet-down {
+  to {
+    transform: translateY(100%);
+  }
+}
+
+:is(.sheet-backdrop, .scene-sheet-backdrop).is-leaving {
+  pointer-events: none;
+}
+
+:is(.sheet-backdrop, .scene-sheet-backdrop).is-leaving::before {
+  animation: sheet-undim 0.2s ease-in forwards;
+}
+
+:is(.sheet-backdrop, .scene-sheet-backdrop).is-leaving > :is(.sheet, .scene-sheet) {
+  animation: sheet-down 0.2s cubic-bezier(0.4, 0, 1, 1) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :is(.sheet-backdrop, .scene-sheet-backdrop)::before,
+  :is(.sheet-backdrop, .scene-sheet-backdrop) > :is(.sheet, .scene-sheet) {
+    animation: none;
+  }
+}
+
+.sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(600px, 100%);
+  /* Many attachments make it taller than a phone: it scrolls inside the screen rather than pushing its title off.
+     --vv-h: the screen a phone's keyboard leaves (sheet.ts fitAboveKeyboard). */
+  max-height: var(--vv-h, 100dvh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 16px 16px calc(env(safe-area-inset-bottom) + 14px);
+  border-radius: 20px 20px 0 0;
+  background: var(--bg-2);
+  border-top: 1px solid var(--line);
+  animation: sheet-up 0.26s cubic-bezier(0.2, 0.8, 0.2, 1);
+  /* As the dim's: the panel keeps its own layer after the slide. */
+  will-change: transform;
+}
+
+.sheet-title {
+  margin: 0;
+  font-size: var(--fs-2xl);
+  font-weight: 900;
+  overflow-wrap: anywhere;
+}
+
+.sheet-pick {
+  margin: 0;
+  color: var(--apricot);
+  font-size: var(--fs-body);
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.btn.choice.answer {
+  align-items: center;
+  font-size: var(--fs-body);
+  font-weight: 900;
+}
+
+.sheet-text {
+  width: 100%;
+  min-height: 140px;
+  padding: 14px;
+  border: 2px solid var(--line);
+  border-radius: 18px;
+  background: var(--panel);
+  font-size: var(--fs-l);
+  resize: vertical;
+}
+
+.sheet-actions {
+  display: grid;
+  gap: 10px;
+}
+
+/* An item's pop-up: Discuss this beside Close, one row, each half the width. */
+.sheet-foot {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.sheet-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-s);
+}
+
+/* Where a box's words go, in one plain line: the card's comment box and a chat's message box. */
+.sheet-where {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+
+/* Attach a photo: the chat composer and the card sheet */
+
+.attach-input {
+  display: none;
+}
+
+.attach-preview {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px;
+  border: 2px solid var(--line);
+  border-radius: 18px;
+  background: var(--panel);
+}
+
+.attach-preview[hidden] {
+  display: none;
+}
+
+.attach-thumb {
+  flex: none;
+  width: 64px;
+  height: 64px;
+  border-radius: 12px;
+  object-fit: cover;
+}
+
+.attach-note {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--fs-l);
+}
+
+.attach-note.error {
+  color: var(--no);
+}
+
+.attach-remove {
+  flex: none;
+  min-height: var(--tap);
+}
+
+.attach-wrap {
+  min-width: 0;
+}
+
+.attach-photos {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Several photos scroll sideways inside the strip; the page never does. */
+.attach-strip {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+/* Wide enough that the photo's middle opens it: the remove button's tap area is the top right corner only. */
+.attach-tile {
+  position: relative;
+  flex: none;
+  width: 96px;
+  height: 96px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--line);
+}
+
+.attach-tile.failed {
+  outline: 2px solid var(--no);
+  outline-offset: -2px;
+}
+
+.attach-tile .attach-thumb {
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+}
+
+.attach-open {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: zoom-in;
+}
+
+/* What goes, or went, with a card answer: on the card before it sends, and in the Activity list after. */
+.card-attached p {
+  margin: 0 0 8px;
+}
+
+.sent-attach {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.sent-attach .chat-images,
+.sent-attach .chat-files {
+  margin: 0;
+}
+
+.attach-wait {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  font-size: var(--fs-body);
+}
+
+.attach-tile .attach-remove {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: grid;
+  place-items: center;
+  width: var(--tap);
+  height: var(--tap);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #fff;
+}
+
+.attach-remove-icon {
+  width: 26px;
+  height: 26px;
+  padding: 5px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.attach-remove-icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* A document: its icon and name, ellipsised; in the strip the tile widens to hold it beside its remove button. */
+.file-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: var(--fs-l);
+}
+
+.file-chip-icon {
+  flex: none;
+  width: 28px;
+  height: 28px;
+}
+
+.file-chip-icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.file-chip-name {
+  display: flex;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.file-chip-stem {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-chip-ext {
+  flex: none;
+}
+
+/* Documents stack in rows under the photo strip. */
+.attach-docs {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: start;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* A document takes the card sheet's first row whole; its note and Remove sit on the row below. */
+.attach-preview:has(> .file-chip) {
+  flex-wrap: wrap;
+}
+
+.attach-preview > .file-chip {
+  flex: 1 1 100%;
+  min-height: var(--tap);
+}
+
+.attach-tile.attach-doc {
+  display: flex;
+  align-items: center;
+  width: auto;
+  height: var(--tap);
+  min-width: 0;
+  max-width: 100%;
+  padding: 0 var(--tap) 0 12px;
+}
+
+.sheet-attach {
+  display: grid;
+  gap: 10px;
+}
+
+.sheet-attach .attach-btn {
+  justify-self: start;
+  min-height: var(--tap);
+}
+
+/* Voice typing */
+.dictate {
+  position: relative;
+  display: grid;
+  gap: 6px;
+}
+
+/* Every box withMic wraps keeps its text clear of the mic in its corner. */
+.dictate > textarea.sheet-text,
+.dictate > textarea.cmd-text,
+.dictate > textarea.desk-note {
+  padding-right: calc(var(--tap) + 14px);
+}
+
+.dictate.listening > textarea {
+  border-color: var(--pom);
+}
+
+.btn.dictate-mic {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: var(--tap);
+  height: var(--tap);
+  min-height: var(--tap);
+  padding: 0;
+  border-radius: 50%;
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+.dictate-icon {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+}
+
+.dictate-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.btn.dictate-mic.listening {
+  border-color: var(--pom);
+  background: var(--pom);
+  color: #fff;
+  animation: dictate-pulse 1.4s ease-out infinite;
+}
+
+.dictate-status {
+  margin: 0;
+  color: var(--pom);
+  font-size: var(--fs-s);
+  font-weight: 800;
+}
+
+@keyframes dictate-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--pom) 60%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 12px transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn.dictate-mic.listening {
+    animation: none;
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--pom) 45%, transparent);
+  }
+}
+
+/* HQ */
+
+.placeholder {
+  max-width: 620px;
+  margin: 0 auto;
+  padding: 24px 16px 110px;
+}
+
+.placeholder-title {
+  margin: 0 0 8px;
+  font-size: var(--fs-4xl);
+  font-weight: 900;
+}
+
+.placeholder-text {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-l);
+}
+
+/* The status line: the phone band's "where are we", one tap per part. */
+.status-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.status-part {
+  min-height: 36px;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-body);
+  font-weight: 800;
+  line-height: 1.2;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.status-part.t-warn {
+  border-color: var(--apricot);
+  color: var(--apricot);
+}
+
+.status-part.t-info {
+  border-color: var(--later);
+  color: var(--later);
+}
+
+.status-part.t-bad {
+  border-color: var(--no);
+  color: #ff8a95;
+}
+
+.status-part.is-lead {
+  border-color: transparent;
+  background: var(--apricot);
+  color: #2a1204;
+}
+
+.status-part:focus-visible {
+  outline: 3px solid var(--apricot);
+  outline-offset: 2px;
+}
+
+.hq {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 4px 16px 110px;
+}
+
+.strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.strip-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: var(--panel);
+  font-size: var(--fs-s);
+  font-weight: 700;
+}
+
+.strip-cell.error {
+  background: rgba(255, 77, 94, 0.2);
+}
+
+.hq-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 12px;
+  font-size: var(--fs-3xl);
+  font-weight: 900;
+}
+
+.hq-count {
+  padding: 2px 12px;
+  border-radius: 999px;
+  background: var(--apricot);
+  color: #2a1204;
+  font-size: var(--fs-body);
+}
+
+.empty {
+  margin: 0;
+  color: var(--muted);
+}
+
+.panel {
+  padding: 12px;
+}
+
+.btn.row-btn {
+  justify-content: flex-start;
+  width: 100%;
+  min-height: var(--tap);
+  padding: 8px 12px;
+  text-align: left;
+  font-weight: 700;
+}
+
+.btn.row-btn .row-t {
+  padding-top: 0;
+}
+
+.soon-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
+  gap: 14px;
+}
+
+.panel.soon {
+  position: relative;
+  min-height: 170px;
+  overflow: hidden;
+  background:
+    radial-gradient(90% 90% at 100% 0%, rgba(255, 194, 61, 0.2), transparent 60%),
+    var(--panel);
+  border-style: dashed;
+}
+
+.soon-tag {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--apricot);
+  font-size: var(--fs-s);
+  font-weight: 800;
+}
+
+.soon-title {
+  margin: 10px 0 6px;
+  font-size: var(--fs-2xl);
+  font-weight: 900;
+}
+
+.soon-body {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-m);
+}
+
+.panel-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 8px;
+  font-size: var(--fs-2xl);
+  font-weight: 900;
+}
+
+.title-icon {
+  width: 26px;
+  height: 26px;
+  color: var(--apricot);
+}
+
+.panel-text {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: var(--fs-m);
+}
+
+.panel-text.break {
+  overflow-wrap: anywhere;
+}
+
+.panel-actions,
+.device {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.device .panel-title,
+.device .panel-text {
+  margin-bottom: 0;
+}
+
+.code {
+  margin: 0;
+  font-size: var(--fs-5xl);
+  font-weight: 900;
+  letter-spacing: 0.14em;
+}
+
+/* Desktop */
+
+@media (max-width: 380px) {
+  .brand-name,
+  .topbar .brand-icon {
+    display: none;
+  }
+}
+
+@media (min-width: 900px) {
+  .topbar {
+    padding: 16px 28px 10px;
+  }
+
+  .feed {
+    width: 100%;
+    max-width: 620px;
+    margin: 0 auto;
+    padding-bottom: 12px;
+  }
+
+  .hq {
+    padding: 8px 28px 60px;
+  }
+}
+
+@media (min-width: 1200px) {
+  .tabs {
+    position: fixed;
+    top: 12px;
+    left: 50%;
+    z-index: 20;
+    width: 600px;
+    padding: 0;
+    background: none;
+    transform: translateX(-50%);
+  }
+
+  .tab {
+    flex-direction: row;
+    gap: 8px;
+    min-height: var(--tap);
+    font-size: var(--fs-l);
+  }
+
+  .tab .badge {
+    position: static;
+  }
+
+  .app.signed-in {
+    grid-template-rows: auto minmax(0, 1fr) 0;
+  }
+
+  .toasts {
+    top: 76px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .ptr.spinning .ptr-ring {
+    animation: none;
+    border-style: dotted;
+  }
+}

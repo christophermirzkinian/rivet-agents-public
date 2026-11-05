@@ -1,0 +1,658 @@
+/* The phone Feed: three segments, the deck with the say-line on the
+   card, one pile per thing with Seen kept, today's answers. Body 16px, nothing under 13px. */
+
+.feed.v4 {
+  height: auto;
+  gap: 12px;
+  padding: 4px 16px 24px;
+  font-size: 16px;
+}
+
+.feed.v4 :is(.deck, .stack, .card-body) {
+  flex: none;
+}
+
+.feed.v4 .card.top {
+  position: relative;
+  inset: auto;
+  /* Clips as hidden did without being a scroll box, so its pinned answers stick to the Feed's bottom (pinAnswers). */
+  overflow: clip;
+}
+
+.feed.v4 .more-cue {
+  display: none;
+}
+
+.feed.v4 .card-body {
+  overflow: visible;
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+/* The open card and its answers in one box: the card, the say-line, the buttons. */
+
+/* Needs you as rows: each card its own box, one under another. */
+.feed.v4 .deck-rows {
+  display: grid;
+  /* A card's one-line thread title must not size the column: it ran the cards past the owner's phone. */
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+
+.feed.v4 .deck {
+  --edge: var(--line);
+  border: 1px solid var(--edge);
+  border-radius: 16px;
+  background: var(--panel);
+  padding-bottom: 12px;
+}
+
+.feed.v4 .deck:has(.card.k-plan) {
+  --edge: color-mix(in srgb, var(--pom) 55%, var(--line));
+}
+
+.feed.v4 .deck:has(.card.risky) {
+  --edge: rgba(255, 77, 94, 0.7);
+}
+
+.feed.v4 .card.top {
+  border: 0;
+  background: none;
+}
+
+.feed.v4 .card-title {
+  font-size: 22px;
+  line-height: 1.2;
+}
+
+.feed.v4 .card-ask {
+  font-size: 16px;
+  line-height: 1.4;
+}
+
+.feed.v4 .card-meta {
+  font-size: 14px;
+}
+
+.feed.v4 .deck > .actions {
+  padding: 0 14px;
+}
+
+/* A read card's answers stay at the bottom of the screen until its end scrolls up to them (pinAnswers): the card's own colour runs behind them to its edges, and while they are held there a shadow says the card goes on
+   under. */
+.feed.v4 .pinned {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  background: var(--panel);
+  box-shadow: 0 0 0 12px var(--panel);
+}
+
+.feed.v4 .pinned.stuck {
+  box-shadow:
+    0 0 0 12px var(--panel),
+    0 -14px 16px 2px rgba(0, 0, 0, 0.45);
+}
+
+.card-kind.plan {
+  color: var(--apricot);
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.plan-points {
+  margin: 0 0 12px;
+  padding-left: 22px;
+  font-size: 16px;
+  line-height: 1.4;
+}
+
+.plan-points li::marker {
+  color: var(--apricot);
+}
+
+.plan-points li + li {
+  margin-top: 4px;
+}
+
+.plan-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.plan-chip {
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.plan-chip b {
+  color: var(--text);
+}
+
+/* The say-line: the mic, the box, a photo; Send once there is something to send. */
+
+.say-line {
+  display: grid;
+  gap: 8px;
+}
+
+.say-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--bg-2);
+}
+
+.say-row > .dictate,
+.say-row > .say-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.say-row .dictate {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.say-row .dictate > .btn.dictate-mic {
+  position: static;
+  flex: none;
+  order: -1;
+  border-radius: 10px;
+}
+
+.say-row .dictate-status {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin: 2px 0 0;
+  font-size: 14px;
+}
+
+.say-text {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  max-height: 160px;
+  padding: 10px 4px;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+  line-height: 1.4;
+  resize: none;
+  field-sizing: content;
+}
+
+.say-text:focus {
+  outline: none;
+}
+
+.say-row:focus-within {
+  border-color: var(--apricot);
+}
+
+.say-row .attach-btn {
+  flex: none;
+  border-radius: 10px;
+  border-width: 1px;
+}
+
+.say-line:not(.has-text) .say-send {
+  display: none;
+}
+
+.btn.say-send {
+  flex: none;
+  border-color: transparent;
+  background: var(--apricot);
+  color: #2a1606;
+  font-size: 16px;
+}
+
+.say-line > .attach-preview:empty,
+.say-line > .attach-preview:not(:has(li, p:not(:empty))) {
+  display: none;
+}
+
+.feed.v4 .actions {
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.feed.v4 .btn.pick,
+.feed.v4 .btn.mini {
+  font-size: 16px;
+}
+
+/* A plan's answers: one big Yes, go, then No. */
+
+.plan-row {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr;
+  gap: 10px;
+}
+
+.plan-row .btn {
+  flex-direction: column;
+  gap: 2px;
+  min-height: 64px;
+  border-radius: 16px;
+}
+
+.btn.pick.yes.plan-go {
+  background: linear-gradient(180deg, #ffb24a, #f08a1c);
+  color: #2a1606;
+}
+
+.plan-b {
+  font-size: 20px;
+  font-weight: 900;
+}
+
+.plan-s {
+  font-size: 14px;
+  font-weight: 700;
+  opacity: 0.85;
+}
+
+.feed.v4 .fsec-list {
+  padding: 8px 0 0;
+}
+
+/* A thread's update cards opened from Done today, in a sheet: their tags, ages and details read at 14px at least. */
+.update-sheet .upd {
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+.update-sheet :is(.upd-tag, .upd-age, .upd-meta) {
+  font-size: max(14px, 1em);
+}
+
+/* Seen goes when nothing in the thread is new, and Close takes the row. */
+.update-sheet .upd-seen[hidden] {
+  display: none;
+}
+
+.update-sheet .sheet-foot.solo {
+  grid-template-columns: 1fr;
+}
+
+.update-sheet .upd + .upd {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.update-sheet .upd-acts,
+.update-sheet .say-line {
+  margin-top: 12px;
+}
+
+.update-sheet .upd-say {
+  width: 100%;
+  min-height: var(--tap);
+  font-size: var(--fs-l);
+}
+
+/* The lists and option details in the Feed read at 14px at least (no small text). */
+.feed.v4 :is(.choice-detail, .cfilter-n, .qc-stage, .qc-what, .fsec-n, .card-link) {
+  font-size: max(14px, 1em);
+}
+
+/* Minimise: a button at a card's top right and under its last line; minimised, a card is its title
+   line, and a tap on it opens the card again. */
+
+.min-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* The card's head: the count, then "−" and "✕" as two round 44 px targets at the top right, 8 px apart. */
+.card-head .head-tools {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* The X: a red ring on a faint red disc so it reads as "reject", never as "close". Same 44 px as the −. */
+.btn.x-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border: 1.5px solid rgba(255, 77, 94, 0.55);
+  border-radius: 999px;
+  background: rgba(255, 77, 94, 0.1);
+  color: var(--no);
+}
+
+.x-btn svg {
+  display: block;
+  width: 20px;
+  height: 20px;
+}
+
+.desktop .btn.x-btn:hover {
+  background: rgba(255, 77, 94, 0.22);
+}
+
+.min-btn.bottom {
+  align-self: flex-end;
+  display: flex;
+  margin: 12px 0 0 auto;
+}
+
+.min-open {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 56px;
+  padding: 12px 14px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Two lines at most, so a long title still reads. */
+.min-title {
+  display: -webkit-box;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.min-chev {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  color: var(--muted);
+  transform: rotate(90deg);
+}
+
+.feed.v4 .deck.minimised {
+  padding-bottom: 0;
+}
+
+/* The answers: a caption over the option boxes, so the list reads
+   as the one place to answer. */
+.choices-cap {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 2px 0 8px;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.choices-cap .cap-key {
+  letter-spacing: 0;
+  text-transform: none;
+  font-weight: 700;
+}
+
+/* Message Rivet, Share and the bottom "−" share one row at the card's end: tools, not answers. */
+.card-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.card-tools .btn.card-message {
+  flex: 1 0 auto;
+  width: auto;
+  min-height: 44px;
+  margin: 0;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+/* Share keeps its word. Where the row is
+   too tight for it, Share wraps onto its own line beside the "−" rather than shrinking to an icon. */
+.card-tools .btn.card-share-top {
+  flex: 1 0 auto;
+  width: auto;
+  min-height: 44px;
+  margin: 0;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+.card-tools .btn.min-btn.bottom {
+  align-self: center;
+  margin: 0;
+}
+
+/* The reject popup: why, in his words. A bottom sheet on the phone, the centred dialog on the desktop. */
+.sheet.reject-sheet,
+.reject-sheet .sheet-body {
+  gap: 14px;
+}
+
+.reject-sheet .sheet-body {
+  display: flex;
+  flex-direction: column;
+}
+
+.reject-sheet .sheet-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.reject-mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 1.5px solid rgba(255, 77, 94, 0.55);
+  border-radius: 50%;
+  background: rgba(255, 77, 94, 0.12);
+  color: var(--no);
+}
+
+.reject-mark svg {
+  width: 20px;
+  height: 20px;
+}
+
+.reject-sheet .sheet-title {
+  font-size: 22px;
+}
+
+.reject-sheet .sheet-where {
+  font-size: 16px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.reject-sheet .sheet-text {
+  min-height: 128px;
+  max-height: 40dvh;
+  font-size: 17px;
+  line-height: 1.4;
+  field-sizing: content;
+}
+
+.reject-sheet .dictate.listening > textarea,
+.reject-sheet .sheet-text:focus {
+  border-color: var(--no);
+  outline: none;
+}
+
+.reject-sheet .sheet-hint {
+  font-size: 14px;
+}
+
+.reject-sheet .sheet-foot .btn {
+  min-height: 52px;
+  font-size: 17px;
+}
+
+.reject-sheet .btn.reject-send:disabled {
+  opacity: 0.4;
+}
+
+/* Freshness and offline: how old the cards are, and a bar while they cannot be refreshed. */
+.feed-fresh {
+  margin: 6px 4px 0;
+  color: var(--muted);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.feed-fresh.stale {
+  color: var(--apricot);
+}
+
+.feed-offline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  padding: 8px 8px 8px 14px;
+  border: 1.5px solid var(--apricot);
+  border-radius: 14px;
+  background: #3a2419;
+  color: var(--apricot);
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.feed-offline-t {
+  overflow-wrap: anywhere;
+}
+
+.btn.feed-retry {
+  flex: none;
+  min-width: var(--tap);
+  font-size: 16px;
+}
+
+/* New cards wait behind this pill so the list never moves under the owner. */
+.btn.new-pill {
+  position: sticky;
+  top: 8px;
+  z-index: 5;
+  justify-self: start;
+  align-self: start;
+  /* Its height and the list's 12 px gap given back below: the pill floats over the first card's empty top left, clear
+     of − and X, so nothing moves. */
+  height: 44px;
+  margin: 0 auto -56px 16px;
+  display: flex;
+  padding: 0 18px;
+  border-color: var(--apricot);
+  border-radius: 999px;
+  background: var(--apricot);
+  color: #1b1317;
+  font-size: 16px;
+  font-weight: 800;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+
+/* Proof on a merge card: tests, review, why and holds, a tone dot each. */
+.card-proof {
+  display: grid;
+  gap: 6px;
+  margin: 4px 0 0;
+  padding: 10px 12px;
+  border: 1.5px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel-2);
+  list-style: none;
+}
+
+.proof-line {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.proof-line::before {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--muted);
+  content: "";
+  transform: translateY(-1px);
+}
+
+.proof-line.ok::before {
+  background: var(--yes);
+}
+
+.proof-line.bad::before {
+  background: var(--no);
+}
+
+.proof-line.warn::before,
+.proof-line.wait::before {
+  background: var(--apricot);
+}
+
+.proof-line.warn {
+  color: var(--apricot);
+}
+
+/* Rivet heads each card with his asking face. */
+.card-head .card-rivet {
+  margin-right: 2px;
+}

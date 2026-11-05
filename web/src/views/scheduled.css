@@ -1,0 +1,116 @@
+/* The red jobs sheet (scheduled.ts): one card per job, Machines' line style at full size. */
+.jobs {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.job {
+  display: grid;
+  gap: 4px;
+  padding: 12px 16px;
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  font-size: var(--fs-xl);
+}
+
+.job.paused {
+  opacity: 0.75;
+}
+
+.job p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.job-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.job-name {
+  min-width: 0;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.job-paused {
+  margin-left: auto;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.job-words,
+.job-line,
+.job-when,
+.job-next {
+  color: var(--muted);
+}
+
+.job-last {
+  font-weight: 700;
+}
+
+.job-last.t-bad,
+.job-status.bad {
+  color: var(--no);
+}
+
+.job-last.t-ok,
+.job-status.ok {
+  color: var(--yes);
+}
+
+/* A red job an agent is on: amber, never red. */
+.job-last.t-warn {
+  color: var(--apricot);
+}
+
+.job-status {
+  font-weight: 800;
+}
+
+.job-status.wait {
+  color: var(--later);
+}
+
+.job-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.job-actions .btn {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: var(--tap);
+  padding-inline: 8px;
+  white-space: nowrap;
+}
+
+/* Dismiss and Bring back take their own line, so the row's three buttons keep their width at 320. */
+.job-actions :is(.job-dismiss, .job-bring-back) {
+  flex-basis: 100%;
+}
+
+.jobs-limits {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: var(--fs-xl);
+}
+
+.job-confirm {
+  display: grid;
+  gap: 12px;
+}
+
+.job-confirm p {
+  margin: 0;
+  font-size: var(--fs-xl);
+}

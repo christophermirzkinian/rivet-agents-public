@@ -1,0 +1,72 @@
+/* A chat's sheet (worker-sheet.ts: Message Rivet, a chat's search hit, an ask's or Ops row's chat). These rules went
+   with scene.css, which left the sheet unstyled under the app and the page shoved up a screen to
+   reach it. It opens over a tall sheet (the Decide sheet), so it sits above `.sheet-backdrop` and under the
+   lightbox. --vv-h: the screen a phone's keyboard leaves (sheet.ts fitAboveKeyboard). */
+.scene-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  --sheet-dim: rgba(0, 0, 0, 0.6);
+}
+
+.scene-sheet {
+  animation: sheet-up 0.26s cubic-bezier(0.2, 0.8, 0.2, 1);
+  /* Its layer stays after the slide, as a sheet's does (styles.css). */
+  will-change: transform;
+  display: flex;
+  flex-direction: column;
+  width: min(600px, 100%);
+  max-height: calc(var(--vv-h, 100dvh) - env(safe-area-inset-top) - 16px);
+  overflow: hidden;
+  padding: 16px 16px calc(env(safe-area-inset-bottom) + 14px);
+  border-radius: 20px 20px 0 0;
+  background: var(--bg-2);
+}
+
+.scene-sheet-name {
+  flex: none;
+  margin: 0 0 12px;
+  font-size: var(--fs-2xl);
+  font-weight: 900;
+  overflow-wrap: anywhere;
+}
+
+.scene-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-content: start;
+  gap: 8px 16px;
+  min-height: 0;
+  margin: 0 0 16px;
+}
+
+.scene-facts dt {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.scene-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* A toast (Sent, a send's error) shows over the sheet, as it does over the Decide sheet. */
+body:has(.scene-sheet-backdrop) .toasts {
+  z-index: 46;
+}
+
+.desktop .scene-sheet-backdrop {
+  align-items: center;
+}
+
+.desktop .scene-sheet {
+  width: min(640px, calc(100% - 48px));
+  max-height: min(86vh, calc(var(--vv-h, 100dvh) - 16px));
+  padding: 22px 22px 18px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+}

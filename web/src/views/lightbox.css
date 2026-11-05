@@ -1,0 +1,398 @@
+/* The full-screen viewer for screenshots, chat photos and PDF pages (lightbox.ts). */
+
+html.lightbox-open,
+html.lightbox-open body {
+  overflow: hidden;
+}
+
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  background: #000;
+  color: var(--text);
+  touch-action: none;
+  overscroll-behavior: contain;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.lightbox.document {
+  background: var(--bg);
+}
+
+.lightbox-bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  padding: max(8px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) 8px max(14px, env(safe-area-inset-left));
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-2);
+}
+
+.lightbox-heading {
+  display: grid;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.lightbox-title {
+  overflow: hidden;
+  font-size: var(--fs-2xl);
+  font-weight: 800;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lightbox-sub {
+  color: var(--muted);
+  font-size: var(--fs-body);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.lightbox-sub:empty {
+  display: none;
+}
+
+.btn.lightbox-tool {
+  flex: none;
+  min-width: var(--tap);
+  padding: 4px 10px;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.btn:is(.media-share, .media-download).lightbox-share {
+  flex: none;
+  flex-direction: row;
+  gap: 6px;
+  min-width: var(--tap);
+  min-height: var(--tap);
+  padding: 6px 12px;
+  font-size: var(--fs-xl);
+}
+
+/* A phone's bar keeps its room for the title: Download and Share are their icons, which pulse while the file comes. */
+@media (max-width: 560px) {
+  .btn:is(.media-share, .media-download).lightbox-share {
+    padding: 6px;
+  }
+
+  .lightbox-share .media-share-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .lightbox-share[aria-busy="true"] .media-share-icon {
+    animation: lightbox-share-wait 0.8s ease-in-out infinite alternate;
+  }
+}
+
+@keyframes lightbox-share-wait {
+  to {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lightbox-share[aria-busy="true"] .media-share-icon {
+    animation: none;
+    opacity: 0.5;
+  }
+}
+
+.btn.lightbox-close {
+  flex: none;
+  gap: 6px;
+  padding: 8px 14px 8px 10px;
+  font-size: var(--fs-xl);
+}
+
+.lightbox-close-icon {
+  width: 20px;
+  height: 20px;
+}
+
+.lightbox-close-icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Fingers pinch; the zoom buttons are for a mouse. */
+@media (hover: none) {
+  .lightbox-zoom {
+    display: none;
+  }
+}
+
+.lightbox-stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  touch-action: none;
+  cursor: grab;
+}
+
+.lightbox-stage:active {
+  cursor: grabbing;
+}
+
+.lightbox-img,
+.lightbox-pages {
+  position: absolute;
+  top: 0;
+  left: 0;
+  max-width: none;
+  transform-origin: 0 0;
+}
+
+.lightbox-img {
+  display: block;
+  -webkit-user-drag: none;
+}
+
+.lightbox-page {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  overflow: hidden;
+  background: #fff;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.45);
+}
+
+.lightbox-base {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.lightbox-detail {
+  position: absolute;
+  display: block;
+}
+
+.lightbox-note {
+  position: absolute;
+  inset: 0;
+  /* Over a shown image (a Share failure), and never in the way of a pinch or pan. */
+  z-index: 1;
+  pointer-events: none;
+  text-shadow: 0 1px 3px #000, 0 0 12px #000;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  padding: 24px;
+  color: var(--muted);
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  text-align: center;
+}
+
+.lightbox-note[hidden] {
+  display: none;
+}
+
+/* Text files (text-pages.ts): a reading column on the app's own colours, laid out again at each zoom. */
+.lightbox-doc {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+.lightbox-text {
+  box-sizing: border-box;
+  padding: 18px 18px 40px;
+  color: var(--text);
+  font-size: 17px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  transform-origin: 0 0;
+}
+
+.lightbox-text-cut {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--apricot);
+  font-weight: 700;
+}
+
+.lightbox-plain,
+.lightbox-text pre {
+  margin: 0;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 15px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.lightbox-text pre {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--panel);
+}
+
+.lightbox-text code {
+  padding: 1px 5px;
+  border-radius: 6px;
+  background: var(--panel);
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.9em;
+}
+
+.lightbox-text pre code {
+  padding: 0;
+  background: none;
+  font-size: inherit;
+}
+
+.lightbox-text h1,
+.lightbox-text h2,
+.lightbox-text h3,
+.lightbox-text h4,
+.lightbox-text h5,
+.lightbox-text h6 {
+  margin: 22px 0 10px;
+  line-height: 1.25;
+}
+
+.lightbox-text h1 {
+  font-size: 26px;
+}
+
+.lightbox-text h2 {
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+  font-size: 22px;
+}
+
+.lightbox-text h3 {
+  font-size: 19px;
+}
+
+.lightbox-text h4,
+.lightbox-text h5,
+.lightbox-text h6 {
+  font-size: 17px;
+}
+
+.lightbox-text > :first-child {
+  margin-top: 0;
+}
+
+.lightbox-text p,
+.lightbox-text ul,
+.lightbox-text ol,
+.lightbox-text blockquote,
+.lightbox-text table {
+  margin: 0 0 14px;
+}
+
+.lightbox-text ul,
+.lightbox-text ol {
+  padding-left: 26px;
+}
+
+.lightbox-text li > ul,
+.lightbox-text li > ol {
+  margin: 4px 0 0;
+}
+
+.lightbox-text li.md-task-item {
+  list-style: none;
+}
+
+.md-task {
+  width: 18px;
+  height: 18px;
+  margin: 0 8px 0 -24px;
+  vertical-align: -3px;
+  accent-color: var(--yes);
+}
+
+.lightbox-text blockquote {
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--muted);
+}
+
+.lightbox-text a {
+  color: var(--later);
+  text-decoration: underline;
+}
+
+.lightbox-text hr {
+  margin: 20px 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+.lightbox-text table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 15px;
+}
+
+.lightbox-text th,
+.lightbox-text td {
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.lightbox-text th {
+  background: var(--panel);
+}
+
+.md-image,
+.md-raw {
+  color: var(--muted);
+}
+
+.md-raw {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 15px;
+  white-space: pre-wrap;
+}
+
+.lightbox-video {
+  position: absolute;
+  top: 0;
+  left: 0;
+  max-width: none;
+  transform-origin: 0 0;
+  background: #000;
+}
+
+/* The way back to where the picture came from: one wide button under the picture. */
+.lightbox-foot {
+  display: flex;
+  flex: none;
+  justify-content: center;
+  padding: 8px 16px calc(env(safe-area-inset-bottom) + 10px);
+}
+
+.btn.lightbox-action {
+  width: 100%;
+  max-width: 420px;
+  min-height: var(--tap);
+  font-size: var(--fs-xl);
+}

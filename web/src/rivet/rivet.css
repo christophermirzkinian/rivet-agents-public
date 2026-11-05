@@ -1,0 +1,283 @@
+/* Rivet and the sub-agents: rounded squares, no arms or legs. They hover, blink, look around and squash. */
+.rivet {
+  --rv-size: 120px;
+  --rv-body-a: #ffd25c;
+  --rv-body-b: #f2a516;
+  --rv-ink: #3a2a0f;
+  --rv-eye: #ffd25c;
+  position: relative;
+  width: var(--rv-size);
+  height: var(--rv-size);
+  flex: none;
+}
+
+.rivet.is-agent {
+  --rv-body-a: #a5f0dc;
+  --rv-body-b: #4fc7a8;
+  --rv-ink: #10352d;
+  --rv-eye: #b8f7e6;
+}
+
+.rivet.is-agent.is-asking {
+  --rv-body-a: #ffd25c;
+  --rv-body-b: #f2a516;
+  --rv-ink: #3a2a0f;
+  --rv-eye: #ffd25c;
+}
+
+.rivet.is-agent.is-wrong {
+  --rv-body-a: #ff8f99;
+  --rv-body-b: #e0475a;
+  --rv-ink: #3d0d14;
+  --rv-eye: #ffc2c8;
+}
+
+.rivet.has-glow::before {
+  content: "";
+  position: absolute;
+  inset: -45%;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(255, 196, 64, 0.42), rgba(255, 196, 64, 0) 72%);
+  animation: rv-glow 3.2s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.rivet.is-agent.has-glow::before {
+  background: radial-gradient(closest-side, rgba(110, 230, 200, 0.35), rgba(110, 230, 200, 0) 72%);
+}
+
+.rivet-hover {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  animation: rv-hover 3.2s ease-in-out infinite;
+}
+
+.rivet svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.rivet .rv-body {
+  fill: var(--rv-body-a);
+  stroke: var(--rv-body-b);
+  stroke-width: 4;
+  filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.35));
+}
+
+.rv-visor {
+  fill: var(--rv-ink);
+}
+
+/* The eyes and the working dots: HTML layers over the still body, so the compositor runs them (rivet.ts). */
+.rv-eyes,
+.rv-look,
+.rivet .rv-dot {
+  position: absolute;
+  inset: 0;
+}
+
+.rv-eyes {
+  fill: var(--rv-eye);
+  /* The middle of the eyes, in his 100-unit drawing. */
+  transform-origin: 50% 38%;
+  animation: rv-blink 4.6s infinite;
+}
+
+.rv-line {
+  fill: none;
+  stroke: var(--rv-eye);
+  stroke-width: 6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.rv-mark {
+  fill: none;
+  stroke: var(--rv-ink);
+  stroke-width: 7.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.rv-fill,
+.rv-dot {
+  fill: var(--rv-ink);
+}
+
+.rivet .rv-dot {
+  animation: rv-dot 1.2s ease-in-out infinite;
+}
+
+/* One after another, by class: the CSP refuses an inline style (style-src 'self'). */
+.rivet .rv-dot-1 {
+  animation-delay: 0.2s;
+}
+
+.rivet .rv-dot-2 {
+  animation-delay: 0.4s;
+}
+
+/* Looking around: while working, and now and then when all is clear. */
+.rivet.is-working .rv-look,
+.rivet.is-clear .rv-look {
+  animation: rv-look 6s ease-in-out infinite;
+}
+
+.rivet.is-thinking .rivet-hover {
+  animation: rv-hover 3.2s ease-in-out infinite, rv-tilt 3.2s ease-in-out infinite;
+}
+
+.rivet.is-wrong .rivet-hover {
+  animation: rv-shake 2.4s ease-in-out infinite;
+}
+
+.rivet.is-happy .rivet-hover {
+  animation: rv-bounce 1.1s ease-in-out infinite;
+}
+
+/* Sub-agents flex and pulse as they hover: a little squash, a little stretch. */
+.rivet.is-agent .rivet-hover {
+  animation: rv-hover 2.6s ease-in-out infinite, rv-squash 1.3s ease-in-out infinite alternate;
+  animation-delay: var(--rv-delay, 0s);
+}
+
+.rivet.is-pop .rivet-hover {
+  animation: rv-pop 0.42s cubic-bezier(0.3, 1.6, 0.5, 1), rv-hover 3.2s ease-in-out 0.42s infinite;
+}
+
+@keyframes rv-hover {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+  50% {
+    translate: 0 -6%;
+  }
+}
+
+@keyframes rv-squash {
+  from {
+    scale: 1.06 0.94;
+  }
+  to {
+    scale: 0.95 1.05;
+  }
+}
+
+@keyframes rv-blink {
+  0%,
+  91%,
+  100% {
+    transform: scaleY(1);
+  }
+  94% {
+    transform: scaleY(0.08);
+  }
+}
+
+@keyframes rv-look {
+  0%,
+  18%,
+  100% {
+    translate: 0 0;
+  }
+  26%,
+  44% {
+    translate: -5% 0;
+  }
+  52%,
+  70% {
+    translate: 5% 1%;
+  }
+  78% {
+    translate: 0 0;
+  }
+}
+
+@keyframes rv-dot {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes rv-tilt {
+  0%,
+  100% {
+    rotate: -4deg;
+  }
+  50% {
+    rotate: 4deg;
+  }
+}
+
+@keyframes rv-shake {
+  0%,
+  60%,
+  100% {
+    translate: 0 0;
+  }
+  64% {
+    translate: -4% 0;
+  }
+  68% {
+    translate: 4% 0;
+  }
+  72% {
+    translate: -3% 0;
+  }
+  76% {
+    translate: 0 0;
+  }
+}
+
+@keyframes rv-bounce {
+  0%,
+  100% {
+    translate: 0 0;
+    scale: 1 1;
+  }
+  40% {
+    translate: 0 -10%;
+    scale: 0.96 1.04;
+  }
+  80% {
+    translate: 0 0;
+    scale: 1.06 0.94;
+  }
+}
+
+@keyframes rv-pop {
+  0% {
+    scale: 0.8 1.15;
+  }
+  60% {
+    scale: 1.08 0.94;
+  }
+  100% {
+    scale: 1 1;
+  }
+}
+
+@keyframes rv-glow {
+  0%,
+  100% {
+    opacity: 0.75;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rivet *,
+  .rivet::before {
+    animation: none !important;
+  }
+}
