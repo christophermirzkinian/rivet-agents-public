@@ -1,0 +1,153 @@
+/* The Machines trend (machines-trend.ts): dark, flat, no glow; Ops's 14 px floor for every word on it. */
+.trend-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.trend-ranges .trend-now {
+  margin-left: auto;
+}
+
+/* A sideways drag and a pinch are the chart's; a vertical swipe still scrolls the page. */
+.trend-plot {
+  position: relative;
+  height: 220px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  overflow: hidden;
+  /* Its redraws stay inside it: the page around it is not laid out or painted again. */
+  contain: layout paint;
+  touch-action: pan-y;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  cursor: grab;
+}
+
+.trend-plot:focus-visible {
+  outline: 2px solid var(--apricot);
+  outline-offset: 2px;
+}
+
+.trend-plot svg {
+  display: block;
+}
+
+.trend-grid {
+  stroke: rgba(255, 240, 225, 0.08);
+  stroke-width: 1;
+}
+
+.trend-base {
+  stroke: rgba(255, 240, 225, 0.22);
+  stroke-width: 1;
+}
+
+.trend-tick {
+  fill: var(--muted);
+  font-family: var(--font);
+  font-size: var(--fs-body);
+  font-variant-numeric: tabular-nums;
+}
+
+.trend-line {
+  fill: none;
+  stroke-width: 2.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.trend-cross {
+  stroke: var(--text);
+  stroke-width: 1;
+  opacity: 0.5;
+}
+
+/* The picked readings: a ring of the card's colour keeps each dot clear of the lines it crosses. */
+.trend-pick {
+  stroke: var(--panel);
+  stroke-width: 2;
+}
+
+.trend-empty {
+  position: absolute;
+  inset: 0 12px 30px 46px;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-l);
+  text-align: center;
+  pointer-events: none;
+}
+
+.trend-caption {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 2px 12px;
+  margin: 0;
+  font-size: var(--fs-body);
+}
+
+.trend-window {
+  font-weight: 800;
+}
+
+.trend-hint {
+  color: var(--muted);
+}
+
+.trend-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.trend-at {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-body);
+}
+
+.trend-legend ul {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.trend-legend li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+  font-size: var(--fs-xl);
+}
+
+.trend-key {
+  flex: none;
+  width: 22px;
+  height: 4px;
+  border-radius: 2px;
+}
+
+.trend-name {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.trend-value {
+  font-variant-numeric: tabular-nums;
+}
+
+.trend-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-body);
+}

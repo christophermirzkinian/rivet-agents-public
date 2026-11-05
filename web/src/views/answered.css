@@ -1,0 +1,211 @@
+/* Cards › Answered (views/answered.ts): the switch's second side, its rows, the computer's answered card, and the band
+   on a reopened card. Nothing here is under 14px. */
+
+.ans {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ans-day {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.ans-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ans-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+}
+
+.ans-row.found {
+  box-shadow: 0 0 0 2px var(--apricot);
+}
+
+.ans-text {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ans-t {
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.ans-you {
+  color: var(--muted);
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
+.ans-word.yes {
+  color: var(--yes);
+}
+
+.ans-word.no {
+  color: var(--no);
+}
+
+.ans-word.note {
+  color: var(--later);
+}
+
+.ans-state {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.ans-state.ok,
+.ans-state.acted {
+  color: var(--yes);
+}
+
+.ans-state.warn,
+.ans-state.wait {
+  color: var(--apricot);
+}
+
+.btn.ans-reopen {
+  min-height: 44px;
+  padding: 8px 16px;
+  color: var(--apricot);
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.ans-empty {
+  padding: 24px 4px;
+  font-size: 16px;
+}
+
+/* The band on a reopened card, above its title. */
+.ans-reopened {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border-color: rgba(255, 194, 61, 0.55);
+  background: rgba(255, 194, 61, 0.1);
+}
+
+.ans-band-line,
+.ans-merged {
+  margin: 0;
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.ans-reopened .ans-word {
+  color: var(--text);
+}
+
+.ans-reopened.not-told .ans-told,
+.ans-reopened.unconfirmed .ans-told {
+  color: var(--apricot);
+  font-weight: 700;
+}
+
+.btn.ans-send {
+  justify-self: start;
+  min-height: 44px;
+  font-size: 15px;
+}
+
+/* The time chips and Show done over the list: one row of five chips, Show done under them. */
+.ans-filters {
+  display: grid;
+  gap: 8px;
+}
+
+.ans-chips {
+  display: flex;
+  gap: 6px;
+}
+
+.ans-chip {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--muted);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.ans-chip.on {
+  border-color: var(--apricot);
+  color: var(--apricot);
+}
+
+.ans-done {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.ans-knob {
+  position: relative;
+  flex: none;
+  width: 44px;
+  height: 26px;
+  border-radius: 13px;
+  background: var(--line);
+}
+
+.ans-knob::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: transform 0.15s;
+}
+
+.ans-done.on .ans-knob {
+  background: var(--apricot);
+}
+
+.ans-done.on .ans-knob::after {
+  background: #0f1a12;
+  transform: translateX(18px);
+}

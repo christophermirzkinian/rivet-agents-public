@@ -1,0 +1,298 @@
+/* More › What you used (what-you-used.ts): the 30-day counts in folds by area, More's row style; no text under 13px, taps 44px. */
+.used {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 14px 16px 32px;
+}
+
+.used-devices {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 14px;
+  background: var(--panel);
+}
+
+.used-device {
+  flex: 1;
+  min-height: var(--tap);
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.used-device.is-on {
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+.used-sum,
+.used-foot {
+  margin: 0 4px;
+  font-size: 15px;
+  color: var(--muted);
+}
+
+.used-sum b {
+  color: var(--text);
+}
+
+.used-sum.is-warn {
+  color: var(--no);
+}
+
+.used-foot {
+  font-size: 14px;
+}
+
+.used-rows {
+  display: flex;
+  flex-direction: column;
+  border-radius: 14px;
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.used-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 10px 14px;
+}
+
+.used-rows > * + * {
+  border-top: 1px solid var(--line);
+}
+
+.used-words {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.used-name {
+  font-size: 16px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.used-where {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.used-id {
+  font-size: 13px;
+  color: var(--muted);
+  opacity: 0.8;
+  overflow-wrap: anywhere;
+}
+
+.used-ends {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+/* The search and Expand all row. 16px in the box so a phone never zooms into it. */
+.used-tools {
+  display: flex;
+  gap: 8px;
+}
+
+.used-search {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--tap);
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+}
+
+.used-search::placeholder {
+  color: var(--muted);
+}
+
+.used-toggle {
+  flex: none;
+  min-height: var(--tap);
+  padding: 0 14px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--panel-2);
+  color: var(--apricot);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.used-folds {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.used-fold {
+  border-radius: 14px;
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.used-fold-head {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  width: 100%;
+  min-height: 56px;
+  padding: 12px 14px;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.used-fold-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.used-fold-name {
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.used-fold-n {
+  flex: 1;
+  font-size: 15px;
+  color: var(--muted);
+}
+
+.used-fold-mark {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--apricot);
+}
+
+.used-split {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.used-fold .used-rows {
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+}
+
+/* Status chips: green a lot, blue sometimes, grey untouched, apricot can't tell, purple removed. */
+.used-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 2px 10px;
+  border-radius: 13px;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--muted) 14%, transparent);
+}
+
+.used-status.lot {
+  color: var(--yes);
+  background: color-mix(in srgb, var(--yes) 16%, transparent);
+}
+
+.used-status.some {
+  color: var(--later);
+  background: color-mix(in srgb, var(--later) 16%, transparent);
+}
+
+.used-status.unclear {
+  color: var(--apricot);
+  background: color-mix(in srgb, var(--apricot) 16%, transparent);
+}
+
+.used-status.removed {
+  color: var(--note);
+  background: color-mix(in srgb, var(--note) 18%, transparent);
+}
+
+.used-chip {
+  flex: none;
+  min-height: var(--tap);
+  padding: 0 14px;
+  border: 1.5px solid;
+  border-radius: 22px;
+  background: none;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.used-chip.retire {
+  color: var(--no);
+  border-color: color-mix(in srgb, var(--no) 60%, transparent);
+}
+
+.used-chip.rework {
+  color: var(--later);
+  border-color: color-mix(in srgb, var(--later) 60%, transparent);
+}
+
+.used-chip:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.used-asked {
+  flex: none;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.used-note {
+  margin: 0;
+  padding: 10px 14px;
+  font-size: 14px;
+}
+
+.used-note.yes {
+  color: var(--yes);
+}
+
+.used-note.no {
+  color: var(--no);
+}
+
+.used-empty {
+  margin: 0;
+  padding: 14px;
+  border-radius: 14px;
+  background: var(--panel);
+  font-size: 15px;
+  color: var(--muted);
+}

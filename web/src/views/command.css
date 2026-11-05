@@ -1,0 +1,1439 @@
+/* Chat tab */
+
+.view[data-tab="chat"] {
+  overflow: hidden;
+}
+
+.chat {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 10px 14px 6px;
+}
+
+.chat-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin-bottom: 8px;
+}
+
+.chat-title {
+  margin: 0;
+  font-size: var(--fs-4xl);
+  font-weight: 900;
+}
+
+.chat-tools {
+  display: flex;
+  gap: 8px;
+}
+
+.chat-tools .btn {
+  min-height: 44px;
+  padding: 8px 14px;
+  font-size: var(--fs-m);
+}
+
+.chat-speak[aria-pressed="true"] {
+  border-color: var(--apricot);
+  color: var(--apricot);
+}
+
+/* In the Rivet sheet the head is the sheet's own row, between his face and Close. */
+.home-sheet-head > .chat-head {
+  flex: 1;
+  flex-wrap: nowrap;
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.home-sheet-head > .chat-head .chat-speak {
+  white-space: normal;
+  text-align: left;
+}
+
+.chat-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.chat-older {
+  display: flex;
+  width: 100%;
+  margin-bottom: 8px;
+  font-size: var(--fs-m);
+}
+
+.chat-older[hidden] {
+  display: none;
+}
+
+.chat-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0 0 8px;
+  list-style: none;
+}
+
+.chat-empty {
+  padding: 24px 4px;
+  color: var(--muted);
+  font-size: var(--fs-body);
+}
+
+.chat-msg {
+  max-width: 86%;
+  padding: 9px 13px;
+  border-radius: 18px;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  /* A row off screen is skipped until it nears it: a page of 30 or more was laid out whole on each open, poll and send.
+     `auto` keeps the size it last drew at, so the scroll stays put; the clip margin keeps Rivet's face beside it. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 280px auto 100px;
+  overflow-clip-margin: 48px;
+}
+
+.chat-msg.mine {
+  align-self: flex-end;
+  border-color: transparent;
+  background: linear-gradient(135deg, rgba(255, 194, 61, 0.26), rgba(120, 92, 255, 0.26));
+  border-bottom-right-radius: 8px;
+}
+
+.chat-msg.theirs {
+  align-self: flex-start;
+  border-bottom-left-radius: 8px;
+}
+
+.chat-body {
+  margin: 0;
+  font-size: var(--fs-body);
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chat-image {
+  display: block;
+  /* A fixed height keeps the thread's scroll-to-bottom right while the image loads. */
+  height: min(240px, 40vh);
+  width: auto;
+  max-width: 100%;
+  object-fit: contain;
+  margin-bottom: 8px;
+  border-radius: 14px;
+}
+
+/* What Rivet shows the owner is usually a phone screenshot: taller, so it reads before he taps it full screen. */
+.chat-msg.theirs .chat-image {
+  height: min(400px, 52vh);
+}
+
+.chat-video {
+  display: block;
+  /* As .chat-image: a fixed height, so the thread's scroll-to-bottom is right before the clip's size is known. */
+  height: min(400px, 52vh);
+  width: min(300px, 64vw);
+  max-width: 100%;
+  margin-bottom: 8px;
+  border-radius: 14px;
+  background: #000;
+}
+
+.chat-image-open {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 14px;
+  background: none;
+  color: inherit;
+  cursor: zoom-in;
+}
+
+.chat-images > .chat-image-open {
+  width: 100%;
+  border-radius: 10px;
+}
+
+.chat-images {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+  gap: 4px;
+  width: min(300px, 64vw);
+  max-width: 100%;
+  margin-bottom: 8px;
+}
+
+.chat-files {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+  max-width: min(300px, 64vw);
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.chat-file {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  min-height: var(--tap);
+  padding: 4px 12px;
+  border: 2px solid var(--line);
+  border-radius: 14px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.chat-image-tile {
+  display: block;
+  width: 100%;
+  /* A square tile has its height before the image loads, so scroll-to-bottom stays right. */
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 10px;
+}
+
+.chat-meta {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.chat-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0 8px;
+  margin: 2px -8px -6px 0;
+}
+
+.chat-foot .chat-meta {
+  margin: 0;
+}
+
+.chat-foot-tools {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+}
+
+.chat-share,
+.chat-reply,
+.chat-thread-open {
+  min-width: var(--tap);
+  padding: 6px 10px;
+  border-color: transparent;
+  font-size: var(--fs-m);
+}
+
+.chat-foot-tools > [hidden] {
+  display: none;
+}
+
+/* The name and time line: a tap on it, or on the message, shows Reply and Share. */
+.chat-meta-tap {
+  min-height: var(--tap);
+  padding: 0 8px 0 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--fs-body);
+  color: var(--muted);
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.chat-share {
+  color: var(--wa);
+}
+
+.chat-reply {
+  color: var(--apricot);
+}
+
+.chat-thread-open {
+  color: var(--text);
+}
+
+.chat-quote {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+  min-width: 0;
+  min-height: var(--tap);
+  margin: 0 0 8px;
+  padding: 5px 10px 6px;
+  --edge: color-mix(in srgb, var(--apricot) 60%, transparent);
+  background: rgba(0, 0, 0, 0.26);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+button.chat-quote {
+  cursor: pointer;
+}
+
+.chat-quote-who {
+  color: var(--apricot);
+  font-size: var(--fs-s);
+  font-weight: 800;
+}
+
+.chat-quote-text {
+  color: var(--muted);
+  font-size: var(--fs-m);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.chat-msg {
+  transition: box-shadow 0.3s ease;
+}
+
+.chat-msg.lit {
+  box-shadow: 0 0 0 3px var(--apricot);
+}
+
+.chat-replying {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.chat-replying[hidden] {
+  display: none;
+}
+
+.chat-replying .chat-quote {
+  flex: 1;
+  margin: 0;
+  background: var(--panel);
+}
+
+.chat-replying-cancel {
+  flex: none;
+  width: var(--tap);
+  height: var(--tap);
+  min-height: var(--tap);
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+}
+
+.chat-status.replied,
+.chat-status.typed,
+.chat-status.acked {
+  color: var(--yes);
+}
+
+/* Replied is a small green tick after the time. */
+.chat-tick {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  vertical-align: -3px;
+}
+
+.chat-tick svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.chat-status.failed {
+  color: var(--no);
+}
+
+.chat-status.unconfirmed,
+.chat-status.collecting {
+  color: var(--apricot);
+}
+
+.chat-collecting {
+  margin: 0 4px 8px;
+  color: var(--apricot);
+  font-size: var(--fs-m);
+}
+
+.chat-compose {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding-top: 8px;
+}
+
+.chat-field {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-text {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  max-height: 180px;
+  /* Room on the right for the mic that sits in the box's corner. */
+  padding: 10px 48px 10px 12px;
+  border: 2px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  /* Readable-first: what the owner types reads at 16px. */
+  font-size: var(--fs-xl);
+  line-height: 1.3;
+  resize: none;
+}
+
+.chat .attach-preview {
+  margin-top: 8px;
+}
+
+.chat-compose .attach-btn {
+  flex: none;
+  width: var(--tap);
+  height: 44px;
+  border-radius: 18px;
+}
+
+.chat-send {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  min-height: var(--tap);
+  padding: 0;
+}
+
+/* Mac offline: the button says the message waits for it, beside the arrow. */
+.chat-send.waits {
+  width: auto;
+  height: auto;
+  gap: 6px;
+  padding: 4px 12px;
+}
+
+.chat-send-wait {
+  max-width: 6.5em;
+  font-size: var(--fs-body);
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: left;
+}
+
+.chat-mic {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: var(--tap);
+  height: var(--tap);
+  min-height: var(--tap);
+  padding: 0;
+  border-color: transparent;
+  border-radius: 14px;
+  background: transparent;
+}
+
+.chat-mic.on {
+  border-color: var(--pom);
+  background: var(--pom);
+  color: #fff;
+  animation: dictate-pulse 1.4s ease-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-mic.on {
+    animation: none;
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--pom) 45%, transparent);
+  }
+}
+
+.chat-hint {
+  min-height: 22px;
+  margin: 6px 4px 0;
+  color: var(--muted);
+  font-size: var(--fs-s);
+}
+
+/* Actions sheet, confirm steps and the worker sheet's controls */
+
+.cmd {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.cmd-scroll {
+  max-height: min(64dvh, 640px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.cmd-h {
+  margin: 8px 0 0;
+  font-size: var(--fs-l);
+  font-weight: 900;
+}
+
+.cmd-title {
+  margin: 0;
+  font-size: var(--fs-l);
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.cmd-meta {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-s);
+  overflow-wrap: anywhere;
+}
+
+.cmd-reason {
+  margin: 0;
+  color: var(--no);
+  font-size: var(--fs-m);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.cmd-line {
+  margin: 0;
+}
+
+.cmd-link {
+  color: var(--later);
+  font-size: var(--fs-m);
+  font-weight: 700;
+}
+
+.cmd-mono {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+.cmd-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 6px 14px;
+  margin: 0;
+  font-size: var(--fs-m);
+}
+
+.cmd-facts dt {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.cmd-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.cmd-stops ul {
+  margin: 6px 0 0;
+  padding-left: 20px;
+  font-size: var(--fs-s);
+  overflow-wrap: anywhere;
+}
+
+.cmd-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+@media (max-width: 480px) {
+  .cmd-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .cmd-row > :first-child {
+    grid-column: 1 / -1;
+  }
+}
+
+.cmd-input,
+.cmd-text {
+  width: 100%;
+  min-height: var(--tap);
+  padding: 10px 14px;
+  border: 2px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: var(--fs-body);
+}
+
+.cmd-text {
+  resize: vertical;
+}
+
+.cmd-list {
+  display: grid;
+  gap: 8px;
+}
+
+.btn.cmd-deploy {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+}
+
+.cmd-btn-t {
+  font-size: var(--fs-body);
+}
+
+.cmd-btn-s {
+  color: var(--muted);
+  font-size: var(--fs-s);
+  font-weight: 600;
+}
+
+.cmd-chip {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  font-size: var(--fs-s);
+  font-weight: 800;
+}
+
+.cmd-chip.merged,
+.cmd-chip.deployed,
+.cmd-chip.succeeded,
+.cmd-chip.typed,
+.cmd-chip.replied,
+.cmd-chip.previewed {
+  color: var(--yes);
+}
+
+.cmd-chip.refused,
+.cmd-chip.failed {
+  color: var(--no);
+}
+
+.cmd-chip.collecting,
+.cmd-chip.queued,
+.cmd-chip.dispatched,
+.cmd-chip.armed,
+.cmd-chip.deploying,
+.cmd-chip.running,
+.cmd-chip.untracked,
+.cmd-chip.unconfirmed {
+  color: var(--apricot);
+}
+
+.cmd-audit {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cmd-audit-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 10px 12px;
+  font-size: var(--fs-s);
+}
+
+.cmd-audit-kind {
+  font-weight: 800;
+}
+
+.cmd-audit-what {
+  flex: 1 1 10em;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.cmd-worker-scroll {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin-bottom: 10px;
+}
+
+.cmd-worker-scroll .scene-facts {
+  flex: none;
+  gap: 4px 14px;
+  margin: 0;
+  overflow: visible;
+}
+
+/* The chat's PRs: big enough to tap apart on a phone. */
+.cmd-prs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+
+.cmd-prs a {
+  display: inline-block;
+  /* Taller to tap, on the same line as its label. */
+  margin: -4px 0;
+  padding: 4px 0;
+  color: inherit;
+  font-weight: 700;
+}
+
+.cmd-send > .cmd-meta:empty {
+  display: none;
+}
+
+.cmd-send .cmd-text {
+  min-height: 52px;
+  max-height: 7.5em;
+  padding-inline: 12px;
+  resize: none;
+  field-sizing: content;
+}
+
+.cmd-log-head {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 12px;
+}
+
+.cmd-log-head .cmd-h {
+  margin: 0;
+}
+
+.cmd-worker-foot {
+  display: grid;
+  flex: none;
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
+  gap: 8px;
+}
+
+.cmd-worker-foot .btn {
+  min-height: 44px;
+  padding: 8px 12px;
+  white-space: nowrap;
+}
+
+.cmd-log {
+  flex: 1 0 40dvh;
+  min-height: 40dvh;
+  margin: 0;
+  padding: 10px 12px;
+  overflow: auto;
+  border: 2px solid var(--line);
+  border-radius: 14px;
+  background: #0d0a0b;
+  color: #eadfd3;
+  font-size: var(--fs-body);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+/* Show raw: the redacted terminal lines as they are. */
+.cmd-log.is-raw {
+  font: 16px/1.35 ui-monospace, "SF Mono", Menlo, monospace;
+  white-space: pre-wrap;
+}
+
+/* The feed: one row per thing the chat said or sent, newest first, its time above it. */
+.cmd-feed {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cmd-feed-item {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  align-items: baseline;
+}
+
+.cmd-feed-item + .cmd-feed-item {
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.cmd-feed-time {
+  color: var(--muted);
+  font-size: var(--fs-s);
+  font-variant-numeric: tabular-nums;
+}
+
+.cmd-feed-who {
+  color: var(--apricot);
+  font-size: var(--fs-s);
+  font-weight: 700;
+}
+
+.cmd-feed-text {
+  flex-basis: 100%;
+  white-space: pre-line;
+}
+
+.cmd-log-raw {
+  min-height: var(--tap);
+  margin-inline-start: auto;
+  padding: 4px 12px;
+  font-size: var(--fs-s);
+}
+
+/* The message box: heading, text, then the delivery steps beside Send. */
+.cmd-send {
+  display: grid;
+  flex: none;
+  gap: 8px;
+  padding: 12px;
+  border: 2px solid var(--apricot);
+  border-radius: 18px;
+  background: var(--panel-2);
+}
+
+.cmd-send > .cmd-h {
+  margin: 0;
+}
+
+.cmd-send-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.cmd-send .cmd-send-row .btn {
+  min-width: 96px;
+}
+
+.cmd-steps {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cmd-steps[hidden] {
+  display: none;
+}
+
+.cmd-step {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.cmd-step.is-on {
+  background: var(--yes);
+  color: #06210f;
+}
+
+/* Before/after media on a feed card */
+
+.card-media {
+  margin: 0 0 14px;
+  touch-action: pan-y;
+}
+
+.media-panes {
+  display: grid;
+  gap: 8px;
+}
+
+.media-pane {
+  position: relative;
+  margin: 0;
+}
+
+.card-media.pair.show-after .media-pane.before,
+.card-media.pair.show-before .media-pane.after {
+  display: none;
+}
+
+/* The clip's own shape (--ratio, set once it loads; 16:9 until then), as wide as the card
+   but no taller than 70% of the screen: a tall clip narrows instead of gaining side bars. */
+.media-panes {
+  width: min(100%, calc(70dvh * var(--ratio, 1.7778)));
+  margin-inline: auto;
+}
+
+.media-clip {
+  display: block;
+  width: 100%;
+  aspect-ratio: var(--ratio, 1.7778);
+  border-radius: 16px;
+  background: #000;
+  object-fit: contain;
+  cursor: zoom-in;
+}
+
+.media-cap {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.7);
+  font-size: var(--fs-s);
+  font-weight: 800;
+}
+
+.media-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.media-toggles {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 1;
+  display: flex;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.card-media > .media-toggles {
+  position: static;
+  width: max-content;
+  margin: 8px auto 0;
+}
+
+.media-toggle {
+  min-height: 44px;
+  padding: 6px 12px;
+  border: 0;
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+  font-size: var(--fs-m);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.media-toggle[aria-pressed="true"] {
+  background: var(--apricot);
+  color: #2a1204;
+}
+
+.btn.media-play {
+  gap: 6px;
+  min-height: 44px;
+  padding: 6px 16px;
+  font-size: var(--fs-m);
+}
+
+.media-scrub {
+  flex: 1;
+  min-width: 120px;
+  accent-color: var(--apricot);
+}
+
+.media-icon {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  flex: none;
+}
+
+.media-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.media-panes {
+  position: relative;
+}
+
+.media-corner {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  display: flex;
+  gap: 8px;
+}
+
+.btn.media-sound,
+.btn.media-full {
+  width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+}
+
+.btn.media-sound[aria-pressed="true"] {
+  border-color: var(--yes);
+  color: var(--yes);
+}
+
+/* Sound clips: one row each, a big play button, the label and a scrubber. */
+.media-audio {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.media-audio-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px 8px 8px;
+  border: 2px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel-2);
+}
+
+.btn.media-audio-play {
+  flex: none;
+  width: 56px;
+  height: 48px;
+  min-height: 48px;
+  padding: 0;
+  border-radius: 50%;
+}
+
+.media-audio-play .media-icon {
+  width: 28px;
+  height: 28px;
+}
+
+.media-audio-main {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  /* The track shrinks to the row, never past it to under Share. */
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+}
+
+.media-audio-label {
+  overflow: hidden;
+  font-size: 18px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.media-audio-track {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.media-audio-track .media-scrub {
+  min-width: 0;
+}
+
+.media-audio-time {
+  min-width: 40px;
+  color: var(--muted);
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Screenshots: big thumbnails in a strip that scrolls sideways, snapping one at a time. */
+.media-stills {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x mandatory;
+  touch-action: pan-x pan-y;
+}
+
+.media-still {
+  flex: none;
+  width: min(78%, 360px);
+  padding: 0;
+  border: 2px solid var(--line);
+  border-radius: 14px;
+  overflow: hidden;
+  background: #000;
+  cursor: zoom-in;
+  scroll-snap-align: start;
+}
+
+.media-still img {
+  display: block;
+  width: 100%;
+  height: 170px;
+  object-fit: contain;
+}
+
+/* On a feed card the media follows the title and meta, edge to edge; everything but the clips and stills keeps the card's inset. */
+.card-body > .card-media {
+  margin: 10px -14px 12px;
+}
+
+.card-body > .card-media > :not(.media-panes, .media-stills) {
+  padding-inline: 14px;
+}
+
+.card-body > .card-media .media-clip {
+  border-radius: 0;
+}
+
+.card-body > .card-media .media-stills {
+  gap: 2px;
+  margin-top: 0;
+}
+
+.card-body > .card-media .media-still {
+  border: 0;
+  border-radius: 0;
+}
+
+.card-body > .card-media .media-still img {
+  height: 230px;
+}
+
+.card-body.with-media > .card-title {
+  margin-bottom: 4px;
+}
+
+/* PDFs: one full-width button each, the file's name and size under "Open PDF". */
+.media-files {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.media-file-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+}
+
+/* Open across the card, so a long name keeps its two lines; Download and Share side by side under it. */
+.media-file-buttons {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.media-file-buttons > .media-file,
+.media-file-buttons > .media-download:last-child {
+  grid-column: 1 / -1;
+}
+
+.btn.media-file {
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: flex-start;
+  gap: 12px;
+  width: 100%;
+  min-height: 52px;
+  padding: 8px 14px;
+  text-align: left;
+}
+
+/* A document the app cannot show: the same tile, not a button; Download under it still saves it. */
+.btn.media-file.no-preview {
+  cursor: default;
+  opacity: 0.85;
+}
+
+.media-file.no-preview .media-file-action {
+  color: var(--muted);
+}
+
+.btn:is(.media-share, .media-download) {
+  flex: none;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 76px;
+  min-height: 52px;
+  padding: 6px 10px;
+  font-size: var(--fs-m);
+  font-weight: 800;
+}
+
+.btn:is(.media-share, .media-download)[aria-busy="true"] {
+  cursor: progress;
+}
+
+.btn.media-share.ready {
+  border-color: var(--apricot);
+}
+
+/* Over a clip with the sound and full-screen buttons: its icon, which pulses while the clip comes. */
+.btn.media-share.media-share-corner {
+  width: 44px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+}
+
+.btn.media-share.media-share-corner.ready {
+  border-color: var(--apricot);
+}
+
+/* Beside a sound clip's track. */
+.btn:is(.media-share, .media-download).media-share-audio {
+  flex: none;
+  width: var(--tap);
+  min-width: 0;
+  min-height: var(--tap);
+  padding: 0;
+}
+
+/* At the end of a clip's Play row. */
+.btn.media-download.media-download-clip {
+  flex: none;
+  width: var(--tap);
+  min-width: 0;
+  min-height: var(--tap);
+  padding: 0;
+}
+
+:is(.media-share, .media-download).icon-only .media-share-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+:is(.media-share, .media-download).icon-only[aria-busy="true"] .media-share-icon {
+  animation: media-share-wait 0.8s ease-in-out infinite alternate;
+}
+
+@keyframes media-share-wait {
+  to {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :is(.media-share, .media-download).icon-only[aria-busy="true"] .media-share-icon {
+    animation: none;
+    opacity: 0.5;
+  }
+}
+
+.media-controls > .media-file-note {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+:is(.media-share, .media-download) .media-share-icon {
+  width: 22px;
+  height: 22px;
+  color: var(--apricot);
+}
+
+.media-file .media-file-icon {
+  width: 30px;
+  height: 30px;
+  color: var(--apricot);
+}
+
+.media-file-text {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.media-file-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 10px;
+}
+
+.media-file-action {
+  font-size: var(--fs-l);
+  font-weight: 800;
+}
+
+.media-file-size {
+  flex: none;
+  color: var(--muted);
+  font-size: var(--fs-m);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Up to two lines, so a phone still shows most of a long name. */
+.media-file-name {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--fs-m);
+  font-weight: 600;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.media-file-note {
+  margin: 0;
+  color: var(--no);
+  font-size: var(--fs-m);
+}
+
+@media (max-width: 759px) {
+  /* On a phone: the whole title and the ask, then the clip at full card width, at most half the screen tall, so
+     what the card asks is read before OK on a small phone. */
+  .card-body.with-media > .card-title {
+    font-size: var(--fs-xl);
+    line-height: 1.12;
+  }
+
+  .card-body.with-media > .card-ask {
+    margin-bottom: 6px;
+  }
+
+  .card-body > .card-media .media-clip {
+    max-height: 50dvh;
+  }
+
+  .card-body > .card-media .media-controls {
+    gap: 2px 8px;
+    margin-top: 4px;
+  }
+
+  .card-body > .card-media .media-still {
+    width: 86%;
+  }
+
+  .card-body > .card-media .media-still:only-child {
+    width: 100%;
+  }
+
+  .card-body > .card-media .media-play {
+    min-height: var(--tap);
+  }
+
+  /* The Before/After toggle names the clip showing; the corner buttons stack so a
+     narrow portrait clip still has room for both. */
+  .card-body > .card-media .media-cap {
+    display: none;
+  }
+
+  .card-body > .card-media .media-corner {
+    flex-direction: column;
+  }
+
+  /* Too short a clip for the three stacked: a row, which sends Before/After under the clip if it no longer fits. */
+  .card-body > .card-media.short-clip .media-corner {
+    flex-direction: row;
+  }
+
+  /* Play is an icon here, so it and the scrubber share one row. */
+  .card-body > .card-media .media-word {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .card-body > .card-media .media-play {
+    width: 56px;
+    padding: 0;
+  }
+
+  .card-body > .card-media .media-scrub {
+    min-width: 140px;
+    margin: 0;
+  }
+
+  /* A sound clip's row also holds its Share, so its scrubber takes what is left. */
+  .card-body > .card-media .media-audio-track .media-scrub {
+    min-width: 0;
+  }
+}
+
+@media (min-width: 760px) {
+  .card-media.pair .media-panes {
+    width: min(100%, calc(140dvh * var(--ratio, 1.7778) + 8px));
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .card-media.pair.show-after .media-pane.before,
+  .card-media.pair.show-before .media-pane.after {
+    display: block;
+  }
+
+  /* Side by side, a clip shaped unlike its partner is held to the same height. */
+  .card-media.pair .media-clip {
+    max-height: 70dvh;
+  }
+
+  .media-toggles {
+    display: none;
+  }
+}
+
+/* Rivet beside what he says, his mood on his face. */
+.chat-msg.theirs.has-rivet {
+  position: relative;
+  margin-left: 44px;
+  max-width: calc(86% - 44px);
+}
+
+.chat-msg .chat-rivet {
+  position: absolute;
+  left: -44px;
+  bottom: 0;
+}
+
+/* Only his newest message's Rivet moves; the earlier ones sit still, so a long thread costs no more than a short one. */
+.chat-msg.has-rivet:not(:nth-last-child(1 of .has-rivet)) .chat-rivet,
+.chat-msg.has-rivet:not(:nth-last-child(1 of .has-rivet)) .chat-rivet * {
+  animation: none;
+}

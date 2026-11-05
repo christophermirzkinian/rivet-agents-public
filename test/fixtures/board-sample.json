@@ -1,0 +1,17 @@
+{
+  "updatedAt": "2026-09-28T03:55:18.875Z",
+  "needs": [],
+  "coming": [
+    { "pr": 101, "title": "Settings: a dark theme that follows the system" },
+    { "pr": 102, "title": "Search: match words in any order" }
+  ],
+  "chats": [
+    { "name": "docs-refresh", "state": "working", "doing": "Rewriting the setup guide for example-org/example-repo", "prs": [], "moved": "2026-09-28T03:55:18.875Z" },
+    { "name": "flaky-tests", "state": "idle", "doing": "Waiting for CI on example-org/other-repo", "prs": [103], "moved": "2026-09-28T03:40:00.000Z" }
+  ],
+  "shipped": [
+    { "pr": 98, "title": "Login: remember the last device", "deployed": "partial", "deployedNote": "deploying" },
+    { "pr": 97, "title": "Export: CSV keeps leading zeros", "deployed": true },
+    { "title": "Nightly sweep: 12 stale issues closed", "deployed": true }
+  ]
+}

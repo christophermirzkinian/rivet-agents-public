@@ -1,0 +1,187 @@
+/* A failed item's status pill, in its top-right corner. The item's first line keeps clear of it. */
+.has-pill {
+  --pill-room: 128px;
+  position: relative;
+}
+
+.has-pill > .ops-link > :first-child,
+.has-pill:not(.ops-tags) > :first-child:not(.ops-link) {
+  min-height: 28px;
+  padding-right: var(--pill-room);
+}
+
+/* A pill that names its chat is two lines tall and wider, so the first line keeps clear of both. */
+.has-pill.has-owner {
+  --pill-room: 168px;
+}
+
+.has-pill.has-owner > .ops-link > :first-child,
+.has-pill.has-owner:not(.ops-tags) > :first-child:not(.ops-link) {
+  min-height: 52px;
+}
+
+/* A row of tags wraps clear of its pill as a whole, not by stretching its first tag. */
+.ops-tags.has-pill {
+  min-height: var(--tap);
+  padding-right: var(--pill-room);
+}
+
+.ops-tags.has-pill.has-owner {
+  min-height: 56px;
+}
+
+/* A stat tile is too narrow for its pill, so a failed one takes the whole row. */
+.ops-stats > .has-pill {
+  grid-column: 1 / -1;
+}
+
+.ops-pill {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: var(--tap);
+  min-height: var(--tap);
+  padding: 4px 8px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.ops-pill:focus-visible {
+  outline: 2px solid var(--later);
+  outline-offset: -2px;
+  border-radius: 10px;
+}
+
+.ops-pill-face {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border: 2px solid color-mix(in srgb, var(--tone) 70%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--tone) 22%, var(--panel));
+  color: var(--text);
+  font-size: var(--fs-body);
+  font-weight: 900;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+/* Work under way names the chat on it, under the state. A long name is cut so the pill stays in its corner. */
+.ops-pill-face.has-owner {
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.ops-pill-owner {
+  max-width: calc(var(--pill-room, 128px) - 36px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 700;
+}
+
+/* The sheet has the room: its pill names the whole chat. */
+.ops-status-top .ops-pill-owner {
+  max-width: none;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* The status in full, in the sheet. It scrolls inside the sheet so the Close button stays on screen. */
+.ops-status-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: calc(100dvh - 180px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.ops-status-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.ops-status-top .ops-pill-face {
+  font-size: var(--fs-l);
+}
+
+.ops-status-key {
+  color: var(--muted);
+  font-size: var(--fs-body);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.ops-status-label {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: var(--fs-body);
+  font-weight: 800;
+}
+
+.ops-status-text {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--fs-l);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+
+.ops-status-text p {
+  margin: 0;
+}
+
+.ops-status-note {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+  padding: 10px 12px;
+  border-color: color-mix(in srgb, var(--tone) 55%, transparent);
+}
+
+.ops-status-note .ops-status-label {
+  margin: 0;
+}
+
+.ops-status-note .ops-status-text {
+  font-size: var(--fs-xl);
+  font-weight: 700;
+}
+
+.ops-status-who {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+}
+
+.ops-status-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tap);
+  color: var(--later);
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.ops-status-chat {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.ops-status-open {
+  align-self: flex-start;
+  margin-top: 10px;
+  text-decoration: none;
+}
+

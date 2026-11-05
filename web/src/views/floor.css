@@ -1,0 +1,172 @@
+/* The Floor (floor.ts): the desks at their natural height, the page scrolling them and Plan under them; and the
+   phone band's one line. Every word 14px or more, every control 44px or more. */
+.floor-stage {
+  background: var(--bg);
+  color: var(--text);
+}
+
+.floor-stage .dot {
+  box-shadow: none;
+}
+
+.floor-stage .desks {
+  position: relative;
+  inset: auto;
+  overflow: visible;
+}
+
+.floor-stage .desks::before {
+  display: none;
+}
+
+/* The line opens and closes over 300ms; folded it keeps its words, so it fades out as it was. */
+.floor-line {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 0.3s ease,
+    opacity 0.3s ease;
+}
+
+.floor-line.is-on {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.floor-line-fold {
+  display: flex;
+  justify-content: center;
+  min-height: 0;
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .floor-line {
+    transition: none;
+  }
+}
+
+.floor-line-say {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  min-height: 44px;
+  margin: 6px 0 2px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.floor-line-dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.floor-line-lead,
+.floor-line-more {
+  flex: none;
+}
+
+.floor-line-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.floor-line-say.t-cards {
+  border-color: rgba(255, 194, 61, 0.45);
+  color: var(--apricot);
+}
+
+.floor-line-say.t-cards > .floor-line-dot {
+  background: var(--apricot);
+}
+
+.floor-line-say.t-due > .floor-line-dot {
+  background: var(--later);
+}
+
+.floor-line-say.t-warn {
+  border-color: rgba(255, 194, 61, 0.45);
+}
+
+.floor-line-say.t-warn > .floor-line-dot {
+  background: var(--apricot);
+}
+
+.floor-line-say.t-bad {
+  border-color: color-mix(in srgb, var(--no) 55%, transparent);
+}
+
+.floor-line-say.t-bad > .floor-line-dot {
+  background: var(--no);
+}
+
+/* The sheets over the Floor: a head with Close, then their own scroll. */
+.floor-sheet-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 8px;
+}
+
+.floor-sheet-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--fs-xl);
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.floor-sheet-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.floor-sheet-body > .your-asks {
+  padding: 0;
+}
+
+.sheet.is-tall.floor-sheet {
+  min-height: 50dvh;
+}
+
+/* A row's line wraps in the sheet rather than ending in an ellipsis. */
+.floor-sheet .ask-sub {
+  overflow: visible;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+}
+
+.floor-room {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 14px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}

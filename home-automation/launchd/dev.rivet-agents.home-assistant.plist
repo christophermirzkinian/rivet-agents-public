@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Rendered by scripts/install.sh: __HA_HOME__ becomes the folder Home Assistant lives in. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>dev.rivet-agents.home-assistant</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__HA_HOME__/venv/bin/hass</string>
+    <string>--config</string>
+    <string>__HA_HOME__/config</string>
+    <string>--log-file</string>
+    <string>__HA_HOME__/home-assistant.log</string>
+    <string>--log-rotate-days</string>
+    <string>3</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>__HA_HOME__</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+  <key>Nice</key>
+  <integer>10</integer>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>__HA_HOME__/launchd.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HA_HOME__/launchd.log</string>
+</dict>
+</plist>

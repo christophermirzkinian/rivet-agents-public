@@ -1,0 +1,24 @@
+# A lean Home Assistant for Rivet Agents, reachable only from this Mac. Rivet talks to it through the REST API on
+# localhost; the pages at http://127.0.0.1:8123 are where you sign in, link your devices and make a token. Add what your
+# own devices need below this line; scripts/install.sh copies this file only when there is none yet.
+homeassistant:
+  name: Home
+  unit_system: metric
+
+http:
+  server_host: 127.0.0.1
+  server_port: 8123
+
+api:
+config:
+frontend:
+onboarding:
+automation:
+script:
+
+recorder:
+  purge_keep_days: 7
+  commit_interval: 30
+
+logger:
+  default: warning

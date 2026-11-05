@@ -1,0 +1,345 @@
+/* The Decide sheet (decide-sheet.ts) on sheet.ts's tall sheet: a strip of the dimmed map stays above it, its head and
+   the card's answer row stay put and the card between them scrolls. */
+.sheet.is-tall {
+  gap: 0;
+  max-height: calc(var(--vv-h, 100dvh) - 40px);
+  overflow: hidden;
+  padding: 0 14px calc(env(safe-area-inset-bottom) + 8px);
+  /* A drag let go short of closing springs back (sheet.ts); while the finger holds it, it follows with no lag. */
+  transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* The dim lightens as the sheet is dragged down (--sheet-drag, 0 to 1). */
+.sheet-backdrop.is-tall::before {
+  opacity: calc(1 - var(--sheet-drag, 0));
+  transition: opacity 0.22s ease-out;
+}
+
+.sheet-backdrop.is-tall.is-dragging > .sheet,
+.sheet-backdrop.is-tall.is-dragging::before {
+  transition: none;
+}
+
+/* See it big: the whole visual viewport, the map strip gone, so a long card has the room. */
+.sheet.is-tall.decide-sheet.is-big {
+  height: var(--vv-h, 100dvh);
+  max-height: var(--vv-h, 100dvh);
+  padding-top: env(safe-area-inset-top);
+  border-radius: 0;
+}
+
+.sheet.is-tall > .sheet-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* The drag-down handle: the whole width, so a thumb finds it. */
+.sheet-handle {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  touch-action: none;
+  cursor: grab;
+}
+
+.sheet-handle span {
+  width: 44px;
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(214, 205, 255, 0.35);
+}
+
+.decide-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 8px;
+}
+
+.decide-face {
+  border-radius: 30%;
+  outline: 3px solid #ffc23d;
+  outline-offset: 1px;
+}
+
+.decide-who {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* A long chat name wraps, never cut to an ellipsis. */
+.decide-name {
+  font-size: var(--fs-xl);
+  font-weight: 800;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.decide-count {
+  color: var(--muted);
+  font-size: var(--fs-body);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.decide-skip,
+.decide-close {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--tap);
+  min-height: var(--tap);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-body);
+  font-weight: 800;
+}
+
+.decide-skip {
+  padding: 0 12px;
+}
+
+.decide-skip[hidden] {
+  display: none;
+}
+
+/* See it big takes no row: it floats at the right of the read's foot, above a pinned answer tray (decide-sheet.ts fits
+   sets --big-at), solid so the words under it do not show through. */
+.decide-big {
+  position: absolute;
+  right: 10px;
+  bottom: var(--big-at, 8px);
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--tap);
+  min-width: var(--tap);
+  padding: 0 16px;
+  border: 1px solid rgba(214, 205, 255, 0.3);
+  border-radius: 22px;
+  background: #2c2747;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-body);
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+/* Room under the read's last line, so scrolled to the end the pill sits on no control. */
+.decide-sheet:not(.is-big) .decide-card.has-big .card.top::after,
+.sheet.decide-sheet.is-big .answer-card::after {
+  content: "";
+  display: block;
+  flex: none;
+  height: calc(var(--tap) + 16px);
+}
+
+/* Big is for reading: the switch and say-line go, and the answers scroll on after the read, no longer pinned. */
+.sheet.decide-sheet.is-big .decide-segs,
+.sheet.decide-sheet.is-big .say-line {
+  display: none;
+}
+
+.sheet.decide-sheet.is-big .answer-card {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.sheet.decide-sheet.is-big .answer-card .card.top {
+  flex: none;
+  overflow: visible;
+}
+
+.sheet.decide-sheet.is-big .choices {
+  position: static;
+  box-shadow: none;
+}
+
+.decide-big[hidden] {
+  display: none;
+}
+
+.decide-close .btn-icon {
+  width: 24px;
+  height: 24px;
+  transform: rotate(-90deg);
+}
+
+.decide-card {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* The Feed's card in the sheet: in the flow, not stacked as on the deck; it scrolls and its answer row stays below. */
+.decide-sheet .answer-card {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.decide-sheet .answer-card .card.top {
+  position: static;
+  inset: auto;
+  flex: 0 1 auto;
+  height: auto;
+  min-height: 0;
+  max-height: none;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  transform: none;
+  animation: none;
+}
+
+.decide-sheet .answer-card .card-body {
+  flex: none;
+  max-height: none;
+  overflow: visible;
+}
+
+.decide-sheet .answer-card .actions {
+  flex: none;
+  padding-bottom: 0;
+}
+
+/* The sheet's head already wears the asking agent's face. */
+.decide-sheet .answer-card .card-rivet {
+  display: none;
+}
+
+/* Up to three options stay in sight at the foot of the card as its body scrolls under them: the answer at the thumb,
+   with no scroll on a small 320x693 (plan Risks). More than three scroll with the card. */
+.decide-sheet .choices:not(:has(> button:nth-of-type(4))) {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  margin: 0 -14px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+  box-shadow: 0 -10px 18px rgba(0, 0, 0, 0.35);
+}
+
+.decide-sheet .answer-card .more-cue,
+.decide-sheet .answer-card kbd {
+  display: none;
+}
+
+/* The card's stills and clips stay short in the sheet, whole and uncropped, so the card and its answers fit above the
+   say-line on your 412x915. */
+.decide-sheet .card-body > .card-media .media-still img {
+  height: min(20vh, 180px);
+}
+
+.decide-sheet .card-body > .card-media .media-panes {
+  width: min(100%, calc(min(20vh, 180px) * var(--ratio, 1.7778)));
+}
+
+/* On a short phone the stills sit side by side, each still a picture beside the pinned answers, and
+   those answers close up a little. */
+@media (max-height: 760px) {
+  .sheet.is-tall {
+    max-height: calc(var(--vv-h, 100dvh) - 28px);
+  }
+
+  .sheet-handle {
+    height: 18px;
+  }
+
+  .decide-sheet .card-body > .card-media .media-still {
+    width: min(48%, 220px);
+  }
+
+  .decide-sheet .card-body > .card-media .media-still img {
+    height: 112px;
+  }
+
+  .decide-sheet .choices:not(:has(> button:nth-of-type(4))) {
+    gap: 6px;
+    padding-block: 6px;
+  }
+
+  .decide-sheet .choices .btn.choice {
+    padding-block: 6px;
+  }
+}
+
+/* A card that still runs on past the sheet's foot fades out there rather than show half a control. A pinned options
+   tray is its own whole edge, so that card does not fade. */
+.decide-sheet .card.top.has-more:not(:has(.choices:not(:has(> button:nth-of-type(4))))) {
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 56px), transparent);
+}
+
+/* Tap targets on the sheet's main path, 44px (plan: the three short ones). */
+.decide-sheet .card-thread {
+  min-height: var(--tap);
+}
+
+/* The scrub's hit area is 44px; its track stays the thin native one, centred in it. */
+.decide-sheet .media-scrub {
+  height: var(--tap);
+  margin: 0;
+}
+
+/* Cards' switch, Open N | Answered N, under the head. */
+.decide-segs {
+  display: grid;
+  flex: none;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  padding-bottom: 10px;
+}
+
+.decide-seg {
+  min-height: var(--tap);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--fs-body);
+  font-weight: 800;
+}
+
+.decide-seg[aria-pressed="true"] {
+  border-color: rgba(255, 194, 61, 0.6);
+  background: rgba(255, 194, 61, 0.16);
+  color: var(--text);
+}
+
+.decide-count[hidden] {
+  display: none;
+}
+
+/* Answered's rows, or the line saying nothing is open, scroll inside the sheet. */
+.decide-card.is-list {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.decide-none {
+  padding: 24px 4px;
+  font-size: var(--fs-xl);
+}
+
+/* An answer's Undo toast sits over the sheet, which stays open on the next card: under it, Undo could not be tapped. */
+body:has(.decide-sheet) .toasts {
+  z-index: 41;
+}

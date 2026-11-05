@@ -1,0 +1,56 @@
+/* Rivet from Android's splash, alive while the app loads. boot.ts fades it out; a file, not
+   an inline <style>, because the server's CSP allows only style-src 'self'. */
+#boot {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  background: #100e19;
+  transition: opacity 0.25s ease-out;
+  /* Gone at 6 s from launch even if the app's script never runs. */
+  animation: boot-out 0.25s 6s ease-out forwards;
+}
+#boot.gone {
+  opacity: 0;
+  pointer-events: none;
+}
+#boot svg {
+  width: min(40vw, 200px);
+  height: auto;
+  overflow: visible;
+}
+#boot .glow {
+  animation: boot-glow 1.4s ease-in-out infinite alternate;
+}
+#boot .bob {
+  animation: boot-hover 1.6s ease-in-out infinite alternate;
+}
+#boot .eyes {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: boot-blink 2.4s ease-in-out infinite;
+}
+@keyframes boot-out {
+  to { opacity: 0; visibility: hidden; pointer-events: none; }
+}
+@keyframes boot-glow {
+  from { opacity: 0.55; }
+  to { opacity: 1; }
+}
+@keyframes boot-hover {
+  from { transform: translateY(2px); }
+  to { transform: translateY(-3px); }
+}
+@keyframes boot-blink {
+  0%, 44%, 52%, 100% { transform: scaleY(1); }
+  48% { transform: scaleY(0.1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  #boot * {
+    animation: none !important;
+  }
+  #boot {
+    transition: none;
+  }
+}

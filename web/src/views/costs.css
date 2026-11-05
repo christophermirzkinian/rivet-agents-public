@@ -1,0 +1,290 @@
+/* The Costs page, and the hero and cards the Usage page shares. Nothing under 16px. Kind is never a
+   stripe down a card's side: an estimate's pill is dashed, its figure quieter, its share of the strip hatched. */
+
+.costs {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 8px 16px 28px;
+}
+
+.costs-hero {
+  display: grid;
+  gap: 2px;
+  padding: 10px 4px 4px;
+}
+
+.costs-figure {
+  margin: 0;
+  font-size: 52px;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.costs-per {
+  color: var(--muted);
+  font-size: var(--fs-6xl);
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.costs-line {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-xl);
+  font-weight: 700;
+}
+
+.costs-line.lead {
+  margin-top: 8px;
+  color: var(--text);
+  font-size: var(--fs-6xl);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.costs-strip {
+  display: flex;
+  gap: 3px;
+  height: 12px;
+  margin-top: 14px;
+}
+
+.costs-part {
+  min-width: 4px;
+  border-radius: 4px;
+  background: var(--yes);
+}
+
+.costs-part.dashed {
+  background: repeating-linear-gradient(135deg, var(--apricot) 0 4px, color-mix(in srgb, var(--apricot) 30%, transparent) 4px 8px);
+}
+
+.costs-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cost-card {
+  display: grid;
+  gap: 8px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: linear-gradient(180deg, var(--panel-2), var(--panel));
+}
+
+.cost-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cost-name {
+  min-width: 0;
+  font-size: var(--fs-4xl);
+  font-weight: 900;
+  overflow-wrap: anywhere;
+}
+
+.cost-figure {
+  flex: none;
+  font-size: var(--fs-6xl);
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+
+.cost-figure.approx,
+.cost-figure.quiet {
+  color: var(--muted);
+}
+
+.cost-figure.quiet {
+  font-size: var(--fs-4xl);
+  font-weight: 800;
+}
+
+.cost-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-xl);
+  font-weight: 700;
+}
+
+.cost-pill {
+  padding: 2px 12px;
+  border: 2px solid currentColor;
+  border-radius: 999px;
+  font-size: var(--fs-xl);
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.cost-pill.dashed {
+  border-style: dashed;
+}
+
+.cost-pill.yes {
+  color: var(--yes);
+}
+
+.cost-pill.warn {
+  color: var(--apricot);
+}
+
+.cost-pill.bad {
+  color: var(--no);
+}
+
+.cost-pill.quiet {
+  color: var(--muted);
+}
+
+/* Usage's account cards carry a meter again: the share used, in the grade's colour. */
+.cost-bar {
+  display: block;
+  height: 12px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 18%, transparent);
+  overflow: hidden;
+}
+
+.cost-bar-fill {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: currentColor;
+}
+
+.cost-bar.yes {
+  color: var(--yes);
+}
+
+.cost-bar.warn {
+  color: var(--apricot);
+}
+
+.cost-bar.bad {
+  color: var(--no);
+}
+
+.cost-bar.quiet {
+  color: var(--muted);
+}
+
+.cost-bar.unread {
+  background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--muted) 18%, transparent) 0 6px, transparent 6px 12px);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.cost-line {
+  margin: 0;
+  font-size: var(--fs-xl);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+/* A group's rows, under its total: name and figure on a line, the note under it, a hairline between. */
+.cost-items {
+  display: grid;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cost-item {
+  display: grid;
+  gap: 4px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+
+.cost-item:last-child {
+  padding-bottom: 2px;
+}
+
+.cost-item-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cost-item-name {
+  min-width: 0;
+  font-size: var(--fs-3xl);
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.cost-item-figure {
+  flex: none;
+  font-size: var(--fs-4xl);
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+
+.cost-item-figure.approx {
+  color: var(--muted);
+}
+
+.cost-item-line {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-xl);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.costs-notice {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--apricot) 55%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--apricot) 12%, transparent);
+  font-size: var(--fs-xl);
+  font-weight: 700;
+}
+
+.costs-empty,
+.costs-foot {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-xl);
+}
+
+/* Past the three biggest lines, the rest folded. */
+.costs-more {
+  margin-top: 12px;
+}
+
+.costs-more-head {
+  display: flex;
+  list-style: none;
+  align-items: center;
+  min-height: 48px;
+  padding: 0 16px;
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  font-size: var(--fs-xl);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.costs-more[open] > .costs-more-head {
+  margin-bottom: 12px;
+}

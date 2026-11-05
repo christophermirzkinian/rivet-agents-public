@@ -1,0 +1,940 @@
+/*
+ * Desktop layout. The shell sets html.desktop on a wide window (DESK_QUERY in desk.ts): a rail on the left, the view in
+ * the middle and chat alongside. Every rule here is scoped to it, so the phone layout never changes.
+ */
+
+.side[hidden] {
+  display: none;
+}
+
+.desktop .app {
+  --rail-w: 236px;
+  --strip-w: 56px;
+}
+
+.desktop .app.rail-icons {
+  --rail-w: 76px;
+}
+
+.desktop .app.signed-in {
+  grid-template-columns: var(--rail-w) minmax(0, 1fr) 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas:
+    "rail top side"
+    "rail view side";
+}
+
+.desktop .app.signed-in.chat-open {
+  grid-template-columns: var(--rail-w) minmax(0, 1fr) min(var(--chat-w, clamp(340px, 25vw, 440px)), 32vw);
+}
+
+.desktop .app.signed-in.chat-collapsed {
+  grid-template-columns: var(--rail-w) minmax(0, 1fr) var(--strip-w);
+}
+
+.desktop ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.desktop ::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 10px;
+  background: rgba(255, 240, 225, 0.14) padding-box;
+}
+
+.desktop ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.desktop .key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid rgba(255, 240, 225, 0.22);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  background: rgba(255, 240, 225, 0.06);
+  color: var(--muted);
+  font: 700 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: nowrap;
+}
+
+.desktop .btn .key {
+  border-color: rgba(0, 0, 0, 0.28);
+  background: rgba(0, 0, 0, 0.18);
+  color: inherit;
+  opacity: 0.85;
+}
+
+.desktop .btn:hover:not(:disabled) {
+  filter: brightness(1.12);
+}
+
+.desktop .btn:active {
+  transform: scale(0.98);
+}
+
+.desktop .btn:focus-visible,
+.desktop .tab:focus-visible {
+  outline: 2px solid var(--apricot);
+  outline-offset: 2px;
+}
+
+/* Rail */
+
+.desktop .tabs {
+  grid-area: rail;
+  position: relative;
+  inset: auto;
+  z-index: auto;
+  width: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 18px 12px 16px;
+  border-right: 1px solid var(--line);
+  background: rgba(10, 7, 9, 0.55);
+  transform: none;
+}
+
+.desktop .rail-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 8px 18px;
+  font-size: var(--fs-xl);
+  font-weight: 900;
+  letter-spacing: 0.02em;
+}
+
+.desktop .rail-brand .brand-icon {
+  width: 34px;
+  height: 34px;
+}
+
+.desktop .tab {
+  flex-direction: row;
+  justify-content: flex-start;
+  gap: 12px;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--fs-m);
+  font-weight: 700;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.desktop .tab:hover {
+  background: rgba(255, 240, 225, 0.06);
+  color: var(--text);
+}
+
+.desktop .tab.on {
+  background: linear-gradient(135deg, rgba(255, 194, 61, 0.22), rgba(120, 92, 255, 0.2));
+  border-color: color-mix(in srgb, var(--apricot) 60%, transparent);
+  color: var(--text);
+}
+
+.desktop .tab-icon {
+  flex: none;
+  width: 20px;
+  height: 20px;
+}
+
+.desktop .tab .badge {
+  position: static;
+  margin-left: auto;
+  min-width: 22px;
+  font-size: 12px;
+}
+
+.desktop .rail-gap {
+  flex: 1;
+}
+
+.desktop .rail-tool[aria-pressed="true"] {
+  background: rgba(199, 155, 255, 0.14);
+  border-color: color-mix(in srgb, var(--note) 60%, transparent);
+  color: var(--text);
+}
+
+/* The rail with its icons only, when the owner folds it (the backslash key); its names show by default. */
+.desktop .rail-icons .tabs {
+  align-items: center;
+  padding: 16px 10px;
+}
+
+.desktop .rail-icons .rail-brand {
+  padding: 0 0 16px;
+}
+
+/* The icon rail is the app icon alone: the app's name is wider than the rail and ran into the page title. */
+.desktop .rail-icons .rail-brand .brand-name,
+.desktop .rail-icons .tab-label {
+  display: none;
+}
+
+.desktop .rail-icons .tab {
+  justify-content: center;
+  width: 52px;
+  min-height: 48px;
+  padding: 0;
+}
+
+/* A laptop's short browser window: the rail's buttons still reach Settings (1240×600 and up). */
+@media (max-height: 720px) {
+  .desktop .tabs {
+    gap: 2px;
+    padding-top: 12px;
+    padding-bottom: 10px;
+  }
+
+  .desktop .tab,
+  .desktop .rail-icons .tab {
+    min-height: 44px;
+  }
+}
+
+.desktop .rail-icons .tab .badge {
+  position: absolute;
+  top: 2px;
+  right: 0;
+  min-width: 20px;
+  padding: 0 5px;
+}
+
+/* Top bar */
+
+.desktop .topbar {
+  grid-area: top;
+  flex-wrap: nowrap;
+  padding: 16px 28px 14px;
+  border-bottom: 1px solid var(--line);
+  /* The header is as wide as the space the panes leave it, so it sizes its controls to that, not to the window. */
+  container-type: inline-size;
+}
+
+.desktop .topbar-title {
+  margin: 0;
+  font-size: var(--fs-3xl);
+  font-weight: 900;
+}
+
+.desktop .topbar-title {
+  flex: none;
+}
+
+/* Decide's way back: words, and gold, so it reads as the button it is. */
+.desktop .home-back {
+  flex: none;
+  min-height: 44px;
+  margin-right: 6px;
+  padding: 0 16px;
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  font-size: var(--fs-xl);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.desktop .home-back:hover {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+.desktop .topbar-end {
+  flex: 0 1 auto;
+  min-width: 0;
+  gap: 12px;
+}
+
+/* A narrow header (a 1080–1300 px window with chat open) drops the Focus label; the title stays. */
+@container (max-width: 760px) {
+  .desktop .pane-toggle-label {
+    display: none;
+  }
+}
+
+/* The state stays in words, so it never rests on the dot's colour alone. */
+@container (max-width: 520px) {
+  .desktop .topbar .pill-mac {
+    display: none;
+  }
+}
+
+.desktop .view {
+  grid-area: view;
+}
+
+/* Chat alongside */
+
+.desktop .side {
+  grid-area: side;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--line);
+  background: rgba(10, 7, 9, 0.45);
+}
+
+.desktop .side .chat {
+  width: 100%;
+  max-width: none;
+  padding: 14px 16px 12px;
+}
+
+.desktop .side .chat-title {
+  font-size: var(--fs-2xl);
+}
+
+.desktop .side .chat-tools .btn {
+  min-height: 44px;
+  padding: 6px 12px;
+  font-size: var(--fs-s);
+}
+
+/* Sheets open as a centred dialog */
+
+.desktop .sheet-backdrop {
+  align-items: center;
+}
+
+.desktop .sheet {
+  width: min(640px, calc(100% - 48px));
+  max-height: min(86vh, calc(var(--vv-h, 100dvh) - 16px));
+  overflow-y: auto;
+  padding: 22px 22px 18px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+  animation-name: sheet-pop;
+}
+
+/* A centred dialog rises a little into place rather than from the foot of the screen. */
+.desktop .sheet-backdrop.is-leaving > .sheet {
+  animation-name: sheet-unpop;
+}
+
+@keyframes sheet-pop {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+}
+
+@keyframes sheet-unpop {
+  to {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+}
+
+/* The update cards under the home screen's Plan */
+
+.desktop .feed {
+  max-width: none;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+.desktop .feed > .push-off {
+  margin: 12px 12px 0;
+}
+
+/* Decide N at the home screen's foot in the middle column, kept in view as the page scrolls (home.ts). */
+.desktop .home-wide-dock {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  display: flex;
+  justify-content: center;
+  padding: 8px 14px 12px;
+  border-top: 1px solid var(--line);
+  background: var(--bg);
+}
+
+.desktop .home-wide-dock > .home-decide {
+  width: min(100%, 620px);
+}
+
+/* A decision where the home screen was (decide-sheet.ts pane): Decide's head and switch, then the open card at a readable
+   width, which scrolls while its answers and keys stay under it. */
+.desktop .view.decide-pane {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 14px 28px 0;
+}
+
+.desktop .decide-pane > .decide-head,
+.desktop .decide-pane > .decide-segs,
+.desktop .decide-pane > .decide-card {
+  width: min(100%, 1120px);
+  margin-inline: auto;
+}
+
+.desktop .decide-pane > .decide-card {
+  padding: 4px 0 14px;
+}
+
+.desktop .decide-pane .answer-card {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+.desktop .decide-pane .answer-card .card.top {
+  position: relative;
+  inset: auto;
+  flex: 0 1 auto;
+  height: auto;
+  min-height: 0;
+  max-height: none;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  transform: none;
+  animation: none;
+}
+
+.desktop .decide-pane .answer-card .card-body {
+  flex: none;
+  max-height: none;
+  overflow: visible;
+}
+
+.desktop .decide-pane .decide-card.is-list {
+  overflow-y: auto;
+}
+
+/* The open card */
+
+.desktop .desk-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  padding: 18px 28px 14px;
+}
+
+.desktop .desk-detail .stack {
+  flex: 1;
+  min-height: 0;
+}
+
+/* Minimised: the open card is its title line alone, not a card the height of the pane. */
+.desktop .desk-detail.minimised .stack {
+  flex: none;
+}
+
+.desktop .desk-detail.minimised .card.top {
+  position: relative;
+  inset: auto;
+  height: auto;
+}
+
+.desktop .desk-detail .card-title {
+  max-width: 44ch;
+  margin-bottom: 10px;
+  font-size: var(--fs-4xl);
+}
+
+.desktop .desk-detail .card-ask,
+.desktop .desk-detail .card-meta,
+.desktop .desk-detail .card-note,
+.desktop .desk-detail .card-error {
+  max-width: 72ch;
+}
+
+.desktop .desk-detail .card-ask {
+  font-size: var(--fs-l);
+  line-height: 1.55;
+}
+
+.desktop .desk-detail .choices {
+  max-width: 820px;
+}
+
+.desktop .desk-detail .btn.choice {
+  position: relative;
+  padding-left: 50px;
+}
+
+.desktop .desk-detail .btn.choice:hover {
+  border-color: rgba(255, 194, 61, 0.6);
+}
+
+.desktop .desk-detail .choice-key {
+  position: absolute;
+  top: 12px;
+  left: 14px;
+}
+
+.desktop .desk-detail .card-link:hover {
+  filter: brightness(1.15);
+}
+
+/* Media: before and after side by side (command.css does that from 760 px) and large, stills as a grid */
+
+.desktop .desk-detail .media-panes {
+  width: min(100%, calc(55dvh * var(--ratio, 1.7778)));
+}
+
+.desktop .desk-detail .card-media.pair .media-panes {
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  width: min(100%, calc(2 * 55dvh * var(--ratio, 1.7778) + 12px));
+}
+
+.desktop .desk-detail .card-media.pair .media-cap {
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.desktop .desk-detail .media-controls {
+  max-width: 100%;
+}
+
+.desktop .desk-detail .media-stills {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+  overflow: visible;
+  scroll-snap-type: none;
+}
+
+.desktop .desk-detail .media-still {
+  width: auto;
+}
+
+.desktop .desk-detail .media-still:hover {
+  outline: 2px solid var(--apricot);
+  outline-offset: -2px;
+}
+
+.desktop .desk-detail .more-cue {
+  display: none;
+}
+
+.desktop .desk-detail .confirm::after {
+  content: "Enter to confirm · Esc to cancel";
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* Answer bar */
+
+.desktop .desk-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* One line of answers, each by its label (what Done and the chat record); Reject is the X on the card and Minimise
+   its "−". */
+.desktop .desk-answer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.desktop .desk-picks {
+  display: grid;
+  flex: 1 1 360px;
+  min-width: 0;
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
+  gap: 8px;
+}
+
+.desktop .desk-actions .btn.pick {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 6px 10px;
+  border-width: 2px;
+  font-size: var(--fs-l);
+}
+
+.desktop .desk-actions .btn.pick.rec {
+  border-color: var(--yes);
+  background: rgba(47, 214, 123, 0.1);
+}
+
+.desktop .desk-actions .btn.pick .pick-label {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: center;
+  gap: 2px 10px;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
+/* An answer's label, with its detail as a second line under it. */
+.desktop .desk-actions .btn.pick .pick-text {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.desktop .desk-actions .btn.pick .pick-detail {
+  color: var(--muted);
+  font-size: var(--fs-body);
+  font-weight: 600;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
+/* The recommended answer's mark: a green check (its name says Recommended); the card above carries the word. */
+.desktop .desk-actions .btn.pick .pick-tag {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+  color: var(--yes);
+  vertical-align: middle;
+}
+
+.desktop .desk-actions .btn.pick .pick-tag svg {
+  width: 100%;
+  height: 100%;
+}
+
+.desktop .desk-actions .btn.mini {
+  gap: 10px;
+  min-width: 132px;
+  min-height: 44px;
+  border-width: 1px;
+  font-size: var(--fs-m);
+}
+
+.desktop .desk-actions .btn.mini:hover {
+  background: rgba(255, 240, 225, 0.06);
+}
+
+/* The reject popup, centred: its keys under the box. */
+.desktop .sheet.reject-sheet {
+  width: min(560px, calc(100% - 48px));
+}
+
+.desktop .reject-sheet .sheet-keys {
+  display: flex;
+  gap: 16px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.desktop .reject-sheet .sheet-keys span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.desktop .desk-compose {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.desktop .desk-compose > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.desktop .desk-note {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  max-height: 180px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: var(--fs-m);
+  line-height: 1.4;
+  resize: vertical;
+}
+
+.desktop .desk-note:focus {
+  border-color: var(--note);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(199, 155, 255, 0.2);
+}
+
+.desktop .desk-send {
+  gap: 10px;
+  min-height: 44px;
+  border-width: 1px;
+  font-size: var(--fs-m);
+}
+
+.desktop .desk-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.desktop .desk-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Centred only while it fits: overflow past the top of a scroller can never be scrolled back to. */
+.desktop .desk-clear {
+  align-items: center;
+  justify-content: safe center;
+  overflow-y: auto;
+}
+
+/* Ops and Goals keep their own wide layouts, with room to breathe */
+
+.desktop .hq {
+  padding: 16px 28px 60px;
+}
+
+/* Pane controls: Focus in the header, the chevron on each pane's edge, a collapsed pane's strip, and the grip that drags a pane's width */
+
+.desktop .pane-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 9px;
+  justify-content: center;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--fs-s);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.desktop .pane-toggle:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text);
+}
+
+.desktop .pane-toggle[aria-pressed="true"] {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text);
+}
+
+.desktop .focus-toggle[aria-pressed="true"] {
+  background: var(--apricot);
+  color: #1c0f06;
+}
+
+.desktop .pane-toggle-icon,
+.desktop .pane-toggle-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.pane-fold {
+  display: none;
+}
+
+/* A 28 px disc on the pane's inner border; its hit area reaches 44 px. */
+.desktop .pane-fold {
+  position: absolute;
+  top: 16px;
+  z-index: 6;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--panel-2);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.desktop .pane-fold::before {
+  content: "";
+  position: absolute;
+  inset: -8px;
+}
+
+.desktop .pane-fold:hover {
+  border-color: rgba(255, 240, 225, 0.3);
+  color: var(--text);
+}
+
+.desktop .pane-fold:focus-visible {
+  outline: 2px solid var(--apricot);
+  outline-offset: 2px;
+}
+
+.desktop .pane-fold-icon,
+.desktop .pane-fold-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.desktop .fold-rail {
+  right: -14px;
+}
+
+.desktop .fold-chat {
+  left: -14px;
+}
+
+/* The chevron points the way the pane goes: a left pane folds left, chat folds right, the folded rail opens right. */
+.desktop .fold-chat.open .pane-fold-icon,
+.desktop .fold-rail:not(.open) .pane-fold-icon {
+  transform: rotate(180deg);
+}
+
+.desktop .pane-strip {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  height: 100%;
+  padding: 18px 0;
+  border: 0;
+  background: rgba(10, 7, 9, 0.35);
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.desktop .pane-strip:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+}
+
+.desktop .pane-strip-icon,
+.desktop .pane-strip-icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+.desktop .pane-strip .badge {
+  position: static;
+}
+
+.desktop .pane-strip-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--apricot);
+  box-shadow: 0 0 0 4px rgba(255, 194, 61, 0.22);
+}
+
+.desktop .pane-strip-label {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-size: var(--fs-s);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.desktop .pane-grip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 5;
+  width: 10px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.desktop .grip-chat {
+  left: -5px;
+}
+
+.desktop .pane-grip::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 4px;
+  width: 2px;
+  background: transparent;
+  transition: background 0.15s;
+}
+
+.desktop .pane-grip:hover::after,
+.desktop .pane-grip:focus-visible::after,
+.pane-resizing .pane-grip::after {
+  background: var(--apricot);
+}
+
+.pane-resizing,
+.pane-resizing * {
+  cursor: col-resize !important;
+  user-select: none;
+}
+
+/* Keyboard help (?) */
+
+.shortcuts {
+  display: grid;
+  gap: 18px;
+}
+
+.shortcuts-title {
+  margin: 0 0 8px;
+  font-size: var(--fs-s);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.shortcuts-list {
+  display: grid;
+  grid-template-columns: 5.5em 1fr;
+  gap: 8px 16px;
+  align-items: center;
+  margin: 0;
+}
+
+.shortcuts-list dt {
+  display: flex;
+  gap: 4px;
+}
+
+.shortcuts-list dd {
+  margin: 0;
+}
+
+.shortcuts-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-s);
+}

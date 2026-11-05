@@ -1,0 +1,164 @@
+/* A thing's page (thing.ts) and its line in Chat. Phone first at 412 wide: body 16 px, nothing under 13 px, every tap
+   target 44 px or more. */
+
+.thing-top[hidden],
+.thing-foot[hidden] {
+  display: none;
+}
+
+.thing-head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 6px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.thing-head-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.thing-back {
+  flex: none;
+  margin-left: -8px;
+}
+
+.thing-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 20px;
+  font-weight: 900;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.thing-head-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 10px;
+}
+
+.thing-head-facts .thing-meta {
+  flex: 1 1 200px;
+}
+
+.thing-pill {
+  flex: none;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--apricot) 18%, transparent);
+  color: var(--apricot);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.thing-pill.step-merged {
+  background: color-mix(in srgb, var(--yes) 18%, transparent);
+  color: var(--yes);
+}
+
+.thing-meta {
+  margin: 0;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.thing-meta b {
+  color: var(--text);
+}
+
+.thing-lab {
+  color: var(--apricot);
+  font-weight: 700;
+}
+
+.thing-quiet {
+  margin: 0;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.thing-card-open {
+  align-self: flex-start;
+  font-size: 16px;
+}
+
+/* Share and Stop it: one row under the say-line. */
+.thing-buttons {
+  display: flex;
+  gap: 8px;
+  padding: 8px 0 2px;
+}
+
+.thing-buttons > * {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.thing-btn {
+  gap: 6px;
+  min-height: 48px;
+  padding: 8px 6px;
+  font-size: 15px;
+  line-height: 1.15;
+}
+
+.thing-btn .btn-icon {
+  flex: none;
+  width: 18px;
+  height: 18px;
+}
+
+.thing-stop {
+  border-color: color-mix(in srgb, var(--no) 55%, transparent);
+  color: var(--no);
+}
+
+/* A thing in Chat: its first card, as one line that opens its page. */
+.chat-msg.chat-thing-row,
+.chat-msg.chat-answer-row {
+  padding: 0;
+  overflow: hidden;
+}
+
+.chat-thing-link {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 13px 11px;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-answer-text {
+  font-size: var(--fs-body);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.chat-thing-row > .chat-meta,
+.chat-answer-row > .chat-meta {
+  margin: 0;
+  padding: 0 13px 10px;
+}
+
+.chat-thing-open {
+  margin-top: 4px;
+  color: var(--apricot);
+  font-size: 15px;
+  font-weight: 800;
+}

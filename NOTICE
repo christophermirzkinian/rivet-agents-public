@@ -1,0 +1,7 @@
+Rivet Agents
+Copyright (c) 2026 the Rivet Agents authors. Released under the MIT licence (see LICENSE).
+
+The MIT licence covers the code and the first-party assets in this repository; every shipped
+asset is listed in web/public/LICENSES.yaml. Dependencies keep their own licences: most are MIT
+or ISC, including force-graph and the d3 packages under it; pdfjs-dist is Apache-2.0 and web-push
+is MPL-2.0 (used unchanged).

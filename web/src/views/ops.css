@@ -1,0 +1,1352 @@
+/* Ops tab, briefing, search and settings sheets. Tones: ok, warn, bad, info, idle. */
+
+.t-ok {
+  --tone: var(--yes);
+}
+
+.t-warn {
+  --tone: var(--apricot);
+}
+
+.t-bad {
+  --tone: var(--no);
+}
+
+.t-info {
+  --tone: var(--later);
+}
+
+.t-idle,
+.t-muted {
+  --tone: var(--muted);
+}
+
+/* A box's border takes its state colour only when something is wrong or needs a look; ok, info and idle keep
+   the plain line (the one card style, styles.css .box). */
+.box:is(.s-bad, .t-bad) {
+  --edge: var(--no);
+}
+
+.box:is(.s-warn, .t-warn) {
+  --edge: var(--apricot);
+}
+
+.ops {
+  container: ops / inline-size;
+  gap: 16px;
+}
+
+/* Refresh is for a desktop; a phone pulls to refresh. */
+.ops-top {
+  display: none;
+}
+
+.desktop .ops-top {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Usage: the two overalls first, each used, left and its next reset in big figures; then the accounts and resets,
+   grouped in calm cards. One column on the phone (412 px), two side by side once the page is wide. Nothing under 14 px. */
+.usage-heroes,
+.usage-cards {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+@container ops (min-width: 720px) {
+  .usage-heroes,
+  .usage-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+  }
+}
+
+/* An overall: the provider's own colour on its mark and a faint wash at the top-left; the figures take the tone. */
+.usage-hero {
+  --accent: var(--apricot);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  padding: 18px 18px 16px;
+  border-radius: 18px;
+  background: linear-gradient(150deg, color-mix(in srgb, var(--accent) 12%, var(--panel)) 0%, var(--panel) 58%);
+  scroll-margin-top: 84px;
+}
+
+.usage-hero[data-section="openai"] {
+  --accent: #3fd0c9;
+}
+
+.usage-hero-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.usage-hero-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-size: var(--fs-4xl);
+  font-weight: 900;
+}
+
+.usage-mark {
+  width: 14px;
+  height: 14px;
+  border-radius: 5px;
+  background: var(--accent);
+}
+
+.usage-hero-meta {
+  color: var(--muted);
+  font-size: var(--fs-l);
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.usage-hero-meta.t-warn {
+  color: var(--tone);
+}
+
+.usage-hero-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-xl);
+}
+
+.usage-figs {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.usage-fig {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.usage-fig.left {
+  align-items: flex-end;
+  text-align: right;
+}
+
+.usage-fig-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.usage-fig-n {
+  color: var(--tone);
+  font-size: 50px;
+  font-weight: 900;
+  line-height: 0.95;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-fig.left .usage-fig-n {
+  color: var(--text);
+}
+
+.usage-fig-of {
+  color: var(--muted);
+  font-size: var(--fs-6xl);
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.usage-fig-label {
+  color: var(--muted);
+  font-size: var(--fs-l);
+  font-weight: 800;
+}
+
+/* One cell per account, each filled to its own window; an unread one is hatched, never a 0%. */
+.usage-cells {
+  display: flex;
+  gap: 5px;
+  height: 26px;
+}
+
+.usage-cell {
+  flex: 1 1 0;
+  min-width: 0;
+  border-radius: 8px;
+  background: var(--panel-2);
+  overflow: hidden;
+}
+
+.usage-cell-fill {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--tone);
+}
+
+.usage-hero.t-idle .usage-cell-fill {
+  background: var(--muted);
+}
+
+.usage-cell.unread {
+  background: repeating-linear-gradient(135deg, var(--panel-2) 0 6px, transparent 6px 12px);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.usage-reset {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.usage-reset-label {
+  color: var(--muted);
+  font-size: var(--fs-l);
+  font-weight: 800;
+}
+
+.usage-reset-when {
+  font-size: var(--fs-2xl);
+  font-weight: 900;
+}
+
+.usage-reset-who {
+  color: var(--muted);
+  font-size: var(--fs-l);
+  font-weight: 700;
+}
+
+/* Under the overalls: the details, quieter. */
+.usage-more {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.usage-col {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+@container ops (min-width: 720px) {
+  .usage-col {
+    gap: 16px;
+  }
+}
+
+.usage-more-title {
+  margin: 10px 2px 0;
+  color: var(--muted);
+  font-size: var(--fs-xl);
+  font-weight: 900;
+}
+
+.usage-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 16px;
+  scroll-margin-top: 84px;
+}
+
+.usage-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 2px 10px;
+}
+
+.usage-card-title {
+  margin: 0;
+  font-size: var(--fs-3xl);
+  font-weight: 900;
+}
+
+.usage-card-meta {
+  color: var(--muted);
+  font-size: var(--fs-body);
+  font-weight: 700;
+}
+
+.usage-card-meta:is(.t-warn, .t-bad) {
+  color: var(--tone);
+  font-weight: 800;
+}
+
+.usage-sub {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: var(--fs-l);
+  font-weight: 900;
+}
+
+/* Usage's groups hold the Costs page's cards (costs.ts): a title, then a costs-list, with no box of their own. */
+.usage-group {
+  padding: 0;
+}
+
+.usage-group .usage-card-head {
+  padding: 0 2px;
+}
+
+.ops-notices {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ops-notice {
+  margin: 0;
+  padding: 10px 14px;
+  background: color-mix(in srgb, var(--tone) 10%, var(--panel));
+  font-size: var(--fs-body);
+  font-weight: 700;
+}
+
+.ops-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px 20px;
+  align-items: start;
+}
+
+/* The Actions rows and an answer's GitHub link, at Ops's 14 px floor; the sheets that share them keep their own sizes. */
+.ops-grid :is(.cmd-meta, .cmd-chip, .cmd-audit-row, .card-link) {
+  font-size: var(--fs-body);
+}
+
+/* A section is its title and headline, then its content, on the page with no frame. */
+.ops-sec {
+  min-width: 0;
+  /* A chip or search hit scrolls a section to the top: its title lands under the sticky tabs, not behind them. */
+  scroll-margin-top: 84px;
+}
+
+.ops-sec-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 2px 10px;
+}
+
+.ops-sec-title {
+  margin: 0;
+  font-size: var(--fs-xl);
+  font-weight: 900;
+}
+
+.ops-sec-line {
+  color: var(--tone);
+  font-size: var(--fs-body);
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.ops-sec-body {
+  padding: 0 0 12px;
+}
+
+/* A folded section (history and detail): its head is the tap that opens it, with a chevron at the right. */
+.ops-fold > summary {
+  position: relative;
+  padding-right: 36px;
+  list-style: none;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.ops-fold > summary::-webkit-details-marker {
+  display: none;
+}
+
+.ops-fold > summary::after,
+.ops-more > summary::after {
+  content: "›";
+  position: absolute;
+  top: 4px;
+  right: 8px;
+  color: var(--muted);
+  font-size: var(--fs-5xl);
+  font-weight: 900;
+  line-height: 1;
+  transform: rotate(90deg);
+  transition: transform 120ms ease;
+}
+
+.ops-fold[open] > summary::after,
+.ops-more[open] > summary::after {
+  transform: rotate(-90deg);
+}
+
+/* A fold inside a section: a sub-heading with a count or a word on its right, the rows under it when open. */
+.ops-more > summary {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  min-height: var(--tap);
+  padding: 4px 36px 4px 0;
+  list-style: none;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.ops-more > summary::-webkit-details-marker {
+  display: none;
+}
+
+.ops-more > summary .ops-sub {
+  margin: 0;
+}
+
+.ops-more-n {
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: var(--fs-body);
+  font-weight: 800;
+}
+
+.ops-more > summary::after {
+  top: 50%;
+  margin-top: -12px;
+}
+
+.ops-more.ops-stack > :not(summary) {
+  margin-top: 0;
+}
+
+.ops-more:not([open]) {
+  gap: 0;
+}
+
+.ops-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ops-sub {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 0;
+  font-size: var(--fs-l);
+  font-weight: 900;
+}
+
+.ops-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ops-row {
+  min-width: 0;
+}
+
+.ops-link {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: var(--tap);
+  padding: 10px 14px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.ops-row-title {
+  font-size: var(--fs-body);
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.ops-num {
+  margin-right: 8px;
+  color: #b9cdff;
+}
+
+.ops-row-meta {
+  color: var(--muted);
+  font-size: var(--fs-body);
+  overflow-wrap: anywhere;
+}
+
+.ops-retired summary {
+  cursor: pointer;
+}
+
+.ops-retired p {
+  margin: 4px 0 0;
+}
+
+/* When the PR should be merged: as large as the checks label, never small text. */
+.ops-row-eta {
+  color: var(--text);
+  font-size: var(--fs-body);
+  font-weight: 700;
+}
+
+.ops-row-meta.t-bad {
+  color: var(--no);
+  font-weight: 700;
+}
+
+.ops-checks {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--fs-body);
+}
+
+.ops-checks-bar {
+  display: flex;
+  flex: 1;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+  overflow: hidden;
+}
+
+.ops-checks-passed {
+  background: var(--yes);
+}
+
+.ops-checks-failed {
+  background: var(--no);
+}
+
+.ops-checks-label {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ops-checks.t-bad .ops-checks-label {
+  color: var(--no);
+  font-weight: 700;
+}
+
+.ops-row-fail {
+  color: #ffb3ba;
+  font-size: var(--fs-body);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.ops-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.ops-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border: 2px solid color-mix(in srgb, var(--tone) 55%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--tone) 16%, transparent);
+  color: var(--text);
+  font-size: var(--fs-body);
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.ops-tag.ops-tag-wrap {
+  max-width: 100%;
+  white-space: normal;
+}
+
+.ops-tag::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--tone);
+}
+
+.ops-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 110px), 1fr));
+  gap: 8px;
+}
+
+.ops-stat {
+  display: flex;
+  flex-direction: column;
+  padding: 10px 12px;
+}
+
+.ops-stat-n {
+  color: var(--tone);
+  font-size: var(--fs-4xl);
+  font-weight: 900;
+  line-height: 1.1;
+}
+
+.ops-stat.t-idle .ops-stat-n {
+  color: var(--text);
+}
+
+.ops-stat-l {
+  color: var(--muted);
+  font-size: var(--fs-body);
+  font-weight: 700;
+}
+
+.ops-apps {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ops-app {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px 14px;
+}
+
+.ops-app-name {
+  font-size: var(--fs-body);
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.ops-disks {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ops-disk {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ops-disk-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: var(--fs-body);
+}
+
+.ops-disk-top span {
+  color: var(--tone);
+  font-weight: 900;
+  /* A long label wraps; the figure beside it stays on one line. */
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.ops-disk.t-ok .ops-disk-top span {
+  color: var(--text);
+}
+
+.ops-bar {
+  display: block;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  overflow: hidden;
+}
+
+.ops-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--tone);
+}
+
+.ops-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ops-filter-btn {
+  min-height: 44px;
+  padding: 6px 16px;
+  border: 2px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel-2);
+  font-size: var(--fs-body);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.ops-filter-btn.on {
+  border-color: transparent;
+  background: var(--apricot);
+  color: #2a1204;
+}
+
+.ops-days {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ops-day-more {
+  margin-top: 8px;
+}
+
+.ops-day-n {
+  padding: 0 10px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: var(--fs-body);
+}
+
+@media (min-width: 900px) {
+  .ops-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ops-sec.wide {
+    grid-column: 1 / -1;
+  }
+}
+
+/* Briefing */
+
+.brief {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+}
+
+.brief-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.brief-heading {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+  min-width: 0;
+  padding-top: 4px;
+}
+
+.brief-close {
+  flex: 0 0 auto;
+  width: 44px;
+  min-height: 44px;
+  margin: -6px -6px 0 0;
+  padding: 0;
+  border-radius: 999px;
+  font-size: var(--fs-3xl);
+  line-height: 1;
+}
+
+.brief-title {
+  margin: 0;
+  font-size: var(--fs-2xl);
+  font-weight: 900;
+}
+
+.brief-since {
+  color: var(--muted);
+  font-size: var(--fs-s);
+  font-weight: 700;
+}
+
+.brief-headline {
+  margin: 0;
+  font-size: var(--fs-xl);
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.brief-items {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.brief-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 10px 14px;
+}
+
+.brief-item-title {
+  font-size: var(--fs-body);
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.brief-line {
+  color: var(--muted);
+  font-size: var(--fs-s);
+  overflow-wrap: anywhere;
+}
+
+.brief-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.brief-note {
+  padding: 10px 14px;
+  border-radius: 18px 18px 18px 6px;
+  background: color-mix(in srgb, var(--note) 22%, var(--panel-2));
+  font-size: var(--fs-m);
+  overflow-wrap: anywhere;
+}
+
+.brief-note strong {
+  color: var(--note);
+}
+
+.brief-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.brief-actions .btn {
+  min-height: var(--tap);
+  padding: 6px 16px;
+  border-radius: 999px;
+  font-size: var(--fs-s);
+}
+
+.brief-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.brief-row {
+  overflow: hidden;
+  padding: 6px 12px;
+  font-size: var(--fs-m);
+  font-weight: 800;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.brief-row.s-note {
+  --edge: color-mix(in srgb, var(--note) 60%, transparent);
+  font-weight: 600;
+}
+
+/* Search sheet */
+
+.srch {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+
+.srch-input {
+  width: 100%;
+  min-height: var(--tap-big);
+  padding: 12px 16px;
+  border: 2px solid var(--line);
+  border-radius: 18px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-l);
+}
+
+.srch-input:focus {
+  outline: 3px solid var(--apricot);
+  outline-offset: 1px;
+}
+
+.srch-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-s);
+}
+
+.srch-results {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: min(56vh, 520px);
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  overscroll-behavior: contain;
+}
+
+.srch-hit {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  width: 100%;
+  min-height: var(--tap-big);
+  padding: 10px 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.srch-kind {
+  color: var(--tone, var(--muted));
+  font-size: var(--fs-s);
+  font-weight: 900;
+}
+
+.srch-title {
+  font-size: var(--fs-body);
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.srch-detail {
+  display: -webkit-box;
+  color: var(--muted);
+  font-size: var(--fs-s);
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+/* Settings sheet */
+
+.set {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: min(70vh, 640px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.set-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: var(--tap-big);
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+
+.set-row input[type="checkbox"] {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  accent-color: var(--apricot);
+}
+
+.set-times {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.set-time {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: var(--fs-m);
+  font-weight: 800;
+}
+
+.set-time select {
+  min-height: var(--tap);
+  padding: 8px 12px;
+  border: 2px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel-2);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-l);
+  color-scheme: dark;
+}
+
+.set-sub {
+  margin: 4px 0 0;
+  font-size: var(--fs-l);
+  font-weight: 900;
+}
+
+.set-state {
+  margin: 0;
+  padding: 10px 14px;
+  background: color-mix(in srgb, var(--tone) 10%, var(--panel-2));
+  font-size: var(--fs-m);
+  font-weight: 600;
+}
+
+/* The readings as pills, under Plan: one row, scrolled sideways on a phone. */
+.ops-pills {
+  display: flex;
+  gap: 8px;
+  margin: 0 -16px 14px;
+  padding: 2px 16px 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.ops-pills::-webkit-scrollbar {
+  display: none;
+}
+
+.ops-pill-tab {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 2px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--fs-xl);
+  font-weight: 800;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* The page on screen is white, never amber: amber on Ops only ever means a warning. */
+.ops-pill-tab.on {
+  border-color: color-mix(in srgb, var(--text) 70%, transparent);
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+.ops-dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--tone, var(--muted));
+}
+
+/* Machines' lines: a heading in capitals, then one row each. */
+.ops-list-title {
+  margin: 4px 0 10px;
+  color: var(--muted);
+  font-size: var(--fs-l);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.ops-list {
+  margin-bottom: 18px;
+}
+
+.ops-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ops-line {
+  display: grid;
+  grid-template-columns: 10px 1fr;
+  align-items: baseline;
+  gap: 2px 12px;
+  padding: 12px 16px;
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  font-size: var(--fs-xl);
+}
+
+.ops-line .ops-dot {
+  align-self: center;
+}
+
+.ops-line-name {
+  font-weight: 800;
+}
+
+.ops-line-why {
+  grid-column: 2;
+  min-width: 0;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+/* "More": a page's detail, folded. */
+.ops-page-more {
+  margin-top: 8px;
+}
+
+.ops-page-more > .ops-page-more-head {
+  display: flex;
+  list-style: none;
+  align-items: center;
+  min-height: 48px;
+  padding: 0 16px;
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--text);
+  font-size: var(--fs-xl);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.ops-page-more > .ops-page-more-head::-webkit-details-marker {
+  display: none;
+}
+
+.ops-page-more > .ops-page-more-head::after {
+  content: "";
+  width: 10px;
+  height: 10px;
+  margin-left: auto;
+  border-right: 3px solid currentColor;
+  border-bottom: 3px solid currentColor;
+  transform: rotate(45deg) translateY(-3px);
+}
+
+.ops-page-more[open] > .ops-page-more-head::after {
+  transform: rotate(-135deg) translateY(-3px);
+}
+
+.ops-page-more[open] > .ops-page-more-head {
+  margin-bottom: 14px;
+}
+
+/* Plan: what is being done, by when and why. Nothing on it is red. */
+.plan {
+  display: flex;
+  flex-direction: column;
+}
+
+.plan-sec {
+  display: flex;
+  justify-content: space-between;
+  margin: 18px 2px 8px;
+  color: var(--muted);
+  font-size: var(--fs-m);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.plan-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.plan-row {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 11px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.plan-row-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: var(--fs-l);
+  font-weight: 700;
+}
+
+.plan-row-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.plan-when {
+  flex: none;
+  color: var(--later);
+  font-size: var(--fs-body);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.plan-when.is-coming {
+  color: var(--muted);
+}
+
+.plan-why {
+  display: -webkit-box;
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--fs-body);
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.plan-item {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 7px 4px;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--fs-body);
+}
+
+.plan-mark {
+  color: var(--later);
+  font-weight: 900;
+}
+
+.plan-mark.is-done {
+  color: var(--yes);
+}
+
+.plan-at {
+  flex: none;
+  min-width: 64px;
+  color: var(--muted);
+  font-size: var(--fs-m);
+}
+
+.plan-fold {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 4px;
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--fs-body);
+  cursor: pointer;
+}
+
+.plan-link {
+  color: var(--later);
+  font-weight: 700;
+}
+
+.plan-empty {
+  margin: 0 2px 8px;
+  color: var(--muted);
+  font-size: var(--fs-body);
+}
+
+.plan-note {
+  margin: 0 2px 6px;
+  color: var(--muted);
+  font-size: var(--fs-body);
+}
+
+.plan-readings {
+  margin: 0;
+  padding: 2px 0 4px;
+}
+
+.plan-more {
+  margin-top: 18px;
+}
+
+/* Dismiss on a break nobody is on, and the fold of what you dismissed. */
+.plan-dismiss,
+.plan-bring-back {
+  flex: none;
+  min-height: var(--tap);
+  font-size: var(--fs-body);
+}
+
+.plan-dismissed {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 4px 4px 4px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  color: var(--muted);
+  font-size: var(--fs-body);
+}
+
+/* A red an agent is on is amber, one you dismissed muted: the checks bar and failure line too (ops-status.ts calm). */
+[data-being-fixed] .ops-checks-failed {
+  background: var(--apricot);
+}
+
+[data-being-fixed] .ops-row-fail {
+  color: var(--apricot);
+}
+
+[data-dismissed] .ops-checks-failed {
+  background: var(--muted);
+}
+
+[data-dismissed] .ops-row-fail {
+  color: var(--muted);
+}

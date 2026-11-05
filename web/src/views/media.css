@@ -1,0 +1,170 @@
+/* The Media tab (media.ts): Rivet's photos and videos by local day. Phone first; every word 16 px and up. */
+
+.media-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 12px 16px 28px;
+}
+
+.media-tab-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-xl);
+  font-weight: 700;
+}
+
+.media-tab-day {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.media-tab-day-title {
+  margin: 0;
+  font-size: var(--fs-4xl);
+  font-weight: 900;
+}
+
+.media-tab-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
+.media-tab-thumbs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+  gap: 6px;
+}
+
+.media-tab-thumb {
+  position: relative;
+  display: block;
+  min-width: var(--tap);
+  min-height: var(--tap);
+  aspect-ratio: 1;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg-2);
+  cursor: pointer;
+}
+
+.media-tab-thumb:focus-visible {
+  outline: 3px solid var(--apricot);
+  outline-offset: 2px;
+}
+
+.media-tab-thumb-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+.media-tab-play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 40px;
+  height: 40px;
+  padding: 8px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.media-tab-play svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.media-tab-source {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin: 0;
+  font-size: var(--fs-xl);
+}
+
+/* As a button the line opens its card or chat message. */
+.media-tab-open {
+  width: 100%;
+  min-height: var(--tap);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: var(--fs-xl);
+  text-align: left;
+  cursor: pointer;
+}
+
+.media-tab-kind {
+  flex: none;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-weight: 800;
+}
+
+.media-tab-kind.from-card {
+  background: rgba(255, 194, 61, 0.18);
+  color: var(--apricot);
+}
+
+.media-tab-kind.from-chat {
+  background: rgba(199, 155, 255, 0.18);
+  color: var(--note);
+}
+
+.media-tab-title {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: 700;
+}
+
+.media-tab-time {
+  flex: none;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.btn.media-tab-more {
+  align-self: center;
+  min-width: 160px;
+  min-height: var(--tap);
+  font-size: var(--fs-xl);
+}
+
+.media-tab-ask,
+.media-tab-answer,
+.media-tab-answered {
+  margin: 0 0 12px;
+  font-size: var(--fs-xl);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.media-tab-answer {
+  font-weight: 800;
+}
+
+.media-tab-answered {
+  color: var(--muted);
+}

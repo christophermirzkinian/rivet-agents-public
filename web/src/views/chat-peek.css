@@ -1,0 +1,291 @@
+/* The map's chat sheet (chat-peek.ts). Its screen reads on a 320px phone: no text under 15px, every line wrapped,
+   nothing cut off sideways. */
+
+/* A long ask or last sentence pushes the screen down: the sheet's body scrolls so it is always in reach. */
+.peek-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.peek-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.peek-who {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.peek-title {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 800;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.peek-sub {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-l);
+  overflow-wrap: anywhere;
+}
+
+.peek-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.peek-block[hidden] {
+  display: none;
+}
+
+.peek-h {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-l);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.peek-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 8px 14px;
+  margin: 0;
+  font-size: var(--fs-xl);
+  line-height: 1.4;
+}
+
+.peek-facts dt {
+  color: var(--muted);
+}
+
+.peek-facts dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.peek-words {
+  font-style: italic;
+  quotes: "\201C" "\201D";
+}
+
+.peek-stage {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+
+.peek-stage .pill {
+  font-size: var(--fs-l);
+}
+
+.peek-time.is-asked {
+  color: var(--no);
+}
+
+.peek-prs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+
+.peek-prs a {
+  color: var(--accent);
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.peek-last {
+  margin: 0;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  font-size: var(--fs-xl);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+
+.peek-screen-block {
+  flex: 1 0 auto;
+}
+
+.peek-screen-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 2px 12px;
+}
+
+.peek-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-l);
+}
+
+.peek-note[data-state="off"] {
+  color: var(--no);
+}
+
+/* The newest at the foot; it scrolls inside itself so the facts above stay put. */
+.peek-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 52dvh;
+  min-height: 260px;
+  padding: 14px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #0c0a14;
+  color: #eeeaf8;
+  font-size: var(--fs-xl);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.peek-screen > :first-child {
+  margin-top: auto;
+}
+
+.peek-screen[data-state="gone"] {
+  justify-content: center;
+  height: auto;
+  min-height: 120px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.peek-screen p {
+  margin: 0;
+}
+
+.peek-said {
+  white-space: pre-line;
+}
+
+.peek-label {
+  display: block;
+  margin-bottom: 2px;
+  color: #b9a8ff;
+  font-size: var(--fs-l);
+  font-weight: 800;
+}
+
+.peek-message,
+.peek-asked {
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgba(185, 168, 255, 0.1);
+  white-space: pre-line;
+}
+
+.peek-message[data-way="out"] .peek-label {
+  color: #7fd8ff;
+}
+
+.peek-tool {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.peek-call {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+}
+
+.peek-tool-name {
+  flex: none;
+  padding: 1px 8px;
+  border-radius: 8px;
+  background: rgba(255, 194, 61, 0.16);
+  color: var(--accent);
+  font-size: var(--fs-l);
+  font-weight: 800;
+}
+
+.peek-tool-detail,
+.peek-result {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: var(--fs-l);
+  line-height: 1.45;
+}
+
+.peek-tool-detail {
+  min-width: 0;
+  color: #d8d2ea;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.peek-result {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0 0 0 16px;
+  list-style: none;
+  color: #c9c2de;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.peek-result [data-tone="ok"] {
+  color: var(--yes);
+}
+
+.peek-result [data-tone="bad"] {
+  color: var(--no);
+}
+
+.peek-working {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #b9a8ff;
+  font-weight: 700;
+}
+
+.peek-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: peek-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes peek-pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .peek-dot {
+    animation: none;
+  }
+}

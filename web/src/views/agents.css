@@ -1,0 +1,258 @@
+/* The Agents board: four columns side by side on a wide window, stacked on a phone so nothing scrolls sideways. */
+
+.agents {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 12px 16px 28px;
+}
+
+.agents-lede,
+.agents-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-l);
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.agents-note {
+  color: var(--apricot);
+}
+
+.agents-jump {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.agents-jump-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--tap);
+  padding: 6px 8px 6px 14px;
+  border: 1.5px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-l);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.agents-jump-waiting .agents-count {
+  background: var(--apricot);
+  color: var(--bg);
+}
+
+@media (min-width: 1100px) {
+  .agents-jump {
+    display: none;
+  }
+}
+
+.agents-board {
+  display: grid;
+  gap: 18px;
+}
+
+@media (min-width: 1100px) {
+  .agents-board {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    align-items: start;
+    gap: 12px;
+  }
+}
+
+.agents-col {
+  scroll-margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.agents-col-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: var(--fs-3xl);
+  font-weight: 900;
+}
+
+.agents-count {
+  min-width: 28px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: var(--fs-l);
+  text-align: center;
+}
+
+.agents-col-waiting .agents-count {
+  background: var(--apricot);
+  color: var(--bg);
+}
+
+.agents-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.agents-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-l);
+  font-weight: 700;
+}
+
+/* One card style (.box): the column shows only in the border colour, green while the chat works, apricot while it
+   waits on you. */
+.agents-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 12px 14px;
+  cursor: pointer;
+}
+
+.agents-card:focus-visible {
+  outline: 3px solid var(--apricot);
+  outline-offset: 2px;
+}
+
+.agents-card:is(.agents-card-building, .agents-card-review) {
+  --edge: var(--yes);
+}
+.agents-card-waiting {
+  --edge: var(--apricot);
+}
+
+.agents-card-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.agents-chat {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--fs-3xl);
+  font-weight: 900;
+}
+
+.agents-age {
+  flex: none;
+  color: var(--muted);
+  font-size: var(--fs-l);
+  font-weight: 700;
+}
+
+.agents-task {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  font-size: var(--fs-xl);
+  line-height: 1.35;
+}
+
+.agents-why,
+.agents-claims,
+.agents-due {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: var(--fs-l);
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.agents-due {
+  color: var(--text);
+}
+
+.agents-due.is-late {
+  color: var(--no);
+}
+
+.agents-pr {
+  display: inline-block;
+  margin-right: 8px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--text);
+  text-decoration: none;
+}
+
+/* Copy summary: a full tap-size button under the bar, and "Copied" beside it for two seconds. */
+
+.agents-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 6px 0 4px;
+}
+
+.agents-copy-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 12px;
+}
+
+.agents-copy-btn {
+  min-height: var(--tap);
+  padding: 6px 18px;
+  border: 1.5px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-l);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.agents-copy-note {
+  color: var(--yes);
+  font-size: var(--fs-l);
+  font-weight: 800;
+}
+
+.agents-copy-manual {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1.5px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-l);
+  line-height: 1.35;
+}
+
+.agents-copy-manual[hidden] {
+  display: none;
+}
+
+/* The fallback copy's textarea: in the page so it can be selected, never seen. */
+
+.agents-copy-area {
+  position: fixed;
+  top: 0;
+  left: -9999px;
+  opacity: 0;
+}
