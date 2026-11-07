@@ -120,18 +120,39 @@ export function lateAskLine(raw) {
   return `Rivet: ask ${r.key} ran past its done-by time (${r.dueAt}). ${who} Then give it a new time and the cause: rivet ask set ${r.key} --due "<new time>" --why "<cause>". When it is done: rivet ask set ${r.key} --stage done.`;
 }
 
+const OPS_DETAIL_MAX = 120;
+const N = "\\d{1,4}";
+// Every machine fault text the server writes from fixed words and numbers (ops/pickup.ts machineReds). A list of what
+// may pass, as no rule can tell a short password from plain words; text that carries an error or a name, even a
+// runner's, is not here, so it never passes.
+const OPS_DETAIL_FAULTS = ["[Mm]emory pressure critical", `${N}% free`, "Bridge offline"].join("|");
+const OPS_DETAIL_RE = new RegExp(`^(?:${OPS_DETAIL_FAULTS})(?:[,;] (?:${OPS_DETAIL_FAULTS}))*$`);
+
+/**
+ * What a pick-up may say about why a machine is red: its fault texts, each one exactly as listed. Anything else is left
+ * out whole, as an item's detail can be free text and this line is typed into a chat. It is never logged. Empty when
+ * there is nothing safe to say.
+ * @param {unknown} detail
+ * @returns {string}
+ */
+export function opsPickupDetail(detail) {
+  if (typeof detail !== "string" || detail.length > OPS_DETAIL_MAX || !OPS_DETAIL_RE.test(detail)) return "";
+  return detail;
+}
+
 /**
  * The monitor chat's line for the server's auto pick-up: this bridge's own sentence around the item's kind, key and repo,
- * each checked here. Null for one it does not know.
- * @param {unknown} kind @param {unknown} key @param {unknown} repo
+ * each checked here, and its reason when opsPickupDetail passes it. Null for one it does not know.
+ * @param {unknown} kind @param {unknown} key @param {unknown} repo @param {unknown} [detail]
  * @returns {string | null}
  */
-export function opsPickupLine(kind, key, repo) {
+export function opsPickupLine(kind, key, repo, detail) {
   if (typeof kind !== "string" || kind === "coming" || !OPS_STATUS_KINDS.includes(kind)) return null;
   if (typeof key !== "string" || !OPS_STATUS_KEY_RE.test(key)) return null;
   if (typeof repo !== "string" || !repoAllowlist().includes(repo)) return null;
   const flag = repo === defaultRepo() ? "" : ` --repo ${repo}`;
-  return `Rivet auto pick-up: ${kind} ${key} is red with nobody on it. Run rivet fix ${kind} ${key}${flag} --by rivet (no card for the owner).`;
+  const why = opsPickupDetail(detail);
+  return `Rivet auto pick-up: ${kind} ${key} is red with nobody on it${why ? ` (${why})` : ""}. Run rivet fix ${kind} ${key}${flag} --by rivet (no card for the owner).`;
 }
 
 const REOPEN_WORDS = { approve: "APPROVED", reject: "REJECTED", done: "DONE", dismiss: "DISMISSED", comment: "COMMENT" };
@@ -500,7 +521,7 @@ export function createBridge(deps) {
   async function processOpsPickup(raw, receivedAt = now().getTime()) {
     const r = /** @type {any} */ (raw);
     const id = typeof r?.id === "string" && /^[A-Za-z0-9._-]{1,100}$/.test(r.id) ? r.id : "?";
-    const line = id === "?" ? null : opsPickupLine(r.kind, r.key, r.repo);
+    const line = id === "?" ? null : opsPickupLine(r.kind, r.key, r.repo, r.detail);
     if (!line) {
       log("drop", { id, reason: "bad-ops-pickup" });
       return "dropped";

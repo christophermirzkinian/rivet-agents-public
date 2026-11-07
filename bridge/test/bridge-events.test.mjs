@@ -6,7 +6,7 @@ import test from "node:test";
 
 process.env.RIVET_REPOS = "example-org/example-repo,example-org/second-repo";
 
-const { createBridge, FEATURES, opsPickupLine } = await import("../lib/bridge.mjs");
+const { createBridge, FEATURES, opsPickupDetail, opsPickupLine } = await import("../lib/bridge.mjs");
 const { StateStore } = await import("../lib/state.mjs");
 
 const ORIGIN = "https://rivet.example.test";
@@ -79,6 +79,19 @@ test("the bridge tells the server it takes a merge answer, the pick-up and the H
 test("a pick-up's line is the bridge's own sentence, with --repo only off the first repo", () => {
   assert.equal(opsPickupLine("ci", "ci.yml", "example-org/example-repo"), "Rivet auto pick-up: ci ci.yml is red with nobody on it. Run rivet fix ci ci.yml --by rivet (no card for the owner).");
   assert.match(/** @type {string} */ (opsPickupLine("pr", "7", "example-org/second-repo")), /rivet fix pr 7 --repo example-org\/second-repo --by rivet/);
+});
+
+test("a pick-up names a machine's fault only when every part is a listed fault text", () => {
+  const repo = "example-org/example-repo";
+  assert.equal(opsPickupLine("machine", "mac", repo, "Memory pressure critical, 4% free"), "Rivet auto pick-up: machine mac is red with nobody on it (Memory pressure critical, 4% free). Run rivet fix machine mac --by rivet (no card for the owner).");
+  assert.equal(opsPickupLine("machine", "mac", repo, "Login failed with pass hunter2"), opsPickupLine("machine", "mac", repo));
+  for (const reason of ["Memory pressure critical, 4% free", "Bridge offline", "memory pressure critical; 12% free", "Memory pressure critical, 4% free, Bridge offline"]) assert.equal(opsPickupDetail(reason), reason);
+  // Each passes any rule that looks for a token's shape: short, plain words. None is a listed fault.
+  const plain = ["Login failed with pass hunter2", "Recovery code: 1234-5678", "SMTP failed using abcd efgh ijkl mnop", "main", "hunter2"];
+  // A listed fault with anything beside it goes whole, a runner's name included.
+  const mixed = ["hunter2 Bridge offline", "Bridge offline, hunter2", "Bridge offline; pass hunter2", "4% free hunter2", "Bridge offline, ", "Runner hunter2 down", "Bridge offline, Runner build-1 down"];
+  const bad = [...plain, ...mixed, "token=abc", "a".repeat(20), "Bridge offline, ".repeat(9) + "Bridge offline", "", 7, null, undefined];
+  for (const reason of bad) assert.equal(opsPickupDetail(reason), "", String(reason));
 });
 
 test("a pick-up with a kind, key or repo this bridge does not know has no line", () => {
