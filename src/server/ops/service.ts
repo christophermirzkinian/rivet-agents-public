@@ -73,7 +73,7 @@ export interface OpsDeps {
   /** Posts an update card, create-only (http.ts); without it no Fix result card is posted. */
   addUpdate?: (card: { id: string } & Record<string, unknown>) => { status: number; error?: string };
   /** The auto pick-up's way to the monitor chat (ops/pickup.ts); without it nothing is picked up. */
-  pickup?: { send: (pickup: { kind: string; key: string; repo: string }) => string | null; monitorChat: string };
+  pickup?: { send: (pickup: { kind: string; key: string; repo: string; detail?: string }) => string | null; monitorChat: string };
   /** Makes the wait cards again from the records and asks (http.ts); writes the board only when they changed. */
   refreshWaits?: () => void;
 }
@@ -745,7 +745,7 @@ export function createOps(deps: OpsDeps) {
       const before = state;
       state = { ...state, starts: [...state.starts, { item: itemId(item), at: iso }] };
       opsStore.put("pickup", state, at);
-      const id = pickup.send({ kind: item.kind, key: item.key, repo: item.repo });
+      const id = pickup.send({ kind: item.kind, key: item.key, repo: item.repo, ...(item.kind === "machine" && item.detail ? { detail: item.detail } : {}) });
       // No capable bridge: the record and the start go back and the next tick tries again.
       if (id === null) {
         restore(item.kind, item.key, wrote.written.version, wrote.before);

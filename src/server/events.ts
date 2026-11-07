@@ -206,10 +206,10 @@ export class BridgeChannel {
   }
 
   /**
-   * An unowned red item for the monitor to run rivet fix on: its kind, key and repo only, which the bridge puts in its
-   * own sentence. Returns the event id the bridge acks, or null with no capable bridge; the next tick tries again.
+   * An unowned red item for the monitor to run rivet fix on: its kind, key, repo and reason only, which the bridge puts in
+   * its own sentence after checking each. Returns the event id the bridge acks, or null with no capable bridge; the next tick tries again.
    */
-  sendOpsPickup(pickup: { kind: string; key: string; repo: string }): string | null {
+  sendOpsPickup(pickup: { kind: string; key: string; repo: string; detail?: string }): string | null {
     if (!this.current || this.features?.has("ops-pickup") !== true) return null;
     const id = randomUUID();
     this.current.response.write(`event: ops-pickup\nid: ${id}\ndata: ${JSON.stringify({ id, ...pickup })}\n\n`);
