@@ -225,8 +225,10 @@ function fakeRunner({ chats = /** @type {any[]} */ ([]), fail = /** @type {strin
   };
 }
 
-/** gh answering one open PR with the given body and no comments. @param {string} [body] */
-const ghWith = (body = "") => async (/** @type {string} */ _file, /** @type {string[]} */ args) => {
+/** gh answering one open PR with the given body and no comments, and its head branch. @param {string} [body] @param {string} [head] */
+const ghWith = (body = "", head = "example-org/pr-branch") => async (/** @type {string} */ _file, /** @type {string[]} */ args) => {
+  // The PR's head branch, for the chat that may hold it.
+  if (args[0] === "pr" && args[1] === "view") return { stdout: `${head}\n`, stderr: "" };
   const route = String(args[1]);
   if (!/^repos\/example-org\/example-repo\/pulls\/42$/.test(route)) return { stdout: "[]", stderr: "" };
   return { stdout: JSON.stringify({ number: 42, body, labels: [], draft: false }), stderr: "" };
@@ -295,18 +297,139 @@ test("a repo-bound fix with no repo set says so and writes nothing", async () =>
   assert.deepEqual(runner.made, []);
 });
 
-test("an item whose chat is running or still opening keeps it; a closed chat gets a new one beside any name in use", async () => {
+test("an item whose chat is running or still opening is refused; a closed chat gets a new one beside any name in use", async () => {
   const record = { kind: "ci", key: "ci.yml", state: "investigating", chat: "fix-ci-ci.yml", since: NOW, updatedAt: NOW, version: 3 };
-  const open = await cli(["fix", "ci", "ci.yml"], { env: FIX_ENV, fetch: stubServer([record]).fetch, runner: fakeRunner({ chats: [{ name: "fix-ci-ci.yml", status: "running", state: "alive" }] }) });
-  assert.equal(open.stdout, "ci ci.yml already has its fix chat: fix-ci-ci.yml\n");
+  const server = stubServer([record]);
+  const live = fakeRunner({ chats: [{ name: "fix-ci-ci.yml", status: "running", state: "alive" }] });
+  const open = await cli(["fix", "ci", "ci.yml"], { env: FIX_ENV, fetch: server.fetch, runner: live });
+  assert.equal(open.code, 1);
+  assert.equal(open.stderr, "rivet: ci ci.yml is already owned: investigating, chat fix-ci-ci.yml is open: no fix chat opens\n");
+  assert.equal(open.stdout, "");
+  assert.deepEqual(live.made, []);
+  assert.ok(!server.state.calls.some((call) => call.method !== "GET"));
+  const json = await cli(["fix", "ci", "ci.yml", "--json"], { env: FIX_ENV, fetch: stubServer([{ ...record, by: "someone" }]).fetch, runner: live });
+  assert.equal(json.code, 1);
+  assert.deepEqual(JSON.parse(json.stdout), { status: "owned", kind: "ci", key: "ci.yml", chat: "fix-ci-ci.yml" });
+  assert.match(json.stderr, /already owned: investigating by someone, chat fix-ci-ci\.yml is open/);
 
   const opening = await cli(["fix", "ci", "ci.yml"], { env: FIX_ENV, fetch: stubServer([{ ...record, note: "Opening the fix chat…" }]).fetch, runner: fakeRunner() });
-  assert.equal(opening.stdout, "ci ci.yml already has its fix chat: fix-ci-ci.yml\n");
+  assert.equal(opening.code, 1);
+  assert.match(opening.stderr, /is already owned: investigating, chat fix-ci-ci\.yml is open/);
 
   const runner = fakeRunner({ chats: [{ name: "fix-ci-ci.yml", status: "finished", state: "gone" }] });
   const closed = await cli(["fix", "ci", "ci.yml"], { env: FIX_ENV, fetch: stubServer([record]).fetch, runner });
   assert.equal(closed.code, 0, closed.stderr);
   assert.equal(runner.made[0].name, "fix-ci-ci.yml-2");
+});
+
+test("fix refuses work under way with no chat named by someone else, and opens on its own pick-up's record", async () => {
+  // A record naming its owner and no chat must not get a second chat.
+  const owned = { kind: "pr", key: "42", state: "investigating", by: "another-chat", since: NOW, updatedAt: NOW, version: 3 };
+  const runner = fakeRunner();
+  const server = stubServer([owned]);
+  const deps = { env: FIX_ENV, runner, exec: ghWith(), bin: () => "gh" };
+  const out = await cli(["fix", "pr", "42", "--by", "rivet"], { ...deps, fetch: server.fetch });
+  assert.equal(out.code, 1);
+  assert.equal(out.stderr, "rivet: pr 42 is already owned: investigating by another-chat, no chat named: no fix chat opens\n");
+  assert.equal(out.stdout, "");
+  assert.ok(!server.state.calls.some((call) => call.method !== "GET"));
+  assert.deepEqual(runner.made, []);
+  const json = await cli(["fix", "pr", "42", "--by", "rivet", "--json"], { ...deps, fetch: stubServer([owned]).fetch });
+  assert.equal(json.code, 1);
+  assert.deepEqual(JSON.parse(json.stdout), { status: "owned", kind: "pr", key: "42" });
+  // In progress counts the same; no --by is Rivet's, someone else too.
+  const bare = await cli(["fix", "pr", "42"], { ...deps, fetch: stubServer([{ ...owned, state: "in-progress" }]).fetch });
+  assert.equal(bare.code, 1);
+  assert.match(bare.stderr, /already owned: in-progress by another-chat, no chat named/);
+
+  // A pick-up's own record comes before its fix, which runs with the same --by: that one opens.
+  for (const by of ["rivet", "Rivet"]) {
+    const mine = fakeRunner();
+    const opened = await cli(["fix", "pr", "42", ...(by === "Rivet" ? [] : ["--by", by]), "--json"], { ...deps, runner: mine, fetch: stubServer([{ ...owned, by }]).fetch });
+    assert.equal(opened.code, 0, opened.stderr);
+    assert.equal(JSON.parse(opened.stdout).chat, "fix-pr-42", by);
+  }
+  // A record not under way has no owner, whoever set it.
+  for (const state of ["backlog", "fixed"]) {
+    const free = await cli(["fix", "pr", "42", "--by", "rivet"], { ...deps, runner: fakeRunner(), fetch: stubServer([{ ...owned, state }]).fetch });
+    assert.equal(free.code, 0, `${state}: ${free.stderr}`);
+  }
+});
+
+/** A linked worktree on disk whose .git file names a gitdir with `head` checked out. @param {string} name @param {string} head */
+function linkedWorktree(name, head) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "rivet-fix-branch-"));
+  const dir = path.join(root, name);
+  const gitdir = path.join(root, "gitdirs", name);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(gitdir, { recursive: true });
+  fs.writeFileSync(path.join(dir, ".git"), `gitdir: ${gitdir}\n`);
+  fs.writeFileSync(path.join(gitdir, "HEAD"), `ref: refs/heads/${head}\n`);
+  return { dir, gitdir };
+}
+
+test("fix of a PR refuses while a running chat has its branch checked out, and opens when that chat is done or moved off it", async () => {
+  const branch = "example-org/pr-branch";
+  const at = linkedWorktree("pr-work", branch);
+  const chat = (/** @type {string} */ status, /** @type {string} */ state) => ({ name: "pr-work", repo: "example-org/example-repo", worktree: at.dir, status, state });
+  const deps = { env: FIX_ENV, exec: ghWith("", branch), bin: () => "gh" };
+  const alive = fakeRunner({ chats: [chat("running", "alive")] });
+  const server = stubServer();
+  const out = await cli(["fix", "pr", "42", "--by", "rivet"], { ...deps, runner: alive, fetch: server.fetch });
+  assert.equal(out.code, 1);
+  assert.equal(out.stderr, `rivet: pr 42 is already owned: chat pr-work is open on its branch ${branch}: no fix chat opens\n`);
+  assert.deepEqual(server.state.calls.map((call) => call.method), ["GET"]);
+  assert.deepEqual(alive.made, []);
+  const json = await cli(["fix", "pr", "42", "--by", "rivet", "--json"], { ...deps, runner: alive, fetch: stubServer().fetch });
+  assert.deepEqual(JSON.parse(json.stdout), { status: "owned", kind: "pr", key: "42", chat: "pr-work", branch });
+
+  // The chat finished (its worktree stays), or the PR's branch is another one: the fix chat opens.
+  for (const { runner, exec } of [{ runner: fakeRunner({ chats: [chat("finished", "gone")] }), exec: deps.exec }, { runner: fakeRunner({ chats: [chat("running", "alive")] }), exec: ghWith("", "example-org/other") }]) {
+    const opened = await cli(["fix", "pr", "42", "--by", "rivet"], { ...deps, exec, runner, fetch: stubServer().fetch });
+    assert.equal(opened.code, 0, opened.stderr);
+    assert.equal(opened.stderr, "");
+    assert.equal(runner.made[0]?.name, "fix-pr-42");
+  }
+  // Moved off the branch since, or detached: that chat no longer holds it.
+  fs.writeFileSync(path.join(at.gitdir, "HEAD"), "ref: refs/heads/example-org/next-thing\n");
+  const moved = fakeRunner({ chats: [chat("running", "alive")] });
+  assert.equal((await cli(["fix", "pr", "42", "--by", "rivet"], { ...deps, runner: moved, fetch: stubServer().fetch })).code, 0);
+  fs.writeFileSync(path.join(at.gitdir, "HEAD"), `${"b".repeat(40)}\n`);
+  const detached = fakeRunner({ chats: [chat("running", "alive")] });
+  assert.equal((await cli(["fix", "pr", "42", "--by", "rivet"], { ...deps, runner: detached, fetch: stubServer().fetch })).code, 0);
+});
+
+test("fix of a PR opens with one warning when GitHub cannot say whose branch it is", async () => {
+  const runner = fakeRunner();
+  const hold = ghWith();
+  const exec = /** @type {typeof hold} */ (async (file, args) => {
+    if (args[0] === "pr") throw new Error("HTTP 504");
+    return hold(file, args);
+  });
+  const server = stubServer();
+  const out = await cli(["fix", "pr", "42", "--by", "rivet"], { env: FIX_ENV, fetch: server.fetch, runner, exec, bin: () => "gh" });
+  assert.equal(out.code, 0, out.stderr);
+  assert.equal(out.stderr, "rivet: warning: could not tell whether a chat holds the PR's branch (HTTP 504): opening the fix chat\n");
+  assert.equal(runner.made[0]?.name, "fix-pr-42");
+  assert.equal(server.state.statuses[0]?.chat, "fix-pr-42");
+});
+
+test("fix's hold deadline starts at its first hold read, so a slow branch read before it leaves the hold reads their time", async () => {
+  let elapsed = 0;
+  const hold = ghWith();
+  const exec = /** @type {typeof hold} */ (async (file, args) => {
+    // GitHub's branch read takes longer than the whole hold deadline on the test's clock.
+    if (args[0] === "pr" && args[1] === "view") elapsed += 1500;
+    // The hold reads yield to the timers, so a deadline already past would fire before they answer.
+    if (args[0] === "api") await new Promise((resolve) => setTimeout(resolve, 20));
+    return hold(file, args);
+  });
+  const runner = fakeRunner();
+  const now = () => new Date(Date.parse(NOW) + elapsed);
+  const out = await cli(["fix", "pr", "42"], { env: FIX_ENV, fetch: stubServer().fetch, runner, exec, bin: () => "gh", prHoldsMs: 1000, now });
+  assert.equal(out.code, 0, out.stderr);
+  assert.equal(elapsed, 1500);
+  assert.equal(runner.made[0]?.name, "fix-pr-42");
 });
 
 test("a pick-up leaves a parked item alone, and a person's fix does not", async () => {
