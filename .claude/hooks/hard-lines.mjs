@@ -492,11 +492,12 @@ const callsApi = (record) => record && !("start" in record) && (record.words[0] 
 
 function mergeUnresolved(command, commands) {
   const dynamic = (w) => /[$\u0000\u0001]/.test(w ?? "");
+  const expands = (w) => dynamic(w) || /[{}*?[\]]/.test(w ?? ""); // a substitution, a brace or a glob
   for (const { words } of commands) {
     if (dynamic(words[0]) && words.some((w) => /merge/i.test(w))) return true; // `$G pr merge 42`
     if (words[0] === "gh") {
       const [sub, verb] = ghWords(words.slice(1));
-      if (dynamic(sub) || (sub === "pr" && dynamic(verb))) return true; // `gh pr $v 42`
+      if (expands(sub) || (sub === "pr" && expands(verb))) return true; // `gh pr $v 42`, `gh pr {,}merge 42`
     }
   }
   const raw = mentions(command.replace(/\\\n/g, "").replace(/['"\\]/g, ""));
