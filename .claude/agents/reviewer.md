@@ -1,6 +1,6 @@
 ---
 name: reviewer
-description: Fresh-context adversarial finder for the gh-pr-review-loop self-review, one that did not author the change. Give it the PR goal, the full branch diff (only the fix diff on a capped round, as the skill says), and the constraints that bind it. It returns findings only (file, line, concrete failure scenario), never a summary or an approval. Spawn one instance per lens, each in its own fresh context with its own result, never one combined review. Main-loop triage of its findings cannot be delegated.
+description: Fresh-context adversarial finder for the gh-pr-review-loop self-review, one that did not author the change. Give it the PR goal, the full branch diff (only the fix diff on a capped round or from round 5, as the skill says), and the constraints that bind it. It returns findings only (file, line, concrete failure scenario), never a summary or an approval. Spawn one instance per lens, each in its own fresh context with its own result, never one combined review. Main-loop triage of its findings cannot be delegated.
 tools: Read, Grep, Glob
 ---
 

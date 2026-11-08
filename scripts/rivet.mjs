@@ -123,8 +123,10 @@ Card flags: --kind (default decision; a card is for what you must confirm or cho
                                              the key the app gives an item
   rivet fix <kind> <key> [--brief "<what failed>"] [--title "<item name>"] [--repo owner/name] [--by c] [--eta t] [--why t]
                                              open the item's fix chat (Ops' Fix it, Coming's Start it as kind coming) with a
-                                             brief, and set its status to investigating naming that chat; when its status
-                                             names a chat that is open, say so and open nothing
+                                             brief, and set its status to investigating naming that chat. Refused (rc 1, one
+                                             line naming the owner, nothing written) when its status is under way naming a
+                                             chat that is open, or naming no chat by someone other than --by, or for a PR
+                                             when a live chat has its branch checked out (unread: a warning, and it opens)
   rivet claim add <path|glob> --chat <name> [--pr N] [--note text] [--ttl 2h] [--force]
                                              claim a shared path before changing it; refused (exit 1, naming the
                                              holder, its PR and note) while another chat holds an overlapping claim,
@@ -1706,9 +1708,40 @@ export function fixBrief(kind, key, repo, chat, f) {
   return `Fix it (from Ops, via Rivet): ${title} (${kind} ${key}${where}) is failing.${what} Done means ${done}. Keep its status current: ${progress}. Once it is green: rivet status set ${kind} ${key} --state fixed --note "<what fixed it>". ${rules}`;
 }
 
+/** The branch a worktree has checked out, from its git HEAD: null when detached, undefined when HEAD does not read. @param {unknown} worktree @returns {string | null | undefined} */
+function checkedOut(worktree) {
+  try {
+    if (typeof worktree !== "string" || !worktree) return undefined;
+    const dotGit = path.join(worktree, ".git");
+    const linked = fs.statSync(dotGit).isFile() ? /^gitdir: (.+)$/m.exec(fs.readFileSync(dotGit, "utf8"))?.[1]?.trim() : dotGit;
+    if (!linked) return undefined;
+    return /^ref: refs\/heads\/(\S+)\s*$/.exec(fs.readFileSync(path.resolve(worktree, linked, "HEAD"), "utf8"))?.[1] ?? null;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
- * Opens an Ops item's fix chat and sets its status to investigating, naming the chat, in one go. One per item: when the
- * item's status names a chat that is still running, it says so and opens nothing.
+ * The runner chat at work with PR `pr`'s head branch checked out in its worktree, if any. Throws when GitHub cannot be
+ * read.
+ * @param {Deps} d @param {{ repo: string, pr: number, chats: any[], running: (name: string) => boolean }} at
+ * @returns {Promise<{ chat: string, branch: string } | null>}
+ */
+async function branchHolder(d, { repo, pr, chats, running }) {
+  if (!Number.isInteger(pr) || pr <= 0) throw new Error("no PR number in its key");
+  const { stdout } = await d.exec(d.bin("gh"), ["pr", "view", String(pr), "--repo", repo, "--json", "headRefName", "--jq", ".headRefName"], { timeout: 30_000, maxBuffer: 1024 * 1024 });
+  const branch = stdout.trim();
+  if (!branch || /\s/.test(branch)) throw new Error("GitHub gave no head branch");
+  const short = (/** @type {unknown} */ r) => String(r ?? "").split("/").pop()?.toLowerCase();
+  // What a chat's worktree has checked out now: a chat moved off the branch, or detached, no longer holds it.
+  const held = chats.find((c) => checkedOut(c.worktree) === branch && short(c.repo) === short(repo) && running(c.name));
+  return held ? { chat: held.name, branch } : null;
+}
+
+/**
+ * Opens an Ops item's fix chat and sets its status to investigating, naming the chat, in one go. One per item: an item
+ * someone is on (its status under way naming a running chat, or no chat and someone else; a PR's branch held by a
+ * running chat) is refused with rc 1 and nothing opens.
  * @param {Parsed} o @param {Deps} d
  */
 async function fix(o, d) {
@@ -1720,10 +1753,12 @@ async function fix(o, d) {
   if (kind === "coming" && given.includes("/") && !(prefix && given.startsWith(prefix))) throw new Error(`coming ${given} is not a key in ${repo}`);
   const key = kind === "coming" && !given.includes("/") ? `${prefix}${given}` : given;
   // A PR's hold can land after Ops was read: it is read whole, as the merge guard reads it, before each write. Both
-  // reads share one deadline, so a slow GitHub cannot keep the record naming a chat that never opened.
-  const holdsBy = d.now().getTime() + d.prHoldsMs;
+  // reads share one deadline from the first, so a slow GitHub cannot keep the record naming a chat that never opened.
+  /** @type {number | undefined} */
+  let holdsBy;
   const prHold = async () => {
     if (kind !== "pr") return;
+    const until = (holdsBy ??= d.now().getTime() + d.prHoldsMs);
     const pr = Number(key.split("/").pop());
     /** @type {string[]} */
     let holds;
@@ -1733,7 +1768,7 @@ async function fix(o, d) {
       if (!Number.isInteger(pr) || pr <= 0) throw new Error(`no PR number in ${key}`);
       /** @type {Promise<never>} */
       const late = new Promise((_, reject) => {
-        deadline = setTimeout(() => reject(new Error(`hold reads past ${d.prHoldsMs} ms`)), Math.max(0, holdsBy - d.now().getTime()));
+        deadline = setTimeout(() => reject(new Error(`hold reads past ${d.prHoldsMs} ms`)), Math.max(0, until - d.now().getTime()));
       });
       ({ holds } = await Promise.race([readMergeHolds({
         repo, pr, holdsFile: d.holdsFile, now: d.now().getTime(), shown: redactKeepingLines, forMerge: false,
@@ -1761,14 +1796,32 @@ async function fix(o, d) {
   const ctx = d.runner.context({ env: d.env });
   const chats = d.runner.ps(ctx);
   const running = (/** @type {string} */ name) => chats.some((one) => one.name === name && (one.status !== "finished" || one.state === "alive"));
-  if (current?.chat && (current.state === "investigating" || current.state === "in-progress")) {
+  const by = /** @type {string | undefined} */ (o.fields.by) ?? "Rivet";
+  const underWay = current?.state === "investigating" || current?.state === "in-progress";
+  /** Refuses the fix, naming who is on the item: rc 1, nothing written, no chat. @param {string} who @param {Record<string, string>} extra */
+  const refuse = (who, extra) => {
+    if (o.jsonOut) d.stdout(`${JSON.stringify({ status: "owned", kind, key, ...extra }, null, 2)}\n`);
+    // Its names are the record's and GitHub's words: one line, control characters out.
+    d.stderr(`rivet: ${kind} ${key} is already owned: ${sanitizeLine(who, 300)}: no fix chat opens\n`);
+    return 1;
+  };
+  if (current?.chat && underWay) {
     // A fix still opening its chat says so in the note: within the runner's create time that one counts as open too.
     // Any other record whose chat is not running (closed, or put back by a failed fix) gets a new chat.
     const opening = current.note === FIX_OPENING_NOTE && d.now().getTime() - Date.parse(current.updatedAt) < FIX_OPENING_MS;
-    if (opening || running(current.chat)) {
-      done(o, d, `${kind} ${key} already has its fix chat: ${current.chat}`, { status: "open", kind, key, chat: current.chat });
-      return 0;
-    }
+    if (opening || running(current.chat)) return refuse(`${current.state}${current.by ? ` by ${current.by}` : ""}, chat ${current.chat} is open`, { chat: current.chat });
+  }
+  // Work under way with no chat named, set by someone other than this fix: a record naming its owner and no chat must
+  // not get a second chat. A pick-up's own record is by the --by its fix runs with.
+  if (!current?.chat && underWay && current?.by && current.by !== by) return refuse(`${current.state} by ${current.by}, no chat named`, {});
+  // A running chat with the PR's branch checked out is on it, record or none. Anything unread here opens the chat as
+  // before, with one warning: an outage must not keep a red from being picked up.
+  if (kind === "pr") {
+    const holder = await branchHolder(d, { repo, pr: Number(key.split("/").pop()), chats, running }).catch((/** @type {Error} */ err) => {
+      d.stderr(`rivet: warning: could not tell whether a chat holds the PR's branch (${sanitizeLine(err.message, 200)}): opening the fix chat\n`);
+      return null;
+    });
+    if (holder) return refuse(`chat ${holder.chat} is open on its branch ${holder.branch}`, holder);
   }
   // A runner chat's name is at most 64 characters (scripts/chat-runner.mjs NAME_RE), with room for the -N below.
   const base = `fix-${kind}-${key.replace(/[^a-z0-9.-]+/g, "-")}`.slice(0, 60).replace(/[-.]+$/, "");
@@ -1776,7 +1829,6 @@ async function fix(o, d) {
   let chat = base;
   for (let n = 2; taken.has(chat); n++) chat = `${base}-${n}`;
   const brief = fixBrief(kind, key, repo, chat, /** @type {Record<string, string | undefined>} */ (o.fields));
-  const by = /** @type {string | undefined} */ (o.fields.by) ?? "Rivet";
   const eta = /** @type {string | undefined} */ (o.fields.eta) ?? FIX_ETA;
   const why = /** @type {string | undefined} */ (o.fields.why) ?? FIX_WHY;
   const pathname = `/api/ops/status/${kind}/${encodeURIComponent(key)}`;
