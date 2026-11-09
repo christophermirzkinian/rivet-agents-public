@@ -165,7 +165,7 @@ export function liveLog(
 }
 
 /**
- * The worker sheet's log: the feed of what the chat said, newest first, or the redacted raw lines when `raw`.
+ * The worker sheet's log: the feed of what the chat said, newest first, or the redacted raw lines when `raw()`.
  * Returns its stop and a repaint for when the view changes.
  */
 function workerLog(worker: Worker, box: HTMLElement, note: HTMLElement, raw: () => boolean): { stop(): void; repaint(): void } {

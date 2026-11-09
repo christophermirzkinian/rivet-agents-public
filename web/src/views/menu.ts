@@ -109,7 +109,7 @@ export function openMenu(): void {
   );
 }
 
-/** The band's menu button. */
+/** The band's menu button; the ops mark rides on it as a dot. */
 export function menuButton(): HTMLElement {
   const { mark } = opsStatus();
   const words = navMark(mark)?.getAttribute("aria-label");

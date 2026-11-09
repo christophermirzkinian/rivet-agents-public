@@ -7,7 +7,7 @@
  * finger must reach are a card taller than the sheet and Answered's rows. A card whose own scroll kept the swipe
  * (overscroll-behavior: contain) left the rows out of reach. The Feed's news runs are gone with it: the sheet
  * shows no update cards. Each leg fails unless what it swipes runs past the sheet.
- *   node scripts/feed-touch-scroll.mjs [--video <dir>] [--shots <dir>]
+ *   node rivet/scripts/feed-touch-scroll.mjs [--video <dir>] [--shots <dir>]
  */
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";

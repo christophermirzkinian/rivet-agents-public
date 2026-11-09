@@ -34,7 +34,7 @@ interface Meta {
 export async function takeShare(store: CacheStorage | undefined = globalThis.caches, now = Date.now()): Promise<Shared | null> {
   if (!store) return null;
   try {
-    // has first: open would make the cache on every start.
+    // has() first: open() would make the cache on every start.
     if (!(await store.has(SHARE_CACHE))) return null;
     const cache = await store.open(SHARE_CACHE);
     const response = await cache.match(SHARE_META);

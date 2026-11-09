@@ -18,7 +18,7 @@ const R = "example-org/example-repo";
 /** Rivet's PDF (say.mjs --file), served below as a one-page sample so the viewer has something to draw. */
 const PDF_SHA = "5".repeat(64);
 function samplePdf(): Blob {
-  const lines = ["Quarterly report (v2)", "Revenue up 12%", "Costs down 4%", "Margin 31%"];
+  const lines = ["Quarterly report (v2)", "Signups up 12%", "Costs down 4%", "Margin 31%"];
   const stream = `BT /F1 22 Tf 60 760 Td 30 TL ${lines.map((line) => `(${line}) Tj T*`).join(" ")} ET`;
   const objects = [
     "<< /Type /Catalog /Pages 2 0 R >>",

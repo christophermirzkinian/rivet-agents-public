@@ -391,7 +391,7 @@ export function filesSentence(id, files) {
 }
 
 /**
- * The line typed into Rivet's chat, naming the item's chat for it to pass it
+ * The line typed into Rivet's chat, naming the item's chat for him to pass it
  * on. Only the decision word is the owner's instruction; everything the owner or
  * the board wrote sits inside double quotes.
  * @param {Reply} reply

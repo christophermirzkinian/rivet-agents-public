@@ -189,7 +189,7 @@ export const claudeUsageSnapshotSchema = z
         z
           .object({
             kind: z.string().regex(/^[a-z0-9_]{1,40}$/),
-            // The bridge's own label ("Week, all models"): one line of plain text.
+            // The bridge's own label ("Week, all models", "Week, Fable"): one line of plain text.
             label: z.string().regex(/^[^\u0000-\u001f\u007f-\u009f]{1,60}$/),
             percent: z.number().min(0).max(100),
             severity: z.enum(["normal", "warning", "critical"]),

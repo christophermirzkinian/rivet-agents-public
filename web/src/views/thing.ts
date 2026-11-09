@@ -241,7 +241,7 @@ export interface ThingButtons {
   stop: () => void;
 }
 
-/** Share and Stop it, at the foot of the page. */
+/** Share, Open on Mac and Stop it, at the foot of the page. */
 export function thingButtons(input: ThingButtons): HTMLElement {
   return h(
     "div",

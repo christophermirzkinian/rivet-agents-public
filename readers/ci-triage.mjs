@@ -76,7 +76,7 @@ const isTime = (t) => typeof t === "number" && Number.isFinite(t) && Math.abs(t)
 /**
  * The saved items, re-checked: the state file is editable, and its jobs go into PR comments and Ops notes.
  * @param {unknown} raw
- * @returns {Record<string, { head: string, kind: string, key: string, pr: number | null, at: number, runAt: number, pending: boolean, check: boolean, jobs: Record<string, { name: string, label: string, cause: string, run: number, attempt: number }> }>}
+ * @returns {Record<string, { head: string, kind: string, key: string, pr: number | null, at: number, runAt: number, pending: boolean, check: boolean, jobs: Record<string, { name: string, label: string, cause: string, covered: boolean, run: number, attempt: number }> }>}
  */
 export function savedItems(raw) {
   /** @type {Record<string, any>} */
@@ -129,8 +129,8 @@ export function codeSpan(text) {
 }
 
 /**
- * The PR comment for a head's labelled jobs.
- * @param {string} head @param {{ name: string, label: string, cause: string }[]} jobs
+ * The PR comment for a head's labelled jobs, or null when every job has flaky triage's comment instead.
+ * @param {string} head @param {{ name: string, label: string, cause: string, covered: boolean }[]} jobs
  */
 export function commentBody(head, jobs) {
   return [

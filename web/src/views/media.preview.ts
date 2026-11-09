@@ -227,7 +227,7 @@ export async function previewMediaFile(url: string): Promise<Response | null> {
 }
 
 /**
- * Points every fixture /media/ src and poster at its drawn file. `window.previewMediaDrawn` resolves once every swap
+ * Points every fixture /media/ src and poster at its drawn file. `window.previewMediaDrawn()` resolves once every swap
  * begun so far is done, so a layout check waits for the drawn stills rather than the fixture src that fails before them.
  */
 export function drawPreviewMedia(): void {

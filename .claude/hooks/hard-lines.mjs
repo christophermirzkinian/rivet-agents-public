@@ -431,7 +431,7 @@ const DEEP_REASON =
 // assignment before it, nothing in it runs as code
 // (`<(…)`, a shell's, eval's or group's script), every mention sits in a word or a here-string/heredoc of one of
 // those commands, a word that mentions it holds no `$(…)` (the read around one may be wrong), and gh's subcommand
-// and verb are literal. A `$(cat <<'EOF' … EOF)` commit message passes.
+// and verb are literal. A `$(cat <<'EOF' … EOF)` commit message passes. `merge-pr.mjs` names no merge: it is the door.
 const UNRESOLVED_REASON =
   "This line mentions a merge (`gh pr merge`, a REST or GraphQL merge) in a form the hook cannot read plainly, so it is refused: run plain commands, with text that mentions a merge kept in a quoted argument or a quoted heredoc of git, gh, echo, cat or grep.";
 const MERGE_TEXT = /pulls\/[^/\s]+\/merge\b|mergepullrequest|enablepullrequestautomerge/;
@@ -542,8 +542,8 @@ const MERGE_PATH = /(?:^|\/)pulls\/[^/\s]+\/merge(?:[/?#]|$)/;
 
 /** parse(), or null for a command nested past MAX_DEPTH. */
 function readable(command) {
-  // One read per command line: the hard lines and the nudges share it, so the 2-second budget is the whole hook's, not
-  // one per caller.
+  // One read per command line: the robot rule, the hard lines and the nudges share it, so the 2-second budget is the
+  // whole hook's, not one per caller.
   if (lastRead?.command === command) return lastRead.commands;
   lastRead = { command, commands: read(command) };
   return lastRead.commands;

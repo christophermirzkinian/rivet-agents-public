@@ -5,7 +5,7 @@
 //
 // It counts browsers, not processes (one browser is several, and only its main process has no --type=), and only
 // this chat's: below this Claude process, or left running with their working folder in this chat's worktree, since a
-// `( … ) &` that outlives its shell is reparented away from Claude.
+// `( … ) &` that outlives its shell is reparented away from Claude and that was the incident's shape.
 //
 // What it cannot see: browsers started and closed inside one foreground command, because it only looks between
 // commands. So before a command runs it also reads the text for the two ways a chat asks for many at once.

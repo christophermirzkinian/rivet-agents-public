@@ -84,7 +84,7 @@ export async function workRepo(deps, worker) {
       return repos.size === 1 ? [...repos][0] : repos.size ? undefined : known(worker.repo);
     }
   } catch {
-    // Unread: the server falls back to the worktree's repo and says it is a guess.
+    // Unread: the server's box falls back to the worktree's repo and says it is a guess.
   }
   return undefined;
 }

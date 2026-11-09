@@ -123,7 +123,7 @@ export function encodeProjectPath(p) {
 }
 
 /**
- * @typedef {{ repo: string, chat?: string, seen: string }} Label
+ * @typedef {{ repo: string, chat: string, seen: string }} Label
  * @typedef {Record<string, Label>} Labels keyed by project folder name
  */
 

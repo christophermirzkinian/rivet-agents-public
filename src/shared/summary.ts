@@ -92,7 +92,7 @@ export function isStaleComing(item: ComingItem, now = Date.now()): boolean {
   return (comingQuietMs(item, now) ?? 0) >= COMING_STALE_MS;
 }
 
-/** A working chat, Rivet left out: the Feed and Progress count these. */
+/** A working chat, Rivet left out: the Town's pill, place chips and hut signs, the Feed and Progress all count these. */
 export function isWorking(worker: Worker): boolean {
   return worker.state === "working" && !worker.rivet;
 }
@@ -301,7 +301,7 @@ export function movingAsk(ask: Ask, readings: MovingReadings, now: number): bool
   return ask.stage === "deploying" && readings.merged.some((pr) => sameRepo(pr.repo, repo) && ask.prs.includes(pr.number) && now - Date.parse(pr.at) < MERGE_MOVING_MS);
 }
 
-/** A record Rivet's own can hold: an Ops record it is on, or a pick-up waiting on a time, that is not Coming's. */
+/** A record Rivet's own can hold: an Ops record he is on, or a pick-up waiting on a time, that is not Coming's. */
 export function ownRecord(status: OpsStatus): boolean {
   if (status.kind === "coming") return false;
   return status.state === "backlog" ? !!status.askedForTimeAt : underWay(status);

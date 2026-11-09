@@ -15,7 +15,7 @@ export function summaryNow({ store, schedules, now, workers, ops }: Pick<RouteDe
   try {
     statuses = store.listOpsStatuses();
   } catch {
-    // No status records yet: nothing is timed.
+    // No status records yet: nothing is timed, nothing fixed today.
   }
   const { queue, prs, merged } = stageReadings(store, ops.get("github"), ops.get("merged"), at);
   return summarize({

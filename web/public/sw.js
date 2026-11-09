@@ -1,5 +1,5 @@
 /*
- * Rivet service worker: push and the share target.
+ * Rivet service worker: push and the share target, after hoo/client/public/sw.js.
  * It caches no app files and answers no fetch but a share's POST, so the app is
  * never pinned to an old bundle and an authed /api response is never served stale.
  */

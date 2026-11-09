@@ -15,7 +15,7 @@ executed without step-by-step supervision.
 
 ## Context is your constraint
 
-You start with a fresh context. You see only what the brief contains: not the
+You start with a fresh context. You see only what the brief contains — not the
 conversation that led here, not the files the orchestrator already read. If the
 brief is thin, say so in your response rather than answering confidently from an
 incomplete picture. A wrong answer delivered fluently is the worst thing you can

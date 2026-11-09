@@ -46,7 +46,7 @@ export const WRITE_TIMEOUT_MS = 30_000;
 /** An upload's deadline: half a minute plus a second per 64 KB, so a slow line still gets a 25 MB file up. */
 export const uploadTimeoutMs = (bytes: number) => 30_000 + Math.ceil(bytes / 65_536) * 1000;
 
-/** A signal that aborts at `ms`, or when `outer` does; `timedOut` tells the two apart, `done` stops the clock. */
+/** A signal that aborts at `ms`, or when `outer` does; `timedOut()` tells the two apart, `done()` stops the clock. */
 export function deadline(ms: number, outer?: AbortSignal) {
   const controller = new AbortController();
   let late = false;
@@ -212,7 +212,7 @@ export const pushTest = () => call<{ sent: number; removed: number; skipped?: st
 
 export const getWorkers = () => call<WorkersResponse>("GET", "/api/workers");
 export const getSummary = () => call<Summary>("GET", "/api/summary");
-/** What you used, counted for one device. */
+/** More › What you used, counted for one device. */
 export const getUsageReport = (device: UsageDevice) => call<UsageReport>("GET", `/api/usage/report?device=${device}`);
 /** Retire? or Rework? tapped: the server makes the card. */
 export const askUsage = (id: string, ask: UsageAsk, device: UsageDevice) => call<{ card: string }>("POST", "/api/usage/ask", { id, ask, device });

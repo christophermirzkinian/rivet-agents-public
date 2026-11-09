@@ -142,7 +142,7 @@ export function redactNode(desc: string, body: string): { desc: string; body: st
   return kept;
 }
 
-/** A dot's name as the map shows it: kept only when no reading of it would change. */
+/** A dot's name as the map shows it ("live" dropped): kept only when no reading of it would change. */
 export function redactLabel(label: string): string {
   return flagged([label], [mindMarksGone(label)]).size ? CUT : label;
 }

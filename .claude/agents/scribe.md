@@ -14,7 +14,7 @@ picture.
 
 **Stop and report back instead of guessing** whenever the task turns out to need a
 judgment call about how the code behaves. Describing behavior that you have not
-verified is worse than returning an incomplete document. Documentation that is
+verified is worse than returning an incomplete document — documentation that is
 confidently wrong outlives the session and misleads the next reader.
 
 ## Writing
