@@ -1,11 +1,12 @@
 import { collectHome, haBaseUrl, haJson, homeFile, readHaToken, readHomeSettings } from "../ops/home.mjs";
 
 // The Home page's buttons. The page sends a button id; the only calls made are the service and entity that id names in
-// the user's home.json, read at the press. An id not in the file is refused without touching Home Assistant.
+// the user's home.json, read at the press. An id not in the file is refused without touching Home Assistant, and so is a
+// press on an entity Home Assistant reports unavailable: the page says at once that nothing changed.
 
 /** @typedef {import("./index.mjs").ActionContext} ActionContext */
 /** @typedef {import("./index.mjs").ActionResult} ActionResult */
-/** @typedef {"not_set_up" | "unknown_button" | "home_assistant"} Failure */
+/** @typedef {"not_set_up" | "unknown_button" | "home_assistant" | "offline"} Failure */
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PRESS_BUDGET_MS = 12_000;
@@ -30,9 +31,14 @@ export function createHomeFamily(options = {}) {
     const cache = { token: await readHaToken(deps.exec, Math.min(5_000, left())) };
     if (!cache.token) return { ok: false, error: "not_set_up" };
     const [domain, service] = button.service.split(".");
+    const ha = { fetch: deps.fetch, exec: deps.exec, haUrl };
+    // "unavailable" is Home Assistant's word for a device it can't reach. "unknown" is not: a scene or a script that has
+    // never run reads that. A state read that fails stops nothing; the press itself says whether Home Assistant is there.
+    const now = await haJson(ha, cache, `/api/states/${button.entity_id}`, { timeoutMs: Math.min(4_000, left()) }).catch(() => null);
+    if (now?.state === "unavailable") return { ok: false, error: "offline" };
     try {
       const body = { ...button.data, entity_id: button.entity_id };
-      await haJson({ fetch: deps.fetch, exec: deps.exec, haUrl }, cache, `/api/services/${domain}/${service}`, { method: "POST", body, timeoutMs: Math.min(8_000, left()) });
+      await haJson(ha, cache, `/api/services/${domain}/${service}`, { method: "POST", body, timeoutMs: Math.min(8_000, left()) });
       return { ok: true };
     } catch {
       return { ok: false, error: "home_assistant" };

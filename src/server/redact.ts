@@ -83,8 +83,9 @@ export type MediaAt = (path: readonly string[]) => boolean;
 const NO_MEDIA: MediaAt = () => false;
 /** A board's: the `sha256` of each file in a card's `media`, which writeBoard finds in the store. */
 export const BOARD_MEDIA: MediaAt = (path) => path[0] === "needs" && path[1] === "media" && path.at(-1) === "sha256";
-/** Say's: its photos and its video. */
-export const SAY_MEDIA: MediaAt = (path) => path.length === 1 && (path[0] === "images" || path[0] === "video");
+/** Say's: its photos, its video and its PDF's sha256. */
+export const SAY_MEDIA: MediaAt = (path) =>
+  (path.length === 1 && (path[0] === "images" || path[0] === "video")) || (path.length === 2 && path[0] === "files" && path[1] === "sha256");
 /**
  * Where in a body a string is a name another system gives by design, which the redactor can read as a token, and the
  * redactor that reads it instead of `redactText`.

@@ -198,6 +198,50 @@ describe("share a reply", () => {
     for (const fn of listeners.thread ?? []) fn({ data: JSON.stringify({ id: "c1", project: null }) });
   });
 
+  it("keeps a PDF in a personal conversation in the app: its viewer offers Download, never Share", async () => {
+    const { closeLightbox } = await import("../web/src/views/lightbox.js");
+    history[1] = { ...history[1]!, files: [{ sha256: "4".repeat(64), name: "Pitch deck.pdf", bytes: 90_000 }] };
+    const tools = async () => {
+      root.querySelector<HTMLAnchorElement>('.chat-msg[data-id="h2"] .chat-file')!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
+      const labels = [...document.querySelectorAll<HTMLButtonElement>(".lightbox .lightbox-share")].map((one) => one.getAttribute("aria-label") ?? one.textContent);
+      closeLightbox();
+      await settle();
+      return labels;
+    };
+    chat.mount(root);
+    await settle();
+    expect(await tools()).toEqual(["Download Pitch deck.pdf", "Share Pitch deck.pdf"]);
+    for (const fn of listeners.thread ?? []) fn({ data: JSON.stringify({ id: "c1", project: "personal" }) });
+    await settle();
+    expect(await tools()).toEqual(["Download Pitch deck.pdf"]);
+    for (const fn of listeners.thread ?? []) fn({ data: JSON.stringify({ id: "c1", project: null }) });
+  });
+
+  it("shares nothing from a PDF viewer left open while its conversation turned personal", async () => {
+    const { closeLightbox } = await import("../web/src/views/lightbox.js");
+    history[1] = { ...history[1]!, files: [{ sha256: "4".repeat(64), name: "Pitch deck.pdf", bytes: 90_000 }] };
+    vi.mocked(fetch).mockImplementation(async (input) =>
+      String(input).startsWith("/media/") ? new Response(new Blob(["%PDF-1.4\n"], { type: "application/pdf" }), { status: 200, headers: { "content-type": "application/pdf" } }) : fakeFetch(input),
+    );
+    useShare(() => Promise.resolve());
+    Object.defineProperty(navigator, "canShare", { value: () => true, configurable: true, writable: true });
+    chat.mount(root);
+    await settle();
+    root.querySelector<HTMLAnchorElement>('.chat-msg[data-id="h2"] .chat-file')!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
+    await settle();
+    const shareTool = document.querySelector<HTMLButtonElement>('.lightbox [aria-label="Share Pitch deck.pdf"]')!;
+    expect(shareTool.hidden).toBe(false);
+    for (const fn of listeners.thread ?? []) fn({ data: JSON.stringify({ id: "c1", project: "personal" }) });
+    await settle();
+    shareTool.click();
+    await settle();
+    expect(share).not.toHaveBeenCalled();
+    expect(shareTool.isConnected).toBe(false);
+    expect(document.querySelector(".lightbox")!.textContent).toContain("This conversation is personal now: it stays in the app.");
+    closeLightbox();
+    for (const fn of listeners.thread ?? []) fn({ data: JSON.stringify({ id: "c1", project: null }) });
+  });
+
   it("puts Share on Rivet's replies only", async () => {
     chat.mount(root);
     await settle();

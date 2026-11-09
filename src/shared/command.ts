@@ -3,7 +3,7 @@ import type { ScreenItem } from "./screen-view.js";
 import { z } from "zod";
 
 import type { AskCreate } from "./asks.js";
-import { CHAT_PATTERN, fileRefsSchema, ID_PATTERN, MAX_CHAT_IMAGES, type FileRef } from "./board.js";
+import { CHAT_PATTERN, fileRefsSchema, ID_PATTERN, MAX_CHAT_IMAGES, PDF_NAME_PATTERN, type FileRef } from "./board.js";
 import type { JobAction } from "./jobs.js";
 import { RIVET_NAME } from "./names.js";
 import { OPS_STATUS_KEY_PATTERN } from "./ops-status.js";
@@ -112,6 +112,8 @@ export const logsLeaseSchema = z.object({ repo, chat }).strict();
 
 /** The photos one Rivet answer may carry. */
 export const MAX_SAY_IMAGES = 3;
+/** The PDFs one Rivet answer may carry (say.mjs --file). */
+export const MAX_SAY_FILES = 1;
 
 /**
  * `POST /api/bridge/say`: Rivet's answer in the app chat. Its photos and video are shas already in the media store
@@ -125,6 +127,15 @@ export const saySchema = z
     replyTo: z.string().regex(ID_PATTERN).optional(),
     images: z.array(image).min(1).max(MAX_SAY_IMAGES).optional(),
     video: image.optional(),
+    /**
+     * A PDF (say.mjs --file) by sha256, already in the media store as application/pdf, under its own file name
+     * (PDF_NAME_PATTERN). A chat line only: a card carries documents through rivet card --file.
+     */
+    files: z
+      .array(z.object({ sha256: image, name: z.string().regex(PDF_NAME_PATTERN) }).strict())
+      .min(1)
+      .max(MAX_SAY_FILES)
+      .optional(),
     /** Starts a conversation of its own (say.mjs --new), titled `title` when given. */
     new: z.literal(true).optional(),
     title: z.string().trim().min(1).max(MAX_SAY_TITLE).optional(),
@@ -147,7 +158,10 @@ export const saySchema = z
   })
   .strict()
   .refine((value) => new Set(value.images).size === (value.images?.length ?? 0), "an image is attached twice")
-  .refine((value) => (value.text ?? "").trim().length > 0 || value.images !== undefined || value.video !== undefined || value.ack !== undefined, "text must not be blank")
+  .refine(
+    (value) => (value.text ?? "").trim().length > 0 || value.images !== undefined || value.video !== undefined || value.files !== undefined || value.ack !== undefined,
+    "text must not be blank",
+  )
   .refine(
     ({ ack, replyTo, ...rest }) => ack === undefined || (replyTo !== undefined && Object.values(rest).every((one) => one === undefined)),
     "an ack replies to a message and carries nothing else",
@@ -158,7 +172,8 @@ export const saySchema = z
   .refine((value) => (value.pr === undefined && value.repo === undefined) || (value.card === true && value.replyTo !== undefined), "a PR goes on an outcome card (card with replyTo)")
   .refine((value) => value.repo === undefined || value.pr !== undefined, "a repo names the PR's repo: give pr")
   .refine((value) => (value.tag === undefined && value.thread === undefined) || isSayCard(value), "a tag or thread goes on a card")
-  .refine((value) => value.schedule === undefined || (value.replyTo === undefined && !value.new), "a schedule goes on an update card");
+  .refine((value) => value.schedule === undefined || (value.replyTo === undefined && !value.new), "a schedule goes on an update card")
+  .refine((value) => value.files === undefined || !isSayCard(value), "a file goes on a chat reply or a new conversation, not a card");
 
 /** A say that becomes a card: an update card replying to nothing that starts no conversation, or a --card outcome. */
 export function isSayCard(say: { replyTo?: string; new?: true; card?: true }): boolean {
@@ -277,6 +292,9 @@ export interface AuditEntry {
   detail?: ActionDetail;
 }
 
+/** A document on a chat message: the owner's as attached, Rivet's PDF with its size in bytes from the media store. */
+export type ChatFile = FileRef & { bytes?: number };
+
 export interface ChatMessage {
   id: string;
   from: "owner" | "rivet";
@@ -296,8 +314,8 @@ export interface ChatMessage {
   images?: string[];
   /** Rivet's attached mp4, served at /media/<sha256>. */
   video?: string;
-  /** Attached documents, served at /media/<sha256>. */
-  files?: FileRef[];
+  /** Attached documents, served at /media/<sha256>; Rivet's (say.mjs --file) carry their size. */
+  files?: ChatFile[];
   /** The id of the first message of its thread (src/shared/threads.ts); its own id when it starts one. */
   threadId?: string;
   /** A card answer's message: the card it answered (its id is the reply's). */

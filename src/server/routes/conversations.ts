@@ -325,7 +325,7 @@ export function registerConversations(
         fits(commands.repliedIn(reply.id)) ??
         fits(commands.filedLike(matchOf(card))?.thread) ??
         reply.id;
-      commands.addChatMessage({ id: reply.id, from: "owner", text: answerText(reply), at: reply.at, images: chatImages(reply), card: reply.itemId, cardTitle: reply.itemTitle, thread });
+      commands.addChatMessage({ id: reply.id, from: "owner", text: answerText(reply), at: reply.at, images: chatImages(reply), files: reply.files, card: reply.itemId, cardTitle: reply.itemTitle, thread });
       if (!ownsNoCard(thread)) commands.fileCard({ card: reply.itemId, thread, via: "answer", ...keyOf(card), at: reply.at });
     }
     if (thread === reply.id && !(existing && commands.threadFiled(reply.id))) {

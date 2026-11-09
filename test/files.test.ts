@@ -543,6 +543,9 @@ describe("Rivet's fetch", () => {
     const rev = await revOf(server.base, cookie, "pr2022-checkout");
     const reply = (await (await post("/api/replies", { clientId: clientId(), itemId: "pr2022-checkout", decision: "comment", rev, files: [text] })).json()) as Reply;
     expect(await (await board(`/api/board/attachments/${reply.id}`)).json()).toMatchObject({ id: reply.id, files: [{ name: "notes.txt" }], images: [] });
+    // His card answer in the chat carries its file too, as it carries its photos.
+    const chatPage = (await (await fetch(`${server.base}/api/chat`, { headers: { cookie } })).json()) as { messages: { id: string; files?: FileRef[] }[] };
+    expect(chatPage.messages.find((one) => one.id === reply.id)?.files?.map((file) => file.name)).toEqual(["notes.txt"]);
 
     expect((await fetch(`${server.base}/api/board/attachments/${lead.id}`, { headers: { cookie } })).status).toBe(401);
     expect((await board(`/api/board/attachments/${lead.id}`, BRIDGE_TOKEN)).status).toBe(401);

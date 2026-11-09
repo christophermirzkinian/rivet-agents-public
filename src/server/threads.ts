@@ -293,7 +293,7 @@ export function summarize(row: ThreadRow, ask: Ask | undefined, now: Date, facts
     count: row.count,
     lastAt: row.lastAt,
     lastFrom: row.lastFrom,
-    lastText: oneLine(row.lastText) || "Photo",
+    lastText: oneLine(row.lastText) || (row.lastFiles ? "File" : "Photo"),
     ...(ask ? { ask: ask.id } : {}),
   };
 }

@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { readClip, uploadClips } from "../bridge/lib/board-client.mjs";
+import { documentName, MAX_MEDIA_BYTES, readClip, uploadClips } from "../bridge/lib/board-client.mjs";
 import { makeExec, readToken, resolveBin, serverOrigin } from "../bridge/lib/config.mjs";
 import { folderRepo, prRepo } from "../bridge/lib/folder-repo.mjs";
 import { preflight } from "../bridge/lib/media-preflight.mjs";
@@ -15,7 +15,7 @@ const REPO_RE = /^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/;
 
 const USAGE = `Answer you in the Rivet Agents app: a chat reply, a card you must confirm, or an update card.
 
-  node say.mjs --text "<message>" [--reply-to <message id>] [--image <abs path> ...] [--video <abs path>]
+  node say.mjs --text "<message>" [--reply-to <message id>] [--image <abs path> ...] [--video <abs path>] [--file <abs path>.pdf]
   node say.mjs --stdin [--reply-to <message id>]       read the message from stdin
   node say.mjs --image <abs path> [--reply-to <message id>]   a photo alone
   node say.mjs --new [--title "<title>"] --text "<message>"   start a conversation of its own
@@ -51,6 +51,11 @@ A later --ack replaces it. Use it for acks; real answers stay --text.
 are (ffmpeg), uploaded to the board's media store, then sent; never send a disk
 path, your phone cannot open one. Text is optional when there is a photo or video.
 
+--file puts one PDF there (25 MB at most, its first bytes %PDF-): a tile with its
+name and size that opens in the app's PDF viewer, where you can share or save
+it. It goes on a chat line (--reply-to or --new), not a card; a card carries
+documents through rivet card --file. Text is optional with it too.
+
 The app shows the message, reads it aloud when the speaker is on, and pushes it
 to your phone when the app is closed.
 
@@ -73,7 +78,7 @@ function fail(msg, code = 1) {
 
 /** @param {string[]} argv */
 export function parseArgs(argv) {
-  /** @type {{ text?: string, replyTo?: string, stdin?: boolean, help?: boolean, images: string[], video?: string, new?: boolean, title?: string, card?: boolean, tag?: string, thread?: string, ack?: string, pr?: number, repo?: string }} */
+  /** @type {{ text?: string, replyTo?: string, stdin?: boolean, help?: boolean, images: string[], video?: string, file?: string, new?: boolean, title?: string, card?: boolean, tag?: string, thread?: string, ack?: string, pr?: number, repo?: string }} */
   const o = { images: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -91,6 +96,13 @@ export function parseArgs(argv) {
         if (!/^[1-9]\d{0,8}$/.test(value)) throw new Error("--pr takes a PR number");
         o.pr = Number(value);
       }
+    }
+    else if (a === "--file") {
+      const value = argv[++i];
+      if (value === undefined) throw new Error(`${a} needs a value`);
+      if (o.file !== undefined) throw new Error("one --file at most");
+      if (!path.isAbsolute(value) || !/\.pdf$/i.test(value)) throw new Error("--file takes the absolute path of a pdf");
+      o.file = value;
     }
     else if (a === "--text" || a === "--reply-to" || a === "--image" || a === "--video" || a === "--title" || a === "--tag" || a === "--thread" || a === "--ack") {
       const value = argv[++i];
@@ -120,7 +132,7 @@ export function parseArgs(argv) {
   if (o.title !== undefined && (!o.title.trim() || o.title.length > MAX_SAY_TITLE)) throw new Error(`--title is 1 to ${MAX_SAY_TITLE} characters`);
   if (o.ack !== undefined) {
     if (o.replyTo === undefined) throw new Error("--ack goes on a message: give --reply-to <id>");
-    if (o.stdin || o.text !== undefined || o.images.length || o.video !== undefined || o.card || o.tag !== undefined || o.thread !== undefined)
+    if (o.stdin || o.text !== undefined || o.images.length || o.video !== undefined || o.file !== undefined || o.card || o.tag !== undefined || o.thread !== undefined)
       throw new Error("--ack is a status line: --reply-to and --ack, nothing else");
     if (!o.ack.trim() || o.ack.trim().length > MAX_SAY_ACK) throw new Error(`--ack is 1 to ${MAX_SAY_ACK} characters`);
   }
@@ -129,6 +141,8 @@ export function parseArgs(argv) {
   if (o.repo !== undefined && o.pr === undefined) throw new Error("--repo names the PR's repo: give --pr <n>");
   // An outcome (--card) takes no tag or thread, but an older call that passes them still posts it: the server drops them.
   const card = o.card || (o.replyTo === undefined && !o.new);
+  if (card && o.file !== undefined && o.ack === undefined)
+    throw new Error("--file goes on a chat line (--reply-to or --new), not a card; a card carries a PDF through rivet card --file");
   if (!card && (o.tag !== undefined || o.thread !== undefined))
     throw new Error("--tag and --thread go on an update card (progress, with no --reply-to); a reply to you takes neither");
   if (o.tag !== undefined && (!o.tag.trim() || o.tag.trim().length > MAX_CARD_TAG)) throw new Error(`--tag is 1 to ${MAX_CARD_TAG} characters`);
@@ -141,18 +155,21 @@ export function parseArgs(argv) {
  * the media store.
  * @param {string} text
  * @param {string | undefined} replyTo
- * @param {{ role: "image" | "video", sha256: string }[]} clips
+ * @param {{ role: "image" | "video" | "file", sha256: string, file?: string }[]} clips
  * @param {{ new?: boolean, title?: string, card?: boolean, tag?: string, thread?: string, ack?: string, pr?: number, repo?: string }} [start] say.mjs --new [--title], --card [--pr [--repo]], --tag, --thread, --ack
  */
 export function sayBody(text, replyTo, clips, start = {}) {
   // Two paths to the same bytes are one photo.
   const images = [...new Set(clips.filter((clip) => clip.role === "image").map((clip) => clip.sha256))];
   const video = clips.find((clip) => clip.role === "video")?.sha256;
+  // The PDF under its own name, kept to the letters the server's pdfFileName keeps.
+  const files = clips.filter((clip) => clip.role === "file").map((clip) => ({ sha256: clip.sha256, name: documentName(clip.file ?? "document.pdf") }));
   return {
     ...(text ? { text } : {}),
     ...(replyTo ? { replyTo } : {}),
     ...(images.length ? { images } : {}),
     ...(video ? { video } : {}),
+    ...(files.length ? { files } : {}),
     ...(start.new ? { new: true } : {}),
     ...(start.new && start.title ? { title: start.title.trim() } : {}),
     ...(start.card ? { card: true } : {}),
@@ -161,6 +178,22 @@ export function sayBody(text, replyTo, clips, start = {}) {
     ...(start.thread ? { thread: start.thread.trim() } : {}),
     ...(start.ack ? { ack: start.ack.trim() } : {}),
   };
+}
+
+/**
+ * The PDF --file names, read for upload: refused unless it is a file of 1 byte to 25 MB whose first bytes are %PDF-.
+ * @param {string} file
+ */
+export function readPdf(file) {
+  let stat;
+  try {
+    stat = fs.statSync(file);
+  } catch {
+    throw new Error(`${path.basename(file)}: file not found`);
+  }
+  if (!stat.isFile()) throw new Error(`${path.basename(file)}: not a file`);
+  if (stat.size > MAX_MEDIA_BYTES) throw new Error(`${path.basename(file)}: ${(stat.size / 1024 / 1024).toFixed(1)} MB, over the 25 MB limit`);
+  return readClip(file, { ".pdf": "application/pdf" });
 }
 
 async function readStdin() {
@@ -181,7 +214,7 @@ async function main() {
   } catch (err) {
     return fail(`${/** @type {Error} */ (err).message}\n\n${USAGE}`, 2);
   }
-  const media = o.images.length > 0 || o.video !== undefined;
+  const media = o.images.length > 0 || o.video !== undefined || o.file !== undefined;
   if (o.help || (!o.stdin && o.text === undefined && !media && o.ack === undefined)) {
     process.stdout.write(USAGE);
     return o.help ? 0 : 2;
@@ -201,7 +234,7 @@ async function main() {
   /** @type {import("../bridge/lib/media-preflight.mjs").MediaFile[]} */
   const files = o.images.map((file) => ({ role: /** @type {const} */ ("still"), file }));
   if (o.video !== undefined) files.push({ role: "video", file: o.video });
-  if (media) {
+  if (files.length) {
     const bin = (/** @type {string} */ name) => {
       try {
         return resolveBin(name);
@@ -213,7 +246,16 @@ async function main() {
     for (const problem of problems) process.stderr.write(`say: ${problem}\n`);
     if (!ok) return fail("media refused; nothing was sent", 5);
   }
+  /** @type {{ role: "image" | "video" | "file", file: string, type: string, bytes: Buffer, sha256: string }[]} */
   const clips = files.map(({ role, file }) => ({ role: role === "video" ? "video" : "image", file, ...readClip(file) }));
+  // A PDF is read, not played: readClip checks its size and %PDF- start, and the server checks both again.
+  if (o.file !== undefined) {
+    try {
+      clips.push({ role: "file", file: o.file, ...readPdf(o.file) });
+    } catch (err) {
+      return fail(`${/** @type {Error} */ (err).message}; nothing was sent`, 5);
+    }
+  }
 
   const origin = serverOrigin(process.env.RIVET_URL || undefined);
   const token = await readToken(exec, "RIVET_BOARD_TOKEN");

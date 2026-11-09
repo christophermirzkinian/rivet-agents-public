@@ -3,7 +3,7 @@ import "./command.css";
 import type { AudioClip, CardFile, Media, MediaRef } from "../../../src/shared/board.js";
 import { FULL_SCREEN_EVENTS, fullScreenElement, h, svg } from "../dom.js";
 import { autoplay, unwatch, type AutoPlayer } from "./autoplay.js";
-import { fetchDocument, openDocument, previewKind } from "./documents.js";
+import { fetchDocument, fileSize, openDocument, previewKind } from "./documents.js";
 import { openImages } from "./lightbox.js";
 
 // Before/after clips on a feed card: side by side on a wide screen, one at a time
@@ -201,8 +201,6 @@ function build(media: Media, title: string): HTMLElement {
   return root;
 }
 
-const sizeText = (bytes: number) => (bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`);
-
 /**
  * A document on the card: Open shows it in the app's own viewer (PDFs, Markdown, text and JSON; any other type says
  * it can't be shown), whose Download and Share save or send it. In the installed iPhone app the session cookie lives
@@ -224,7 +222,7 @@ function fileButtons(file: CardFile, signal: AbortSignal, live: () => boolean): 
         "span",
         { class: "media-file-top" },
         h("span", { class: "media-file-action" }, previewable ? `Open ${extension}` : `Download ${extension}`),
-        h("span", { class: "media-file-size" }, sizeText(file.bytes)),
+        h("span", { class: "media-file-size" }, fileSize(file.bytes)),
       ),
       h("span", { class: "media-file-name" }, file.name),
     ),

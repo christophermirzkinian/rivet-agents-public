@@ -983,6 +983,50 @@ describe("media", () => {
     expect((await fetch(`${server.base}/media/${sha(PNG2)}`, { headers: { cookie } })).status).toBe(200);
   });
 
+  it("puts Rivet's uploaded PDF in his chat answer under its own name and size, served behind the session as a sandboxed inline PDF", async () => {
+    const say = (body: unknown) => fetch(`${server.base}/api/bridge/say`, { method: "POST", headers: bearer(BOARD_TOKEN), body: JSON.stringify(body) });
+    const PDF = Buffer.concat([Buffer.from("%PDF-1.7\n", "latin1"), Buffer.alloc(3000, 0x20)]);
+    // The upload refuses a file that only claims to be a PDF.
+    const fake = Buffer.concat([Buffer.from("<html>", "latin1"), Buffer.alloc(100, 0x20)]);
+    expect((await put(sha(fake), fake, "application/pdf")).status).toBe(415);
+    expect((await put(sha(PDF), PDF, "application/pdf", {})).status).toBe(401);
+    expect((await put(sha(PDF), PDF, "application/pdf")).status).toBe(201);
+    expect((await put(sha(PNG), PNG, "image/png")).status).toBe(201);
+    const pdf = (name = "Quarterly report.pdf") => ({ sha256: sha(PDF), name });
+    // Refused: a sha not in the store, a photo as the PDF, a name that is not a safe .pdf, two, and a PDF on a card.
+    expect((await say({ files: [{ sha256: "d".repeat(64), name: "x.pdf" }], new: true })).status).toBe(400);
+    expect((await say({ files: [{ sha256: sha(PNG), name: "x.pdf" }], new: true })).status).toBe(400);
+    expect((await say({ files: [pdf("../x.pdf")], new: true })).status).toBe(400);
+    expect((await say({ files: [pdf("x.png")], new: true })).status).toBe(400);
+    expect((await say({ files: [pdf(), pdf("b.pdf")], new: true })).status).toBe(400);
+    expect((await say({ text: "Quarterly report", files: [pdf()] })).status).toBe(400);
+    expect((await say({ text: "Quarterly report", files: [pdf()], replyTo: "m1", card: true })).status).toBe(400);
+
+    const sent = await say({ files: [pdf("Quarterly report (v2).pdf")], new: true });
+    expect(sent.status).toBe(201);
+    const message = (await sent.json()) as ChatMessage;
+    expect(message).toMatchObject({ from: "rivet", text: "", files: [{ sha256: sha(PDF), name: "Quarterly report (v2).pdf", bytes: PDF.length }] });
+    const page = (await (await fetch(`${server.base}/api/chat`, { headers: { cookie } })).json()) as ChatPage;
+    expect(page.messages.find((one) => one.id === message.id)?.files).toEqual([{ sha256: sha(PDF), name: "Quarterly report (v2).pdf", bytes: PDF.length }]);
+    // A PDF-only conversation is named and previewed for its document, not as a photo.
+    const rows = (await (await fetch(`${server.base}/api/conversations`, { headers: { cookie } })).json()) as { conversations: { id: string; title: string; lastText: string }[] };
+    expect(rows.conversations.find((one) => one.id === message.id)).toMatchObject({ title: "Document", lastText: "File" });
+
+    const href = `${server.base}/media/${sha(PDF)}?name=${encodeURIComponent("Quarterly report (v2).pdf")}`;
+    expect((await fetch(href)).status).toBe(401);
+    const served = await fetch(href, { headers: { cookie } });
+    expect(served.status).toBe(200);
+    expect(served.headers.get("content-type")).toBe("application/pdf");
+    expect(served.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(served.headers.get("content-security-policy")).toBe("sandbox; default-src 'none'; frame-ancestors 'none'");
+    expect(served.headers.get("content-disposition")).toBe(`inline; filename="Quarterly report (v2).pdf"; filename*=UTF-8''Quarterly%20report%20%28v2%29.pdf`);
+    expect(Buffer.from(await served.arrayBuffer()).equals(PDF)).toBe(true);
+    // A name with header-breaking characters is re-sanitised when served.
+    const hostile = await fetch(`${server.base}/media/${sha(PDF)}?name=${encodeURIComponent('a"\r\nX-Evil: 1.pdf')}`, { headers: { cookie } });
+    expect(hostile.headers.get("content-disposition")).toMatch(/^inline; filename="a X-Evil 1\.pdf"/);
+    expect(hostile.headers.get("x-evil")).toBeNull();
+  });
+
   it("a say replying to nothing is a Got it card: its photos and video the card's media, its tag leading its title; no chat line, the board's push", async () => {
     const say = (body: unknown) => fetch(`${server.base}/api/bridge/say`, { method: "POST", headers: bearer(BOARD_TOKEN), body: JSON.stringify(body) });
     for (const [bytes, type] of [[PNG, "image/png"], [MP4, "video/mp4"]] as const) expect((await put(sha(bytes), bytes, type)).status).toBe(201);

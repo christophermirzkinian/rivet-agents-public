@@ -163,6 +163,33 @@ describe("chat tab", () => {
     expect(document.querySelector(".lightbox")).toBeNull();
   });
 
+  it("shows Rivet's PDF as a tile with its icon, own name and size, which opens it in the PDF viewer", async () => {
+    const pdf = "3".repeat(64);
+    messages = [
+      {
+        id: "p",
+        from: "rivet",
+        text: "Your quarterly report.",
+        at: "2026-09-28T01:00:00.000Z",
+        files: [{ sha256: pdf, name: "Quarterly report (v2).pdf", bytes: 482_000 }],
+      },
+    ];
+    chat.mount(root);
+    await settle();
+    const link = root.querySelector<HTMLAnchorElement>(".chat-files .chat-file")!;
+    expect(link.getAttribute("href")).toBe(`/media/${pdf}?name=${encodeURIComponent("Quarterly report (v2).pdf")}`);
+    expect(link.querySelector(".file-chip-sized .file-chip-icon svg text")!.textContent).toBe("PDF");
+    expect(link.querySelector(".file-chip-name")!.textContent).toBe("Quarterly report (v2).pdf");
+    expect(link.querySelector(".file-chip-size")!.textContent).toBe("PDF · 471 KB");
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 });
+    link.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(document.querySelector(".lightbox-title")!.textContent).toBe("Quarterly report (v2).pdf");
+    await settle();
+    expect(vi.mocked(fetch).mock.calls.map(([input]) => String(input))).toContain(`/media/${pdf}?name=${encodeURIComponent("Quarterly report (v2).pdf")}`);
+    chat.unmount();
+  });
+
   it("shows the thread with delivery states and sends a message", async () => {
     messages = [
       { id: "a", from: "owner", text: "What's next?", at: "2026-09-28T01:00:00.000Z", status: "replied" },

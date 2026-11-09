@@ -1,9 +1,9 @@
 import { FILE_EXTENSIONS, fileTypeOf, isAvType, isBigType, MAX_AV_BYTES, MAX_CHAT_FILES, type FileRef } from "../../../src/shared/board.js";
-import { MAX_CHAT_IMAGES, MAX_FILE_BYTES } from "../../../src/shared/command.js";
+import { MAX_CHAT_IMAGES, MAX_FILE_BYTES, type ChatFile } from "../../../src/shared/command.js";
 import { ApiError, uploadFile, uploadImage } from "../api.js";
 import { button, describe, h, keepFocus, svg } from "../dom.js";
 import { prepareImage } from "../image.js";
-import { fetchDocument, openDocument, previewKind } from "./documents.js";
+import { fetchDocument, fileSize, openDocument, previewKind } from "./documents.js";
 import { openImages } from "./lightbox.js";
 
 // The attach button and its preview, for the Chat composer, the card answer sheet and the desktop comment box alike:
@@ -46,17 +46,28 @@ export function sortPick(file: File): { kind: "photo" } | { kind: "file" } | { k
 const DOC =
   '<svg viewBox="0 0 24 24"><path d="M6 3h8l5 5v13H6z" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/><path d="M14 3v5h5M9 13h7M9 17h7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>';
 
-/** A document as the strip and the bubbles show it: its icon and its name. */
-export function fileChip(name: string): HTMLElement {
+/** A PDF: the page with its corner turned and a PDF band across it. */
+const PDF_DOC =
+  '<svg viewBox="0 0 24 24"><path d="M6 3h8l5 5v13H6z" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/><path d="M14 3v5h5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/><rect x="2" y="11" width="16" height="8" rx="1.5" fill="#d93025"/><text x="10" y="17.4" text-anchor="middle" font-family="system-ui, sans-serif" font-size="6.4" font-weight="800" fill="#fff">PDF</text></svg>';
+
+/**
+ * A document as the strip and the bubbles show it: its icon and its name, and under the name its size when it is known
+ * (Rivet's PDF, say.mjs --file).
+ */
+export function fileChip(name: string, bytes?: number): HTMLElement {
   // The stem gives way to an ellipsis; the extension always shows, so a long name still says what kind of file it is.
   const dot = name.lastIndexOf(".");
   const stem = dot > 0 ? name.slice(0, dot) : name;
   const extension = dot > 0 ? name.slice(dot) : "";
+  const pdf = extension.toLowerCase() === ".pdf";
+  const shown = h("span", { class: "file-chip-name" }, h("span", { class: "file-chip-stem" }, stem), extension ? h("span", { class: "file-chip-ext" }, extension) : null);
   return h(
     "span",
-    { class: "file-chip", attrs: { title: name } },
-    svg(DOC, "file-chip-icon"),
-    h("span", { class: "file-chip-name" }, h("span", { class: "file-chip-stem" }, stem), extension ? h("span", { class: "file-chip-ext" }, extension) : null),
+    { class: `file-chip${bytes === undefined ? "" : " file-chip-sized"}`, attrs: { title: name } },
+    svg(pdf ? PDF_DOC : DOC, "file-chip-icon"),
+    bytes === undefined
+      ? shown
+      : h("span", { class: "file-chip-text" }, shown, h("span", { class: "file-chip-size" }, `${pdf ? "PDF" : extension.slice(1).toUpperCase() || "File"} · ${fileSize(bytes)}`)),
   );
 }
 
@@ -377,15 +388,16 @@ export function imageButton(srcs: string[], index: number, img: HTMLImageElement
  * A sent document. One the app can show (PDF, Markdown, text, JSON) opens in its viewer; any other, or a click
  * that asks for a new tab, follows the link, which downloads it or opens it in the browser.
  */
-export function fileLink(file: FileRef): HTMLElement {
+export function fileLink(file: ChatFile, share: () => boolean = () => true): HTMLElement {
   const href = `${mediaSrc(file.sha256)}?name=${encodeURIComponent(file.name)}`;
   const type = fileTypeOf(file.name);
-  const link = h("a", { class: "chat-file", attrs: { href, target: "_blank", rel: "noopener", "data-use": "chat.msg.file" } }, fileChip(file.name));
+  const sized = typeof file.bytes === "number" && file.bytes > 0 ? file.bytes : undefined;
+  const link = h("a", { class: "chat-file", attrs: { href, target: "_blank", rel: "noopener", "data-use": "chat.msg.file" } }, fileChip(file.name, sized));
   if (type && previewKind(type)) {
     link.addEventListener("click", (event) => {
       if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       event.preventDefault();
-      openDocument(file.name, type, () => fetchDocument(href, file.name, type));
+      openDocument(file.name, type, () => fetchDocument(href, file.name, type), share);
     });
   }
   return link;

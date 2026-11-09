@@ -42,7 +42,7 @@ export interface HomeResponse {
 export const homeControlSchema = z.object({ button: buttonId }).strict();
 
 /** Why the bridge did not press a button. */
-export const HOME_CONTROL_ERRORS = ["not_set_up", "unknown_button", "home_assistant"] as const;
+export const HOME_CONTROL_ERRORS = ["not_set_up", "unknown_button", "home_assistant", "offline"] as const;
 export type HomeControlError = (typeof HOME_CONTROL_ERRORS)[number];
 
 export const homeControlAckSchema = z

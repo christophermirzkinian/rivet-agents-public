@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { MAX_SAY_IMAGES, parseArgs, sayBody } from "../../scripts/say.mjs";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+import { MAX_SAY_IMAGES, parseArgs, readPdf, sayBody } from "../../scripts/say.mjs";
 
 // Rivet's photos and video in a chat answer: say.mjs takes them by absolute path and sends their store shas.
 
@@ -105,4 +109,47 @@ test("say --ack sets the status line on your message: a reply id and the words, 
   assert.throws(() => parseArgs(["--reply-to", "m1", "--ack", "x", "--text", "y"]), /nothing else/);
   assert.throws(() => parseArgs(["--reply-to", "m1", "--ack", "x", "--card"]), /nothing else/);
   assert.throws(() => parseArgs(["--reply-to", "m1", "--ack", " "]), /--ack is 1 to 120/);
+});
+
+test("say --file takes one absolute pdf on a chat line, never on a card or with an ack", () => {
+  assert.deepEqual(parseArgs(["--reply-to", "m1", "--file", "/a/Quarterly report.PDF"]), { images: [], replyTo: "m1", file: "/a/Quarterly report.PDF" });
+  assert.deepEqual(parseArgs(["--new", "--text", "Your quarterly report", "--file", "/a/p.pdf"]), { images: [], new: true, text: "Your quarterly report", file: "/a/p.pdf" });
+  assert.throws(() => parseArgs(["--reply-to", "m1", "--file", "p.pdf"]), /absolute path of a pdf/);
+  assert.throws(() => parseArgs(["--reply-to", "m1", "--file", "/a/p.png"]), /absolute path of a pdf/);
+  assert.throws(() => parseArgs(["--reply-to", "m1", "--file", "/a/p.pdf.exe"]), /absolute path of a pdf/);
+  assert.throws(() => parseArgs(["--reply-to", "m1", "--file", "/a/p.pdf", "--file", "/a/q.pdf"]), /one --file at most/);
+  assert.throws(() => parseArgs(["--reply-to", "m1", "--file"]), /--file needs a value/);
+  assert.throws(() => parseArgs(["--text", "update", "--file", "/a/p.pdf"]), /not a card/);
+  assert.throws(() => parseArgs(["--reply-to", "m1", "--card", "--text", "x", "--file", "/a/p.pdf"]), /not a card/);
+  assert.throws(() => parseArgs(["--reply-to", "m1", "--ack", "on it", "--file", "/a/p.pdf"]), /--ack is a status line/);
+});
+
+test("say --file reads only a real PDF of 25 MB at most, and sends it under its own name", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "say-pdf-"));
+  try {
+    const good = path.join(dir, "Quarterly: report.pdf");
+    fs.writeFileSync(good, "%PDF-1.7\nhello");
+    const read = readPdf(good);
+    assert.equal(read.type, "application/pdf");
+    assert.match(read.sha256, /^[0-9a-f]{64}$/);
+    const renamed = path.join(dir, "page.pdf");
+    fs.writeFileSync(renamed, "<html><script>x</script>");
+    assert.throws(() => readPdf(renamed), /not a PDF/);
+    const empty = path.join(dir, "empty.pdf");
+    fs.writeFileSync(empty, "");
+    assert.throws(() => readPdf(empty), /empty or over 25 MB/);
+    const big = path.join(dir, "big.pdf");
+    fs.writeFileSync(big, "%PDF-");
+    fs.truncateSync(big, 25 * 1024 * 1024 + 1);
+    assert.throws(() => readPdf(big), /over the 25 MB limit/);
+    assert.throws(() => readPdf(path.join(dir, "missing.pdf")), /file not found/);
+    assert.throws(() => readPdf(dir + "/"), /not a file|file not found/);
+
+    assert.deepEqual(sayBody("", "m1", [{ role: "file", sha256: read.sha256, file: good }]), {
+      replyTo: "m1",
+      files: [{ sha256: read.sha256, name: "Quarterly report.pdf" }],
+    });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
