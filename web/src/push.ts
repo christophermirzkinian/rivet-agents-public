@@ -125,7 +125,7 @@ async function removeSubscription(subscription: PushSubscription, current: () =>
   await api.pushUnsubscribe(subscription.endpoint).catch(() => undefined);
   if (current() && turnedOff()) {
     // A browser operation cannot be aborted by our UI deadline. Keep the repair
-    // attached to the real completion, even after step has released the lock.
+    // attached to the real completion, even after step() has released the lock.
     let released = false;
     try {
       await step(subscription.unsubscribe().then(async () => {

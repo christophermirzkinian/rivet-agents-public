@@ -36,7 +36,7 @@ function claimKey(path, globs) {
   return null;
 }
 
-// The same glob rules as src/shared/claims.ts.
+// The same glob rules as rivet/src/shared/claims.ts.
 function globRegExp(pattern) {
   const parts = pattern.split("/").map((part, index, all) => {
     if (part === "**") return index === all.length - 1 ? ".*" : "(?:[^/]+/)*";

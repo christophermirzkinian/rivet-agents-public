@@ -156,7 +156,7 @@ export function parseArgs(argv) {
  * @param {string} text
  * @param {string | undefined} replyTo
  * @param {{ role: "image" | "video" | "file", sha256: string, file?: string }[]} clips
- * @param {{ new?: boolean, title?: string, card?: boolean, tag?: string, thread?: string, ack?: string, pr?: number, repo?: string }} [start] say.mjs --new [--title], --card [--pr [--repo]], --tag, --thread, --ack
+ * @param {{ new?: boolean, title?: string, card?: boolean, tag?: string, thread?: string, schedule?: string, ack?: string, pr?: number, repo?: string }} [start] say.mjs --new [--title], --card [--pr [--repo]], --tag, --thread, --schedule, --ack
  */
 export function sayBody(text, replyTo, clips, start = {}) {
   // Two paths to the same bytes are one photo.

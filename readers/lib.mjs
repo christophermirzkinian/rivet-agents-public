@@ -62,7 +62,7 @@ export async function runReader(job, main) {
  * A runner for one reader: the titler's CLI flags with this job's effort and system prompt, and its output capped.
  * It runs on the user's own `claude` login.
  * @param {string} bin absolute path of `claude`
- * @param {{ effort: "low" | "medium", system: string, timeoutMs?: number }} opts
+ * @param {{ job: string, effort: "low" | "medium", system: string, timeoutMs?: number }} opts
  * @returns {(input: string) => Promise<string>}
  */
 export function makeReaderRun(bin, { effort, system, timeoutMs = CLI_TIMEOUT_MS }) {
@@ -787,7 +787,7 @@ export async function upsertMarkedComment({ gh, repo, pr, head, body: wanted, ma
   };
 
   let comments = await list();
-  // Nothing left to say (a re-run passed, or the item expired): ours go, open PR or not, before
+  // Nothing left to say (a re-run passed, flaky triage has it, or the item expired): ours go, open PR or not, before
   // evidence or after. A deletion adds no activity.
   if (!body) {
     const old = ours(comments);
@@ -803,7 +803,7 @@ export async function upsertMarkedComment({ gh, repo, pr, head, body: wanted, ma
   if (current?.state !== "open" || current?.head?.sha !== head) return "stale";
   const mine = ours(comments)[0];
   if (mine?.body === body) return "same";
-  // The body goes on stdin, never in gh's arguments (bridge/lib/config.mjs Exec).
+  // The body goes on stdin, never in gh's arguments (rivet/bridge/lib/config.mjs Exec).
   const input = JSON.stringify({ body });
   if (mine) await gh(["api", "-X", "PATCH", `repos/${repo}/issues/comments/${mine.id}`, "--input", "-"], input);
   else await gh(["api", "-X", "POST", `repos/${repo}/issues/${pr}/comments`, "--input", "-"], input);

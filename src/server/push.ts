@@ -412,7 +412,7 @@ export class PushService {
   }
 
   /**
-   * Any other push: the same sender, under the same quiet hours.
+   * Any other push (ops alerts, briefings): the same sender, under the same quiet hours.
    * With a key, a push already held or sent under it is skipped as a duplicate.
    * `unsent` pruned ops alerts are stated in the push, or in the digest when quiet hours hold it.
    */

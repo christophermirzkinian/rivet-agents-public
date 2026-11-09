@@ -4,7 +4,7 @@ import type { Schedule } from "./schedules.js";
 // The Plan page's Next list: dated things coming up, each with when it happens.
 // Only dated items: a job with no next run, or an always-on one, is not here.
 
-/** A schedule's next run shows this far ahead. */
+/** A schedule's next run shows this far ahead; an expiry, this far. */
 export const NEXT_SCHEDULE_DAYS = 7;
 export const MAX_NEXT_ROWS = 20;
 

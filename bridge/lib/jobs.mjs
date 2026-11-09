@@ -49,7 +49,7 @@ const isRecord = (v) => typeof v === "object" && v !== null && !Array.isArray(v)
 const plain = (v, max) => (typeof v === "string" && v.trim() !== "" && v.trim().length <= max && !CONTROL.test(v) ? v.trim() : null);
 
 /**
- * @typedef {{ script: string, onRed: "card" | "look" } | { probe: "up", app: string, onRed: "card" }} JobCheck
+ * @typedef {{ script: string, where: "mac" | "remote", onRed: "card" | "look" } | { probe: "up", app: string, where: "mac", onRed: "card" }} JobCheck
  * @typedef {{ name: string, words: string, kind: "check" | "task", check?: JobCheck, cron: string }} JobActionSpec
  * @typedef {{ op: "create" | "pause" | "resume" | "run" | "remove", id: string, spec?: JobActionSpec }} JobAction
  * @typedef {{ status: "succeeded" | "refused" | "failed", reason: string }} JobResult
@@ -168,7 +168,7 @@ const READ_JSON = /^[A-Za-z]+(,[A-Za-z]+)*$/;
 const GIT_REF_OR_PATH = /^[A-Za-z0-9_.][A-Za-z0-9_.\/~^:@{}+-]{0,199}$/;
 
 /**
- * The command `job read` runs, or an Error saying why not.
+ * The command `rivet job read` runs, or an Error saying why not.
  * @param {string[]} argv @returns {{ tool: "gh" | "git", args: string[], env: Record<string, string> }}
  */
 export function readCommand(argv) {

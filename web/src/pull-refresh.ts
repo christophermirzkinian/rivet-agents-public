@@ -40,7 +40,7 @@ export interface PullRefresh {
 
 /**
  * Pull `scroller` down from its top and let go past the threshold to run
- * `refresh` once. The spinner sits in `host`, just above the scroller.
+ * `refresh()` once. The spinner sits in `host`, just above the scroller.
  */
 export function attachPullRefresh(scroller: HTMLElement, host: HTMLElement, refresh: () => unknown): PullRefresh {
   const spinner = h("div", { class: "ptr", attrs: { "aria-hidden": "true" } }, h("span", { class: "ptr-ring" }));
@@ -49,7 +49,7 @@ export function attachPullRefresh(scroller: HTMLElement, host: HTMLElement, refr
   let start: { x: number; y: number } | null = null;
   let state: "idle" | "maybe" | "pulling" | "refreshing" = "idle";
   let distance = 0;
-  /** Bumped by reset, so a refresh that ends afterwards leaves the rest state alone. */
+  /** Bumped by reset(), so a refresh that ends afterwards leaves the rest state alone. */
   let generation = 0;
 
   const draw = (d: number, animate: boolean) => {

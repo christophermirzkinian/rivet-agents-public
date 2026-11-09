@@ -78,7 +78,7 @@ function recognitionClass(from: Window): RecognitionClass | null {
 }
 
 // WebKit marks the page as using the microphone from a recognition's first audio until
-// the document that made it goes away: abort and the end never clear it
+// the document that made it goes away: abort() and the end never clear it
 // (Document::setActiveSpeechRecognition), so Safari on the Mac can show the mic on
 // after Off. Each dictation makes its recognitions in a hidden frame of its own and
 // removes the frame at Off, which ends them and clears it.
@@ -260,7 +260,7 @@ let watching = false;
 
 function keepAwake(field: Field, on: boolean): void {
   if (on) {
-    // Added on first use: the module also loads where there is no document (tests).
+    // Added on first use: the module also loads where there is no document (the Town's tests).
     if (!watching) {
       watching = true;
       document.addEventListener("visibilitychange", () => awakeFor && askAwake());

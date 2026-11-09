@@ -35,7 +35,7 @@ export interface PlanRow {
   picking: boolean;
   /** A record past its first time, in the words an ask's row uses (lateWords); null while it keeps its time. */
   late: string | null;
-  /** No time yet, or moved twice, as an ask row's `counted`. */
+  /** No time yet, or moved twice: what the Progress mark counts, as an ask row's `counted`. */
   counted: boolean;
   /** The Ops item a break nobody has taken stands for: you may dismiss it. */
   item: FailedItem | null;

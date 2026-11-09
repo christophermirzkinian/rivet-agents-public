@@ -1,4 +1,4 @@
-/* Ops tab, briefing, search and settings sheets. Tones: ok, warn, bad, info, idle. */
+/* Ops tab, Yard briefing, search and settings sheets. Tones: ok, warn, bad, info, idle. */
 
 .t-ok {
   --tone: var(--yes);

@@ -344,8 +344,8 @@ export async function collectGithub({ exec, ghBin, now, repos = repoAllowlist(),
       const runs = [];
       // Its timer runs, and the manual ones on the default branch: a fix proved by a re-run shows
       // at once, not at the next timer. Pull request, push and other-branch runs never count, nor
-      // manual runs of a workflow that takes inputs: those can run less than the timer does,
-      // so their green proves nothing about it.
+      // manual runs of a workflow that takes inputs: those can run less than the timer does
+      // (ci.yml's idle feeder skips suites), so their green proves nothing about it.
       const manual = defaultBranch && parsed.triggers.includes("workflow_dispatch") && !parsed.dispatchInputs && !parsed.unsure;
       const queries = ["event=schedule", ...(manual ? [`event=workflow_dispatch&branch=${encodeURIComponent(defaultBranch)}`] : [])];
       /** @type {string[]} */

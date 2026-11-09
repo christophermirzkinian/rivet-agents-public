@@ -11,7 +11,7 @@
 # is empty.
 #
 # The plist is generated because it must carry absolute paths and a usable PATH: launchd agents start from a near-empty
-# environment, so the PATH in effect at install time is baked in.
+# environment, so the PATH in effect at install time (node, git) is baked in.
 set -euo pipefail
 
 LABEL="dev.rivet-agents.mind"

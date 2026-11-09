@@ -401,7 +401,7 @@ export async function mainView(git, blobs, head, names, log = () => {}) {
  * One nightly pass.
  * @param {{ git: (args: string[], timeoutMs?: number) => Promise<string>, blobs: (oids: string[]) => Promise<Map<string, Buffer | null>>,
  *   run: (input: string) => Promise<string>, spend: Spend, now: () => Date,
- *   log: (event: string, fields?: Record<string, unknown>) => void, memoryDir: string, dir?: string, dryRun?: boolean }} deps
+ *   log: (event: string, fields?: Record<string, unknown>) => void, memoryDir?: string, dir?: string, dryRun?: boolean }} deps
  */
 export async function memoryPass(deps) {
   const { git, run, spend, log, memoryDir, dryRun = false } = deps;

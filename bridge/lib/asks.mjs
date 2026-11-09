@@ -26,7 +26,7 @@ Stages: queued → building → push-queue → review → needs-you → merging 
 |---|---|---|---|---|
 `;
 
-/** A stage name; undefined for anything else. @param {string} word */
+/** A stage name, or a legacy status word as its stage; undefined for anything else. @param {string} word */
 export function askStage(word) {
   return ASK_STAGES.includes(word) ? word : undefined;
 }

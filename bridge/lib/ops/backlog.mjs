@@ -117,7 +117,7 @@ export function parseBacklog(stdout, now, repos) {
 
 /**
  * The snapshot cut to fit `max` bytes, so a pass the server would refuse whole still lands: each repo's newest issues
- * are cut first, then its bugs, then the owner's. The counts stay whole; the sheet shows the rows it has.
+ * are cut first, then its bugs, then Rivet's search, then the owner's. The counts stay whole; the sheet shows the rows it has.
  * @param {{ at: string, repos: any[] }} snapshot @param {number} [max]
  */
 export function fitBacklog(snapshot, max = BACKLOG_MAX_BYTES) {

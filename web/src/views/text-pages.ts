@@ -170,13 +170,13 @@ function blocks(tokens: Token[], parent: Node): void {
 }
 
 /** Past these, Markdown is shown as plain text: marked pads every table row to its header's width while it lexes, on
- * the main thread, so a small file whose table is wide and long could freeze the app before anything shows. */
+ *  the main thread, so a small file whose table is wide and long could freeze the app before anything shows. */
 export const MD_CAP_BYTES = 512 * 1024;
 export const MD_MAX_CELLS = 200_000;
 export const MD_MAX_QUOTE_DEPTH = 4;
 
 /** A line that could be a table's delimiter row (`---|:--:|---`), quote markers and any whitespace allowed. One
- * character class, so the test is linear however the line is built. */
+ *  character class, so the test is linear however the line is built. */
 const DELIMITER_SHAPED = /^[\s>|:-]*$/;
 const QUOTE_PREFIX = /^[\s>]*/;
 

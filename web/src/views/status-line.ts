@@ -26,7 +26,7 @@ export interface StatusPart {
   short: string;
   /** Red only for your own jobs (the Red jobs sheet): breaks are Rivet's job and live on Plan. */
   tone: "ok" | "info" | "warn" | "bad";
-  /** The cards waiting: the way to the Feed, so it stands out. */
+  /** The cards waiting: on the Town it is the way to the Feed, so it stands out. */
   lead?: boolean;
   open(): void;
 }

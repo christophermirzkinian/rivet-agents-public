@@ -44,7 +44,7 @@ function synth(): SpeechSynthesis | null {
     : null;
 }
 
-/** The browser can speak at all; whether it has an accent we use is voiceAvailable. */
+/** The browser can speak at all; whether it has an accent we use is voiceAvailable(). */
 export function canSpeak(): boolean {
   return synth() !== null;
 }

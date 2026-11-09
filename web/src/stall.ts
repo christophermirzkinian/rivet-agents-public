@@ -4,7 +4,7 @@
  */
 export const STALL_MS = 20_000;
 
-/** A signal that aborts after STALL_MS with no `touch`, or when `outer` does; `stalled` tells the two apart. */
+/** A signal that aborts after STALL_MS with no `touch()`, or when `outer` does; `stalled()` tells the two apart. */
 export function stallWatch(outer?: AbortSignal) {
   const controller = new AbortController();
   let stalled = false;

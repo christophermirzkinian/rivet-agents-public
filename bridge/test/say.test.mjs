@@ -7,7 +7,7 @@ import path from "node:path";
 
 import { MAX_SAY_IMAGES, parseArgs, readPdf, sayBody } from "../../scripts/say.mjs";
 
-// Rivet's photos and video in a chat answer: say.mjs takes them by absolute path and sends their store shas.
+// Rivet's photos and video in his chat answer: say.mjs takes them by absolute path and sends their store shas.
 
 test("say takes up to three absolute jpg or png photos and one absolute mp4, text optional", () => {
   assert.deepEqual(parseArgs(["--image", "/a/one.png", "--image", "/a/two.JPG", "--reply-to", "m1"]), {

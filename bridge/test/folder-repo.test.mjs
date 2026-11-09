@@ -50,7 +50,7 @@ test("the folder's repo is read from its origin remote; no checkout or no origin
   assert.equal(await folderRepo(exec, git, checkout("git@github.com:example-org/Other-Repo.git")), "example-org/Other-Repo");
   assert.equal(await folderRepo(exec, git, checkout(undefined)), undefined);
   assert.equal(await folderRepo(exec, git, fs.mkdtempSync(path.join(os.tmpdir(), "folder-repo-"))), undefined);
-  // Never the default repo when the folder's repo is unknown: an origin that is no GitHub URL (its token
+  // Never the main repo by default when the folder's repo is unknown: an origin that is no GitHub URL (its token
   // unechoed), no git, or a git that fails otherwise.
   await assert.rejects(folderRepo(exec, git, checkout("https://" + "tok3n" + "@" + "gitlab.com/x/y.git")), (err) => {
     assert.match(/** @type {Error} */ (err).message, /this folder's origin is not a GitHub URL: give --repo/);

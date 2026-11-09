@@ -8,8 +8,8 @@ import { mindPutSchema } from "../src/shared/mind.js";
 // @ts-expect-error -- a plain .mjs script with no types
 import { BODY_MAX, buildGraph, clean, main, zoneMidnight } from "../scripts/mind-export.mjs";
 
-// The exporter (scripts/mind-export.mjs) on made-up files: what it reads, what it leaves out, and that its output is
-// what PUT /api/bridge/mind takes.
+// The exporter (rivet/scripts/mind-export.mjs) on made-up files: what it reads, what it leaves out, and that its
+// output is what PUT /api/bridge/mind takes.
 
 const NOW = Date.parse("2026-11-03T01:00:00.000Z");
 const TOKEN = `${["gh", "p_"].join("")}${"a1B2".repeat(9)}`;
