@@ -15,6 +15,30 @@ const now = Date.now();
 const ago = (minutes: number) => new Date(now - minutes * 60_000).toISOString();
 const R = "example-org/example-repo";
 
+/** Rivet's PDF (say.mjs --file), served below as a one-page sample so the viewer has something to draw. */
+const PDF_SHA = "5".repeat(64);
+function samplePdf(): Blob {
+  const lines = ["Quarterly report (v2)", "Revenue up 12%", "Costs down 4%", "Margin 31%"];
+  const stream = `BT /F1 22 Tf 60 760 Td 30 TL ${lines.map((line) => `(${line}) Tj T*`).join(" ")} ET`;
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+  ];
+  let body = "%PDF-1.4\n";
+  const offsets = objects.map((object, i) => {
+    const at = body.length;
+    body += `${i + 1} 0 obj\n${object}\nendobj\n`;
+    return at;
+  });
+  const xref = body.length;
+  body += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.map((at) => `${String(at).padStart(10, "0")} 00000 n \n`).join("")}`;
+  body += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return new Blob([body], { type: "application/pdf" });
+}
+
 const say = (id: string, thread: string, minutes: number, text: string, extra: Partial<ChatMessage> = {}): ChatMessage => ({
   id,
   from: "rivet",
@@ -61,9 +85,11 @@ const messages: ChatMessage[] = [
   say("g2", "g1", 59, "Yes. Main is green, the last run took 11 minutes."),
   mine("g3", "g1", 12, "Good. Remind me at 5 about the quote form"),
   say("g4", "g1", 11, "Will do, 5pm."),
+  mine("v1", "v1", 8, "Send me the quarterly report"),
+  say("v2", "v1", 6, "Here it is, v2 with the summary table.", { files: [{ sha256: PDF_SHA, name: "Quarterly report (v2).pdf", bytes: 482_000 }] }),
 ];
 
-const titles: Record<string, string> = { j1: "Demo video",s1: "Top 10 note-taking apps research on iOS and Android", l1: "Lost asks", m1: "Morning", r1: "Colour picker", k1: "Checkout results row", g1: "CI" };
+const titles: Record<string, string> = { v1: "Quarterly report", j1: "Demo video",s1: "Top 10 note-taking apps research on iOS and Android", l1: "Lost asks", m1: "Morning", r1: "Colour picker", k1: "Checkout results row", g1: "CI" };
 const extra: Record<string, Partial<ConversationSummary>> = {
   r1: { links: { prs: ["#42"], chats: ["colour-picker"], tag: "Colours" }, stage: "open", stagePr: "#42", unread: 1 },
   k1: { needsYou: true, phase: "waiting" },
@@ -163,6 +189,7 @@ const passThrough = window.fetch.bind(window);
 window.fetch = async (input, init) => {
   const url = new URL(String(input), location.origin);
   const path = url.pathname;
+  if (path === `/media/${PDF_SHA}`) return new Response(samplePdf(), { headers: { "content-type": "application/pdf" } });
   if (path.startsWith("/media/")) return (await previewMediaFile(path)) ?? passThrough(input, init);
   if (path === "/api/board") return json(board);
   if (path === "/api/workers") return json(workers);

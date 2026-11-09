@@ -576,14 +576,17 @@ export function openVideo(src: string, poster: string | undefined, label: string
 }
 
 /**
- * A document full screen, with Download and Share for the file it shows. `get` fetches it (or hands back the copy
- * already kept), or says why it could not; `build` lays it out.
+ * A document full screen, with Download and Share for the file it shows. `share` says, at open and again at every tap,
+ * whether it may leave the app (an app-only conversation's file may not): no Share when it says no at open, and a tap
+ * after it turns no shares nothing and takes the button away. `get` fetches it (or hands back the copy already kept),
+ * or says why it could not; `build` lays it out.
  */
 function openDocument(
   name: string,
   get: () => Promise<File | string>,
   build: (file: File, signal: AbortSignal) => Promise<LightboxContent>,
   notes: { getting: string; failed: string },
+  share: () => boolean,
 ): void {
   const controller = new AbortController();
   // One download for the viewer, Download and Share; one that failed is tried again by the next tap.
@@ -599,8 +602,17 @@ function openDocument(
   const live = () => !box.closed();
   const say = (text: string) => box.setNote(text);
   const saving = downloadButton({ get: fetchOnce, peek: () => kept, label: `Download ${name}`, noun, live, className: "lightbox-share", say });
-  const sharing = shareButton({ get: fetchOnce, peek: () => kept, label: `Share ${name}`, noun, fallback: "download", live, className: "lightbox-share", say, hint: true });
-  const box = open({ label: name, kind: "document", onClose: () => controller.abort(), tools: [saving.button, sharing.button] });
+  const allowed = () => {
+    if (share()) return true;
+    // Removed, not hidden: .btn's display would show a hidden one.
+    sharing?.button.remove();
+    say(STAYS_IN_APP);
+    return false;
+  };
+  const sharing = share()
+    ? shareButton({ get: fetchOnce, peek: () => kept, label: `Share ${name}`, noun, fallback: "download", live: () => live() && allowed(), className: "lightbox-share", say, hint: true })
+    : null;
+  const box = open({ label: name, kind: "document", onClose: () => controller.abort(), tools: sharing ? [saving.button, sharing.button] : [saving.button] });
   box.setTitle(name);
   box.setNote(notes.getting);
   void (async () => {
@@ -617,8 +629,11 @@ function openDocument(
   })();
 }
 
-/** A PDF's pages full screen. */
-export function openPdf(name: string, get: () => Promise<File | string>): void {
+/** What a document's viewer says when its conversation turned app-only while it was open: Share sends nothing. */
+export const STAYS_IN_APP = "This conversation is personal now: it stays in the app.";
+
+/** A PDF's pages full screen; `share` saying no leaves out Share (see openDocument). */
+export function openPdf(name: string, get: () => Promise<File | string>, share: () => boolean = () => true): void {
   openDocument(
     name,
     get,
@@ -630,16 +645,17 @@ export function openPdf(name: string, get: () => Promise<File | string>): void {
       signal.throwIfAborted();
       return pdfContent(new Uint8Array(data), signal);
     },
-    { getting: "Getting the PDF…", failed: "Could not show the PDF. Share it to open it elsewhere." },
+    { getting: "Getting the PDF…", failed: `Could not show the PDF. ${share() ? "Share" : "Download"} it to open it elsewhere.` },
+    share,
   );
 }
 
 /** A text file full screen: Markdown formatted, anything else as it is, JSON laid out. */
-export function openText(name: string, markdown: boolean, get: () => Promise<File | string>): void {
+export function openText(name: string, markdown: boolean, get: () => Promise<File | string>, share: () => boolean = () => true): void {
   openDocument(name, get, async (file) => (await within(import("./text-pages.js"), VIEWER_LOAD_MS, "Text viewer took too long to load")).textContent(file, markdown), {
     getting: "Getting the file…",
     failed: "Could not show the file.",
-  });
+  }, share);
 }
 
 /** Closes the viewer, if one is open. */

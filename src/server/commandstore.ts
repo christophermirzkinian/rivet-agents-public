@@ -17,6 +17,7 @@ import {
   type ActionKind,
   type ActionStatus,
   type AuditEntry,
+  type ChatFile,
   type ChatMessage,
   type ChatQuote,
   type PostedCard,
@@ -356,9 +357,16 @@ function toMessage(row: Row): ChatMessage {
     Object.assign(message, imageFields(chatImages(request)), request.files ? { files: request.files } : {});
   }
   if (typeof row.media === "string") {
-    const media = JSON.parse(row.media) as { images?: string[]; video?: string; card?: string; posted?: PostedCard; team?: { from: string; to: string } };
+    const media = JSON.parse(row.media) as { images?: string[]; video?: string; files?: ChatFile[]; card?: string; posted?: PostedCard; team?: { from: string; to: string } };
     if (media.team) message.team = { from: media.team.from, to: media.team.to };
-    Object.assign(message, imageFields(media.images ?? []), media.video ? { video: media.video } : {}, media.card ? { card: media.card } : {}, media.posted ? { posted: media.posted } : {});
+    Object.assign(
+      message,
+      imageFields(media.images ?? []),
+      media.video ? { video: media.video } : {},
+      media.files?.length ? { files: media.files } : {},
+      media.card ? { card: media.card } : {},
+      media.posted ? { posted: media.posted } : {},
+    );
   }
   if (typeof row.card_title === "string") message.cardTitle = row.card_title;
   const status = typeof row.status === "string" ? CHAT_STATUS[row.status as ActionStatus] : undefined;
@@ -409,6 +417,8 @@ export interface ThreadRow {
   rootFiles: number;
   lastFrom: ChatMessage["from"];
   lastText: string;
+  /** Rivet's PDFs on the last word (say.mjs --file): a file-only answer reads "File", not "Photo". */
+  lastFiles?: number;
   lastAt: string;
   /** The last word's time: lastFrom, lastText and lastAsks pass over a card shown inline (posted), which is no one's word. */
   lastWordAt: string;
@@ -716,6 +726,8 @@ export class CommandStore {
     quote?: ChatQuote;
     images?: readonly string[];
     video?: string;
+    /** Rivet's PDF (say.mjs --file), with its size. */
+    files?: readonly ChatFile[];
     /** The thread a message that answers nothing joins, instead of starting its own; its own id starts one. */
     thread?: string;
     /** A card answer's card: the message's id is the reply's. */
@@ -728,8 +740,8 @@ export class CommandStore {
     team?: { from: string; to: string };
   }): ChatMessage {
     const media =
-      message.images?.length || message.video || message.card || message.posted || message.team
-        ? JSON.stringify({ images: message.images, video: message.video, card: message.card, cardTitle: message.cardTitle, posted: message.posted, team: message.team })
+      message.images?.length || message.video || message.files?.length || message.card || message.posted || message.team
+        ? JSON.stringify({ images: message.images, video: message.video, files: message.files?.length ? message.files : undefined, card: message.card, cardTitle: message.cardTitle, posted: message.posted, team: message.team })
         : null;
     this.db
       .prepare("INSERT OR IGNORE INTO chat_messages (id, sender, text, at, reply_to, quote_from, quote_text, thread_id, media) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
@@ -1121,7 +1133,8 @@ export class CommandStore {
         `SELECT g.thread_id, g.n, g.last_seq, g.last_owner_at,
                 r.sender AS root_from, SUBSTR(r.text, 1, ?) AS root_text, r.reply_to AS root_reply_to,
                 COALESCE(json_array_length(ra.request, '$.images'), json_array_length(r.media, '$.images'), CASE WHEN json_type(ra.request, '$.image') IS NULL THEN 0 ELSE 1 END) AS root_images,
-                COALESCE(json_array_length(ra.request, '$.files'), 0) AS root_files,
+                COALESCE(json_array_length(ra.request, '$.files'), json_array_length(r.media, '$.files'), 0) AS root_files,
+                COALESCE(json_array_length(l.media, '$.files'), 0) AS last_files,
                 l.sender AS last_from, SUBSTR(l.text, 1, ?) AS last_text, a.at AS last_at, l.at AS word_at,
                 json_extract(l.media, '$.team.from') AS last_team_from, json_extract(l.media, '$.team.to') AS last_team_to,
                 (SUBSTR(RTRIM(l.text, ' ' || char(9) || char(10) || char(13)), -1) = '?'
@@ -1153,6 +1166,7 @@ export class CommandStore {
         lastFrom: row.last_from as ChatMessage["from"],
         // A Team room message names who wrote to whom.
         lastText: typeof row.last_team_from === "string" ? `${row.last_team_from} → ${row.last_team_to as string}: ${row.last_text as string}` : (row.last_text as string),
+        lastFiles: Number(row.last_files ?? 0),
         lastAt: row.last_at as string,
         lastWordAt: row.word_at as string,
         lastAsks: Number(row.last_asks) === 1,

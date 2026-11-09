@@ -114,6 +114,15 @@ describe("the Home page", () => {
     expect(root.querySelector(".ha-note[role=status]")?.textContent).toBe("That button isn't in home.json any more.");
   });
 
+  it("says a press on an offline device changed nothing", async () => {
+    post = () => json({ error: "offline" }, 502);
+    home.mount(root);
+    await flush();
+    buttons()[0]!.click();
+    await flush();
+    expect(root.querySelector(".ha-note[role=status]")?.textContent).toBe("The device is offline, so nothing changed. Check that it has power and is on the network.");
+  });
+
   it("says the bridge is offline once it stops checking in, with no stale tiles or buttons", async () => {
     answer = { snapshot: READING, receivedAt: ago(42) };
     home.mount(root);
@@ -150,7 +159,7 @@ describe("the Home words", () => {
   });
 
   it("say each code plainly, and a code they don't know as a failed try", () => {
-    for (const code of ["bridge_offline", "not_set_up", "unknown_button", "timeout", "too_many_tries", "busy"]) expect(controlWords(code)).not.toBe(controlWords("home_assistant"));
+    for (const code of ["bridge_offline", "not_set_up", "unknown_button", "offline", "timeout", "too_many_tries", "busy"]) expect(controlWords(code)).not.toBe(controlWords("home_assistant"));
     expect(controlWords("anything else")).toBe("Home Assistant couldn't do that. Try again.");
   });
 });

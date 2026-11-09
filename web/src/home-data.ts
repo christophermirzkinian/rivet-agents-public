@@ -51,6 +51,8 @@ export function controlWords(code: string): string {
       return "Home Assistant isn't set up on the bridge yet.";
     case "unknown_button":
       return "That button isn't in home.json any more.";
+    case "offline":
+      return "The device is offline, so nothing changed. Check that it has power and is on the network.";
     case "timeout":
       return "The bridge is still working on it. Check back in a minute.";
     case "too_many_tries":

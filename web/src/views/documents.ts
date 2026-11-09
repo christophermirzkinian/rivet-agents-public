@@ -5,6 +5,10 @@ import { openPdf, openText } from "./lightbox.js";
 
 export type PreviewKind = "pdf" | "markdown" | "text";
 
+/** A document's size as a card's file and a chat line's PDF show it: "482 KB", "3.4 MB". */
+export const fileSize = (bytes: number): string =>
+  bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+
 /** How the viewer shows a document of `type`, or null when it cannot. */
 export function previewKind(type: string): PreviewKind | null {
   if (type === "application/pdf") return "pdf";
@@ -42,9 +46,9 @@ export async function fetchDocument(src: string, name: string, type: string, sig
   }
 }
 
-/** Opens a document the viewer can show (see previewKind); does nothing for any other. */
-export function openDocument(name: string, type: string, get: () => Promise<File | string>): void {
+/** Opens a document the viewer can show (see previewKind); does nothing for any other. `share` saying no: Download only. */
+export function openDocument(name: string, type: string, get: () => Promise<File | string>, share: () => boolean = () => true): void {
   const kind = previewKind(type);
-  if (kind === "pdf") openPdf(name, get);
-  else if (kind) openText(name, kind === "markdown", get);
+  if (kind === "pdf") openPdf(name, get, share);
+  else if (kind) openText(name, kind === "markdown", get, share);
 }

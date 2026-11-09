@@ -6,7 +6,7 @@ import { z } from "zod";
 import { DECISION, OUTCOME_OPTIONS, QUESTION } from "../../shared/answers.js";
 import { MAX_ASKS } from "../../shared/asks.js";
 import { MAX_OPS_STATUSES } from "../../shared/ops-status.js";
-import { comingChatRepo, NO_REPO, ID_PATTERN, mediaShas, type ComingItem, type Reply } from "../../shared/board.js";
+import { comingChatRepo, NO_REPO, ID_PATTERN, mediaShas, pdfFileName, type ComingItem, type Reply } from "../../shared/board.js";
 import {
   actionAckSchema,
   chatCreateSchema,
@@ -518,13 +518,22 @@ export function register(router: Router): void {
     requireBearer(request, config.boardTokenDigest);
     const parsed = parseRedacted(saySchema, await readJson(request, SMALL_BODY_MAX), SAY_MEDIA);
     if (!parsed.success)
-      throw new HttpError(400, "invalid say: text up to 4000 characters, 1 to 3 images and a video by sha256, replyTo a message id; text, an image or a video, or an ack with replyTo alone");
+      throw new HttpError(
+        400,
+        "invalid say: text up to 4000 characters, 1 to 3 images, a video and a PDF (on a chat line, not a card) by sha256, replyTo a message id; text, an image, a video or a PDF, or an ack with replyTo alone",
+      );
     const at = now().toISOString();
     const { replyTo, images, video, title } = parsed.data;
     // Only what say.mjs uploaded to the store, of the type the bubble shows it as.
     const typeOf = (sha: string) => commands.getMedia(sha)?.type;
     if (images?.some((sha) => !(IMAGE_TYPES as readonly string[]).includes(typeOf(sha) ?? ""))) throw new HttpError(400, "an image is not a jpg or png in the media store; upload it first");
     if (video !== undefined && typeOf(video) !== "video/mp4") throw new HttpError(400, "the video is not an mp4 in the media store; upload it first");
+    // A PDF (say.mjs --file): stored as one, its name re-sanitised, its size the store's.
+    const files = parsed.data.files?.map((file) => {
+      const stored = commands.getMedia(file.sha256);
+      if (stored?.type !== "application/pdf") throw new HttpError(400, "the file is not a PDF in the media store; upload it first");
+      return { sha256: file.sha256, name: pdfFileName(file.name), bytes: stored.size };
+    });
     // Chats never read the Team room: a reply's quote and an ack's answer show the message replied to, so the board token
     // answers only your own room lines, which reached Rivet as your messages.
     if (replyTo !== undefined && commands.threadOf(replyTo) === TEAM_ROOM_ID && commands.getChatMessage(replyTo)?.from !== "owner")
@@ -560,7 +569,7 @@ export function register(router: Router): void {
     // confirm: a decision card in Needs you, Yes, keep it or Change it, beside a line opening it.
     // A reply in words that asks you something ("…?") is a question card you answer by
     // typing, beside the same line, so nothing he must decide lives only in Chat.
-    const asking = replyTo !== undefined && !isSayCard(parsed.data) && !parsed.data.new && !images && !video && thread !== UPDATES_ID && text.endsWith("?");
+    const asking = replyTo !== undefined && !isSayCard(parsed.data) && !parsed.data.new && !images && !video && !files && thread !== UPDATES_ID && text.endsWith("?");
     // A card never lives in the Team room, nor opens from it: there it is a card like any other, with no line in the room.
     const inRoom = thread === TEAM_ROOM_ID;
     const cardHome = (via === "mention" || replyTo !== undefined) && !inRoom ? thread : null;
@@ -574,7 +583,7 @@ export function register(router: Router): void {
     if (thread === UPDATES_ID) commands.ensureUpdates(at);
     const message = card
       ? commands.addChatMessage({ id, from: "rivet", text: `Card: ${card.title} ›`, at, replyTo, quote, thread, card: card.id })
-      : commands.addChatMessage({ id, from: "rivet", text, at, replyTo, quote, images, video, thread });
+      : commands.addChatMessage({ id, from: "rivet", text, at, replyTo, quote, images, video, files, thread });
     if (title !== undefined) commands.patchThread(id, { title }, at);
     // A new conversation answers none of your lines.
     if (!parsed.data.new) for (const id of commands.markReplied(parsed.data.replyTo, at)) broadcast(commands.getChatMessage(id)!);

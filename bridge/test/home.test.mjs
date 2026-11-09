@@ -80,7 +80,13 @@ function context(fetch, exec = fakeKeychain()) {
   const logs = [];
   return { logs, ctx: { deps: { fetch, exec, origin: "http://rivet.test", token: BRIDGE, log: (event, fields) => logs.push({ event, ...fields }) } } };
 }
-const ROUTES = { "GET /api/states": json(STATES), "PUT /api/bridge/home": json({ ok: true }), "POST /api/bridge/home/control-ack": json({ ok: true }) };
+const ROUTES = {
+  "GET /api/states": json(STATES),
+  "GET /api/states/light.example_lamp": json({ entity_id: "light.example_lamp", state: "off", attributes: {} }),
+  "GET /api/states/switch.example_fan": json({ entity_id: "switch.example_fan", state: "on", attributes: {} }),
+  "PUT /api/bridge/home": json({ ok: true }),
+  "POST /api/bridge/home/control-ack": json({ ok: true }),
+};
 const acks = (fetch) => fetch.calls.filter((one) => one.key === "POST /api/bridge/home/control-ack").map((one) => JSON.parse(one.init.body));
 const haCalls = (fetch) => fetch.calls.filter((one) => one.url.startsWith(HA));
 const until = (ms = 13_000) => Date.now() + ms;
@@ -237,7 +243,7 @@ test("a press calls the file's service for its entity, then sends a fresh readin
   assert.deepEqual(JSON.parse(call.init.body), { brightness: 120, entity_id: "light.example_lamp" });
   assert.equal(call.init.headers.authorization, `Bearer ${HA_TOKEN}`);
   assert.equal(call.init.redirect, "error");
-  assert.deepEqual(fetch.calls.map((one) => one.key), ["POST /api/services/light/turn_on", "GET /api/states", "PUT /api/bridge/home", "POST /api/bridge/home/control-ack"]);
+  assert.deepEqual(fetch.calls.map((one) => one.key), ["GET /api/states/light.example_lamp", "POST /api/services/light/turn_on", "GET /api/states", "PUT /api/bridge/home", "POST /api/bridge/home/control-ack"]);
   assert.deepEqual(acks(fetch), [{ id: ID, ok: true }]);
   assert.deepEqual(logs, [{ event: "home-control-done", id: ID }]);
 });
@@ -302,6 +308,26 @@ test("no token is not_set_up, and a Home Assistant failure is home_assistant wit
   await family.handle("home-control", { id: ID, button: buttons[0].id, until: until() }, context(fetch).ctx);
   assert.deepEqual(acks(fetch), [{ id: ID, ok: false, error: "home_assistant" }]);
   assert.equal(fetch.calls.some((one) => one.key === "PUT /api/bridge/home"), false);
+});
+
+test("a press on an entity Home Assistant reports unavailable is refused as offline, and its service is never called", async () => {
+  const file = settings();
+  const { buttons } = await readHomeSettings(file);
+  const family = createHomeFamily({ haUrl: HA, file });
+  const lamp = (state) => json({ entity_id: "light.example_lamp", state, attributes: {} });
+  const fetch = fakeFetch({ ...ROUTES, "GET /api/states/light.example_lamp": lamp("unavailable"), "POST /api/services/light/turn_on": json([]) });
+  const { ctx, logs } = context(fetch);
+  assert.equal(await family.handle("home-control", { id: ID, button: buttons[0].id, until: until() }, ctx), "dropped");
+  assert.deepEqual(acks(fetch), [{ id: ID, ok: false, error: "offline" }]);
+  assert.equal(fetch.calls.some((one) => one.key.startsWith("POST /api/services/")), false);
+  assert.equal(fetch.calls.some((one) => one.key === "PUT /api/bridge/home"), false);
+  assert.deepEqual(logs, [{ event: "home-control-failed", id: ID, error: "offline" }]);
+  // "unknown" is a real state for a scene or a script that has never run, and a failed state read stops nothing.
+  for (const answer of [lamp("unknown"), json({}, 500)]) {
+    const goes = fakeFetch({ ...ROUTES, "GET /api/states/light.example_lamp": answer, "POST /api/services/light/turn_on": json([]) });
+    await family.handle("home-control", { id: ID, button: buttons[0].id, until: until() }, context(goes).ctx);
+    assert.deepEqual(acks(goes), [{ id: ID, ok: true }]);
+  }
 });
 
 test("a press the server has nearly stopped waiting for is not run, and a bad event id is dropped unanswered", async () => {

@@ -104,6 +104,7 @@ describe("the Home snapshot", () => {
     expect(homeControlSchema.safeParse({ button: "light.turn_on" }).success).toBe(false);
     expect(homeControlSchema.safeParse({ button: BUTTON, entity_id: "light.example_lamp" }).success).toBe(false);
     expect(homeControlAckSchema.safeParse({ id: ID, ok: false, error: "unknown_button" }).success).toBe(true);
+    expect(homeControlAckSchema.safeParse({ id: ID, ok: false, error: "offline" }).success).toBe(true);
     expect(homeControlAckSchema.safeParse({ id: ID, ok: false, error: "refused by the service" }).success).toBe(false);
     expect(homeControlAckSchema.safeParse({ id: ID, ok: true, host: "x" }).success).toBe(false);
   });

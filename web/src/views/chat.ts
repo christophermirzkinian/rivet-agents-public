@@ -1351,7 +1351,12 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
         ? h(
             "ul",
             { class: "chat-files" },
-            ...message.files.map((file) => h("li", {}, fileLink(file))),
+            // An app-only conversation's file stays in the app: its viewer offers Download, never Share, asked again at a tap.
+            ...message.files.map((file) => h("li", {}, fileLink(file, () => {
+              // The message as it stands now: a thread event replaces it with its new project.
+              const now = messages.get(message.id) ?? message;
+              return !appOnly(now) && !inRoom(now);
+            }))),
           )
         : null,
       posted

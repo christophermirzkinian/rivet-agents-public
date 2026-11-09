@@ -1874,6 +1874,30 @@ a {
   flex: none;
 }
 
+/* Rivet's PDF in a bubble: a bigger icon, the name over its size. */
+.file-chip-sized {
+  gap: 12px;
+  padding: 6px 0;
+}
+
+.file-chip-sized .file-chip-icon {
+  width: 40px;
+  height: 40px;
+}
+
+.file-chip-text {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.file-chip-size {
+  color: var(--muted);
+  font-size: var(--fs-m);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
 /* Documents stack in rows under the photo strip. */
 .attach-docs {
   display: grid;

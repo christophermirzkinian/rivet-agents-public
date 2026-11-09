@@ -11,7 +11,8 @@ Nothing here runs, and nothing leaves your Mac, until you set it up.
 - **The bridge** sends the server a short list of readings and button labels. Your Home Assistant token stays on the
   bridge and never reaches the server or the phone.
 - **A button press** sends only the button's id. The bridge looks it up in `home.json` and calls that service for that
-  entity. An id not in the file is refused, so the phone can never ask for anything you did not list.
+  entity. An id not in the file is refused, so the phone can never ask for anything you did not list. A press on an
+  entity Home Assistant reports `unavailable` is refused too, so the page tells you nothing changed.
 
 ## Set it up
 
@@ -52,6 +53,8 @@ Already running Home Assistant? Skip to step 3.
 - **Not set up:** no `RIVET_HA_URL`, or nothing has come from the bridge yet. The page shows how to set it up.
 - **Can't reach Home Assistant:** the address or the token is wrong, or Home Assistant is down.
 - **Bridge offline:** the Mac is asleep or the bridge has stopped. A button press is refused until it is back.
+- **Device offline:** Home Assistant reports the button's entity `unavailable`, so nothing was pressed. Check the device
+  has power and is on the network.
 
 ## Remove it
 
