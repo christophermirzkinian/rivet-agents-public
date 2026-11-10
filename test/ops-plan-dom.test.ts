@@ -106,6 +106,8 @@ beforeEach(() => {
   root = document.createElement("div");
   document.body.replaceChildren(root);
   app.tab = "progress";
+  // All clear is said only once the board has loaded.
+  setComing([]);
 });
 
 afterEach(() => {
@@ -619,7 +621,8 @@ describe("Plan after round 1", () => {
     show(fixture());
     opsData.error = "Ops could not load: the server did not answer.";
     mountPlan();
-    expect(root.querySelector(".plan-note")?.textContent).toBe("Ops could not load: the server did not answer.");
+    // In plain words, never the server's own.
+    expect(root.querySelector(".plan-note")?.textContent).toBe("Couldn't load Ops.");
     expect(root.querySelector(".ops-notice")).toBeNull();
     expect(reds(root)).toEqual([]);
   });

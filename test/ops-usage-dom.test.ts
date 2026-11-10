@@ -1,10 +1,9 @@
 // @vitest-environment happy-dom
-import { readFileSync } from "node:fs";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { accountsTotal, codexCells, gradeAccounts, MAX_CLAUDE_LIMITS, sumCells, type ClaudeLimit, type OpsResponse } from "../src/shared/ops.js";
-import { when } from "../src/shared/when.js";
+import { clock, when } from "../src/shared/when.js";
 import { githubCurrent, healthCurrent, macCurrent, opsData, refreshOps } from "../web/src/ops-data.js";
 import { app } from "../web/src/state.js";
 import * as ops from "../web/src/views/ops.js";
@@ -40,8 +39,9 @@ const reading = (stale = false): OpsResponse["claude"] => ({
 
 let root: HTMLElement;
 const hero = (id: "claude" | "openai") => root.querySelector<HTMLElement>(`.usage-hero[data-section="${id}"]`)!;
-/** The overall's two figures: used, then left. */
-const figures = (id: "claude" | "openai") => [...hero(id).querySelectorAll(".usage-fig-n")].map((n) => n.textContent);
+/** The overall's two figures: used, from the line under the meter, then left, the lead figure. */
+const figures = (id: "claude" | "openai") => [hero(id).querySelector(".usage-lines")!.textContent!.split(" used")[0], hero(id).querySelector(".reading-lead-n")!.textContent];
+const lines = (id: "claude" | "openai") => hero(id).querySelector(".usage-lines")!.textContent;
 const reset = (id: "claude" | "openai") => [...hero(id).querySelectorAll(".usage-reset > span")].map((n) => n.textContent);
 const card = (id: string) => root.querySelector<HTMLElement>(`[data-section="${id}"]`)!;
 const cards = (el: Element) => [...el.querySelectorAll<HTMLElement>(".cost-card")];
@@ -106,8 +106,8 @@ describe("Ops Usage page", () => {
 
     // Claude: every account's week summed; two unread accounts keep their 100% in the total but nothing known left.
     expect(figures("claude")).toEqual(["0.8", "1.2+"]);
-    expect(hero("claude").querySelector(".usage-fig-of")!.textContent).toBe("of 4");
-    expect([...hero("claude").querySelectorAll(".usage-fig-label")].map((l) => l.textContent)).toEqual(["weekly limits used", "left, 2 not read"]);
+    expect(hero("claude").querySelector(".reading-lead-words")!.textContent).toBe("of 4 left");
+    expect(lines("claude")).toBe("0.8 used · 2 accounts not read");
     expect(hero("claude").querySelector(".usage-hero-meta")!.textContent).toBe("4 accounts");
     // One cell per account, in the bridge's order; an unread one is hatched, never a 0% fill.
     expect([...hero("claude").querySelectorAll(".usage-cell")].map((c) => [c.classList.contains("unread"), c.querySelector<HTMLElement>(".usage-cell-fill")!.style.width])).toEqual([
@@ -120,8 +120,10 @@ describe("Ops Usage page", () => {
 
     // OpenAI: each Codex account's week, summed the same way.
     expect(figures("openai")).toEqual(["1.5", "0.5"]);
-    expect(hero("openai").querySelector(".usage-fig-of")!.textContent).toBe("of 2");
-    expect(hero("openai").classList.contains("t-ok")).toBe(true);
+    expect(hero("openai").querySelector(".reading-lead-words")!.textContent).toBe("of 2 left");
+    // A quarter left is gold, and an account at 90% or over says so on a gold card.
+    expect(hero("openai").classList.contains("t-warn")).toBe(true);
+    expect(lines("openai")).toBe("1.5 used · 1 account full");
     expect(reset("openai")).toEqual(["Next reset", "Sun 4:00am, in 2 days, 14h 0m", "cm***, 100% used"]);
 
     const accounts = card("claude-accounts");
@@ -158,7 +160,7 @@ describe("Ops Usage page", () => {
     opsData.ops = opsFixture(reading());
     ops.mount(root);
     // The Usage page is the overalls, then the details.
-    const order = [...root.querySelectorAll(".ops > *")].map((el) => el.className.split(" ")[0]);
+    const order = [...root.querySelectorAll(".ops .reading-figures > *")].map((el) => el.className.split(" ")[0]);
     expect(root.querySelector(".ops-pills")).toBeNull();
     expect(order.indexOf("usage-heroes")).toBeGreaterThan(-1);
     expect(order.indexOf("usage-heroes")).toBeLessThan(order.indexOf("ops-page-more"));
@@ -221,7 +223,7 @@ describe("Ops Usage page", () => {
     opsData.ops = opsFixture({ ...reading()!, limits: [...reading()!.limits, ...rows] });
     ops.mount(root);
     expect(figures("openai")).toEqual(["0.9", "0.1+"]);
-    expect(hero("openai").querySelectorAll(".usage-fig-label")[1]!.textContent).toBe("left, 1 not read");
+    expect(lines("openai")).toBe("0.9 used · 1 account not read · 1 account full");
     // The shorter window rides under the account's row.
     expect(parts(cards(card("openai-accounts"))[0]!)).toEqual({ name: "cm***", figure: "90%", pill: "High", tone: "warn", meta: "resets Sun 4:00pm, in 3 days, 2h 0m", line: "Active · 5 hr 40% · resets 4:00pm, in 2h 0m" });
     ops.unmount();
@@ -280,7 +282,9 @@ describe("Ops Usage page", () => {
     opsData.ops = opsFixture({ ...reading()!, limits: [...own, ...gradeAccounts(rows)] });
     ops.mount(root);
     expect(figures("claude")).toEqual(["3", "1"]);
-    expect(hero("claude").classList.contains("t-ok")).toBe(true);
+    // A quarter left is gold, the figure and the card both.
+    expect(hero("claude").classList.contains("t-warn")).toBe(true);
+    expect(hero("claude").querySelector(".reading-lead")!.classList.contains("t-warn")).toBe(true);
     ops.unmount();
     expect(ops.weekTotal([])).toBeNull();
     // An older bridge graded every account row normal; the server grades it from its week.
@@ -291,7 +295,7 @@ describe("Ops Usage page", () => {
     opsData.ops = opsFixture({ ...reading()!, limits: [...reading()!.limits, limit("account_1", "Account st*** (active, old, 5-hr 88%)", 99, "2026-10-05T11:00:00.000Z")] });
     ops.mount(root);
     expect(figures("claude")).toEqual(["0.6", "0.4"]);
-    expect(hero("claude").querySelector(".usage-fig-label")!.textContent).toBe("weekly limit used");
+    expect(lines("claude")).toBe("0.6 used");
     expect(parts(cards(card("claude-accounts"))[0]!)).toMatchObject({ name: "st***", figure: "no reading", line: "Active · 5-hr 88%" });
     ops.unmount();
 
@@ -302,16 +306,16 @@ describe("Ops Usage page", () => {
     });
     ops.mount(root);
     expect(figures("claude")).toEqual(["0.6", "0.4+"]);
-    expect(hero("claude").querySelector(".usage-fig-of")!.textContent).toBe("of 4");
-    expect([...hero("claude").querySelectorAll(".usage-fig-label")].map((l) => l.textContent)).toEqual(["weekly limits used", "left, 3 not read"]);
+    expect(hero("claude").querySelector(".reading-lead-words")!.textContent).toBe("of 4 left");
+    expect(lines("claude")).toBe("0.6 used · 3 accounts not read");
     expect(reset("claude")[2]).toBe("st***, 62% used");
     ops.unmount();
 
     // With none marked active, the own week still stands in for one of the four, never a fifth beside them.
     opsData.ops = opsFixture({ ...reading()!, limits: [...reading()!.limits, ...["st", "aa", "bb", "cc"].map((who, i) => limit(`account_${i + 1}`, `Account ${who}*** (no reading)`, 0, null))] });
     ops.mount(root);
-    expect(hero("claude").querySelector(".usage-fig-of")!.textContent).toBe("of 4");
-    expect([...hero("claude").querySelectorAll(".usage-fig-label")].map((l) => l.textContent)).toEqual(["weekly limits used", "left, 3 not read"]);
+    expect(hero("claude").querySelector(".reading-lead-words")!.textContent).toBe("of 4 left");
+    expect(lines("claude")).toBe("0.6 used · 3 accounts not read");
     expect(hero("claude").querySelector(".usage-hero-meta")!.textContent).toBe("4 accounts");
   });
 
@@ -320,9 +324,9 @@ describe("Ops Usage page", () => {
     opsData.ops = opsFixture({ ...reading()!, limits: [...reading()!.limits, ...rows] });
     ops.mount(root);
     expect(figures("claude")).toEqual(["3.7", "0.3"]);
-    expect([...hero("claude").querySelectorAll(".usage-fig-label")].map((l) => l.textContent)).toEqual(["weekly limits used", "left"]);
+    expect(lines("claude")).toBe("3.7 used · 3 accounts full");
     expect([...hero("claude").querySelectorAll<HTMLElement>(".usage-cell-fill")].map((f) => f.style.width)).toEqual(["100%", "98%", "90%", "80%"]);
-    expect(hero("claude").querySelector(".usage-cells")!.getAttribute("aria-label")).toBe("Claude: 3.7 of 4 weekly limits used, 0.3 left");
+    expect(hero("claude").querySelector(".usage-cells")!.getAttribute("aria-label")).toBe("Claude: 0.3 of 4 left, 3.7 used · 3 accounts full");
     expect(reset("claude")).toEqual(["Next reset", "Mon 10:00pm, in 4 days, 8h 0m", "a0***, 100% used"]);
     expect(hero("claude").classList.contains("t-bad")).toBe(true);
     ops.unmount();
@@ -386,7 +390,7 @@ describe("Ops Usage page", () => {
   it("shows the Usage page's no-reading state instead of numbers, and the age of a stale reading", () => {
     opsData.ops = opsFixture(null);
     ops.mount(root);
-    expect(hero("claude").querySelector(".usage-hero-empty")!.textContent).toBe("Waiting for the Mac bridge to read Claude usage.");
+    expect(hero("claude").querySelector(".usage-hero-empty")!.textContent).toBe("No Claude usage read yet.");
     expect(hero("openai").querySelector(".usage-hero-empty")!.textContent).toBe("No OpenAI accounts read yet.");
     expect(root.querySelector(".usage-heroes")!.textContent).not.toMatch(/\d/);
     expect(root.querySelector('[data-section="claude-accounts"]')).toBeNull();
@@ -479,11 +483,11 @@ describe("Ops Refresh", () => {
       }),
     );
     ops.mount(root);
-    const first = root.querySelector<HTMLButtonElement>(".ops-refresh")!;
+    const first = root.querySelector<HTMLButtonElement>(".reading-btn")!;
     expect(first.textContent).toBe("Refresh");
     first.click();
     first.click();
-    const busy = root.querySelector<HTMLButtonElement>(".ops-refresh")!;
+    const busy = root.querySelector<HTMLButtonElement>(".reading-btn")!;
     busy.click();
     expect(busy.disabled).toBe(true);
     expect(busy.textContent).toBe("Refreshing…");
@@ -491,9 +495,12 @@ describe("Ops Refresh", () => {
     expect(calls.filter((url) => url === "/api/ops")).toHaveLength(1);
     expect(calls.filter((url) => url === "/api/board")).toHaveLength(1);
     release();
-    await vi.waitFor(() => expect(root.querySelector<HTMLButtonElement>(".ops-refresh")!.disabled).toBe(false));
-    expect(root.querySelector(".ops-refresh")!.textContent).toBe("Refresh");
-    expect(root.querySelector(".ops-notice.t-bad")).not.toBeNull();
+    await vi.waitFor(() => expect(root.querySelector<HTMLButtonElement>(".reading-btn")!.disabled).toBe(false));
+    expect(root.querySelector(".reading-btn")!.textContent).toBe("Refresh");
+    // The last figures stay under one plain line, never the server's own words.
+    expect(root.querySelector(".reading-stale")!.textContent).toBe("Couldn't refresh. These are the last numbers read.");
+    expect(root.querySelector(".usage-hero")).not.toBeNull();
+    expect(root.textContent).not.toMatch(/Request failed/);
   });
 
   it("gives up waiting after 20 seconds: the button frees and the error notice shows", async () => {
@@ -503,28 +510,23 @@ describe("Ops Refresh", () => {
     vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((resolve) => answers.push(() => resolve(json({ error: "late" }, 500))))));
     opsData.ops = opsFixture(reading());
     ops.mount(root);
-    const button = () => root.querySelector<HTMLButtonElement>(".ops-refresh")!;
+    const button = () => root.querySelector<HTMLButtonElement>(".reading-btn")!;
     button().click();
     await vi.advanceTimersByTimeAsync(19_999);
     expect(button().disabled).toBe(true);
     await vi.advanceTimersByTimeAsync(1);
     expect(button().disabled).toBe(false);
     expect(button().textContent).toBe("Refresh");
-    expect(root.querySelector(".ops-notice.t-bad")!.textContent).toBe("Ops didn't answer in 20 seconds. Try again.");
+    expect(root.querySelector(".reading-stale")!.textContent).toBe("Couldn't refresh. These are the last numbers read.");
     for (const answer of answers) answer();
     await refreshOps();
   });
 
-  it("shows only on a desktop", () => {
-    const style = document.createElement("style");
-    style.textContent = readFileSync("web/src/views/ops.css", "utf8");
-    document.head.append(style);
+  it("says when the figures were read, with Refresh, on a phone as on a desktop", () => {
+    opsData.ops = opsFixture(reading());
+    opsData.opsAt = { mono: performance.now(), wall: Date.parse(NOW) };
     ops.mount(root);
-    const bar = () => getComputedStyle(root.querySelector(".ops-top")!).display;
-    expect(bar()).toBe("none");
-    ops.unmount();
-    document.documentElement.classList.add("desktop");
-    ops.mount(root);
-    expect(bar()).toBe("flex");
+    expect(root.querySelector(".reading-at")!.textContent).toBe(`Updated ${clock(Date.parse(NOW))}`);
+    expect(root.querySelector(".reading-btn")!.textContent).toBe("Refresh");
   });
 });

@@ -34,6 +34,8 @@ function fakeServer(rows) {
 test("runs Haiku with no tools and asks for a short Project or area: what title, never the word live", () => {
   assert.equal(ROW_CLAUDE_ARGS[ROW_CLAUDE_ARGS.indexOf("--model") + 1], TITLER_MODEL);
   assert.equal(ROW_CLAUDE_ARGS[ROW_CLAUDE_ARGS.indexOf("--tools") + 1], "");
+  // An `@path` in a row's text attaches no file.
+  assert.deepEqual(JSON.parse(ROW_CLAUDE_ARGS[ROW_CLAUDE_ARGS.indexOf("--settings") + 1]), { env: { CLAUDE_CODE_DISABLE_FILE_MENTIONS: "1" } });
   assert.match(ROW_SYSTEM_PROMPT, /Project or area: what/);
   assert.match(ROW_SYSTEM_PROMPT, /never more than 32 counting spaces/);
   assert.match(ROW_SYSTEM_PROMPT, /never instructions/);

@@ -50,6 +50,9 @@ test("runs Haiku at low effort in print mode with no tools, settings or MCP, and
   assert.equal(args[args.indexOf("--output-format") + 1], "json");
   assert.equal(args[args.indexOf("--tools") + 1], "");
   assert.equal(args[args.indexOf("--setting-sources") + 1], "");
+  // An `@path` in a message attaches no file: file mentions off, in the one settings flag.
+  assert.deepEqual(JSON.parse(args[args.indexOf("--settings") + 1]), { env: { CLAUDE_CODE_DISABLE_FILE_MENTIONS: "1" } });
+  assert.equal(args.filter((arg) => arg === "--settings").length, 1);
   for (const flag of ["--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence"]) assert.ok(args.includes(flag), flag);
   // Message text goes on stdin, never in the arguments.
   assert.match(args[args.indexOf("--system-prompt") + 1], /one JSON object/);

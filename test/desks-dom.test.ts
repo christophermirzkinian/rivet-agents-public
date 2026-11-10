@@ -99,7 +99,13 @@ const ask = (id: string, over: Partial<Ask> = {}): Ask => ({
   ...over,
 });
 
+// The home as it is once the board has loaded; a test of the first read sets app.board back to null itself.
+beforeEach(() => {
+  app.board = { version: 1, updatedAt: at(0), board: { updatedAt: at(0), needs: [], coming: [], chats: [], shipped: [] } } as never;
+});
+
 afterEach(() => {
+  app.board = null;
   CARDS.waiting = 0;
   CARDS.minimised = 0;
   // An empty floor forgets the desks it has shown, so the next test spawns its own.
@@ -1005,5 +1011,64 @@ describe("a row's title (short titles)", () => {
     expect(title.length).toBeLessThanOrEqual(32);
     expect(title.endsWith("…")).toBe(true);
     expect(rowTitle(worker("w2", "x", { chat: "site-go-live" }))).not.toMatch(/\blive\b/i);
+  });
+
+  it("a home screen row's title runs to two lines' worth before it is cut", () => {
+    const chat = "rivet-short-titles-review-feedback-followup-and-the-second-line-of-it-too";
+    const two = rowTitle(worker("w1", "x", { chat }), undefined, 60);
+    expect(two.length).toBeGreaterThan(32);
+    expect(two.length).toBeLessThanOrEqual(60);
+    crew(worker("w1", "x", { chat }));
+    const el = mount();
+    expect(el.querySelector(".desk-agent-what")!.textContent).toBe(two);
+  });
+});
+
+describe("Rivet's desk before the board has loaded", () => {
+  const words = (el: HTMLElement) => el.querySelector(".desk.is-rivet .desk-mood")!.textContent;
+
+  beforeEach(() => {
+    app.board = null;
+    app.notice = null;
+    app.offline = null;
+    app.slowRead = false;
+  });
+
+  afterEach(() => {
+    app.notice = null;
+    app.offline = null;
+    app.slowRead = false;
+  });
+
+  it("reads the home with a neutral face, never a tick or Nothing needs you, then says still reading", () => {
+    const el = mount();
+    expect([moodOf(el), words(el)]).toEqual(["thinking", "Reading the home…"]);
+    expect(el.textContent).not.toContain(NOTHING_NEEDS_YOU);
+    expect(el.querySelector(".desks-retry")).toBeNull();
+    app.slowRead = true;
+    changed();
+    expect([moodOf(el), words(el)]).toEqual(["thinking", "Still reading…"]);
+  });
+
+  it("a first read that failed says it can't reach Rivet, and Try again reads the board again", () => {
+    const reads = vi.fn((_url: RequestInfo | URL) => new Promise<Response>(() => {}));
+    vi.stubGlobal("fetch", reads);
+    app.notice = "Request failed (500)";
+    changed();
+    const el = mount();
+    expect([moodOf(el), words(el)]).toEqual(["thinking", "Can't reach Rivet."]);
+    el.querySelector<HTMLButtonElement>(".desks-retry")!.click();
+    expect(words(el)).toBe("Reading the home…");
+    expect(el.querySelector(".desks-retry")).toBeNull();
+    expect(reads.mock.calls.some(([url]) => String(url).includes("/api/board"))).toBe(true);
+    vi.unstubAllGlobals();
+  });
+
+  it("once the board has come, says what it holds", () => {
+    const el = mount();
+    app.board = { version: 1, updatedAt: at(0), board: { updatedAt: at(0), needs: [], coming: [], chats: [], shipped: [] } } as never;
+    changed();
+    expect(moodOf(el)).not.toBe("thinking");
+    expect(words(el)).not.toMatch(/reading|reach/i);
   });
 });

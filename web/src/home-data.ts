@@ -1,7 +1,7 @@
 import type { HomeReading, HomeResponse } from "../../src/shared/home.js";
 import { call } from "./api.js";
 import { describe } from "./dom.js";
-import { onSessionReset } from "./session.js";
+import { onSessionReset, StaleSession } from "./session.js";
 
 // The Home page's reading, shared by the page and its menu row, and the words both say.
 
@@ -17,12 +17,16 @@ onSessionReset(() => {
   homeData.error = null;
 });
 
-export async function loadHome(): Promise<void> {
+/** Reads Home; true when a reading landed. One from a session that has ended changes nothing. */
+export async function loadHome(): Promise<boolean> {
   try {
     homeData.home = await call<HomeResponse>("GET", "/api/home");
     homeData.error = null;
+    return true;
   } catch (err) {
+    if (err instanceof StaleSession) return false;
     homeData.error = describe(err);
+    return false;
   }
 }
 

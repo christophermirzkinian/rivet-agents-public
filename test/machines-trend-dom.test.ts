@@ -225,7 +225,8 @@ describe("Machines trend", () => {
   it("shows a failed load and no lines rather than an empty chart that looks idle", async () => {
     await mount(new Error("offline"));
     expect(lines()).toBe(0);
-    expect(root.querySelector(".trend-empty")?.textContent).toMatch(/^Couldn't load the readings/);
+    // Plain words, never the error's own.
+    expect(root.querySelector(".trend-empty")?.textContent).toBe("Couldn't load the readings.");
   });
 
   it("draws a week of unbroken readings as one line, not dots where it thins them", async () => {
@@ -240,7 +241,20 @@ describe("Machines trend", () => {
   it("takes an answer of another shape as a failed load, and Machines still renders", async () => {
     await mount({ entries: [] } as unknown as MachineHistoryResponse);
     expect(root.querySelector('[data-section="boxes"]')).not.toBeNull();
-    expect(root.querySelector(".trend-empty")?.textContent).toBe("Couldn't load the readings: the answer was not readings");
+    expect(root.querySelector(".trend-empty")?.textContent).toBe("Couldn't load the readings.");
+  });
+
+  it("says a top-up that failed under the lines it kept, never the old figures as the latest unsaid", async () => {
+    await mount();
+    expect(lines()).toBeGreaterThan(0);
+    expect(root.querySelector(".trend-failed")).toBeNull();
+    ops.unmount();
+    vi.stubGlobal("fetch", vi.fn((path: string) => (path.startsWith("/api/machines/") ? Promise.resolve(new Response("{}", { status: 500 })) : Promise.resolve(new Response("{}", { status: 200 })))));
+    opsData.ops = { ...opsData.ops!, mac: { ...MAC, at: new Date(NOW).toISOString() } } as OpsResponse;
+    ops.mount(root);
+    await settle();
+    expect(lines()).toBeGreaterThan(0);
+    expect(root.querySelector(".trend-failed")?.textContent).toBe("Couldn't refresh the readings. These are from the last read.");
   });
 
   it("tops up only after the Mac reports again", async () => {

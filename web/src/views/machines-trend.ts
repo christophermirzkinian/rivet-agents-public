@@ -388,12 +388,14 @@ function draw(): void {
       : null,
     missing.length && drawn.length ? h("p", { class: "trend-note" }, `No ${metric.noun} readings${trend.end === null && trend.span === MAX_SPAN ? "" : " in this range"}: ${missing.map((m) => m.name).join(", ")}`) : null,
     uncoloured.length ? h("p", { class: "trend-note" }, `Not drawn, no colour left: ${uncoloured.map((m) => m.name).join(", ")}`) : null,
+    // Lines kept from an earlier load still say a newer read failed: never the old figures as the latest, unsaid.
+    trend.failed && drawn.length ? h("p", { class: "trend-note trend-failed" }, "Couldn't refresh the readings. These are from the last read.") : null,
   ];
   after.replaceChildren(...parts.filter((part): part is Node | string => !!part));
 }
 
 function emptyText(noun: string): string {
-  if (!trend.loaded) return trend.failed ? `Couldn't load the readings: ${trend.failed}` : "Loading the readings…";
+  if (!trend.loaded) return trend.failed ? "Couldn't load the readings." : "Loading the readings…";
   if (![...trend.machines.values()].some((m) => m.points.length)) return "No readings yet: the Mac sends them every 5 minutes.";
   return `No ${noun} readings in this range.`;
 }

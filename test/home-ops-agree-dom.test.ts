@@ -303,9 +303,11 @@ describe("the menu's Usage number, its own screen's", () => {
     const usage = tileEl("usage");
     const said = [tile("usage"), usage.getAttribute("aria-label")];
     usage.click();
-    await vi.waitFor(() => expect(document.querySelector('.page-sheet .usage-hero[data-section="claude"] .usage-fig.used')).not.toBeNull());
-    const fig = document.querySelector('.page-sheet .usage-hero[data-section="claude"] .usage-fig.used .usage-fig-line')?.textContent;
-    expect(fig?.replace(/(\d)of/, "$1 of")).toBe(said[0]);
+    await vi.waitFor(() => expect(document.querySelector('.page-sheet .usage-hero[data-section="claude"] .usage-lines')).not.toBeNull());
+    // Usage leads with what is left; its used figure, the tile's, is the line under the meter.
+    const used = document.querySelector('.page-sheet .usage-hero[data-section="claude"] .usage-lines')?.textContent?.split(" used")[0];
+    const of = document.querySelector('.page-sheet .usage-hero[data-section="claude"] .reading-lead-words')?.textContent?.replace(/ left$/, "");
+    expect(`${used} ${of}`).toBe(said[0]);
     expect(said[1]).toBe("Usage, Claude 0.4 of 4 weekly limits used");
   });
 
@@ -325,8 +327,8 @@ describe("the menu's Usage number, its own screen's", () => {
     expect(tileEl("usage").getAttribute("aria-label")).toBe("Usage, Claude 0.6 of 4 weekly limits used, 3 accounts not read");
 
     tileEl("usage").click();
-    await vi.waitFor(() => expect(document.querySelector('.page-sheet .usage-hero[data-section="claude"] .usage-fig-of')).not.toBeNull());
-    expect(document.querySelector('.page-sheet .usage-hero[data-section="claude"] .usage-fig-of')?.textContent).toBe("of 4");
+    await vi.waitFor(() => expect(document.querySelector('.page-sheet .usage-hero[data-section="claude"] .reading-lead-words')).not.toBeNull());
+    expect(document.querySelector('.page-sheet .usage-hero[data-section="claude"] .reading-lead-words')?.textContent).toBe("of 4 left");
   });
 
   it("a tile keeps the keyboard's focus when a new reading changes its colour", () => {

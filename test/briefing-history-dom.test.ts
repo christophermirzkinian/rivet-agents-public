@@ -35,7 +35,7 @@ it("shows a missing snapshot and a failed request", async () => {
   openBriefingHistory("missing");
   await vi.waitFor(() => expect(document.querySelector(".sheet-body")?.textContent).toContain("no longer available"));
   openBriefingHistory("failure");
-  await vi.waitFor(() => expect(document.querySelector('[role="alert"]')?.textContent).toContain("Offline"));
+  await vi.waitFor(() => expect(document.querySelector('[role="alert"]')?.textContent).toBe("Couldn't load this briefing."));
 });
 
 it.each([false, true])("ignores a late response after replacement (reject: %s)", async (reject) => {

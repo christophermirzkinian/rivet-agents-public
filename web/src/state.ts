@@ -111,6 +111,8 @@ export const app = {
   loadedAt: null as number | null,
   /** The phone has no network, or the last refresh could not reach the server (no answer, a timeout or a 5xx). */
   offline: null as "offline" | "unreachable" | null,
+  /** The board's first read has gone STILL_READING_MS with no answer. */
+  slowRead: false,
 };
 
 export function cardState(id: string): CardState {
@@ -362,6 +364,9 @@ export function resetSession(): void {
   app.dataRev = 0;
   app.loadedAt = null;
   app.offline = null;
+  app.slowRead = false;
+  clearTimeout(slowTimer);
+  slowTimer = undefined;
   shownSignature = "";
 }
 
@@ -456,11 +461,46 @@ export function replyLanded(reply: Reply): void {
   landedSince.set(reply.id, reply);
 }
 
+/** A first read this long with no answer says "Still reading…": a read waits up to 20 s before it counts as failed. */
+export const STILL_READING_MS = 4000;
+let slowTimer: ReturnType<typeof setTimeout> | undefined;
+
+/**
+ * Where the board's read stands for what says "all clear", which nothing may say until a board has come: reading,
+ * still reading past STILL_READING_MS, or failed (a first read that failed, or the phone offline) until then.
+ */
+export function boardRead(): "loaded" | "reading" | "slow" | "failed" {
+  // Before the server's first snapshot its board is null: not read yet, never all clear.
+  if (app.board?.board) return "loaded";
+  if (app.notice !== null || app.offline !== null) return "failed";
+  return app.slowRead ? "slow" : "reading";
+}
+
+/** Try again: a first read that failed reads as reading again until its answer comes. */
+export function readAgain(): Promise<boolean> {
+  if (!app.board?.board) {
+    app.notice = null;
+    app.offline = null;
+    app.slowRead = false;
+    clearTimeout(slowTimer);
+    slowTimer = undefined;
+    changed();
+  }
+  return refresh();
+}
+
 /** True when the board, status and replies all loaded. */
 export async function refresh(): Promise<boolean> {
   let loaded = false;
   const read = ++reads;
   const current = sameSession();
+  if (!app.board?.board && slowTimer === undefined && !app.slowRead)
+    slowTimer = setTimeout(() => {
+      slowTimer = undefined;
+      if (!current() || app.board?.board) return;
+      app.slowRead = true;
+      changed();
+    }, STILL_READING_MS);
   try {
     const [board, status, replies, workers, links, conversations, summary] = await Promise.all([
       api.getBoard(),
@@ -532,6 +572,8 @@ export async function refresh(): Promise<boolean> {
       signedOut("Your session ended. Sign in again.");
       return false;
     }
+    if (read < readApplied) return false;
+    readApplied = read;
     app.notice = describe(error);
     if (navigator.onLine === false) app.offline = "offline";
     else if (unreachable(error)) app.offline = "unreachable";
@@ -550,8 +592,12 @@ export function closeAnsweredCards(): void {
   void closeAnswered(new Set([...deck(), ...laterCards(), ...updateCards()].map((need) => need.id).concat([...app.held])));
 }
 
-/** The home-screen icon's count: the deck's, so a card put as Later or minimised stops counting there too. */
+/**
+ * The home-screen icon's count: the deck's, so a card put as Later or minimised stops counting there too. Untouched
+ * until a board has been read: a cold open whose read fails keeps the count it had.
+ */
 function showAppBadge(): void {
+  if (!app.board?.board) return;
   const count = needsYou();
   const nav = navigator as Navigator & { setAppBadge?: (n?: number) => Promise<void>; clearAppBadge?: () => Promise<void> };
   void (count ? nav.setAppBadge?.(count) : nav.clearAppBadge?.())?.catch(() => {});

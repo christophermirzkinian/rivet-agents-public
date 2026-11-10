@@ -388,6 +388,27 @@ describe("Chat", () => {
     expect(topics()).not.toContain(UPDATES_ID);
     expect(root.querySelector(".chat-topics-more")).toBeNull();
   });
+
+  it("Archived failing says so plainly, never the server's words", async () => {
+    server.conversations.set("o1", { title: "Old leaderboard", old: true });
+    server.messages.push(owner("o2", "o1", 3, { text: "Leaderboard?" }));
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
+      new URL(String(input), "http://x").searchParams.has("older")
+        ? Promise.resolve(new Response(JSON.stringify({ error: "SQLITE_BUSY: database is locked" }), { status: 500, headers: { "content-type": "application/json" } }))
+        : server.fetch(input, init),
+    ));
+    const { mountToasts } = await import("../web/src/views/toast.js");
+    mountToasts(document.body);
+    await onChat();
+    history.pushState({ chatScreen: "list" }, "");
+    window.dispatchEvent(new PopStateEvent("popstate", { state: history.state }));
+    await settle();
+    root.querySelector<HTMLButtonElement>(".chat-topics-more")!.click();
+    await settle();
+    expect(document.querySelector(".toast.flash.error")?.textContent).toBe("Couldn't load the archived chats.");
+    expect(document.body.textContent).not.toMatch(/SQLITE/);
+    mountToasts(null);
+  });
 });
 
 describe("a thing's page", () => {

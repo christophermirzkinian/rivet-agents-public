@@ -208,3 +208,9 @@ button.ask-row {
   color: var(--muted);
   font-size: var(--fs-body);
 }
+
+/* The band line can hold more than one pill (home.ts lineParts): an offline strip and a runner box stack over the one thing. */
+.home-line-fold {
+  flex-direction: column;
+  align-items: center;
+}

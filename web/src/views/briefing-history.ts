@@ -2,7 +2,7 @@ import "./ops.css";
 
 import type { Briefing } from "../../../src/shared/ops.js";
 import { getBriefing } from "../api.js";
-import { describe, h } from "../dom.js";
+import { h } from "../dom.js";
 import { composedLabel, sinceLabel } from "./briefing.js";
 import { openSheet } from "./sheet.js";
 import { RIVET_NAME } from "../../../src/shared/names.js";
@@ -23,9 +23,9 @@ export function openBriefingHistory(id: string): void {
           }
           el.replaceChildren(snapshot(briefing));
         },
-        (error: unknown) => {
+        () => {
           if (!mounted) return;
-          el.replaceChildren(h("p", { attrs: { role: "alert" } }, `Could not load this briefing: ${describe(error)}`));
+          el.replaceChildren(h("p", { attrs: { role: "alert" } }, "Couldn't load this briefing."));
         },
       );
     },

@@ -8,6 +8,7 @@ import { when } from "../../../src/shared/when.js";
 import * as api from "../api.js";
 import { h, keepFocus } from "../dom.js";
 import { onSessionReset, sameSession } from "../session.js";
+import { readingFrame, readingNotes, type Reading } from "./reading.js";
 
 // Rivet's mind, a menu page: every memory, topic, note and decision in the folders you name as one graph to pinch, drag
 // and search. force-graph is imported only when this page opens. Labels are drawn after every dot, the biggest first, and
@@ -52,13 +53,14 @@ function saveView(view: View): void {
   }
 }
 
-export const mindData = { graph: null as MindGraph | null, loaded: false, error: false };
+export const mindData = { graph: null as MindGraph | null, loaded: false, error: false, at: null as number | null };
 let inflight: Promise<void> | null = null;
 
 onSessionReset(() => {
   mindData.graph = null;
   mindData.loaded = false;
   mindData.error = false;
+  mindData.at = null;
   inflight = null;
   words.clear();
   openSections.clear();
@@ -73,6 +75,7 @@ export function loadMind(): Promise<void> {
       if (!current()) return;
       mindData.graph = answer.graph;
       mindData.loaded = true;
+      mindData.at = Date.now();
       words.clear();
       mindData.error = false;
     })
@@ -112,24 +115,30 @@ export function unmount(): void {
 }
 
 export function refresh(): Promise<void> {
-  return loadMind().then(() => {
+  const load = loadMind().then(() => {
     if (root) paint();
   });
+  paint();
+  return load;
 }
 
 function paint(): void {
   if (!root) return;
   const graph = mindData.graph;
+  const reading: Reading = { page: "Rivet's mind", has: true, failed: mindData.error, busy: inflight !== null, at: mindData.at, shape: [56, 420], retry: () => void refresh() };
   if (!graph || !graph.nodes.length) {
     page?.destroy();
     page = null;
-    const note = mindData.error ? "Couldn't load the map. Pull to try again." : !mindData.loaded ? "Loading…" : EMPTY_NOTE;
-    root.replaceChildren(h("div", { class: "mind mind-empty" }, h("p", { class: "mind-note" }, note)));
+    // A map not sent yet is no numbers read: a failed refresh says so plainly, never "the last numbers read".
+    const empty = { ...reading, has: mindData.loaded && !mindData.error };
+    root.replaceChildren(h("div", { class: "mind mind-empty" }, readingFrame(empty, () => [h("p", { class: "mind-note" }, EMPTY_NOTE)])));
     return;
   }
-  if (page?.graph === graph) return;
-  page?.destroy();
-  page = new Page(root, graph);
+  if (page?.graph !== graph) {
+    page?.destroy();
+    page = new Page(root, graph);
+  }
+  page.showReading(reading);
 }
 
 /** Labels drawn on the last frame, for the preview's checks. */
@@ -175,6 +184,7 @@ class Page {
     banner: HTMLElement;
     sheet: HTMLElement;
     zoom: HTMLElement;
+    reading: HTMLElement;
   };
 
   constructor(
@@ -218,6 +228,7 @@ class Page {
       banner: h("div", { class: "mind-banner" }),
       sheet: h("div", { class: "mind-sheet", attrs: { role: "dialog", "aria-label": "About this dot" } }),
       zoom: h("div", { class: "mind-zoom" }),
+      reading: h("div", { class: "mind-reading" }),
     };
     const { hits, chips, stage, canvas, list, banner, sheet, zoom } = this.parts;
     this.input = input;
@@ -238,6 +249,7 @@ class Page {
         h("p", { class: "mind-sub" }, `${fmt(nodes.length)} things · ${fmt(graph.links.length)} links`),
         h("div", { class: "mind-views", attrs: { role: "group", "aria-label": "View" } }, this.viewButtons.map, this.viewButtons.list),
       ),
+      this.parts.reading,
       h("div", { class: "mind-search" }, input, hits),
       chips,
       stage,
@@ -249,6 +261,14 @@ class Page {
     this.resize.observe(host.parentElement ?? host);
     this.update(false);
     this.showView();
+  }
+
+  /** The frame's stale line, Updated time and Refresh, over the map (reading.ts). */
+  showReading(reading: Reading): void {
+    const refocus = keepFocus(this.parts.reading);
+    this.parts.reading.replaceChildren(...readingNotes(reading));
+    refocus();
+    this.sizeStage();
   }
 
   destroy(): void {

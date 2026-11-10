@@ -29,6 +29,8 @@ export async function copyText(text: string): Promise<boolean> {
 export interface CopyButton {
   label: string;
   text: () => string;
+  /** While its text could not yet be true, what the note says instead of copying. */
+  notYet?: () => string | null;
 }
 
 /**
@@ -39,7 +41,14 @@ export function copySummary(buttons: readonly CopyButton[]): HTMLElement {
   const note = h("span", { class: "agents-copy-note", attrs: { role: "status" } });
   const manual = h("textarea", { class: "agents-copy-manual", attrs: { readonly: "", rows: "8", "aria-label": "Summary to copy", hidden: "" } });
   let timer = 0;
-  const copy = async (text: () => string) => {
+  const copy = async ({ text, notYet }: CopyButton) => {
+    const waiting = notYet?.();
+    if (waiting) {
+      window.clearTimeout(timer);
+      manual.hidden = true;
+      note.textContent = waiting;
+      return;
+    }
     const summary = rivetWords(text());
     const copied = await copyText(summary);
     window.clearTimeout(timer);
@@ -60,7 +69,7 @@ export function copySummary(buttons: readonly CopyButton[]): HTMLElement {
     h(
       "div",
       { class: "agents-copy-row" },
-      ...buttons.map((button) => h("button", { class: "agents-copy-btn", attrs: { type: "button", "data-use": "agents.copy-summary" }, on: { click: () => void copy(button.text) } }, button.label)),
+      ...buttons.map((button) => h("button", { class: "agents-copy-btn", attrs: { type: "button", "data-use": "agents.copy-summary" }, on: { click: () => void copy(button) } }, button.label)),
       note,
     ),
     manual,

@@ -345,6 +345,14 @@ describe("links in a card's ask", () => {
     expect(choices.querySelector(".choice-detail")!.textContent).toBe("Preview https://example.com/demo first");
   });
 
+  it("puts a card's links above its answers, so the answers sit last above the message box", async () => {
+    needs = [{ ...need("a", "a1", "Pick one"), kind: "choice", options: [{ label: "A" }, { label: "B" }], links: [{ label: "Preview", url: "https://example.com/preview" }] }];
+    await signIn();
+    const body = root.querySelector(".card.top .card-body")!;
+    const order = [...body.children].map((child) => child.className).filter((name) => ["card-links", "choices-cap", "choices"].includes(name));
+    expect(order).toEqual(["card-links", "choices-cap", "choices"]);
+  });
+
   it("shows no Mac pill while the Mac is online; offline, the pill shows and the buttons that send say they wait", async () => {
     needs = [{ ...need("a", "a1", "Pick one"), kind: "choice", options: [{ label: "A" }, { label: "B" }] }];
     await signIn();
@@ -1869,8 +1877,9 @@ describe("the crew on the feed", () => {
     workers = [worker("chat-a", "working")];
     needs = [{ ...need("a", "a1"), chat: "chat-a" }, need("b", "b1")];
     await signIn();
-    const message = root.querySelector<HTMLButtonElement>(".card.top .card-message")!;
-    expect(message.textContent).toBe("Message Rivet");
+    // On the phone it sits in the card's top row, so the answers stay last above the message box.
+    const message = root.querySelector<HTMLButtonElement>(".card.top .card-head .head-acts .card-message")!;
+    expect([message.textContent, message.getAttribute("aria-label")]).toEqual(["Message", "Message Rivet"]);
     message.click();
     const sheet = document.querySelector<HTMLElement>(".cmd-worker-sheet")!;
     expect(sheet.getAttribute("aria-label")).toBe("chat-a");
@@ -3830,15 +3839,17 @@ describe("X rejects, always asking why", () => {
 describe("Minimise on Feed cards", () => {
   const long = (): ServedNeed => ({ ...need("a", "a1", "A long ask. ".repeat(40)), options: [{ label: "Yes" }, { label: "No" }] });
 
-  it("a Needs you card has Minimise at its top and under its last line; minimising it moves on to the next card, open with its answers", async () => {
+  it("a Needs you card on the phone has its one Minimise in its top row beside Message and Share, none under its answers; minimising it moves on to the next card, open with its answers", async () => {
     needs = [long(), need("b", "b1")];
     await signIn();
     const card = root.querySelector<HTMLElement>(".card.top")!;
-    const head = [...card.querySelector(".card-head")!.children];
-    expect([...head.at(-1)!.children].map((child) => child.textContent || child.getAttribute("title"))).toEqual(["−", "Reject"]);
-    const body = card.querySelector(".card-body")!;
-    expect(body.lastElementChild?.lastElementChild?.matches(".min-btn.bottom")).toBe(true);
-    body.querySelector<HTMLButtonElement>(".min-btn.bottom")!.click();
+    // One group at the head's end, so on a narrow card it wraps whole: Message, Share, then the "−" and the X.
+    const acts = card.querySelector(".card-head")!.lastElementChild!;
+    expect(acts.matches(".head-acts")).toBe(true);
+    expect([...acts.lastElementChild!.children].map((child) => child.textContent || child.getAttribute("title"))).toEqual(["−", "Reject"]);
+    expect(card.querySelector(".card-tools")).toBeNull();
+    expect(card.querySelector(".min-btn.bottom")).toBeNull();
+    card.querySelector<HTMLButtonElement>(".card-head .min-btn")!.click();
     // The next card, with its answers.
     expect([topId(), root.querySelector(".card.top.minimised"), root.querySelector(".card.top .card-ask") !== null, actionButton("Approve").isConnected]).toEqual(["b", null, true, true]);
     expect(root.querySelector('.decide-seg[data-seg="open"]')?.textContent).toBe(openTab(1));
@@ -3945,12 +3956,88 @@ describe("no jump, freshness and offline", () => {
     failing.add("/api/board");
     await poll();
     const bar = root.querySelector<HTMLElement>('.feed-offline[role="status"]')!;
-    expect(bar.textContent).toMatch(/^Can't reach Rivet Agents · cards as of (?:[A-Z][a-z]{2} )?\d{1,2}:\d\d[ap]mRetry$/);
+    expect(bar.textContent).toMatch(/^Can't reach Rivet · cards as of (?:[A-Z][a-z]{2} )?\d{1,2}:\d\d[ap]mRetry$/);
     expect(root.querySelector(".card.top")?.getAttribute("data-need")).toBe("a");
     failing.clear();
     bar.querySelector<HTMLButtonElement>(".feed-retry")!.click();
     await settle(0);
     expect(root.querySelector(".feed-offline")).toBeNull();
+  });
+
+  it("a focused Retry whose bar goes hands the keyboard to the sheet, never the page", async () => {
+    needs = [need("a", "a1")];
+    await signIn();
+    failing.add("/api/board");
+    await poll();
+    const retry = root.querySelector<HTMLButtonElement>(".feed-offline .feed-retry")!;
+    retry.focus();
+    failing.clear();
+    retry.click();
+    await settle(0);
+    expect(root.querySelector(".feed-offline")).toBeNull();
+    const held = document.activeElement as HTMLElement;
+    expect(held).not.toBe(document.body);
+    expect(held.dataset.cardKeys).toBe("off");
+    held.blur();
+    expect(held.hasAttribute("tabindex")).toBe(false);
+    expect(held.dataset.cardKeys).toBeUndefined();
+  });
+
+  it("an older read failing after a newer one landed leaves the newer one's word", async () => {
+    needs = [need("a", "a1")];
+    await signIn();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => (String(input) === "/api/board" ? gate.then(() => json({ error: "Unavailable" }, 503)) : fakeFetch(input, init))));
+    const older = refresh();
+    vi.stubGlobal("fetch", vi.fn(fakeFetch));
+    await poll();
+    release();
+    await older;
+    await settle(0);
+    expect([app.notice, app.offline, root.querySelector(".feed-offline")]).toEqual([null, null, null]);
+  });
+
+  it("an older read landing after a newer one failed leaves the failure's word", async () => {
+    needs = [need("a", "a1")];
+    await signIn();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const answer = fakeFetch(input, init);
+      return String(input) === "/api/board" ? gate.then(() => answer) : answer;
+    }));
+    const older = refresh();
+    vi.stubGlobal("fetch", vi.fn(fakeFetch));
+    failing.add("/api/board");
+    await poll();
+    const notice = app.notice;
+    const loadedAt = app.loadedAt;
+    expect(notice).not.toBeNull();
+    failing.clear();
+    release();
+    await older;
+    await settle(0);
+    expect([app.notice, app.loadedAt]).toEqual([notice, loadedAt]);
+    expect(root.querySelector(".feed-offline")).not.toBeNull();
+  });
+
+  it("a cold open whose first read fails leaves the home-screen count as it was", async () => {
+    const appBadge = vi.fn(() => Promise.resolve());
+    const appClear = vi.fn(() => Promise.resolve());
+    Object.defineProperty(navigator, "setAppBadge", { value: appBadge, configurable: true });
+    Object.defineProperty(navigator, "clearAppBadge", { value: appClear, configurable: true });
+    try {
+      failing.add("/api/board");
+      await signIn();
+      expect([appBadge.mock.calls.length, appClear.mock.calls.length]).toEqual([0, 0]);
+      failing.clear();
+      await poll();
+      expect(appClear).toHaveBeenCalled();
+    } finally {
+      Reflect.deleteProperty(navigator, "setAppBadge");
+      Reflect.deleteProperty(navigator, "clearAppBadge");
+    }
   });
 });
 

@@ -67,7 +67,7 @@ describe("What you used", () => {
   it("shows the phone's 30 days as closed folds, each with its count and split, and a fold opens to its rows", async () => {
     api.getUsageReport.mockResolvedValue(MATURE);
     page.mount(host);
-    expect(host.querySelector(".used-sum")!.textContent).toBe("Counting…");
+    expect(host.querySelector('.reading.is-pending[aria-label="Reading What you used…"]')).not.toBeNull();
     await flush();
     expect(api.getUsageReport).toHaveBeenCalledWith("phone");
     expect(host.querySelector('[data-use="used.device.phone"]')!.getAttribute("aria-pressed")).toBe("true");
@@ -169,6 +169,18 @@ describe("What you used", () => {
     await flush();
     expect(api.askUsage).toHaveBeenLastCalledWith("chat.aloud", "rework", "phone");
     expect(host.querySelector(".used-note.no")!.textContent).toBe("Not sent: a card already asked about it.");
+    // A server failure is plain words, never its own (review R1.5).
+    api.askUsage.mockRejectedValueOnce(new ApiError(500, "Request failed (500)"));
+    host.querySelector<HTMLButtonElement>('[data-id="chat.aloud"] [data-use="used.rework"]')!.click();
+    await flush();
+    await flush();
+    expect(host.querySelector(".used-note.no")!.textContent).toBe("Not sent. Try again.");
+    // A 4xx with no sentence in its body carries api's own fallback, which is not his to read (review R2.2).
+    api.askUsage.mockRejectedValueOnce(new ApiError(404, "Request failed (404)"));
+    host.querySelector<HTMLButtonElement>('[data-id="chat.aloud"] [data-use="used.rework"]')!.click();
+    await flush();
+    await flush();
+    expect(host.querySelector(".used-note.no")!.textContent).toBe("Not sent. Try again.");
   });
 
   it("switches to the computer's counts and keeps the open folds", async () => {
@@ -182,6 +194,61 @@ describe("What you used", () => {
     expect(host.querySelector('[data-use="used.device.desktop"]')!.getAttribute("aria-pressed")).toBe("true");
     expect(host.querySelector(".used-sum")!.textContent).toBe("Last 30 days on your computer · 40 taps and 1 screen opened on 26 days");
     expect(head("Chat").getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("says it couldn't load in plain words, never the server's, and keeps the last counts when a refresh fails", async () => {
+    const { ApiError } = await import("../web/src/api.js");
+    api.getUsageReport.mockRejectedValueOnce(new ApiError(500, "Request failed (500)"));
+    page.mount(host);
+    await flush();
+    expect(host.querySelector(".reading-failed-words")!.textContent).toBe("Couldn't load What you used.");
+    expect(host.textContent).not.toMatch(/Request failed|Pull to try again/);
+    api.getUsageReport.mockResolvedValueOnce(MATURE);
+    host.querySelector<HTMLButtonElement>(".reading-failed .reading-btn")!.click();
+    await flush();
+    expect(host.querySelector(".used-sum")!.textContent).toMatch(/^Last 30 days on your phone/);
+    api.getUsageReport.mockRejectedValueOnce(new ApiError(500, "Request failed (500)"));
+    await page.refresh();
+    expect(host.querySelector(".reading-stale")!.textContent).toBe("Couldn't refresh. These are the last numbers read.");
+    expect(host.querySelector(".used-sum")).not.toBeNull();
+    expect(host.textContent).not.toMatch(/Request failed/);
+  });
+
+  it("never counts an ended session's answer as a failed read, nor lets it end the newer read's wait (review R2.1)", async () => {
+    const { StaleSession, endSession } = await import("../web/src/session.js");
+    let stale!: (error: Error) => void;
+    let fresh!: (report: UsageReport) => void;
+    api.getUsageReport.mockImplementationOnce(() => new Promise((_, reject) => (stale = reject)));
+    api.getUsageReport.mockImplementationOnce(() => new Promise((resolve) => (fresh = resolve)));
+    page.mount(host);
+    endSession();
+    page.mount(host);
+    stale(new StaleSession());
+    await flush();
+    expect(host.querySelector(".reading-failed")).toBeNull();
+    expect(host.querySelector(".reading.is-pending")).not.toBeNull();
+    fresh(MATURE);
+    await flush();
+    expect(host.querySelector(".used-sum")!.textContent).toMatch(/^Last 30 days on your phone/);
+  });
+
+  it("never lets a read from an earlier visit fail or replace the newer one (review R3.1)", async () => {
+    let early!: { resolve: (report: UsageReport) => void; reject: (error: Error) => void };
+    let fresh!: (report: UsageReport) => void;
+    api.getUsageReport.mockImplementationOnce(() => new Promise((resolve, reject) => (early = { resolve, reject })));
+    api.getUsageReport.mockImplementationOnce(() => new Promise((resolve) => (fresh = resolve)));
+    page.mount(host);
+    page.unmount();
+    page.mount(host);
+    fresh(MATURE);
+    await flush();
+    early.reject(new Error("late"));
+    early.resolve({ ...MATURE, taps: 1 });
+    await flush();
+    expect(host.querySelector(".reading-stale")).toBeNull();
+    expect(host.querySelector(".reading-failed")).toBeNull();
+    expect(host.querySelector(".used-sum")!.textContent).toMatch(/^Last 30 days on your phone/);
+    expect(host.querySelector(".used-sum")!.textContent).not.toContain(" 1 tap");
   });
 
   it("reads a young recording as young, and an empty one as empty, with no Retire?", async () => {

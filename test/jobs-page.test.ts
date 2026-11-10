@@ -7,7 +7,7 @@ import type { OpsResponse } from "../src/shared/ops.js";
 import { opsData, resetOps } from "../web/src/ops-data.js";
 import { app, subscribe } from "../web/src/state.js";
 import * as ops from "../web/src/views/ops.js";
-import { openRedJobs, redJobsEl, resetScheduled } from "../web/src/views/scheduled.js";
+import { jobsApi, loadJobs, openRedJobs, redJobsEl, resetScheduled } from "../web/src/views/scheduled.js";
 import { closeSheet } from "../web/src/views/sheet.js";
 import { statusParts } from "../web/src/views/status-line.js";
 
@@ -97,6 +97,18 @@ describe("the red jobs sheet", () => {
     const sheet = document.querySelector<HTMLElement>(".sheet")!;
     expect(sheet.getAttribute("aria-label")).toBe("Red jobs");
     expect([...sheet.querySelectorAll<HTMLElement>("[data-job]")].map((row) => row.dataset.job)).toEqual(["j-bbbbbbbb"]);
+  });
+
+  it("says a failed read of the jobs in plain words, never the server's", async () => {
+    const get = vi.spyOn(jobsApi, "get").mockRejectedValue(new Error("Request failed (500)"));
+    await loadJobs();
+    mountJobs();
+    expect(root.textContent).toBe("Couldn't read the jobs.");
+    get.mockResolvedValueOnce(view([job({ redStreak: 1, lastRun: redRun })]));
+    await loadJobs();
+    await loadJobs();
+    expect(root.querySelector(".jobs-limits")!.textContent).toBe("Couldn't read the jobs again.");
+    get.mockRestore();
   });
 
   it("opens from a search hit or a Plan row for the jobs, as the status line's does", () => {
@@ -223,7 +235,8 @@ describe("the red jobs sheet", () => {
 
   it("has a way in from Machines, where the status line is hidden", () => {
     resetScheduled(view([job({ redStreak: 1, lastRun: redRun })]));
-    opsData.ops = null;
+    // Machines draws once Ops has a reading (reading.ts); the red jobs are their own read.
+    opsData.ops = { ...opsData.ops!, bridge: { connected: true } } as OpsResponse;
     app.opsPage = "machines";
     ops.mount(root);
     const open = [...root.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "1 job red ›")!;
@@ -231,6 +244,21 @@ describe("the red jobs sheet", () => {
     open.click();
     expect(document.querySelector(".sheet")?.getAttribute("aria-label")).toBe("Red jobs");
     ops.unmount();
+  });
+
+  it("keeps the way in on Machines while Ops has no reading, read or failed", () => {
+    resetScheduled(view([job({ redStreak: 1, lastRun: redRun })]));
+    opsData.ops = null;
+    app.opsPage = "machines";
+    for (const error of [null, "Request failed (500)"]) {
+      opsData.error = error;
+      ops.mount(root);
+      expect(root.querySelector(error ? ".reading.is-failed" : ".reading.is-pending")).not.toBeNull();
+      const open = [...root.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "1 job red ›")!;
+      expect(open.dataset.use).toBe("jobs.red.open");
+      ops.unmount();
+    }
+    opsData.error = null;
   });
 
   it("shows a red job's failed Delete with its reason", () => {

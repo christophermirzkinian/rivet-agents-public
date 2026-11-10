@@ -302,7 +302,8 @@ describe("chat tab", () => {
     chat.mount(root);
     await settle();
     expect(root.querySelector(".chat-msg")).toBeNull();
-    expect(root.querySelector(".chat-hint")!.textContent).not.toBe("");
+    // With nothing to show it says so in words and offers Try again, never the raw error.
+    expect(root.querySelector(".chat-failed p")!.textContent).toBe("Couldn't load this chat.");
     vi.stubGlobal("fetch", vi.fn(fakeFetch));
     for (const fn of listeners.open ?? []) fn();
     for (let i = 0; i < 6; i += 1) await settle();

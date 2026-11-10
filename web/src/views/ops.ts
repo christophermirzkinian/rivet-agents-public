@@ -54,6 +54,8 @@ import { openSheet } from "./sheet.js";
 import { machinesTrend } from "./machines-trend.js";
 import { holdOf, holdReason, isHold } from "../../../src/shared/pr-holds.js";
 import * as api from "../api.js";
+import { machinesHead, machinesWorstFirst, usageLead } from "../reading-figures.js";
+import { leadFigure, readingFrame, readingView } from "./reading.js";
 import { onSessionReset } from "../session.js";
 
 export { HOLD_WORDS } from "../../../src/shared/pr-holds.js";
@@ -190,13 +192,6 @@ async function refreshNow(): Promise<void> {
   }
 }
 
-/** Desktop only (ops.css): a phone pulls to refresh. A failed load shows in the notices like any other. */
-function refreshBar(): HTMLElement {
-  const btn = button(refreshing ? "Refreshing…" : "Refresh", () => void refreshNow(), "ops-refresh", refreshing, "ops.refresh");
-  btn.setAttribute("aria-busy", String(refreshing));
-  return h("div", { class: "ops-top" }, btn);
-}
-
 const short = (repo: string) => repo.split("/").pop() ?? repo;
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
@@ -284,15 +279,49 @@ function allSections(ops: OpsResponse | null): Section[] {
   ];
 }
 
+/** A reading page's title as its menu row says it, and its placeholder's blocks at about the height it lands at. */
+const READING: Record<Exclude<OpsPage, "plan">, { page: string; shape: readonly number[] }> = {
+  usage: { page: "Usage", shape: [250, 250, 56] },
+  machines: { page: "Machines", shape: [110, 230, 200] },
+  code: { page: "Code", shape: [220, 220] },
+};
+
+/** What a reading page has read: Code is Ops and the timeline, the rest Ops alone; Usage's figures are its Claude reading. */
+function readingOf(ops: OpsResponse | null, page: Exclude<OpsPage, "plan">): { has: boolean; failed: boolean } {
+  if (page === "code") return { has: !!ops || !!opsData.timeline, failed: !!opsData.error || opsData.timelineError };
+  const failed = !!opsData.error;
+  // A read with nothing to show says it failed plainly, never that it shows the last numbers read. Usage's figure is
+  // an overall with an account read, not a Claude reading of unread rows.
+  // Machines' figures are any machine reading, however old, never a bare Ops envelope that holds none.
+  const measured = () =>
+    page === "usage" ? overallViews(ops).some((view) => !!view.usage && !!usageLead(view.cells, false)) : page === "machines" ? machinesRead(ops) : true;
+  return { has: !!ops && (!failed || measured()), failed };
+}
+
+/** Whether Ops holds a reading of any machine: the Mac's. */
+function machinesRead(ops: OpsResponse | null): boolean {
+  return !!ops?.mac;
+}
+
 function renderOps(el: HTMLElement): void {
   const ops = opsData.ops;
   const page = app.opsPage;
   const refocus = keepFocus(el);
-  el.replaceChildren(h("div", { class: "hq ops", attrs: { "data-page": page, "data-section": page } }, page === "plan" ? null : refreshBar(), ...pageBody(ops, page)));
+  const reading = page === "plan" ? null : { ...READING[page], ...readingOf(ops, page), busy: refreshing, at: opsData.opsAt.wall || null, retry: () => void refreshNow() };
+  const body: Child[] =
+    !reading
+      ? pageBody(ops, "plan")
+      : [
+          readingFrame(reading, () => pageBody(ops, page)),
+          // The schedules and their Red jobs row are read apart from Ops, and stay while the page has no figures.
+          page === "machines" && !reading.has ? machineSchedules(true) : null,
+        ];
+  el.replaceChildren(h("div", { class: "hq ops", attrs: { "data-page": page, "data-section": page } }, ...body));
   refocus();
   if (pendingSection) {
     const target = el.querySelector(`[data-section="${pendingSection}"]`);
-    pendingSection = null;
+    // A page still reading has drawn no sections yet: a search hit waits for the render that draws its target.
+    if (target || !reading || readingView(reading).body !== "pending") pendingSection = null;
     if (target instanceof HTMLElement && typeof target.scrollIntoView === "function") target.scrollIntoView({ block: "start" });
   }
 }
@@ -352,9 +381,8 @@ function pageBody(ops: OpsResponse | null, page: OpsPage): Child[] {
     case "usage":
       return [usageHeroes(ops), notices(ops, page), more("usage", usageMore(ops))];
     case "machines":
-      if (!schedules && !schedulesError) void loadSchedules();
       // The machine readings and their chart stay in full view.
-      return [notices(ops, page), boxesEl(ops), machinesTrend(ops), h("div", { class: "ops-grid" }, ...pageSections(ops, page)), schedulesEl()];
+      return [notices(ops, page), boxesEl(ops), machinesTrend(ops), h("div", { class: "ops-grid" }, ...pageSections(ops, page)), machineSchedules()];
     default:
       return [notices(ops, page), h("div", { class: "ops-grid" }, ...pageSections(ops, page))];
   }
@@ -370,15 +398,21 @@ function planPage(): Child[] {
 
 // Machines: one line per box, then the schedules
 
-/** One line per box, as each section shows itself: amber for what an agent is on, calm for what you dismissed. */
+/**
+ * How many machines need a look, then one line per machine worst first, as each section shows itself: amber for what an
+ * agent is on, calm for what you dismissed.
+ */
 function boxesEl(ops: OpsResponse | null): HTMLElement {
   const quiet = quietSections(ops, "machines");
-  const lines = [macSection(ops)].map((sec) => ({ name: sec.title, why: sec.headline, tone: shownTone(sec, quiet) }));
+  const faulty = (tone: Shade) => tone === "bad" || tone === "warn";
+  const read = [!!ops?.mac && macCurrent(ops)];
+  const lines = [macSection(ops)].map((sec, i) => ({ name: sec.title, why: sec.headline, tone: shownTone(sec, quiet), read: read[i]!, fault: faulty(sec.tone) }));
+  const head = machinesHead(lines);
   return h(
     "section",
-    { class: "ops-list", attrs: { "data-section": "boxes", "aria-labelledby": "ops-boxes-title" } },
-    h("h2", { class: "ops-list-title", attrs: { id: "ops-boxes-title" } }, "Machines"),
-    h("ul", { class: "ops-lines" }, ...lines.map((line) => lineEl(line.name, line.why, line.tone))),
+    { class: "ops-list machines-head", attrs: { "data-section": "boxes", "aria-label": "Machines" } },
+    h("div", { class: `box machines-lead t-${head.tone}` }, leadFigure(head.figure, head.words, head.tone)),
+    h("ul", { class: "ops-lines" }, ...machinesWorstFirst(lines).map((line) => lineEl(line.name, line.why, line.tone))),
   );
 }
 
@@ -392,6 +426,13 @@ function lineEl(name: string, why: string, tone: Shade, attrs: Record<string, st
   );
 }
 
+function machineSchedules(alone = false): HTMLElement | null {
+  if (!schedules && !schedulesError) void loadSchedules();
+  // Under a Machines frame with no Ops reading, only with something in them: the frame already says the read failed.
+  if (alone && !schedules && !jobsView()?.jobs.some(jobRed)) return null;
+  return schedulesEl();
+}
+
 /** The schedules, read only: name · next run · last result, failing first. Their switches went with their page. */
 function schedulesEl(): HTMLElement {
   const head = (extra: string | null) => h("h2", { class: "ops-list-title", attrs: { id: "ops-schedules-title" } }, extra ? `Schedules · ${extra}` : "Schedules");
@@ -400,12 +441,19 @@ function schedulesEl(): HTMLElement {
   // here too, as its Bring back, Pause and Delete are on that sheet.
   const red = jobsView()?.jobs.filter(jobRed).length ?? 0;
   const redRow = red ? button(`${red === 1 ? "1 job" : `${red} jobs`} red ›`, () => openRedJobs(), "ghost ops-red-jobs", false, "jobs.red.open") : null;
-  if (!schedules) return shell(head(null), redRow, h("p", { class: "empty" }, schedulesError ? `Couldn't read the schedules: ${schedulesError}` : "Loading…"));
+  if (!schedules)
+    return shell(
+      head(null),
+      redRow,
+      h("p", { class: "empty" }, schedulesError ? "Couldn't read the schedules." : "Loading…"),
+      schedulesError ? button("Try again", () => void loadSchedules(), "ghost", false, "ops.refresh") : null,
+    );
   const stale = schedulesStale(schedules);
   if (!schedules.items.length) return shell(head(null), redRow, h("p", { class: "empty" }, "Nothing scheduled yet."));
   return shell(
-    head(stale ? `read ${schedules.at ? when(schedules.at) : "earlier"}` : null),
+    head(schedulesError ? "couldn't refresh" : stale ? `read ${schedules.at ? when(schedules.at) : "earlier"}` : null),
     redRow,
+    schedulesError ? button("Try again", () => void loadSchedules(), "ghost", false, "ops.refresh") : null,
     h("ul", { class: "ops-lines" }, ...scheduleLines(schedules).map((line) => {
       const schedule = schedules!.items.find((one) => one.id === line.id);
       return lineEl(line.name, `${line.next} · ${line.last}`, stale ? "idle" : shade(schedule ? scheduleItem(schedule) : null, line.tone), { "data-schedule": line.id });
@@ -647,8 +695,10 @@ function notices(ops: OpsResponse | null, on: OpsPage): HTMLElement | null {
   const add = (text: string, tone: Shade, pages?: readonly OpsPage[]) => {
     if (!pages || pages.includes(on)) lines.push({ text, tone });
   };
-  if (opsData.error) add(opsData.error, "bad");
-  if (app.notice) add(app.notice, "bad");
+  // A reading page says a failed read in its frame (reading.ts), never a server's own words.
+  if (on === "plan" && opsData.error) add("Couldn't load Ops.", "bad");
+  // app.notice is the feed's failure in the server's own words; Plan says it plainly.
+  if (on === "plan" && app.notice) add("Can't reach Rivet.", "bad");
   if (ops) {
     if (!ops.bridge.connected) add("The Mac bridge is offline; GitHub and Mac data stop updating.", "warn");
     else {
@@ -670,7 +720,7 @@ function notices(ops: OpsResponse | null, on: OpsPage): HTMLElement | null {
       }
       if (ops.healthStaleSince) add(`App checks are from ${readingAt(ops, ops.healthStaleSince) ?? "earlier"}.`, "warn", ["machines"]);
     }
-  } else if (!opsData.error) add("Loading Ops…", "info");
+  } else if (on === "plan" && !opsData.error) add("Loading Ops…", "info");
   if (!lines.length) return null;
   // Plan is never red: a failed read there is a grey line.
   if (on === "plan") return h("div", { class: "plan-notes", attrs: { role: "status" } }, ...lines.map((line) => h("p", { class: "plan-note" }, line.text)));
@@ -1115,7 +1165,7 @@ function macSection(ops: OpsResponse | null): Section {
   const bridge = ops?.bridge.connected ?? false;
   if (!mac)
     return section("mac", "Mac", bridge ? "info" : "warn", bridge ? "No Mac health yet" : "Bridge offline", () =>
-      h("p", { class: "empty" }, "Waiting for the Mac bridge to send its health."),
+      h("p", { class: "empty" }, bridge ? "No Mac health read yet." : "The Mac bridge is offline, so no Mac health was read."),
     );
   // An old reading is no reading: its disk and memory say when they were read, never that they are fine now.
   const current = macCurrent(ops!);
@@ -1262,10 +1312,10 @@ interface Overall {
 }
 
 /** The overall's bar: one cell per account, each filled to its own use, all in the overall's colour. */
-function cellsBar(cells: readonly UsageCell[], label: string): HTMLElement {
+function cellsBar(cells: readonly UsageCell[], label: string, tone: Shade): HTMLElement {
   return h(
     "span",
-    { class: "usage-cells", attrs: { role: "img", "aria-label": label } },
+    { class: `usage-cells t-${tone}`, attrs: { role: "img", "aria-label": label } },
     ...cells.map((cell) => {
       const fill = h("span", { class: "usage-cell-fill" });
       if (!cell.unread) fill.style.width = `${Math.min(100, Math.max(0, cell.percent))}%`;
@@ -1274,17 +1324,9 @@ function cellsBar(cells: readonly UsageCell[], label: string): HTMLElement {
   );
 }
 
-/** An overall's colour: its figures' own, and an old reading is never fine, so calm figures read amber. */
-function overallTone(view: Overall): Shade {
-  const sum = view.usage ? sumCells(view.cells) : null;
-  if (!sum) return "idle";
-  return view.usage && usageStale(view.usage) && sum.tone === "ok" ? "warn" : sum.tone;
-}
-
 function overallCard(ops: OpsResponse | null, view: Overall): HTMLElement {
-  const sum = view.usage ? sumCells(view.cells) : null;
   const stale = !!view.usage && usageStale(view.usage);
-  const tone = overallTone(view);
+  const lead = view.usage ? usageLead(view.cells, stale) : null;
   const head = h(
     "div",
     { class: "usage-hero-head" },
@@ -1296,33 +1338,20 @@ function overallCard(ops: OpsResponse | null, view: Overall): HTMLElement {
           // Codex rows ride on the Claude reading and may be older than it (the bridge keeps them 15 minutes).
           `Read ${readingAt(ops!, view.usage!.at) ?? "earlier"}${view.id === "openai" ? " or earlier" : ""}`,
         )
-      : sum
+      : lead
         ? h("span", { class: "usage-hero-meta" }, plural(view.cells.length, "account"))
         : null,
   );
   const shell = (...body: Child[]) =>
-    h("section", { class: `usage-hero box t-${tone}`, attrs: { "data-section": view.id, "aria-labelledby": `ops-${view.id}-title` } }, head, ...body);
-  if (!sum) return shell(h("p", { class: "usage-hero-empty" }, view.empty));
-  const used = Math.round(sum.used);
-  // An unread account's 100% is in the total but not in what is known to be left.
-  const left = sum.total - sum.unread * 100 - used;
-  const weekly = view.cells.every((cell) => cell.window === "week");
-  const unit = `${weekly ? "weekly " : ""}${sum.total === 100 ? "limit" : "limits"} used`;
-  const leftWords = sum.unread ? `left, ${sum.unread} not read` : "left";
+    h("section", { class: `usage-hero box t-${lead?.cardTone ?? "idle"}`, attrs: { "data-section": view.id, "aria-labelledby": `ops-${view.id}-title` } }, head, ...body);
+  if (!lead) return shell(h("p", { class: "usage-hero-empty" }, view.empty));
+  const sum = sumCells(view.cells)!;
+  const left = `${lead.left}${lead.unread ? "+" : ""}`;
   const reset = sum.next ? resetText(sum.next.resetsAt, Date.now()) : null;
   return shell(
-    h(
-      "div",
-      { class: "usage-figs" },
-      h(
-        "div",
-        { class: "usage-fig used" },
-        h("span", { class: "usage-fig-line" }, h("b", { class: "usage-fig-n" }, asLimits(used)), h("span", { class: "usage-fig-of" }, `of ${asLimits(sum.total)}`)),
-        h("span", { class: "usage-fig-label" }, unit),
-      ),
-      h("div", { class: "usage-fig left" }, h("b", { class: "usage-fig-n" }, `${asLimits(left)}${sum.unread ? "+" : ""}`), h("span", { class: "usage-fig-label" }, leftWords)),
-    ),
-    cellsBar(view.cells, `${view.name}: ${asLimits(used)} of ${asLimits(sum.total)} ${unit}, ${asLimits(left)}${sum.unread ? "+" : ""} ${leftWords}`),
+    leadFigure(left, `of ${lead.of} left`, lead.tone),
+    cellsBar(view.cells, `${view.name}: ${left} of ${lead.of} left, ${lead.line}`, lead.tone),
+    h("p", { class: "reading-lines usage-lines" }, lead.line),
     h(
       "div",
       { class: "usage-reset" },
@@ -1337,7 +1366,7 @@ function overallViews(ops: OpsResponse | null): [Overall, Overall] {
   const usage = ops?.claude ?? null;
   const codex = usage ? codexCells(usage.limits) : [];
   return [
-    { id: "claude", name: "Claude", cells: usage ? claudeOverall(usage) : [], usage, empty: usage ? "No meters in the last reading." : "Waiting for the Mac bridge to read Claude usage." },
+    { id: "claude", name: "Claude", cells: usage ? claudeOverall(usage) : [], usage, empty: usage ? "No meters in the last reading." : "No Claude usage read yet." },
     { id: "openai", name: "OpenAI", cells: codex, usage: codex.length ? usage : null, empty: "No OpenAI accounts read yet." },
   ];
 }

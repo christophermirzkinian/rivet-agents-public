@@ -1,6 +1,6 @@
 import type { TimelineEvent, TimelineResponse } from "../../../src/shared/ops.js";
 import * as api from "../api.js";
-import { describe, h, isHttps } from "../dom.js";
+import { h, isHttps } from "../dom.js";
 import { opsData } from "../ops-data.js";
 import { when } from "../../../src/shared/when.js";
 
@@ -93,18 +93,18 @@ let reads = 0;
 
 export function mount(el: HTMLElement): void {
   const read = ++reads;
-  const show = (timeline: TimelineResponse | null, error?: string) => {
+  const show = (timeline: TimelineResponse | null, failed = false) => {
     if (read !== reads) return;
     el.replaceChildren(
       h("p", { class: "panel-text" }, "What each deploy in the last 14 days shipped."),
-      error ? h("p", { class: "empty" }, `Patch notes did not load: ${error}`) : patchNotesBody(patchNotes(timeline), timeline !== null),
+      failed ? h("p", { class: "empty" }, "Patch notes did not load.") : patchNotesBody(patchNotes(timeline), timeline !== null),
     );
   };
   show(opsData.timeline);
   api.getTimeline().then(
     (timeline) => show(timeline),
     // Ops may have loaded the timeline meanwhile: show that rather than an error or a stuck "Loading".
-    (error: unknown) => show(opsData.timeline, opsData.timeline ? undefined : describe(error)),
+    () => show(opsData.timeline, !opsData.timeline),
   );
 }
 

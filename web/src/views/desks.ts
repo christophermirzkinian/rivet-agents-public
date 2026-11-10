@@ -18,7 +18,7 @@ import { isGotIt } from "../../../src/shared/answers.js";
 import { h, ICONS, svg } from "../dom.js";
 import { opsData, watchOps } from "../ops-data.js";
 import { MOOD_WORDS, rivet, type Mood } from "../rivet/rivet.js";
-import { app, countedCards, crewLapsed, deck, isWorking, subscribe } from "../state.js";
+import { app, boardRead, countedCards, crewLapsed, deck, isWorking, readAgain, subscribe } from "../state.js";
 import { openChatPeek, type PeekFacts } from "./chat-peek.js";
 import { openBacklog } from "./backlog-sheet.js";
 import { askingCards, cardsOf, openDecideFor } from "./decide-sheet.js";
@@ -151,11 +151,13 @@ export const underWay = (): Worker[] => {
   return rows;
 };
 
-/** Asking while cards wait on you, working while any agent is live, else the word for Ops. */
+/** A neutral face until the board has loaded; then asking while cards wait on you, working while any agent is live, else the word for Ops. */
 export function rivetMood(): Mood {
+  const ops = clearWords().mood;
+  if (ops === "thinking") return ops;
   // A Got it card is news, so it never makes him asking, as it never counts as needing him (state.needsYou).
   if (countedCards().some((need) => !isGotIt(need))) return "asking";
-  return liveCrew().length ? "working" : clearWords().mood;
+  return liveCrew().length ? "working" : ops;
 }
 
 /**
@@ -191,15 +193,18 @@ export function crowd(crew: readonly Worker[], cards: readonly ServedNeed[], ask
   return { seated: crew.filter((w) => kept.has(w)), rest: crew.filter((w) => !kept.has(w)) };
 }
 
+/** A map row's title wraps to two lines (desks.css clamps it there), so its fallback is cut this long, not at one line's. */
+const TWO_LINES = 60;
+
 /**
  * An agent's row title: its ask's short title, else its own from what it is at, else its chat's name. A row never shows
- * a long ask or status line: before a short title is written, it reads the words' trimmed first clause. Your own words
- * are in In hand.
+ * a long ask or status line: before a short title is written, it reads the words' trimmed first clause, cut to `max`.
+ * Your own words are in In hand.
  */
-export function rowTitle(w: Worker, ask?: Ask): string {
-  if (ask) return shownTitle(ask.short, ask.words);
+export function rowTitle(w: Worker, ask?: Ask, max?: number): string {
+  if (ask) return shownTitle(ask.short, ask.words, max);
   const what = w.what ?? w.doing;
-  return what ? shownTitle(w.short, what) : fallbackTitle(chatName(w.chat));
+  return what ? shownTitle(w.short, what, max) : fallbackTitle(chatName(w.chat), max);
 }
 
 /** A waiting agent with no decision card: STATE_WORDS says Needs you for waiting, which only a card may say here. */
@@ -263,7 +268,7 @@ export function peekFacts(id: string): PeekFacts | null {
   const signalPr = view.signal?.pr;
   return {
     worker: w,
-    title: rowTitle(w, ask),
+    title: rowTitle(w, ask, TWO_LINES),
     project: projectName(homeOf(w)),
     ...(ask ? { ask } : {}),
     stage: view.stage === "needs-you" ? NEEDS_YOU : IN_HAND[view.stage],
@@ -308,7 +313,7 @@ function agentRow(w: Worker, i: number, asks: readonly Ask[], now: number, crew:
       h(
         "span",
         { class: "desk-agent-what" },
-        rowTitle(w, ask),
+        rowTitle(w, ask, oneLine ? undefined : TWO_LINES),
         w.boxGuess ? h("span", { class: "desk-agent-guess", attrs: { role: "img", "aria-label": "Its project is a guess", title: "Its project is a guess" } }, "?") : null,
       ),
       h("span", { class: `desk-agent-meta${said.tone && said.tone !== "due" ? ` is-${said.tone}` : ""}` }, said.text),
@@ -324,7 +329,7 @@ function agentRow(w: Worker, i: number, asks: readonly Ask[], now: number, crew:
         })
       : h("button", {
           class: "desk-agent-tap",
-          attrs: { type: "button", "data-use": "desks.worker.open-chat", "aria-label": `${chatName(w.chat)}: ${rowTitle(w, ask)}. Open its chat` },
+          attrs: { type: "button", "data-use": "desks.worker.open-chat", "aria-label": `${chatName(w.chat)}: ${rowTitle(w, ask, oneLine ? undefined : TWO_LINES)}. Open its chat` },
           // From the "N more" sheet, the chat sheet opens once that sheet's Back has landed.
           on: { click: () => leaveTallSheet(() => openChatPeek(underWay().find((one) => one.id === w.id) ?? w, () => peekFacts(w.id))) },
         }),
@@ -407,7 +412,8 @@ export function mountDesks(): { el: HTMLElement; paint: () => void; stop: () => 
     // says they wait, as Cards' heading does, and never Needs you: a minimised card is out of the red counts. The deck
     // less the counted cards is the minimised ones, with or without a summary read.
     const small = deck().length - countedCards().length;
-    const word = mood === "happy" ? (small ? allMinimised(small) : MOOD_WORDS.clear) : MOOD_WORDS[mood];
+    const read = boardRead();
+    const word = mood === "thinking" ? clearWords().title : mood === "happy" ? (small ? allMinimised(small) : MOOD_WORDS.clear) : MOOD_WORDS[mood];
     // A tap on Rivet opens his sheet: Copy summary and his chat.
     const home = h(
       "button",
@@ -449,8 +455,10 @@ export function mountDesks(): { el: HTMLElement; paint: () => void; stop: () => 
         h("div", { class: "desk-slab" }, h("span", { class: "desk-screen" }, h("i"), h("i"), h("i"))),
       );
     });
+    // A first read that failed: one way to read it again, beside his desk rather than in it (his desk is a button).
+    const retry = read === "failed" ? h("button", { class: "btn desks-retry", attrs: { type: "button", "data-use": "desks.retry" }, on: { click: () => void readAgain() } }, "Try again") : null;
     const floor = [
-      h("div", { class: "desks-home" }, home),
+      h("div", { class: "desks-home" }, home, retry),
       ...(desks.length ? [h("div", { class: "desks-grid" }, ...desks)] : []),
       ...(rest.length ? [h("button", { class: "desks-more", attrs: { type: "button", "data-use": "desks.more" }, on: { click: openRest } }, `${rest.length} more ›`)] : []),
       // Every project's name under the boxes, the quiet ones dimmed. A tap opens its backlog.

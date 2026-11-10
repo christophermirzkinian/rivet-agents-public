@@ -26,6 +26,20 @@ describe("links in plain text", () => {
     }
   });
 
+  it("opens Rivet's own link, such as the morning line's, in the app's own window", () => {
+    const happy = (window as unknown as { happyDOM: { setURL(url: string): void } }).happyDOM;
+    const before = location.href;
+    happy.setURL("https://rivet-rivet.example.com/");
+    try {
+      const [own, away] = [...render("What you used: https://rivet-rivet.example.com/?tab=what-you-used and https://github.com/x").querySelectorAll("a")];
+      expect(own!.getAttribute("href")).toBe("https://rivet-rivet.example.com/?tab=what-you-used");
+      expect(own!.hasAttribute("target")).toBe(false);
+      expect(away!.getAttribute("target")).toBe("_blank");
+    } finally {
+      happy.setURL(before);
+    }
+  });
+
   it("drops the sentence's punctuation and an unopened bracket, but keeps brackets the URL opened", () => {
     expect(links("See https://example.com/a.")).toEqual([{ href: "https://example.com/a", text: "https://example.com/a" }]);
     expect(links("(see https://example.com/a), then?")[0]!.text).toBe("https://example.com/a");

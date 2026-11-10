@@ -179,6 +179,7 @@ const CONTROLS: UsageId[] = [
     ["decide.back", "Back out of Decide"],
     ["decide.show-minimised", "Show minimised cards in Decide"],
     ["decide.big", "See it big in Decide"],
+    ["decide.retry", "Try again when Decide could not read the cards", { added: "2026-11-10" }],
   ]),
   ...group("control", "Cards", [
     ["cards.offline.retry", "Retry when offline"],
@@ -251,6 +252,7 @@ const CONTROLS: UsageId[] = [
     ["chat.search.clear", "Clear find in chat"],
     ["chat.search.hit", "A find-in-chat hit"],
     ["chat.earlier", "Earlier messages"],
+    ["chat.retry", "Try again when a chat could not be read", { added: "2026-11-10" }],
     ["chat.topics.open", "Open more topics"],
     ["chat.topics.back", "Back from more topics"],
     ["chat.topics.archived", "Show archived topics"],
@@ -404,6 +406,7 @@ const CONTROLS: UsageId[] = [
   ...group("control", "Desks and Agents", [
     ["desks.worker.open-card", "Open a worker's card"],
     ["desks.worker.open-chat", "Open a map row's chat"],
+    ["desks.retry", "Try again when the map could not read the board", { added: "2026-11-10" }],
     ["desks.chat.close", "Close a map row's chat"],
     ["desks.chat.pr-link", "Open a PR from a map row's chat"],
     ["desks.rivet", "Rivet's desk"],

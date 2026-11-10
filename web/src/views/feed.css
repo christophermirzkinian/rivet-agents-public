@@ -343,6 +343,77 @@
   margin-left: auto;
 }
 
+/* The phone's card head: Message and Share, then the one "−" and the ✕, so the answers are the card's last thing.
+   Too tight for Message's word, it keeps its icon and name; Share keeps its word. */
+.card-head:has(> .head-acts) {
+  container: card-head / inline-size;
+}
+
+.card-head .head-acts {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.card-head .head-acts .head-tools {
+  margin-left: 0;
+}
+
+.head-acts .btn.card-message,
+.head-acts .btn.card-share-top {
+  width: auto;
+  min-width: 44px;
+  min-height: 44px;
+  margin: 0;
+  padding: 0 12px;
+  white-space: nowrap;
+}
+
+/* The row never runs past its card, whatever the phone's font or Share's word ("Getting…" is wider): only Share gives,
+   its word ending in "…", and every tool keeps its 44 px. */
+.head-acts .btn.card-message {
+  flex: none;
+}
+
+.head-acts .btn.card-share-top {
+  flex: 0 1 auto;
+  overflow: hidden;
+}
+
+.head-acts .card-share-icon {
+  flex: none;
+}
+
+.head-acts .card-share-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@container card-head (max-width: 320px) {
+  .head-acts .card-message-word {
+    display: none;
+  }
+}
+
+/* With the Decide sheet's See it big in the row, five tools share the head: on a phone Message keeps only its icon and
+   name, so the row fits a 412 px screen whatever the phone's font (feed-cards-fit), and Share keeps only its icon and
+   name on a phone under 360px. */
+@container card-head (max-width: 400px) {
+  .head-acts:has(.decide-big:not([hidden])) .card-message-word {
+    display: none;
+  }
+}
+
+@container card-head (max-width: 300px) {
+  .head-acts:has(.decide-big:not([hidden])) .card-share-label {
+    display: none;
+  }
+}
+
 /* The X: a red ring on a faint red disc so it reads as "reject", never as "close". Same 44 px as the −. */
 .btn.x-btn {
   flex: none;

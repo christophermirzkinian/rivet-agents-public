@@ -52,19 +52,19 @@ export function cutAtWord(text: string, max = MAX_SHORT_TITLE): string {
  * The title a row wears until Haiku names it: the words' first clause (to the first full stop, question mark, semicolon,
  * dash or line break), links left out, cut at a word. Never blank: words that are only a link read as the link's host.
  */
-export function fallbackTitle(words: string): string {
+export function fallbackTitle(words: string, max = MAX_SHORT_TITLE): string {
   const text = words.replace(/\r/g, "").replace(/\blive\b/gi, " ").trim();
   const noLinks = text.replace(URL_RE, " ").replace(/[^\S\n]+/g, " ").trim();
   const first = noLinks.split(/(?<=[^\d])[.?!;](?=\s|$)|\n|\s[–—-]\s/)[0]?.trim() ?? "";
   const clause = first.replace(/[\s,:;]+$/, "");
   const host = /\bhttps?:\/\/([^/\s?#]+)/i.exec(text)?.[1];
-  const title = clause ? cutAtWord(clause) : noLinks ? cutAtWord(noLinks) : host ? cutAtWord(host) : cutAtWord(text);
+  const title = clause ? cutAtWord(clause, max) : noLinks ? cutAtWord(noLinks, max) : host ? cutAtWord(host, max) : cutAtWord(text, max);
   // A cut can leave "live" standing alone ("…-livestream" cut to "…-live…"): drop it once more.
   return title.replace(/\blive\b/gi, "").replace(/\s+/g, " ").replace(/^[\s,:;·–—-]+|[\s,:;·–—-]+$/g, "").trim() || "Untitled";
 }
 
-/** A short title as it may be shown: the given one when it is a fit, else the fallback from `words`. */
-export function shownTitle(title: string | null | undefined, words: string): string {
+/** A short title as it may be shown: the given one when it is a fit, else the fallback from `words`, cut to `max`. */
+export function shownTitle(title: string | null | undefined, words: string, max = MAX_SHORT_TITLE): string {
   const clean = title?.replace(/\s+/g, " ").trim();
-  return clean && isShowable(clean) ? clean : fallbackTitle(words);
+  return clean && isShowable(clean) ? clean : fallbackTitle(words, max);
 }

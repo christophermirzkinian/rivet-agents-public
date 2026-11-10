@@ -84,9 +84,11 @@
 }
 
 .decide-count {
+  overflow: hidden;
   color: var(--muted);
   font-size: var(--fs-body);
   font-weight: 700;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -115,37 +117,24 @@
   display: none;
 }
 
-/* See it big takes no row: it floats at the right of the read's foot, above a pinned answer tray (decide-sheet.ts fits
-   sets --big-at), solid so the words under it do not show through. */
+/* See it big is a mark in the card's tool row, beside the "−", so it covers no line of the read and takes no row. */
 .decide-big {
-  position: absolute;
-  right: 10px;
-  bottom: var(--big-at, 8px);
-  z-index: 3;
   display: inline-flex;
+  flex: none;
   align-items: center;
   justify-content: center;
+  width: var(--tap);
   height: var(--tap);
-  min-width: var(--tap);
-  padding: 0 16px;
+  padding: 0;
   border: 1px solid rgba(214, 205, 255, 0.3);
-  border-radius: 22px;
+  border-radius: 999px;
   background: #2c2747;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
   color: var(--text);
-  font: inherit;
-  font-size: var(--fs-body);
-  font-weight: 800;
-  white-space: nowrap;
 }
 
-/* Room under the read's last line, so scrolled to the end the pill sits on no control. */
-.decide-sheet:not(.is-big) .decide-card.has-big .card.top::after,
-.sheet.decide-sheet.is-big .answer-card::after {
-  content: "";
-  display: block;
-  flex: none;
-  height: calc(var(--tap) + 16px);
+.decide-big .btn-icon {
+  width: 22px;
+  height: 22px;
 }
 
 /* Big is for reading: the switch and say-line go, and the answers scroll on after the read, no longer pinned. */
@@ -224,9 +213,9 @@
   display: none;
 }
 
-/* Up to three options stay in sight at the foot of the card as its body scrolls under them: the answer at the thumb,
-   with no scroll on a small 320x693 (plan Risks). More than three scroll with the card. */
-.decide-sheet .choices:not(:has(> button:nth-of-type(4))) {
+/* The options stay in sight at the foot of the card as its body scrolls under them: the answer at the thumb, with no
+   scroll on a small 320x693 (plan Risks). Four or more scroll in their own tray, kept under half the sheet. */
+.decide-sheet .choices {
   position: sticky;
   bottom: 0;
   z-index: 1;
@@ -235,6 +224,17 @@
   border-top: 1px solid var(--line);
   background: var(--panel);
   box-shadow: 0 -10px 18px rgba(0, 0, 0, 0.35);
+}
+
+.decide-sheet .choices:has(> button:nth-of-type(4)) {
+  max-height: calc(var(--vv-h, 100dvh) * 0.4);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Capped, the tray scrolls whole answers: a squeezed one would spill its words over the next. */
+.decide-sheet .choices > * {
+  flex-shrink: 0;
 }
 
 .decide-sheet .answer-card .more-cue,
@@ -271,7 +271,7 @@
     height: 112px;
   }
 
-  .decide-sheet .choices:not(:has(> button:nth-of-type(4))) {
+  .decide-sheet .choices {
     gap: 6px;
     padding-block: 6px;
   }
@@ -283,7 +283,7 @@
 
 /* A card that still runs on past the sheet's foot fades out there rather than show half a control. A pinned options
    tray is its own whole edge, so that card does not fade. */
-.decide-sheet .card.top.has-more:not(:has(.choices:not(:has(> button:nth-of-type(4))))) {
+.decide-sheet .card.top.has-more:not(:has(.choices)) {
   mask-image: linear-gradient(to bottom, #000 calc(100% - 56px), transparent);
 }
 
@@ -324,8 +324,67 @@
   color: var(--text);
 }
 
-.decide-count[hidden] {
+.decide-count[hidden],
+.decide-segs[hidden] {
   display: none;
+}
+
+/* Before the board's first read: a card's shape while it reads, Rivet and Try again when it could not. */
+.decide-wait,
+.decide-failed {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding-top: 8px;
+  text-align: center;
+}
+
+.decide-wait-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-self: stretch;
+  padding: 18px 16px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--panel);
+}
+
+.decide-wait-card > span {
+  height: 14px;
+  border-radius: 7px;
+  background: rgba(214, 205, 255, 0.12);
+}
+
+.decide-wait-card > span:nth-child(2) {
+  width: 80%;
+}
+
+.decide-wait-card > span:nth-child(3) {
+  width: 55%;
+}
+
+.decide-wait-card > .decide-wait-answer {
+  height: var(--tap);
+  margin-top: 8px;
+  border-radius: 12px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .decide-wait-card > span {
+    animation: decide-wait 1.4s ease-in-out infinite alternate;
+  }
+}
+
+@keyframes decide-wait {
+  to {
+    opacity: 0.45;
+  }
+}
+
+.decide-failed {
+  padding-top: 24px;
 }
 
 /* Answered's rows, or the line saying nothing is open, scroll inside the sheet. */

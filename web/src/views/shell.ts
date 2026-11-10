@@ -255,6 +255,16 @@ function macPill(): HTMLElement | null {
   );
 }
 
+/** A wide window's own place for the alerts the phone shows on its band's line (floor.ts alerts). */
+function alertPill(alert: floor.Said): HTMLElement {
+  return h(
+    "div",
+    { class: "pill pill-alert warn", attrs: { role: "status", "data-key": `alert-${alert.key}`, "aria-label": alert.label } },
+    h("span", { class: "dot" }),
+    h("span", { class: "pill-text" }, alert.text),
+  );
+}
+
 /** Focus: the open card alone. The panes' own controls sit on the panes (panes.ts). */
 function focusToggle(on: boolean, focus: () => void): HTMLElement {
   return h(
@@ -289,6 +299,8 @@ function renderHeader(header: HTMLElement, desk: boolean, focusOn: boolean, focu
         { class: "topbar-end" },
         // Focus is the open card alone, so it is Decide's own.
         app.tab === "cards" ? focusToggle(focusOn, focus) : null,
+        // Decide's pane says its stale cards in its own bar.
+        ...floor.alerts().filter((alert) => !(alert.key === "offline" && app.tab === "cards")).map(alertPill),
         macPill(),
       ),
     );
