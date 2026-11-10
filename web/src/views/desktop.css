@@ -938,3 +938,21 @@
   color: var(--muted);
   font-size: var(--fs-s);
 }
+
+/* The home screen's alerts in the header, as the Mac pill: a runner box down opens Machines; stale cards is amber. */
+.desktop .topbar .pill-alert {
+  border: 0;
+  color: inherit;
+  font: inherit;
+  font-size: var(--fs-s);
+  font-weight: 700;
+}
+
+.desktop .topbar button.pill-alert {
+  cursor: pointer;
+}
+
+.desktop .topbar .pill-alert.warn > .dot {
+  background: var(--apricot);
+  box-shadow: 0 0 10px var(--apricot);
+}

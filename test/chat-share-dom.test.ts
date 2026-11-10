@@ -18,6 +18,12 @@ vi.mock("../web/src/views/toast.js", async (original) => ({
   flash: (text: string) => flashed.push(text),
 }));
 
+// Every PDF here is a stub the viewer cannot show: fail its build at once, not after the real pdf.js loads and parses,
+// which under CI load can outlast a test's wait (its own deadline is VIEWER_LOAD_MS, 20 s).
+vi.mock("../web/src/views/pdf-pages.js", () => ({
+  pdfContent: () => Promise.reject(new Error("not a PDF this test can show")),
+}));
+
 const chat = await import("../web/src/views/chat.js");
 const { SHARE_WAIT_MS } = await import("../web/src/within.js");
 
@@ -27,10 +33,12 @@ let listeners: Record<string, ((event?: { data: string }) => void)[]> = {};
 let root: HTMLElement;
 let share: ReturnType<typeof vi.fn> | null;
 let opened: ReturnType<typeof vi.fn>;
+/** What a read of the conversation says: a test that turns it personal sets this too, so the refresh that follows agrees. */
+let serverAppOnly = false;
 
 async function fakeFetch(input: RequestInfo | URL): Promise<Response> {
   // The conversation is not app-only: until a read of it says so, no reply offers Share.
-  const body = new URL(String(input), "http://x").pathname.startsWith("/api/conversations/") ? detailBody("c1", history) : EMPTY_LIST;
+  const body = new URL(String(input), "http://x").pathname.startsWith("/api/conversations/") ? detailBody("c1", history, { appOnly: serverAppOnly }) : EMPTY_LIST;
   return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
 }
 
@@ -49,6 +57,7 @@ const settle = async () => {
 
 const sheet = () => document.querySelector<HTMLElement>('.sheet[aria-label="Share"]');
 const area = () => sheet()!.querySelector<HTMLTextAreaElement>("textarea")!;
+const lightboxNote = () => document.querySelector<HTMLElement>(".lightbox .lightbox-note")?.textContent;
 const sheetButton = (label: string) => [...sheet()!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === label)!;
 
 async function openReplyShare(): Promise<void> {
@@ -66,6 +75,7 @@ beforeEach(() => {
   flashed.length = 0;
   listeners = {};
   share = null;
+  serverAppOnly = false;
   history = [
     { id: "c1", from: "owner", text: "What's live?", at: "2030-01-01T00:00:01.000Z", status: "replied" },
     { id: "h2", from: "rivet", text: REPLY, at: "2030-01-01T00:00:02.000Z" },
@@ -228,9 +238,12 @@ describe("share a reply", () => {
     chat.mount(root);
     await settle();
     root.querySelector<HTMLAnchorElement>('.chat-msg[data-id="h2"] .chat-file')!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
-    await settle();
+    // The viewer builds out of step with the test (its file and code load, then the stub fails): wait for that to land,
+    // or a failure under load lands after the tap and its note replaces the one under test.
+    await vi.waitFor(() => expect(lightboxNote()).toBe("Could not show the PDF. Share it to open it elsewhere."), { timeout: 15_000 });
     const shareTool = document.querySelector<HTMLButtonElement>('.lightbox [aria-label="Share Pitch deck.pdf"]')!;
     expect(shareTool.hidden).toBe(false);
+    serverAppOnly = true;
     for (const fn of listeners.thread ?? []) fn({ data: JSON.stringify({ id: "c1", project: "personal" }) });
     await settle();
     shareTool.click();
@@ -240,6 +253,63 @@ describe("share a reply", () => {
     expect(document.querySelector(".lightbox")!.textContent).toContain("This conversation is personal now: it stays in the app.");
     closeLightbox();
     for (const fn of listeners.thread ?? []) fn({ data: JSON.stringify({ id: "c1", project: null }) });
+  });
+
+  it("a PDF that fails after its conversation turned personal points at Download, not the Share it no longer offers", async () => {
+    const { closeLightbox } = await import("../web/src/views/lightbox.js");
+    history[1] = { ...history[1]!, files: [{ sha256: "4".repeat(64), name: "Pitch deck.pdf", bytes: 90_000 }] };
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      if (!String(input).startsWith("/media/")) return fakeFetch(input);
+      await held;
+      return new Response(new Blob(["%PDF-1.4\n"], { type: "application/pdf" }), { status: 200, headers: { "content-type": "application/pdf" } });
+    });
+    useShare(() => Promise.resolve());
+    Object.defineProperty(navigator, "canShare", { value: () => true, configurable: true, writable: true });
+    chat.mount(root);
+    await settle();
+    root.querySelector<HTMLAnchorElement>('.chat-msg[data-id="h2"] .chat-file')!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
+    await settle();
+    expect(lightboxNote()).toBe("Getting the PDF…");
+    serverAppOnly = true;
+    for (const fn of listeners.thread ?? []) fn({ data: JSON.stringify({ id: "c1", project: "personal" }) });
+    await settle();
+    release();
+    await vi.waitFor(() => expect(lightboxNote()).toMatch(/^Could not show the PDF\./), { timeout: 15_000 });
+    expect(lightboxNote()).toBe("Could not show the PDF. Download it to open it elsewhere.");
+    closeLightbox();
+    for (const fn of listeners.thread ?? []) fn({ data: JSON.stringify({ id: "c1", project: null }) });
+  });
+
+  it("a PDF opened in a personal conversation that fails after it turned shareable still points at Download: its viewer has no Share", async () => {
+    const { closeLightbox } = await import("../web/src/views/lightbox.js");
+    history[1] = { ...history[1]!, files: [{ sha256: "4".repeat(64), name: "Pitch deck.pdf", bytes: 90_000 }] };
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      if (!String(input).startsWith("/media/")) return fakeFetch(input);
+      await held;
+      return new Response(new Blob(["%PDF-1.4\n"], { type: "application/pdf" }), { status: 200, headers: { "content-type": "application/pdf" } });
+    });
+    useShare(() => Promise.resolve());
+    Object.defineProperty(navigator, "canShare", { value: () => true, configurable: true, writable: true });
+    serverAppOnly = true;
+    chat.mount(root);
+    await settle();
+    for (const fn of listeners.thread ?? []) fn({ data: JSON.stringify({ id: "c1", project: "personal" }) });
+    await settle();
+    root.querySelector<HTMLAnchorElement>('.chat-msg[data-id="h2"] .chat-file')!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
+    await settle();
+    expect(document.querySelector('.lightbox [aria-label="Share Pitch deck.pdf"]')).toBeNull();
+    serverAppOnly = false;
+    for (const fn of listeners.thread ?? []) fn({ data: JSON.stringify({ id: "c1", project: null }) });
+    // Shareable again only once a read of it lands: the reply's Share coming back says so.
+    await vi.waitFor(() => expect(root.querySelector('.chat-msg[data-id="h2"] .chat-share')).not.toBeNull(), { timeout: 15_000 });
+    release();
+    await vi.waitFor(() => expect(lightboxNote()).toMatch(/^Could not show the PDF\./), { timeout: 15_000 });
+    expect(lightboxNote()).toBe("Could not show the PDF. Download it to open it elsewhere.");
+    closeLightbox();
   });
 
   it("puts Share on Rivet's replies only", async () => {

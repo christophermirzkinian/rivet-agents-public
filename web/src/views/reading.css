@@ -1,0 +1,141 @@
+/* The reading pages' frame (reading.ts), in the app's own type scale: only the lead figures are big. */
+
+/* On a phone a page opens as a sheet: its title reads as the page's, above its section headings. */
+.sheet.page-sheet .home-sheet-head .home-sheet-title {
+  font-size: var(--fs-6xl);
+  font-weight: 900;
+  line-height: 1.15;
+}
+
+.reading {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.reading-figures {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  transition: opacity 0.2s ease;
+}
+
+.reading.is-busy .reading-figures {
+  opacity: 0.55;
+}
+
+.reading-skel {
+  position: relative;
+  overflow: hidden;
+  flex: none;
+  border-radius: var(--radius);
+  background: rgba(214, 205, 255, 0.08);
+}
+
+.reading-skel::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(214, 205, 255, 0.1), transparent);
+  transform: translateX(-100%);
+  animation: reading-shimmer 1.2s linear infinite;
+}
+
+@keyframes reading-shimmer {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reading-skel::after {
+    animation: none;
+  }
+}
+
+.reading-failed {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 40px 16px;
+  text-align: center;
+}
+
+.reading-failed-words {
+  margin: 0;
+  font-size: var(--fs-3xl);
+  font-weight: 800;
+}
+
+.reading-stale {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  font-size: var(--fs-body);
+  font-weight: 700;
+}
+
+.reading-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 4px 8px;
+}
+
+.reading-at {
+  color: var(--muted);
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+
+/* A lead figure: "0.3 of 5 left", the number big in its tone. */
+.reading-lead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  margin: 0;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.reading-lead-n {
+  color: var(--tone, var(--text));
+  font-size: 48px;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.reading-lead-words {
+  font-size: var(--fs-5xl);
+}
+
+.reading-meter {
+  display: block;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(214, 205, 255, 0.14);
+}
+
+.reading-meter-fill {
+  display: block;
+  width: var(--fill, 0%);
+  height: 100%;
+  border-radius: inherit;
+  background: var(--tone, var(--accent));
+}
+
+.reading-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-body);
+  font-weight: 600;
+}

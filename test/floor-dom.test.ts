@@ -7,7 +7,7 @@ import { opsData } from "../web/src/ops-data.js";
 import type { ServedNeed } from "../src/shared/board.js";
 import { NOTHING_NEEDS_YOU } from "../src/shared/words.js";
 import { when } from "../src/shared/when.js";
-import { app, changed, go, landing } from "../web/src/state.js";
+import { app, boardRead, changed, go, landing } from "../web/src/state.js";
 import { decideShown, openCards } from "../web/src/views/decide-sheet.js";
 import { openConversation } from "../web/src/views/chat.js";
 import { closeSheet, closeTallSheet } from "../web/src/views/sheet.js";
@@ -208,7 +208,8 @@ describe("Decide N", () => {
     decide.click();
     await settle();
     expect(kind()).toBe("decide-sheet");
-    expect(sheet()!.querySelector(".decide-count")?.textContent).toBe("1 of 2 decisions");
+    expect(sheet()!.querySelector(".decide-name")?.textContent).toBe("example-repo");
+    expect(sheet()!.querySelector(".decide-count")?.textContent).toMatch(/^1 of 2 · /);
     expect(sheet()!.querySelector('.decide-seg[data-seg="open"]')?.textContent).toBe("Open 2");
     deal([]);
     expect(button("decide").classList.contains("has-cards")).toBe(false);
@@ -492,7 +493,8 @@ describe("old tab ids", () => {
     sheet()!.querySelector<HTMLButtonElement>(".decide-none .clear-min")!.click();
     await settle();
     expect(decideShown()).toBe("a");
-    expect(sheet()!.querySelector(".decide-count")?.textContent).toBe("1 of 1 decision");
+    expect(sheet()!.querySelector(".decide-name")?.textContent).toBe("example-repo");
+    expect(sheet()!.querySelector(".decide-count")?.textContent).toMatch(/^1 of 1 · /);
     expect(sheet()!.querySelector('.decide-seg[data-seg="open"]')?.textContent).toBe("Open 1");
     expect(button("decide").querySelector(".home-decide-n")?.textContent).toBe("1");
   });
@@ -1090,5 +1092,127 @@ describe("links and pushes, as main.ts opens them", () => {
     expect([middle(), sheet()]).toEqual(["page", null]);
     await push({ type: "open-tab", tab: "cards" });
     expect([middle(), sheet()]).toEqual(["decide", null]);
+  });
+});
+
+describe("the home screen before and between reads", () => {
+  const pills = () => [...document.querySelectorAll<HTMLElement>(".home-band .floor-line .floor-line-say")];
+  const lineOn = () => document.querySelector(".home-band .floor-line")!.classList.contains("is-on");
+
+  afterEach(() => {
+    app.notice = null;
+    app.offline = null;
+    app.loadedAt = null;
+    app.slowRead = false;
+  });
+
+  it("a board the server has no snapshot of yet (board: null) is not read: a dash, the reading card, never all clear", () => {
+    mount();
+    app.board = { version: 0, updatedAt: null, board: null } as never;
+    changed();
+    expect(boardRead()).toBe("reading");
+    expect([button("decide").querySelector(".home-decide-n")?.textContent, button("decide").getAttribute("aria-label")]).toEqual(["–", "Decide, not read yet"]);
+    button("decide").click();
+    expect(sheet()!.querySelector(".decide-wait")).not.toBeNull();
+    expect(sheet()!.textContent).not.toContain(NOTHING_NEEDS_YOU);
+    // A read that fails then is a failed first read, with no "cards as of" for cards never shown.
+    app.loadedAt = Date.parse(NOW);
+    app.notice = "Request failed (500)";
+    changed();
+    expect(boardRead()).toBe("failed");
+    expect(pills().some((one) => one.dataset.key === "line-offline")).toBe(false);
+  });
+
+  it("the dock's Rivet keeps the neutral face until a board is read, then smiles", () => {
+    mount();
+    const face = () => {
+      const el = document.querySelector(".home-dock .home-rivet-face")!;
+      return el.classList.contains("is-happy") ? "happy" : el.classList.contains("is-thinking") ? "thinking" : "other";
+    };
+    app.board = { version: 0, updatedAt: null, board: null } as never;
+    changed();
+    expect(face()).toBe("thinking");
+    app.notice = "Request failed (500)";
+    changed();
+    expect(face()).toBe("thinking");
+    app.notice = null;
+    deal([]);
+    expect(face()).toBe("happy");
+  });
+
+  it("a wide window's header carries the stale-cards pill", () => {
+    wide(true);
+    mount();
+    deal([]);
+    const end = () => document.querySelector<HTMLElement>(".topbar .topbar-end")!;
+    expect(end().querySelector('[data-key="alert-offline"]')).toBeNull();
+    app.loadedAt = Date.parse(NOW) - 5 * 60_000;
+    // A 429 with the network up is a failed read too: Rivet's name, never the server's words.
+    app.notice = "Request failed (429)";
+    changed();
+    const stale = end().querySelector<HTMLElement>('[data-key="alert-offline"]')!;
+    expect([stale.className, stale.getAttribute("role"), stale.textContent]).toEqual(["pill pill-alert warn", "status", `Can't reach Rivet · cards as of ${when(app.loadedAt)}`]);
+    app.notice = null;
+    app.offline = "offline";
+    changed();
+    expect(end().querySelector('[data-key="alert-offline"]')!.textContent).toBe(`Offline · cards as of ${when(app.loadedAt)}`);
+    go("cards");
+    changed();
+    expect(end().querySelector('[data-key="alert-offline"]')).toBeNull();
+    expect(document.querySelectorAll(".feed-offline").length).toBe(1);
+  });
+
+  it("Decide's count is a dash, never 0, until the board has loaded", () => {
+    mount();
+    const n = () => button("decide").querySelector(".home-decide-n")?.textContent;
+    expect([n(), button("decide").getAttribute("aria-label"), button("decide").classList.contains("has-cards")]).toEqual(["–", "Decide, not read yet", false]);
+    deal([]);
+    expect(n()).toBe("0");
+    deal([card("d1")]);
+    expect(n()).toBe("1");
+  });
+
+  it("Decide while reading shows a placeholder card and no Answered or Open 0; a failed read shows Rivet and Try again", () => {
+    mount();
+    button("decide").click();
+    const segs = sheet()!.querySelector<HTMLElement>(".decide-segs")!;
+    expect(segs.hidden).toBe(true);
+    expect(sheet()!.querySelector(".decide-wait .decide-wait-card")).not.toBeNull();
+    expect(sheet()!.querySelector(".decide-wait")!.textContent).toBe("Reading your cards…");
+    expect(sheet()!.textContent).not.toContain(NOTHING_NEEDS_YOU);
+    const reads = vi.fn((_url: RequestInfo | URL) => new Promise<Response>(() => {}));
+    vi.stubGlobal("fetch", reads);
+    app.notice = "Request failed (500)";
+    changed();
+    const failed = sheet()!.querySelector<HTMLElement>(".decide-failed")!;
+    expect(failed.querySelector(".rivet")).not.toBeNull();
+    expect(failed.textContent).toContain("Couldn't read your cards.");
+    failed.querySelector<HTMLButtonElement>("button")!.click();
+    expect(sheet()!.querySelector(".decide-failed")).toBeNull();
+    expect(sheet()!.querySelector(".decide-wait")).not.toBeNull();
+    expect(reads.mock.calls.some(([url]) => String(url).includes("/api/board"))).toBe(true);
+    deal([card("d1")]);
+    expect([segs.hidden, sheet()!.querySelector(".decide-wait")]).toEqual([false, null]);
+  });
+
+  it("a read that fails after a load puts an offline strip on the band, and the phone's Decide sheet its offline bar", () => {
+    mount();
+    deal([]);
+    app.loadedAt = Date.parse(NOW) - 5 * 60_000;
+    app.offline = "offline";
+    changed();
+    const strip = pills().find((one) => one.dataset.key === "line-offline")!;
+    expect(strip.textContent).toBe(`Offline · cards as of ${when(app.loadedAt)}`);
+    button("decide").click();
+    expect(sheet()!.querySelector(".feed-offline")!.textContent).toContain(`Offline · cards as of ${when(app.loadedAt)}`);
+    app.offline = null;
+    changed();
+    // The line folds away with its last words kept, so it fades out as it was.
+    expect(lineOn()).toBe(false);
+    expect(sheet()!.querySelector(".feed-offline")).toBeNull();
+    // A refused read (a 429) with the network up: the sheet says so over its stale cards, as the band does.
+    app.notice = "Request failed (429)";
+    changed();
+    expect(sheet()!.querySelector(".feed-offline")!.textContent).toContain(`Can't reach Rivet · cards as of ${when(app.loadedAt)}`);
   });
 });

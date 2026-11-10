@@ -585,7 +585,7 @@ function openDocument(
   name: string,
   get: () => Promise<File | string>,
   build: (file: File, signal: AbortSignal) => Promise<LightboxContent>,
-  notes: { getting: string; failed: string },
+  notes: { getting: string; failed: (shares: boolean) => string },
   share: () => boolean,
 ): void {
   const controller = new AbortController();
@@ -624,7 +624,8 @@ function openDocument(
       if (box.closed()) return content.destroy();
       box.show(content);
     } catch {
-      if (!box.closed()) box.setNote(notes.failed);
+      // Share only when this viewer has the button and the conversation still lets it out.
+      if (!box.closed()) box.setNote(notes.failed(sharing !== null && sharing.button.isConnected && share()));
     }
   })();
 }
@@ -645,7 +646,8 @@ export function openPdf(name: string, get: () => Promise<File | string>, share: 
       signal.throwIfAborted();
       return pdfContent(new Uint8Array(data), signal);
     },
-    { getting: "Getting the PDF…", failed: `Could not show the PDF. ${share() ? "Share" : "Download"} it to open it elsewhere.` },
+    // Worked out when it fails, not at open: a conversation turned app-only meanwhile has no Share to point at.
+    { getting: "Getting the PDF…", failed: (shares) => `Could not show the PDF. ${shares ? "Share" : "Download"} it to open it elsewhere.` },
     share,
   );
 }
@@ -654,7 +656,7 @@ export function openPdf(name: string, get: () => Promise<File | string>, share: 
 export function openText(name: string, markdown: boolean, get: () => Promise<File | string>, share: () => boolean = () => true): void {
   openDocument(name, get, async (file) => (await within(import("./text-pages.js"), VIEWER_LOAD_MS, "Text viewer took too long to load")).textContent(file, markdown), {
     getting: "Getting the file…",
-    failed: "Could not show the file.",
+    failed: () => "Could not show the file.",
   }, share);
 }
 

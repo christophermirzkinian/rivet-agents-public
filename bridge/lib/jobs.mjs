@@ -229,8 +229,13 @@ const DENIED_COMMANDS = [
 /** The only built-in tools a job's chat has: no Edit, Write, NotebookEdit, WebFetch or Agent. */
 export const CHAT_TOOLS = ["Read", "Grep", "Glob", "Bash"];
 export const CHAT_DENIED = ["Edit", "Write", "NotebookEdit", ...DENIED_COMMANDS.map((command) => `Bash(${command}:*)`)];
-// Inline settings over every settings file: no hooks (a PermissionRequest hook could approve) and no bypass mode.
-const CHAT_SETTINGS = { disableAllHooks: true, permissions: { disableBypassPermissionsMode: "disable" } };
+// Inline settings over every settings file: no hooks (a PermissionRequest hook could approve), no bypass mode, and
+// file mentions off, so an `@path` in a job's text attaches no file outside what the allow list reads.
+const CHAT_SETTINGS = {
+  disableAllHooks: true,
+  permissions: { disableBypassPermissionsMode: "disable" },
+  env: { CLAUDE_CODE_DISABLE_FILE_MENTIONS: "1" },
+};
 
 /**
  * `claude -p` for a job's chat. No user, project or local settings load, so no allow list or default mode in a

@@ -1,9 +1,10 @@
+import { RIVET_NAME } from "../../../src/shared/names.js";
 import { when } from "../../../src/shared/when.js";
 import { NOTHING_NEEDS_YOU, allMinimised } from "../../../src/shared/words.js";
 import { type Mood } from "../rivet/rivet.js";
 import { h } from "../dom.js";
 import { freshPrs, opsData } from "../ops-data.js";
-import { summary } from "../state.js";
+import { boardRead, summary } from "../state.js";
 import { parkedItems } from "./ops.js";
 import { parked, prItem } from "./ops-status.js";
 
@@ -51,11 +52,17 @@ export function calmLines(mark: NavMark): { agents: string | null; parked: strin
 export function clearWords(minimised = summary()?.minimised ?? 0): { mood: Mood; title: string; lede: string; agents: string | null; parked: string | null } {
   const { mark } = opsStatus();
   const { agents, parked } = calmLines(mark);
+  // Nothing is clear until the board has loaded once: a neutral face, never the tick, while it reads or cannot.
+  const read = boardRead();
+  if (read !== "loaded") return { mood: "thinking", title: READ_WORDS[read], lede: "", agents, parked };
   // A minimised card still waits on you, so with every open card minimised the heading says so, and Cards puts a tap
   // to them under it.
   const title = minimised ? allMinimised(minimised) : NOTHING_NEEDS_YOU;
   return { mood: "happy", title, lede: "", agents, parked };
 }
+
+/** Rivet's words on the home screen before the board has loaded. */
+export const READ_WORDS = { reading: "Reading the home…", slow: "Still reading…", failed: `Can't reach ${RIVET_NAME}.` } as const;
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 

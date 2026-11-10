@@ -13,7 +13,9 @@ import {
 } from "../../../src/shared/usage-ids.js";
 import { shortDate } from "../../../src/shared/when.js";
 import { ApiError, askUsage, getUsageReport } from "../api.js";
-import { describe, h } from "../dom.js";
+import { h } from "../dom.js";
+import { sameSession } from "../session.js";
+import { readingFrame } from "./reading.js";
 
 // More › What you used: what you tapped and opened in the last 30 days, phone first, counted by the server when the
 // page asks. Retire? and Rework? only send a card; nothing is removed from here. Every feature sits in its area's fold,
@@ -28,7 +30,9 @@ const DEVICE_WORDS: Record<UsageDevice, string> = { phone: "your phone", desktop
 let root: HTMLElement | null = null;
 let device: UsageDevice = "phone";
 let report: UsageReport | null = null;
-let failed: string | null = null;
+let failed = false;
+let busy = false;
+let readAt: number | null = null;
 /** The folds open by hand, kept across a device switch; and, while a search is on, the ones open in its results. */
 let open = new Set<UsageArea>();
 let query = "";
@@ -37,6 +41,9 @@ let foldsEl: HTMLElement | null = null;
 let toggleEl: HTMLButtonElement | null = null;
 let pending: string | null = null;
 let note: { id: string; text: string; tone: "yes" | "no" } | null = null;
+
+/** Bumped by every mount, unmount and device pick, so an older read that lands late is dropped. */
+let asking = 0;
 
 export function mount(el: HTMLElement): void {
   unmount();
@@ -50,36 +57,45 @@ export function mount(el: HTMLElement): void {
 }
 
 export function unmount(): void {
+  asking++;
   root = null;
   foldsEl = null;
   toggleEl = null;
   report = null;
-  failed = null;
+  failed = false;
+  busy = false;
+  readAt = null;
   pending = null;
   note = null;
 }
 
 export async function refresh(): Promise<void> {
   const asked = device;
+  const turn = ++asking;
+  const current = sameSession();
+  busy = true;
+  paint();
   try {
     const read = await getUsageReport(asked);
-    if (asked !== device) return;
+    if (turn !== asking || !current()) return;
     report = read;
-    failed = null;
-  } catch (err) {
-    if (asked !== device) return;
-    failed = describe(err);
+    failed = false;
+    readAt = Date.now();
+  } catch {
+    if (turn !== asking || !current()) return;
+    failed = true;
   }
+  busy = false;
   paint();
 }
 
 function pick(next: UsageDevice): void {
   if (next === device) return;
   device = next;
+  asking++;
   report = null;
-  failed = null;
+  failed = false;
   note = null;
-  paint();
   void refresh();
 }
 
@@ -92,8 +108,10 @@ async function ask(row: UsageFeature, what: UsageAsk): Promise<void> {
     await askUsage(row.id, what, device);
     note = { id: row.id, text: "Sent to Cards. Nothing changes until you answer it.", tone: "yes" };
   } catch (err) {
-    const coded = err instanceof ApiError && err.status >= 400 && err.status !== 401 && err.status !== 403;
-    note = { id: row.id, text: coded ? `Not sent: ${err.message}.` : describe(err), tone: "no" };
+    // A refusal's reason is the server's own sentence ("a card already asked about it"); anything else, api's own
+    // "Request failed (N)" for a body with no sentence among them, is plain words.
+    const coded = err instanceof ApiError && err.status >= 400 && err.status < 500 && err.status !== 401 && err.status !== 403 && !/^Request failed \(\d+\)$/.test(err.message);
+    note = { id: row.id, text: coded ? `Not sent: ${err.message}.` : "Not sent. Try again.", tone: "no" };
   } finally {
     pending = null;
   }
@@ -306,14 +324,14 @@ function paint(): void {
   );
   foldsEl = null;
   toggleEl = null;
-  let body: HTMLElement[];
-  if (report?.since) {
+  const body = (shown: UsageReport): HTMLElement[] => {
+    if (!shown.since) return [summary(shown)];
     const tools = toolbar();
-    foldsEl = h("div", { class: "used-folds" }, ...folds(report));
-    body = [summary(report), tools, foldsEl];
-  } else if (report) body = [summary(report)];
-  else body = [h("p", { class: failed ? "used-sum is-warn" : "used-sum", attrs: { role: "status" } }, failed ?? "Counting…")];
+    foldsEl = h("div", { class: "used-folds" }, ...folds(shown));
+    return [summary(shown), tools, foldsEl];
+  };
+  const reading = { page: "What you used", has: !!report, failed, busy, at: readAt, shape: [64, 52, 360], retry: () => void refresh() };
   const focused = document.activeElement?.classList.contains("used-search") ?? false;
-  root.replaceChildren(h("div", { class: "used" }, switcher, ...body, h("p", { class: "used-foot" }, "Each Retire? comes to you as a card first. Nothing is removed by itself.")));
+  root.replaceChildren(h("div", { class: "used" }, switcher, readingFrame(reading, () => body(report!)), h("p", { class: "used-foot" }, "Each Retire? comes to you as a card first. Nothing is removed by itself.")));
   if (focused) root.querySelector<HTMLInputElement>(".used-search")?.focus();
 }

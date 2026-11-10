@@ -22,7 +22,9 @@ export const opsData = {
   dismissals: [] as OpsDismissal[],
   /** Your own holds, as `rivet hold` records them (GET /api/ops/holds); null until loaded. */
   ownerHolds: null as OwnerHold[] | null,
+  /** The last /api/ops read failed; the timeline's own failure is `timelineError`. */
   error: null as string | null,
+  timelineError: false,
   at: 0,
   /**
    * When `ops` was asked for, on both of the device's clocks: its "now" is no earlier, so the time since never counts
@@ -172,7 +174,6 @@ export function refreshOps(): Promise<void> {
         // One begun in an earlier session neither signs this one out nor fills its Ops.
         if (!current()) return;
         const failures = [ops, timeline].filter((result): result is PromiseRejectedResult => result.status === "rejected");
-        const failed = failures[0];
         // Any part refused for the session signs out, whichever part failed first.
         if (failures.some((result) => result.reason instanceof api.ApiError && result.reason.status === 401)) {
           signedOut("Your session ended. Sign in again.");
@@ -185,7 +186,8 @@ export function refreshOps(): Promise<void> {
           expireReadings();
         }
         if (timeline.status === "fulfilled") opsData.timeline = timeline.value;
-        opsData.error = failed ? (failed.reason instanceof Error ? failed.reason.message : "Couldn't load Ops.") : null;
+        opsData.timelineError = timeline.status === "rejected";
+        opsData.error = ops.status === "rejected" ? (ops.reason instanceof Error ? ops.reason.message : "Couldn't load Ops.") : null;
         opsData.at = Date.now();
         notify();
       })
@@ -313,7 +315,7 @@ export function watchStatuses(listener: () => void): () => void {
 
 /** Forgets the previous session's Ops, so a new shell shows Loading until its own read lands. */
 export function resetOps(): void {
-  Object.assign(opsData, { ops: null, timeline: null, statuses: null, statusesLoaded: false, dismissals: [], ownerHolds: null, error: null, at: 0, opsAt: { mono: 0, wall: 0 } });
+  Object.assign(opsData, { ops: null, timeline: null, statuses: null, statusesLoaded: false, dismissals: [], ownerHolds: null, error: null, timelineError: false, at: 0, opsAt: { mono: 0, wall: 0 } });
   if (expiry !== null) window.clearTimeout(expiry);
   expiry = null;
   statusesLoad?.abort();

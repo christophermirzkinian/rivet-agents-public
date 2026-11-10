@@ -51,9 +51,12 @@ beforeEach(() => {
   opsData.opsAt = { mono: performance.now(), wall: Date.now() };
   app.tab = "progress";
   app.opsPage = "code";
+  // All clear is said only once the board has loaded (review F1).
+  app.board = { version: 1, updatedAt: NOW, board: { updatedAt: NOW, needs: [], chats: [], coming: [], shipped: [], waitingWM: [] } } as never;
 });
 
 afterEach(() => {
+  app.board = null;
   ops.unmount();
   opsData.ops = null;
   opsData.at = 0;

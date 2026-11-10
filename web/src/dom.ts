@@ -118,6 +118,27 @@ export function keepFocus(root: Element, fallback?: (was: HTMLElement, like: HTM
   };
 }
 
+/**
+ * Hands the keyboard to `el` itself when the control holding it goes and nothing like it comes back: never to the page,
+ * where Enter would confirm a card waiting for it. Card keys pass `el` by, and it is focusable only until the focus
+ * leaves, so a later click inside it never holds them back.
+ */
+export function parkFocus(el: HTMLElement): void {
+  const hadTab = el.hasAttribute("tabindex");
+  const keys = el.dataset.cardKeys;
+  if (!hadTab) el.tabIndex = -1;
+  el.dataset.cardKeys = "off";
+  el.addEventListener(
+    "blur",
+    () => {
+      if (!hadTab) el.removeAttribute("tabindex");
+      if (keys === undefined) delete el.dataset.cardKeys;
+    },
+    { once: true },
+  );
+  el.focus({ preventScroll: true });
+}
+
 /** Inline SVG from a fixed, trusted string (never board data). */
 export function svg(markup: string, className = "icon"): HTMLElement {
   const holder = h("span", { class: className, attrs: { "aria-hidden": "true" } });
@@ -179,7 +200,9 @@ export function linkify(text: string): Child[] {
     if (!url || url.protocol !== "https:" || !url.hostname || url.username || url.password || shown.length > MAX_LINK) continue;
     if (at > from) parts.push(text.slice(from, at));
     // Isolated left-to-right, so direction marks in the text around it cannot reverse what the link shows.
-    parts.push(h("a", { class: "text-link", attrs: { href: url.href, target: "_blank", rel: "noopener noreferrer", dir: "ltr", "data-use": "link.text" } }, shown));
+    // Rivet's own link (the morning line's `/?tab=what-you-used`) opens in the app's own window, so an installed app stays itself.
+    const away: Record<string, string> = url.origin === location.origin ? {} : { target: "_blank", rel: "noopener noreferrer" };
+    parts.push(h("a", { class: "text-link", attrs: { href: url.href, ...away, dir: "ltr", "data-use": "link.text" } }, shown));
     from = at + shown.length;
   }
   if (from < text.length) parts.push(text.slice(from));
@@ -228,7 +251,9 @@ export const ICONS = {
   factory:
     '<svg viewBox="0 0 24 24"><path d="M3.5 20.5V10l5 3v-3l5 3V4.5h5v16z" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/><path d="M7 17h2M12 17h2" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>',
   mind: '<svg viewBox="0 0 24 24"><path d="M7 7l5 5M17 6l-5 6M12 12l-5 6M12 12l6 5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3" fill="currentColor"/><circle cx="6" cy="6" r="2.2" fill="currentColor"/><circle cx="18" cy="5.5" r="2.2" fill="currentColor"/><circle cx="6" cy="18.5" r="2.2" fill="currentColor"/><circle cx="18.5" cy="17.5" r="2.2" fill="currentColor"/></svg>',
-  back: '<svg viewBox="0 0 24 24"><path d="M14.5 5.5L8 12l6.5 6.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  expand: '<svg viewBox="0 0 24 24"><path d="M14 4.5h5.5V10M10 19.5H4.5V14M19.5 4.5L13.5 10.5M4.5 19.5l6-6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  shrink: '<svg viewBox="0 0 24 24"><path d="M19.5 10H14V4.5M4.5 14H10v5.5M14 10l5.5-5.5M10 14l-5.5 5.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  back: '<svg viewBox="0 0 24 24"><path d="M14.5 5.5L8 12l6.5 6.5"fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   forward: '<svg viewBox="0 0 24 24"><path d="M9.5 5.5L16 12l-6.5 6.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   person: '<svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.6" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M5 20.5c0-3.9 3.1-6.5 7-6.5s7 2.6 7 6.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>',
 };

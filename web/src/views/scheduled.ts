@@ -202,12 +202,12 @@ function jobEl(job: Job, now: number): HTMLElement {
 export function redJobsEl(): HTMLElement {
   const red = (jobs?.jobs ?? []).filter(jobRed).sort((a, b) => a.name.localeCompare(b.name));
   const now = Date.now();
-  if (!jobs) return h("p", { class: "empty" }, loadError ? `Couldn't read the jobs: ${loadError}` : "Loading…");
+  if (!jobs) return h("p", { class: "empty" }, loadError ? "Couldn't read the jobs." : "Loading…");
   return h(
     "section",
     { class: "ops-list", attrs: { "data-section": "jobs" } },
     red.length ? h("ul", { class: "jobs" }, ...red.map((job) => jobEl(job, now))) : h("p", { class: "empty" }, "No job is red now."),
-    loadError ? h("p", { class: "jobs-limits" }, `Couldn't read the jobs again: ${loadError}`) : null,
+    loadError ? h("p", { class: "jobs-limits" }, "Couldn't read the jobs again.") : null,
   );
 }
 

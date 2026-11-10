@@ -30,10 +30,14 @@ export const SYSTEM_PROMPT = [
 
 /**
  * The CLI's flags: print mode, JSON out, the model at the effort given, no tools, no settings, MCP servers, slash
- * commands or saved session. No temperature, top_p or top_k: Haiku 5.5 answers 400 to them. The Haiku readers
+ * commands or saved session, and file mentions off, so an `@path` in a message stays text and attaches no file
+ * (a mention attaches even with no tools, and only this variable stops it, set in flag settings so no other
+ * env outranks it). No temperature, top_p or top_k: Haiku 5.5 answers 400 to them. The Haiku readers
  * (rivet/readers) run the same flags with their own prompts.
  * @param {string} model @param {string} effort @param {string} systemPrompt
  */
+export const NO_FILE_MENTIONS = JSON.stringify({ env: { CLAUDE_CODE_DISABLE_FILE_MENTIONS: "1" } });
+
 export function claudeArgs(model, effort, systemPrompt) {
   return Object.freeze([
     "-p",
@@ -43,6 +47,7 @@ export function claudeArgs(model, effort, systemPrompt) {
     "--tools", "",
     "--strict-mcp-config",
     "--setting-sources", "",
+    "--settings", NO_FILE_MENTIONS,
     "--disable-slash-commands",
     "--no-session-persistence",
     "--system-prompt", systemPrompt,

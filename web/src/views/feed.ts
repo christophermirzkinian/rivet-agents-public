@@ -1,6 +1,6 @@
 import "./feed.css";
 
-import { APP_NAME, RIVET_NAME, chatName } from "../../../src/shared/names.js";
+import { RIVET_NAME, chatName } from "../../../src/shared/names.js";
 import { MAX_SHORT, type Decision, type Reply, type ServedNeed } from "../../../src/shared/board.js";
 import { chatImages, imageFields } from "../../../src/shared/command.js";
 import { canApprove, isPlan, isTodo, isUpdate, MERGE_READY, optionNeedsText, stepsOf, threadKey, wantsText } from "../../../src/shared/answers.js";
@@ -153,14 +153,14 @@ function unlockTaps(): void {
   tapLock = null;
 }
 
-/** No network, or the last refresh could not reach the server: the cards shown are as of the last load. */
+/** No network, or the last refresh failed (no answer, a server error or a 429): the cards shown are as of the last load. */
 export function offlineBar(): HTMLElement | null {
-  if (!app.offline) return null;
+  if (!app.offline && !app.notice) return null;
   const asOf = app.loadedAt === null ? "no cards loaded yet" : `cards as of ${when(app.loadedAt)}`;
   return h(
     "div",
     { class: "feed-offline", attrs: { role: "status" } },
-    h("span", { class: "feed-offline-t" }, `${app.offline === "offline" ? "Offline" : `Can't reach ${APP_NAME}`} · ${asOf}`),
+    h("span", { class: "feed-offline-t" }, `${app.offline === "offline" ? "Offline" : `Can't reach ${RIVET_NAME}`} · ${asOf}`),
     button("Retry", () => void refresh(), "feed-retry", false, "cards.offline.retry"),
   );
 }
@@ -216,6 +216,9 @@ function topCard(need: ServedNeed, minimisable = false): HTMLElement {
   const thread = app.cardThreads.get(need.id);
   const askText = ask ? h("p", { class: todo ? "card-ask todo-ask" : "card-ask" }, ...linkify(ask)) : null;
   const rec = (option: (typeof options)[number]) => !!option.recommended;
+  // On the phone the answers are the card's last thing, over the say-line: Message, Share and the one "−" head it.
+  const phone = !isDesk();
+  const share = keyed(cardShareButton(need, "card-share-top"), `share-${need.id}`);
   const element = h(
     "article",
     {
@@ -240,7 +243,9 @@ function topCard(need: ServedNeed, minimisable = false): HTMLElement {
             `Round ${thread.round} · ${thread.title}`,
           )
         : null,
-      h("div", { class: "head-tools" }, minimisable ? minimiseButton(need, "top") : null, rejectButton(need)),
+      phone
+        ? h("div", { class: "head-acts" }, messageButton(need, "Message"), share, h("div", { class: "head-tools" }, minimisable ? minimiseButton(need, "top") : null, rejectButton(need)))
+        : h("div", { class: "head-tools" }, minimisable ? minimiseButton(need, "top") : null, rejectButton(need)),
     ),
     h(
       "div",
@@ -254,6 +259,13 @@ function topCard(need: ServedNeed, minimisable = false): HTMLElement {
       need.media ? cardMedia(need.id, need.media, need.title) : null,
       todo && steps.length ? h("ol", { class: "todo-steps" }, ...steps.map((step) => h("li", {}, ...linkify(step)))) : null,
       proofBlock(need),
+      links.length
+        ? h(
+            "div",
+            { class: "card-links" },
+            ...links.map(cardLink),
+          )
+        : null,
       listed
         ? h(
             "p",
@@ -288,21 +300,8 @@ function topCard(need: ServedNeed, minimisable = false): HTMLElement {
             ]),
           )
         : null,
-      links.length
-        ? h(
-            "div",
-            { class: "card-links" },
-            ...links.map(cardLink),
-          )
-        : null,
       card.error ? h("p", { class: "card-error box", attrs: { role: "alert" } }, card.error) : null,
-      h(
-        "div",
-        { class: "card-tools" },
-        need.chat ? button([svg(ICONS.note, "card-message-icon"), `Message ${RIVET_NAME}`], () => messageChat(need), "card-message", false, "cards.message-rivet") : null,
-        keyed(cardShareButton(need, "card-share-top"), `share-${need.id}`),
-        minimisable ? minimiseButton(need, "bottom") : null,
-      ),
+      phone ? null : h("div", { class: "card-tools" }, messageButton(need, `Message ${RIVET_NAME}`), share, minimisable ? minimiseButton(need, "bottom") : null),
     ),
     h("div", { class: "more-cue", attrs: { "aria-hidden": "true" } }, "More ↓"),
     card.confirm ? confirmOverlay(need, card) : null,
@@ -333,6 +332,14 @@ function setMinimised(key: string, rev: string, small: boolean): void {
   // A focused say-line holds every render (renderFeed), and its words stay on the card for when it opens.
   leaveText();
   changed();
+}
+
+/** Message Rivet in the card's chat; `word` is what it says, its name is always the whole of it. */
+function messageButton(need: ServedNeed, word: string): HTMLElement | null {
+  if (!need.chat) return null;
+  const message = button([svg(ICONS.note, "card-message-icon"), h("span", { class: "card-message-word" }, word)], () => messageChat(need), "card-message", false, "cards.message-rivet");
+  message.setAttribute("aria-label", `Message ${RIVET_NAME}`);
+  return message;
 }
 
 function minimiseButton(need: ServedNeed, where: "top" | "bottom"): HTMLElement {
@@ -1346,7 +1353,9 @@ const KEY_USE: Record<Action, string> = { approve: "cards.key.approve", reject: 
  * answer, 1–9 choose, C types a comment, Space plays, Z undoes.
  */
 export function cardKey(event: KeyboardEvent, top: ServedNeed | null, host: HTMLElement, step: (by: number) => void): void {
-  if (modalOpen() || event.metaKey || event.ctrlKey || event.altKey || typing(event.target)) return;
+  // A pane that takes the focus so a key lands nowhere (chat, its message box hidden) answers no card.
+  const off = event.target instanceof HTMLElement && event.target.dataset.cardKeys === "off";
+  if (off || modalOpen() || event.metaKey || event.ctrlKey || event.altKey || typing(event.target)) return;
   const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
   const move = MOVES[key];
   if (move) {

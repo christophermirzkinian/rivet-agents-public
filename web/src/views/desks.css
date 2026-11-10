@@ -496,6 +496,18 @@ button.desk.is-rivet:focus-visible {
   overflow-wrap: anywhere;
 }
 
+.desk-agent:not(.is-line) .desk-agent-what {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.desks-retry {
+  display: flex;
+  margin: 8px auto 0;
+}
+
 .desk-agent-meta {
   font-size: var(--fs-body);
   color: var(--muted);

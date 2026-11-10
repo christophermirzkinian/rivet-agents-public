@@ -3,8 +3,8 @@ import "./home.css";
 
 import { RIVET_NAME } from "../../../src/shared/names.js";
 import { h, ICONS, keepFocus, svg } from "../dom.js";
-import { rivet } from "../rivet/rivet.js";
-import { app, changed, go, navigated, subscribe } from "../state.js";
+import { rivet, type Mood } from "../rivet/rivet.js";
+import { app, boardRead, changed, go, navigated, subscribe } from "../state.js";
 import { watchDepth } from "../usage.js";
 import * as chat from "./chat.js";
 import { askingCards, openCards, openDecide } from "./decide-sheet.js";
@@ -74,16 +74,21 @@ function openNow(): void {
   afterSlide(() => changed());
 }
 
+/** Happy once a board has been read; the desk's neutral face while it reads or cannot (progress-mark.ts clearWords). */
+const readMood = (): Mood => (boardRead() === "loaded" ? "happy" : "thinking");
+
 /** The dock: Decide N, the open decision cards the sheet walks through, and Rivet with his unread dot; a tap or a swipe up opens each. */
 export function dock(): HTMLElement[] {
   const n = askingCards().length;
   const unread = app.chatUnread;
+  // No count before the board has loaded: a 0 would say nothing waits.
+  const read = boardRead() === "loaded";
   const buttons = [
     h(
       "button",
       {
-        class: `home-decide${n ? " has-cards" : ""}`,
-        attrs: { type: "button", "data-key": "decide", "data-use": "floor.dock.decide", "aria-label": `Decide, ${n} ${n === 1 ? "decision" : "decisions"}` },
+        class: `home-decide${n && read ? " has-cards" : ""}`,
+        attrs: { type: "button", "data-key": "decide", "data-use": "floor.dock.decide", "aria-label": read ? `Decide, ${n} ${n === 1 ? "decision" : "decisions"}` : "Decide, not read yet" },
         on: {
           click: () => {
             feed.pickSegment("needs");
@@ -92,7 +97,7 @@ export function dock(): HTMLElement[] {
         },
       },
       h("span", {}, "Decide"),
-      h("span", { class: "home-decide-n" }, String(n)),
+      h("span", { class: "home-decide-n" }, read ? String(n) : "–"),
       h("span", { attrs: { "aria-hidden": "true" } }, "›"),
     ),
     h(
@@ -102,7 +107,7 @@ export function dock(): HTMLElement[] {
         attrs: { type: "button", "data-key": "rivet", "data-use": "floor.dock.rivet", "aria-label": unread ? `${RIVET_NAME}, ${unread} unread` : RIVET_NAME },
         on: { click: () => goSheet("chat") },
       },
-      rivet("happy", { size: 30, className: "home-rivet-face" }),
+      rivet(readMood(), { size: 30, className: "home-rivet-face" }),
       h("span", {}, RIVET_NAME),
       unread ? h("span", { class: "home-dot", attrs: { "aria-hidden": "true" } }) : null,
     ),

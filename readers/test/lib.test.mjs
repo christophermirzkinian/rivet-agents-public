@@ -27,6 +27,8 @@ test("readers run Haiku 5.5 through the titler's flags, with no sampling paramet
   assert.deepEqual(args.slice(0, 5), ["-p", "--model", "claude-haiku-5-5", "--effort", "low"]);
   assert.ok(args.includes("--no-session-persistence") && args.includes("--strict-mcp-config"));
   assert.equal(args[args.indexOf("--tools") + 1], "");
+  // An `@path` in what a reader reads attaches no file.
+  assert.deepEqual(JSON.parse(args[args.indexOf("--settings") + 1]), { env: { CLAUDE_CODE_DISABLE_FILE_MENTIONS: "1" } });
   for (const flag of ["--temperature", "--top-p", "--top_p", "--top-k", "--top_k"]) assert.ok(!args.includes(flag));
 });
 

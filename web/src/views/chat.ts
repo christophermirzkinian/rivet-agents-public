@@ -40,7 +40,7 @@ import type { ChatMessage } from "../command-api.js";
 import { dictation, MIC, STOP } from "../dictation.js";
 import { maybeWhen } from "../../../src/shared/when.js";
 import { localDay } from "../day.js";
-import { button, describe, h, ICONS, keepFocus, linkify, svg } from "../dom.js";
+import { button, describe, h, ICONS, keepFocus, linkify, parkFocus, svg } from "../dom.js";
 import { coveredOver } from "../push.js";
 import {
   app,
@@ -647,6 +647,8 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   let list: ConversationsResponse | null = null;
   /** Chat's newest page has come at least once since it last opened. */
   let chatLoaded = false;
+  /** The open thing's first read failed, so its empty line says so and offers Try again rather than Loading… on. */
+  let loadFailed = false;
   let listTimer = 0;
   let listTicket = 0;
   /** Whether the open conversation has messages before the earliest loaded; null until an earlier page loaded. */
@@ -880,7 +882,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   const topicsList = h("ul", { class: "chat-topics", attrs: { "aria-label": "Topics" } });
   const section = h(
     "section",
-    { class: "chat" },
+    { class: "chat", attrs: { "data-card-keys": "off" } },
     chatHead,
     headBox,
     topicsRow,
@@ -938,9 +940,18 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   });
   scroller.addEventListener("scroll", () => markRead());
 
+  /**
+   * The box grows with what is typed. Measuring shrinks it for a moment, and a scroll around it (Rivet's sheet with the
+   * keyboard up, or the messages) clamps to that shorter page and stays there: More topics flashed back and the box
+   * jumped on every key. Each one keeps its place.
+   */
   function fit(): void {
+    const kept: [Element, number][] = [];
+    for (let el = text.parentElement; el; el = el.parentElement) if (el.scrollTop) kept.push([el, el.scrollTop]);
+    if (scroller.scrollTop) kept.push([scroller, scroller.scrollTop]);
     text.style.height = "auto";
     text.style.height = `${Math.min(text.scrollHeight, 180)}px`;
+    for (const [el, top] of kept) if (el.scrollTop !== top) el.scrollTop = top;
   }
 
   /** A piece of work's page: any conversation but Rivet's own (Updates, quote alerts, Agent Chat). */
@@ -1451,7 +1462,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
         : null;
     const thing = thingPage();
     const facts = thing ? thingFacts(messages.values(), allCards(), summary) : null;
-    const title = summary?.title ?? (thing ? "Loading…" : "Conversation");
+    const title = summary?.title ?? (thing && !loadFailed ? "Loading…" : "Conversation");
     const key = JSON.stringify([title, summary?.closed, facts && { ...facts, cards: facts.cards.length }, card, headHosted()]);
     if (key !== paintedHead || !headBox.firstChild) {
       paintedHead = key;
@@ -1575,6 +1586,8 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       .sort(byTime);
     // A new message keeps the keyboard on the control it was on; dropped to the page, Enter would answer the card.
     const refocus = keepFocus(thread);
+    // A first-read Try again goes however the chat loads (its own tap, a refresh, the stream): its keyboard moves on.
+    const retryHeld = !!thread.querySelector(".chat-retry")?.contains(document.activeElement);
     // Rivet's answer to the messages just above it needs no quote; one to an earlier message shows it, as do the owner's.
     let run = new Set<string>();
     const next: typeof rows = new Map();
@@ -1586,7 +1599,14 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       return row(message, quoted, next);
     });
     rows = next;
-    const empty = h(
+    const retry = () => {
+      loadFailed = false;
+      render(false);
+      void loadDetail();
+    };
+    const empty = loadFailed
+      ? h("li", { class: "chat-empty chat-failed" }, h("p", {}, "Couldn't load this chat."), button("Try again", retry, "chat-retry", false, "chat.retry"))
+      : h(
       "li",
       { class: "chat-empty" },
       kind === "rivet"
@@ -1603,11 +1623,18 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     );
     placeChildren(thread, bubbles.length ? bubbles : [empty]);
     refocus();
+    if (retryHeld && !thread.contains(document.activeElement)) handFocus();
     if (stick || atBottom) scroller.scrollTop = scroller.scrollHeight;
     // Under search results nothing in the conversation is on screen, whatever the hidden scroller measures.
     const showsNewest = (stick || atBottom) && !section.classList.contains("searching") && !topics;
     if (showsNewest) markRead();
     return showsNewest;
+  }
+
+  /** The keyboard a Try again held when it went: the message box, or on a touch screen or with the box hidden the chat. */
+  function handFocus(): void {
+    if (!window.matchMedia?.("(pointer: coarse)").matches) text.focus();
+    if (document.activeElement !== text) parkFocus(section);
   }
 
   /** Marks the open conversation read up to its newest message, once that is on screen and anything is unread. */
@@ -1735,6 +1762,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     if (fresh) {
       messages = new Map();
       detail = null;
+      loadFailed = false;
       earlierMore = null;
       earliestPage = null;
       marked = null;
@@ -1784,6 +1812,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       earliestPage = null;
       messages = new Map();
       chatLoaded = false;
+      loadFailed = false;
       toolsShown.clear();
       window.clearTimeout(detailTimer);
       detailTicket++;
@@ -1942,7 +1971,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
         if (!alive || read !== archivedRead) return;
         archivedBusy = false;
         render(false);
-        if (!authFail(error)) flash(describe(error), "error");
+        if (!authFail(error)) flash("Couldn't load the archived chats.", "error");
       },
     );
   }
@@ -2043,6 +2072,35 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       detailTimer = window.setTimeout(() => void loadDetail(), SETTLE_MS);
       return Promise.resolve(false);
     }
+    // A read that fails with nothing shown yet says so in the thread, with Try again; after a load, the hint says it.
+    // A Try again already there stays: replacing it drops its focus, and Enter would reach a card awaiting its confirm.
+    // For the same reason one taken back while focused hands its focus to the message box.
+    const clearRetry = () => {
+      const held = hint.querySelector(".chat-hint-retry")?.contains(document.activeElement);
+      hint.textContent = "";
+      // A keyboard's Enter must not land on the page, where a card waiting for its confirm takes it. On a touch screen
+      // the message box would raise its keyboard, so there, as where Updates, Topics and search hide it, the chat itself
+      // takes the focus, and card keys pass it by. It is focusable only until the focus leaves, so a click in the chat
+      // never holds the card keys back.
+      if (held) handFocus();
+    };
+    const failed = (nothing: boolean): false => {
+      if (nothing) {
+        loadFailed = true;
+        render(false);
+      } else if (!hint.querySelector(".chat-hint-retry")) {
+        const again = () => {
+          clearRetry();
+          void loadDetail();
+        };
+        hint.replaceChildren("Couldn't refresh this chat. ", button("Try again", again, "chat-hint-retry", false, "chat.retry"));
+      }
+      return false;
+    };
+    // A read that lands takes back the hint's "Couldn't refresh", and only that: the hint says other things too.
+    const refreshed = () => {
+      if (hint.querySelector(".chat-hint-retry")) clearRetry();
+    };
     const ticket = ++detailTicket;
     const gen = appOnlyGen;
     if (shown.kind === "rivet") {
@@ -2051,17 +2109,16 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
         (page) => {
           if (!alive || ticket !== detailTicket || messages !== into) return false;
           if (!page || !Array.isArray(page.messages)) {
-            hint.textContent = "Couldn't read Chat. Pull to refresh.";
-            return false;
+            return failed(!chatLoaded && !messages.size);
           }
           if (gen === appOnlyGen) appOnlyHeard = true;
           lastChat = page.messages;
+          refreshed();
           return showTimeline(page.messages, page.older, stick, focus);
         },
         (error: unknown) => {
           if (!alive || ticket !== detailTicket || authFail(error)) return false;
-          hint.textContent = describe(error);
-          return false;
+          return failed(!chatLoaded && !messages.size);
         },
       );
     }
@@ -2072,12 +2129,11 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
         if (!alive || ticket !== detailTicket || shownId() !== id) return false;
         if (id === TEAM_ROOM_ID) roomMissing = false;
         if (!found || !Array.isArray(found.messages) || !found.conversation) {
-          hint.textContent =
-            "Couldn't read this conversation. Pull to refresh.";
-          return false;
+          return failed(!detail);
         }
         heardProject(found.id, found.conversation.appOnly, stamp);
         if (gen === appOnlyGen) appOnlyHeard = true;
+        refreshed();
         return showDetail(found, stick, focus);
       },
       (error: unknown) => {
@@ -2097,8 +2153,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
           showRivet();
           return false;
         }
-        hint.textContent = describe(error);
-        return false;
+        return failed(!detail);
       },
     );
   }
@@ -2120,6 +2175,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       earliestPage = page[0]?.id ?? null;
     }
     chatLoaded = true;
+    loadFailed = false;
     const shows = render(stick && !focus);
     if (focus) {
       if (messages.has(focus)) jump(focus);
@@ -2146,6 +2202,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       if (saved?.conversation === found.id) setReply(saved, false);
     }
     detail = found;
+    loadFailed = false;
     heardMessages(found.messages);
     take(found.messages);
     for (const message of found.messages) messages.set(message.id, message);
@@ -2187,7 +2244,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       },
       (error: unknown) => {
         if (alive && messages === into && !authFail(error))
-          hint.textContent = describe(error);
+          hint.textContent = "Couldn't load earlier messages.";
         return false;
       },
     );

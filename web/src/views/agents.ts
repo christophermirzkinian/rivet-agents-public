@@ -4,8 +4,9 @@ import { isGotIt, isUpdate } from "../../../src/shared/answers.js";
 import { kanban, type KanbanCard } from "../agents-logic.js";
 import { copySummaryText } from "../agents-summary.js";
 import { freshPrs, opsData } from "../ops-data.js";
-import { app, crewLapsed, deck, laterCards } from "../state.js";
+import { app, boardRead, crewLapsed, deck, laterCards } from "../state.js";
 import { copySummary } from "./agents-copy.js";
+import { READ_WORDS } from "./progress-mark.js";
 
 // Every agent chat as one list, read by the Copy summary on Rivet's sheet.
 
@@ -33,5 +34,15 @@ export function cards(now = Date.now()): KanbanCard[] {
 
 /** Rivet's sheet: one Copy summary, on a phone and a computer alike. */
 export function copyButtons(): HTMLElement {
-  return copySummary([{ label: "Copy summary", text: () => copySummaryText(cards(), needs(), Date.now()) }]);
+  return copySummary([
+    {
+      label: "Copy summary",
+      text: () => copySummaryText(cards(), needs(), Date.now()),
+      // Before a board is read it would say nothing is new: the desk's words instead.
+      notYet: () => {
+        const read = boardRead();
+        return read === "loaded" ? null : READ_WORDS[read];
+      },
+    },
+  ]);
 }

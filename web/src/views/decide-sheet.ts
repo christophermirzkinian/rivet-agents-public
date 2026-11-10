@@ -5,14 +5,16 @@ import { asksOfChat } from "../../../src/shared/ask-stages.js";
 import type { Ask } from "../../../src/shared/asks.js";
 import type { ServedNeed } from "../../../src/shared/board.js";
 import { chatName, RIVET_NAME } from "../../../src/shared/names.js";
+import { NO_REPO } from "../../../src/shared/repos.js";
 import { allMinimised, answeredTab, NEEDS_YOU, NOTHING_NEEDS_YOU, openTab, showMinimised } from "../../../src/shared/words.js";
 import type { Worker } from "../../../src/shared/workers.js";
 import { chatFor, seedKey } from "../agents-logic.js";
+import { homeOf, projectName } from "../backlog-logic.js";
 import { isDesk, typing } from "../desk.js";
-import { FULL_SCREEN_EVENTS, fullScreenElement, h, ICONS, keepFocus, modalOpen, svg } from "../dom.js";
+import { FULL_SCREEN_EVENTS, fullScreenElement, h, ICONS, keepFocus, modalOpen, parkFocus, svg } from "../dom.js";
 import { watchOps } from "../ops-data.js";
 import { rivet } from "../rivet/rivet.js";
-import { app, cardState, changed, countedCards, deck, frontCard, isMinimised, navigated, navStamp, refresh, subscribe, unminimise } from "../state.js";
+import { app, boardRead, cardState, changed, countedCards, deck, frontCard, isMinimised, navigated, navStamp, readAgain, refresh, subscribe, unminimise } from "../state.js";
 import { answeredCount, answeredList } from "./answered.js";
 import { stopCardMedia } from "./card-media.js";
 import { answerCard, answerTapsLocked, cardKey, cardOnItsWay, cardsSegment, cheerView, feedKeyUp, guardTaps, keyHints, offlineBar, releaseKeys, setCardsSegment, showCard } from "./feed.js";
@@ -32,6 +34,7 @@ const RUNTIME_MARKS = ["has-more", "entering"];
 const bare = (card: Element): string => {
   const copy = card.cloneNode(true) as Element;
   for (const one of [copy, ...copy.querySelectorAll("*")]) one.classList.remove(...RUNTIME_MARKS);
+  copy.querySelector(".decide-big")?.remove();
   return copy.outerHTML;
 };
 
@@ -131,7 +134,7 @@ function decideView(first: readonly string[], look: { answered?: boolean; untilR
   const order = [...first];
   let at: string | null = first[0] ?? null;
   let mode: "open" | "answered" = look.answered ? "answered" : "open";
-  let untilRead = !!look.untilRead && !app.board;
+  let untilRead = !!look.untilRead && boardRead() !== "loaded";
   /**
    * The card last put on top on purpose (state.ts frontCard): Answered's Reopen, Search or a push while it is open. The
    * pane opened on another waits for it to open, as a link's card read minimised and then opened in full does.
@@ -183,7 +186,7 @@ function decideView(first: readonly string[], look: { answered?: boolean; untilR
    * starts small. A wide window's pane has the full column already.
    */
   let isBig = false;
-  const big = h("button", { class: "decide-big", attrs: { type: "button", "aria-pressed": "false", "data-use": "decide.big" }, on: { click: () => setBig(!isBig) } }, "See it big");
+  const big = h("button", { class: "decide-big", attrs: { type: "button", "aria-label": "See it big", "aria-pressed": "false", "data-use": "decide.big" }, on: { click: () => setBig(!isBig) } }, svg(ICONS.expand, "btn-icon"));
   big.hidden = true;
   /** What scrolls: the card's read, or while big the whole card with its answers. */
   const scroller = (): HTMLElement | null => {
@@ -194,40 +197,38 @@ function decideView(first: readonly string[], look: { answered?: boolean; untilR
     const read = scroller()?.scrollTop ?? 0;
     isBig = on;
     panel?.classList.toggle("is-big", on);
-    big.textContent = on ? "Smaller" : "See it big";
+    big.setAttribute("aria-label", on ? "Smaller" : "See it big");
+    big.replaceChildren(svg(on ? ICONS.shrink : ICONS.expand, "btn-icon"));
     big.setAttribute("aria-pressed", String(on));
     const into = scroller();
     if (into) into.scrollTop = read;
     edge();
     requestAnimationFrame(fits);
   }
-  /**
-   * Shows See it big only while the read overflows (less the room kept under it for the pill), and Smaller while big.
-   * The pill floats at the foot of what scrolls, over a pinned answer tray's top edge rather than on its answers.
-   */
+  /** Shows See it big only while the read overflows, and Smaller while big: a mark in the card's tool row, on no line of the read. */
   function fits(): void {
     const box = slot.querySelector<HTMLElement>(".card.top");
     if (!box || !big.isConnected) return;
-    const room = isBig || big.hidden ? 0 : parseFloat(getComputedStyle(box, "::after").height) || 0;
-    big.hidden = !isBig && box.scrollHeight - room <= box.clientHeight;
-    slot.classList.toggle("has-big", !big.hidden);
-    if (big.hidden) return;
-    const foot = scroller()!.getBoundingClientRect().bottom;
-    const tray = isBig ? null : box.querySelector<HTMLElement>(".choices");
-    const pinned = tray && getComputedStyle(tray).position === "sticky" && tray.getBoundingClientRect().bottom >= foot - 20;
-    const lid = pinned ? tray.getBoundingClientRect().top : foot;
-    big.style.setProperty("--big-at", `${Math.round(slot.getBoundingClientRect().bottom - lid + 8)}px`);
+    big.hidden = !isBig && box.scrollHeight <= box.clientHeight;
   }
   const resized = typeof ResizeObserver === "function" && !inPane ? new ResizeObserver(() => fits()) : null;
-  // The pane says when the cards shown are as of the last load, as Cards' list did on a wide window.
+  // The sheet and the pane say when the cards shown are as of the last load; before one, the failed read says it.
   const offline = h("div", { class: "decide-offline" });
+  const segsRow = h("div", { class: "decide-segs", attrs: { role: "group", "aria-label": "Decide" } }, segs.open, segs.answered);
   /** A clip leaving full screen lets the pane draw what came meanwhile. */
   function fullScreenEnded(): void {
     if (!fullScreenElement()) paint();
   }
   function paintOffline(): void {
-    const bar = offlineBar();
-    if ((offline.firstElementChild?.outerHTML ?? "") !== (bar?.outerHTML ?? "")) offline.replaceChildren(...(bar ? [bar] : []));
+    const bar = boardRead() === "loaded" ? offlineBar() : null;
+    if ((offline.firstElementChild?.outerHTML ?? "") === (bar?.outerHTML ?? "")) return;
+    // A Retry holding the keyboard keeps it in its redrawn bar; the bar gone, the sheet takes it, never the page.
+    const held = offline.contains(document.activeElement);
+    offline.replaceChildren(...(bar ? [bar] : []));
+    if (!held) return;
+    const retry = bar?.querySelector<HTMLElement>(".feed-retry");
+    if (retry) retry.focus({ preventScroll: true });
+    else parkFocus(panel ?? slot);
   }
 
   /** The next open card after `id` in the sheet's order (`by` -1: before it), round to the start; null when it is the only one. */
@@ -282,7 +283,7 @@ function decideView(first: readonly string[], look: { answered?: boolean; untilR
     const open = new Set(cards.map((need) => need.id));
     // Opened before the app had read the board (a cold Cards link): its first read's open cards are what Cards shows,
     // unless the owner picked a side of the switch meanwhile.
-    if (untilRead && app.board) {
+    if (untilRead && boardRead() === "loaded") {
       untilRead = false;
       if (mode === "answered" && open.size) mode = "open";
     }
@@ -302,6 +303,13 @@ function decideView(first: readonly string[], look: { answered?: boolean; untilR
     if (!inPane && onAnswered !== (mode === "answered")) {
       onAnswered = !onAnswered;
       (onAnswered ? enterScreen : leaveScreen)("answered");
+    }
+    // Before the board has loaded there is nothing to count: a card's shape while it reads, Try again if it could not.
+    const unread = boardRead() !== "loaded" && (untilRead || mode === "open");
+    segsRow.hidden = unread;
+    if (unread) {
+      slot.classList.add("is-list");
+      return paintList(readingView(), NEEDS_YOU, `read-${boardRead()}`);
     }
     const answered = answeredCount();
     // None open with some minimised: the tab says those, so it never reads Open 0 over the line that they wait. Open N
@@ -332,8 +340,9 @@ function decideView(first: readonly string[], look: { answered?: boolean; untilR
     count.hidden = false;
     const need = cards.find((one) => one.id === at)!;
     const shown = order.filter((id) => open.has(id));
-    name.textContent = need.chat ? chatName(need.chat) : RIVET_NAME;
-    count.textContent = `${shown.indexOf(at) + 1} of ${shown.length} ${shown.length === 1 ? "decision" : "decisions"}`;
+    const repo = need.repo ?? NO_REPO;
+    name.textContent = projectName(homeOf({ repo, project: (app.workers?.workers ?? []).find((w) => w.repo === repo && w.chat === need.chat)?.project }));
+    count.textContent = `${shown.indexOf(at) + 1} of ${shown.length} · ${need.chat ? chatName(need.chat) : RIVET_NAME}`;
     skip.hidden = shown.length < 2;
     // A note typed in the card's box holds the redraw, as the Feed holds its own; so does a clip in full screen.
     const typing = document.activeElement instanceof HTMLTextAreaElement && slot.contains(document.activeElement);
@@ -341,17 +350,20 @@ function decideView(first: readonly string[], look: { answered?: boolean; untilR
     if (painted === at && (typing || fullScreenElement())) return showing(paintedRev === need.rev ? at : null);
     // The place the card was read to, taken before building the new one moves its clip out and shortens it.
     const read = painted === at ? (scroller()?.scrollTop ?? 0) : 0;
+    // And the answers' own tray, which scrolls on its own once four or more cap it.
+    const tray = painted === at ? (slot.querySelector<HTMLElement>(".choices")?.scrollTop ?? 0) : 0;
     // Taken before building too: the new card takes the clip, and a clip's focused button loses the keyboard with it.
     const refocus = keepFocus(slot);
     const card = answerCard(need);
     if (inPane) card.append(keyHints(need));
     paintedData = app.dataRev;
     // A redraw that changes nothing leaves the card alone, so a clip playing in it plays on.
-    const drawn = slot.firstElementChild;
+    const drawn = slot.lastElementChild;
     if (painted === at && drawn && bare(drawn) === bare(card)) return showing(at);
     const moved = painted !== at;
     if (moved && isBig) setBig(false);
-    slot.replaceChildren(card, ...(inPane ? [] : [big]));
+    if (!inPane) card.querySelector(".card-head .head-tools")?.prepend(big);
+    slot.replaceChildren(card);
     painted = at;
     paintedRev = need.rev;
     shownNeed = need;
@@ -361,6 +373,8 @@ function decideView(first: readonly string[], look: { answered?: boolean; untilR
     const box = slot.querySelector<HTMLElement>(".card.top");
     const into = scroller();
     if (into && read) into.scrollTop = read;
+    const answers = slot.querySelector<HTMLElement>(".choices");
+    if (answers && tray) answers.scrollTop = tray;
     refocus();
     requestAnimationFrame(edge);
     if (!inPane) {
@@ -395,6 +409,24 @@ function decideView(first: readonly string[], look: { answered?: boolean; untilR
       { class: "decide-none" },
       h("p", { class: "feed-quiet decide-none-line" }, allMinimised(waiting.length)),
       h("p", { class: "clear-show" }, h("button", { class: "clear-min", attrs: { type: "button", "data-key": "show-minimised", "data-use": "decide.show-minimised" }, on: { click: show } }, showMinimised(waiting.length))),
+    );
+  }
+
+  function readingView(): HTMLElement {
+    const read = boardRead();
+    if (read === "failed")
+      return h(
+        "div",
+        { class: "decide-failed" },
+        rivet("thinking", { size: 64 }),
+        h("p", { class: "feed-quiet" }, "Couldn't read your cards."),
+        h("button", { class: "btn", attrs: { type: "button", "data-use": "decide.retry" }, on: { click: () => void readAgain() } }, "Try again"),
+      );
+    return h(
+      "div",
+      { class: "decide-wait" },
+      h("div", { class: "decide-wait-card", attrs: { "aria-hidden": "true" } }, h("span", {}), h("span", {}), h("span", {}), h("span", { class: "decide-wait-answer" })),
+      h("p", { class: "feed-quiet", attrs: { role: "status" } }, read === "slow" ? "Still reading…" : "Reading your cards…"),
     );
   }
 
@@ -437,15 +469,16 @@ function decideView(first: readonly string[], look: { answered?: boolean; untilR
           // The pane's way back is the header's ‹ Your asks (shell.ts).
           inPane ? null : closeBtn,
         ),
-        h("div", { class: "decide-segs", attrs: { role: "group", "aria-label": "Decide" } }, segs.open, segs.answered),
-        ...(inPane ? [offline] : []),
+        segsRow,
+        offline,
         slot,
       ];
       el.replaceChildren(...parts);
       // A poll that read nothing new leaves the card alone (as the Feed's does): building it again would move its clip.
+      // Before the first board, every poll is news: it read the board or failed to.
       const unsubscribe = subscribe((reason) => {
-        if (inPane) paintOffline();
-        if (reason !== "poll" || app.dataRev !== paintedData) paint();
+        paintOffline();
+        if (reason !== "poll" || app.dataRev !== paintedData || boardRead() !== "loaded") paint();
       });
       // Ops reads GitHub on its own clock: a fresh read redraws a merge card's checks and holds (proofBlock).
       const unwatchOps = watchOps(paint);
@@ -453,7 +486,7 @@ function decideView(first: readonly string[], look: { answered?: boolean; untilR
         unsubscribe();
         unwatchOps();
       };
-      if (inPane) paintOffline();
+      paintOffline();
       paint();
       if (!inPane) closeBtn.focus();
     },

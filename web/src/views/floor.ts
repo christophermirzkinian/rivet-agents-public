@@ -2,10 +2,12 @@ import "./progress.css";
 import "./floor.css";
 
 import { TEAM_ROOM_ID, TEAM_ROOM_TITLE } from "../../../src/shared/conversations.js";
+import { RIVET_NAME } from "../../../src/shared/names.js";
+import { when } from "../../../src/shared/when.js";
 import { isDesk } from "../desk.js";
 import { h, keepFocus } from "../dom.js";
 import { opsData, watchOps } from "../ops-data.js";
-import { setOpsPage, subscribe } from "../state.js";
+import { app, boardRead, setOpsPage, subscribe } from "../state.js";
 import { askingCards } from "./decide-sheet.js";
 import { mountDesks } from "./desks.js";
 import * as feed from "./feed.js";
@@ -96,14 +98,26 @@ export function watchLine(): () => void {
 
 const HOUR_MS = 60 * 60 * 1000;
 
-interface Said {
-  key: "cards" | "due" | "machine" | "usage";
+export interface Said {
+  key: "offline" | "cards" | "due" | "machine" | "usage";
   tone: "cards" | "due" | "warn" | "bad";
   /** The part never cut: the time of a job due. */
   lead: string | null;
   text: string;
   label: string;
   open: (() => void) | null;
+}
+
+/** The line's pills: the one thing `said` names, then the alerts. */
+function lineParts(now: number): Said[] {
+  return [said(now), ...alerts()].filter((part) => part !== null);
+}
+
+/** A read that failed after the cards loaded: the phone's line and the wide header show it. */
+export function alerts(): Said[] {
+  if (app.loadedAt === null || boardRead() !== "loaded" || !(app.offline || app.notice)) return [];
+  const text = `${app.offline === "offline" ? "Offline" : `Can't reach ${RIVET_NAME}`} · cards as of ${when(app.loadedAt)}`;
+  return [{ key: "offline", tone: "warn", lead: null, text, label: text, open: null }];
 }
 
 /** The one thing the line says, the first of: cards waiting, a job due within the hour, a machine amber or red, Usage near its cap. */
@@ -145,16 +159,22 @@ function said(now: number): Said | null {
   return null;
 }
 
-/** Shows the line's one thing, or folds it away with its words kept so it fades out as it was. */
+/** Shows the line's pills, or folds it away with their words kept so it fades out as it was. */
 function paintLine(el: HTMLElement): void {
-  const now = said(Date.now());
-  el.classList.toggle("is-on", now !== null);
-  el.toggleAttribute("inert", now === null);
-  if (now) el.removeAttribute("aria-hidden");
+  const all = lineParts(Date.now());
+  const on = all.length > 0;
+  el.classList.toggle("is-on", on);
+  el.toggleAttribute("inert", !on);
+  if (on) el.removeAttribute("aria-hidden");
   else el.setAttribute("aria-hidden", "true");
-  if (!now) return;
+  if (!on) return;
   const fold = el.firstElementChild as HTMLElement;
   const refocus = keepFocus(fold);
+  fold.replaceChildren(...all.map(pill));
+  refocus();
+}
+
+function pill(now: Said): HTMLElement {
   const parts = [
     h("span", { class: "floor-line-dot", attrs: { "aria-hidden": "true" } }),
     now.lead ? h("span", { class: "floor-line-lead" }, now.lead, " ·") : null,
@@ -162,10 +182,7 @@ function paintLine(el: HTMLElement): void {
     now.open ? h("span", { class: "floor-line-more", attrs: { "aria-hidden": "true" } }, "›") : null,
   ];
   const cls = `floor-line-say t-${now.tone}`;
-  fold.replaceChildren(
-    now.open
-      ? h("button", { class: cls, attrs: { type: "button", "data-key": `line-${now.key}`, "data-use": `floor.line.${now.key}`, "aria-label": now.label }, on: { click: now.open } }, ...parts)
-      : h("p", { class: cls, attrs: { "data-key": `line-${now.key}`, "aria-label": now.label } }, ...parts),
-  );
-  refocus();
+  return now.open
+    ? h("button", { class: cls, attrs: { type: "button", "data-key": `line-${now.key}`, "data-use": `floor.line.${now.key}`, "aria-label": now.label }, on: { click: now.open } }, ...parts)
+    : h("p", { class: cls, attrs: { "data-key": `line-${now.key}`, "aria-label": now.label } }, ...parts);
 }

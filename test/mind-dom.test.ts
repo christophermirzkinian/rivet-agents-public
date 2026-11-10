@@ -222,6 +222,42 @@ describe("the Rivet's mind page", () => {
     expect(localStorage.getItem("rivet.mind.view")).toBe("map");
   });
 
+  it("says it couldn't load in plain words, with Try again, when the server fails", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.resolve(new Response(JSON.stringify({ error: "boom" }), { status: 500, headers: { "content-type": "application/json" } }))),
+    );
+    await open();
+    expect(document.querySelector(".reading-failed-words")?.textContent).toBe("Couldn't load Rivet's mind.");
+    expect(document.querySelector(".reading-failed .reading-btn")?.textContent).toBe("Try again");
+    expect(document.body.textContent).not.toMatch(/Request failed|Pull to try again|boom/);
+  });
+
+  it("keeps a drawn map when a refresh fails and says so over it, with its time and Refresh", async () => {
+    answer(GRAPH);
+    await open();
+    expect(document.querySelector(".mind-reading .reading-at")!.textContent).toMatch(/^Updated /);
+    expect(document.querySelector(".mind-reading .reading-stale")).toBeNull();
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(JSON.stringify({ error: "boom" }), { status: 500, headers: { "content-type": "application/json" } }))));
+    document.querySelector<HTMLElement>(".mind-reading .reading-btn")!.click();
+    await settle();
+    expect(drawn.graphs).toHaveLength(1);
+    expect(document.querySelector(".mind-reading .reading-stale")!.textContent).toBe("Couldn't refresh. These are the last numbers read.");
+    expect(document.querySelector(".mind-reading .reading-btn")!.textContent).toBe("Refresh");
+    expect(document.body.textContent).not.toMatch(/Request failed|boom/);
+  });
+
+  it("never calls a map not sent yet the last numbers read when a refresh fails", async () => {
+    answer(null);
+    await open();
+    expect(document.querySelector(".mind-note")!.textContent).toContain("Nothing here yet.");
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(JSON.stringify({ error: "boom" }), { status: 500, headers: { "content-type": "application/json" } }))));
+    document.querySelector<HTMLElement>(".mind .reading-btn")!.click();
+    await settle();
+    expect(document.querySelector(".reading-failed-words")!.textContent).toBe("Couldn't load Rivet's mind.");
+    expect(document.body.textContent).not.toContain("last numbers read");
+  });
+
   it.each([
     ["no map has come", null],
     ["the map is empty", { built: NOW, loaded: [], nodes: [], links: [] }],

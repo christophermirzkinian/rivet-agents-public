@@ -379,3 +379,235 @@ describe("reply in chat", () => {
     expect(bubble("h4").querySelector(".chat-quote-text")!.textContent).toBe("What's live?");
   });
 });
+
+describe("a chat whose read fails (review F4)", () => {
+  it("says it couldn't load, never Loading… or the raw error, and Try again reads it again", async () => {
+    chat.unmount();
+    let down = true;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
+        down && new URL(String(input), "http://x").pathname.startsWith("/api/conversations/")
+          ? new Response(JSON.stringify({ error: "boom" }), { status: 500, headers: { "content-type": "application/json" } })
+          : fakeFetch(input, init),
+      ),
+    );
+    chat.showConversation("c1");
+    chat.mount(root);
+    await settle();
+    const failed = root.querySelector<HTMLElement>(".chat-empty.chat-failed")!;
+    expect(failed.querySelector("p")!.textContent).toBe("Couldn't load this chat.");
+    expect(root.textContent).not.toMatch(/Loading…|Request failed/);
+    down = false;
+    failed.querySelector<HTMLButtonElement>("button.chat-retry")!.click();
+    await settle();
+    expect(root.querySelector(".chat-failed")).toBeNull();
+    expect(bubble("c1")).not.toBeNull();
+  });
+
+  it("Try again on a first read that failed hands its focus to the message box, never the page (review r6)", async () => {
+    chat.unmount();
+    let down = true;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
+        down && new URL(String(input), "http://x").pathname.startsWith("/api/conversations/")
+          ? new Response(JSON.stringify({ error: "boom" }), { status: 500, headers: { "content-type": "application/json" } })
+          : fakeFetch(input, init),
+      ),
+    );
+    chat.showConversation("c1");
+    chat.mount(root);
+    await settle();
+    const again = root.querySelector<HTMLButtonElement>(".chat-failed button.chat-retry")!;
+    again.focus();
+    down = false;
+    again.click();
+    expect(document.activeElement).toBe(box());
+    await settle();
+    expect(document.activeElement).not.toBe(document.body);
+    // A refresh that loads the chat, with no tap, takes the button away too: its keyboard moves on the same way (r7).
+    chat.unmount();
+    down = true;
+    chat.showConversation("c1");
+    chat.mount(root);
+    await settle();
+    root.querySelector<HTMLButtonElement>(".chat-failed button.chat-retry")!.focus();
+    down = false;
+    await chat.refresh();
+    await settle();
+    expect(root.querySelector(".chat-failed")).toBeNull();
+    expect(document.activeElement).toBe(box());
+    // With the message box hidden the chat itself takes it, and card keys pass it by.
+    chat.unmount();
+    down = true;
+    chat.showConversation("c1");
+    chat.mount(root);
+    await settle();
+    box().disabled = true;
+    const retry = root.querySelector<HTMLButtonElement>(".chat-failed button.chat-retry")!;
+    retry.focus();
+    retry.click();
+    const pane = root.querySelector<HTMLElement>("section.chat")!;
+    expect(document.activeElement).toBe(pane);
+    expect(pane.dataset.cardKeys).toBe("off");
+    await settle();
+  });
+
+  it("a refresh failing after the chat loaded says so plainly under the box, never the server's words (review F3)", async () => {
+    chat.unmount();
+    let down = false;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
+        down && new URL(String(input), "http://x").pathname.startsWith("/api/conversations/")
+          ? new Response(JSON.stringify({ error: "SQLITE_BUSY: database is locked" }), { status: 500, headers: { "content-type": "application/json" } })
+          : fakeFetch(input, init),
+      ),
+    );
+    chat.showConversation("c1");
+    chat.mount(root);
+    await settle();
+    expect(bubble("c1")).not.toBeNull();
+    down = true;
+    await chat.refresh();
+    await settle();
+    const hint = root.querySelector<HTMLElement>(".chat-hint")!;
+    expect(hint.textContent).toBe("Couldn't refresh this chat. Try again");
+    expect(root.textContent).not.toMatch(/SQLITE|Request failed/);
+    expect(bubble("c1")).not.toBeNull();
+    down = false;
+    hint.querySelector<HTMLButtonElement>("button.chat-hint-retry")!.click();
+    await settle();
+    expect(hint.textContent).toBe("");
+  });
+
+  it("a second failed refresh keeps Try again, and its focus, in place (review r2)", async () => {
+    chat.unmount();
+    let down = false;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
+        down && new URL(String(input), "http://x").pathname.startsWith("/api/conversations/")
+          ? new Response(JSON.stringify({ error: "SQLITE_BUSY: database is locked" }), { status: 500, headers: { "content-type": "application/json" } })
+          : fakeFetch(input, init),
+      ),
+    );
+    chat.showConversation("c1");
+    chat.mount(root);
+    await settle();
+    down = true;
+    await chat.refresh();
+    await settle();
+    const retry = root.querySelector<HTMLButtonElement>(".chat-hint button.chat-hint-retry")!;
+    retry.focus();
+    await chat.refresh();
+    await settle();
+    expect(root.querySelector(".chat-hint button.chat-hint-retry")).toBe(retry);
+    expect(document.activeElement).toBe(retry);
+  });
+
+  it("Try again leaving while focused, by a tap or a refresh that lands, hands focus to the message box (review r3)", async () => {
+    chat.unmount();
+    let down = false;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
+        down && new URL(String(input), "http://x").pathname.startsWith("/api/conversations/")
+          ? new Response(JSON.stringify({ error: "SQLITE_BUSY: database is locked" }), { status: 500, headers: { "content-type": "application/json" } })
+          : fakeFetch(input, init),
+      ),
+    );
+    chat.showConversation("c1");
+    chat.mount(root);
+    await settle();
+    const fail = async () => {
+      down = true;
+      await chat.refresh();
+      await settle();
+      const retry = root.querySelector<HTMLButtonElement>(".chat-hint button.chat-hint-retry")!;
+      retry.focus();
+      down = false;
+      return retry;
+    };
+    (await fail()).click();
+    expect(document.activeElement).toBe(box());
+    await settle();
+    (await fail()).focus();
+    await chat.refresh();
+    await settle();
+    expect(root.querySelector(".chat-hint-retry")).toBeNull();
+    expect(document.activeElement).toBe(box());
+  });
+
+  it("Try again leaving while focused with the message box hidden hands focus to the chat, which card keys pass by (review r4)", async () => {
+    chat.unmount();
+    let down = false;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
+        down && new URL(String(input), "http://x").pathname.startsWith("/api/conversations/")
+          ? new Response(JSON.stringify({ error: "boom" }), { status: 500, headers: { "content-type": "application/json" } })
+          : fakeFetch(input, init),
+      ),
+    );
+    chat.showConversation("c1");
+    chat.mount(root);
+    await settle();
+    down = true;
+    await chat.refresh();
+    await settle();
+    // As in Updates, Topics or search, where the message box is not shown and cannot take the focus.
+    box().disabled = true;
+    root.querySelector<HTMLButtonElement>(".chat-hint button.chat-hint-retry")!.focus();
+    down = false;
+    await chat.refresh();
+    await settle();
+    const pane = root.querySelector<HTMLElement>("section.chat")!;
+    expect(document.activeElement).toBe(pane);
+    const { cardKey } = await import("../web/src/views/feed.js");
+    const step = vi.fn();
+    const enter = new KeyboardEvent("keydown", { key: "j", bubbles: true });
+    Object.defineProperty(enter, "target", { value: pane });
+    cardKey(enter, null, root, step);
+    expect(step).not.toHaveBeenCalled();
+    const elsewhere = new KeyboardEvent("keydown", { key: "j", bubbles: true });
+    Object.defineProperty(elsewhere, "target", { value: document.body });
+    cardKey(elsewhere, null, root, step);
+    expect(step).toHaveBeenCalledOnce();
+    root.querySelector<HTMLButtonElement>("button")!.focus();
+    expect(pane.hasAttribute("tabindex")).toBe(false);
+    // A touch screen with a keyboard: the message box would raise its own keyboard, so the chat takes the focus.
+    box().disabled = false;
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: query === "(pointer: coarse)", media: query, addEventListener() {}, removeEventListener() {} }));
+    down = true;
+    await chat.refresh();
+    await settle();
+    root.querySelector<HTMLButtonElement>(".chat-hint button.chat-hint-retry")!.focus();
+    down = false;
+    await chat.refresh();
+    await settle();
+    expect(document.activeElement).toBe(pane);
+  });
+
+  it("Earlier messages failing says so plainly, never the server's words (review r2)", async () => {
+    chat.unmount();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input), "http://x");
+        if (url.pathname !== "/api/chat") return fakeFetch(input, init);
+        return url.searchParams.has("before")
+          ? new Response(JSON.stringify({ error: "SQLITE_BUSY: database is locked" }), { status: 500, headers: { "content-type": "application/json" } })
+          : new Response(JSON.stringify({ messages: [history[0]!], older: "c0" }), { status: 200, headers: { "content-type": "application/json" } });
+      }),
+    );
+    chat.showRivetChat();
+    chat.mount(root);
+    await settle();
+    root.querySelector<HTMLButtonElement>("button.conv-earlier")!.click();
+    await settle();
+    expect(root.querySelector(".chat-hint")!.textContent).toBe("Couldn't load earlier messages.");
+    expect(root.textContent).not.toMatch(/SQLITE|Request failed/);
+  });
+});

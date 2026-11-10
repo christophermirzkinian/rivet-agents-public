@@ -136,7 +136,13 @@ test("a job's chat: claude -p on Opus that can read and report, and never merge,
   assert.equal(flag("--permission-mode"), "dontAsk");
   assert.equal(flag("--permission-prompts"), "none");
   assert.equal(flag("--setting-sources"), "", "no user, project or local settings file loads");
-  assert.deepEqual(JSON.parse(flag("--settings")), { disableAllHooks: true, permissions: { disableBypassPermissionsMode: "disable" } });
+  assert.deepEqual(JSON.parse(flag("--settings")), {
+    disableAllHooks: true,
+    permissions: { disableBypassPermissionsMode: "disable" },
+    // An `@path` in a job's text attaches no file.
+    env: { CLAUDE_CODE_DISABLE_FILE_MENTIONS: "1" },
+  });
+  assert.equal(args.filter((arg) => arg === "--settings").length, 1, "one settings flag, so none replaces it");
   assert.equal(flag("--tools"), "Read,Grep,Glob,Bash");
   for (const bypass of ["--dangerously-skip-permissions", "--allow-dangerously-skip-permissions", "bypassPermissions", "--bare", "--add-dir", "--mcp-config"])
     assert.ok(!args.includes(bypass), bypass);

@@ -82,4 +82,24 @@ describe("Progress's copy button", () => {
   it("is one Copy summary, the one Rivet's sheet shows", () => {
     expect([...agents.copyButtons().querySelectorAll(".agents-copy-btn")].map((button) => button.textContent)).toEqual(["Copy summary"]);
   });
+
+  it("before a board is read copies nothing and says it is still reading, never all clear (review r3)", async () => {
+    const writeText = vi.fn(() => Promise.resolve());
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+    try {
+      app.board = { version: 0, updatedAt: null, board: null } as never;
+      app.notice = null;
+      app.offline = null;
+      const el = agents.copyButtons();
+      el.querySelector<HTMLButtonElement>(".agents-copy-btn")!.click();
+      await Promise.resolve();
+      expect([writeText.mock.calls.length, el.querySelector(".agents-copy-note")!.textContent]).toEqual([0, "Reading the home…"]);
+      app.board = { version: 1, updatedAt: NOW, board: { updatedAt: NOW, needs: [], coming: [], chats: [], shipped: [], waitingWM: [] } };
+      el.querySelector<HTMLButtonElement>(".agents-copy-btn")!.click();
+      await Promise.resolve();
+      expect(writeText).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });

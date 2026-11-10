@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { BRIEFING_STALE_MS, FLY_STALE_MS, GITHUB_STALE_MS, type OpsResponse } from "../src/shared/ops.js";
-import { flyCurrent, opsData, resetOps } from "../web/src/ops-data.js";
-import { app, resetSession, type OpsPage } from "../web/src/state.js";
-import { failedItems, mount, unmount } from "../web/src/views/ops.js";
+import { flyCurrent, opsData, refreshOps, resetOps } from "../web/src/ops-data.js";
+import { app, changed, resetSession, type OpsPage } from "../web/src/state.js";
+import { failedItems, focusSection, mount, refresh, unmount } from "../web/src/views/ops.js";
 
 const NOW = "2026-10-08T00:00:00.000Z";
 let root: HTMLElement;
@@ -159,11 +159,11 @@ it("counts only eligible sampled offline runners when omitted rows may be Macs",
   expect(broken("runner")).toHaveLength(1);
 });
 
-it("a new sign-in shows Ops loading, never the last session's reading", () => {
+it("a new sign-in shows Machines reading, never the last session's reading", () => {
   show("machines");
   const last = line("runners").textContent!;
   expect(last).toContain("offline");
-  expect(root.textContent).not.toContain("Loading Ops…");
+  expect(root.querySelector(".reading.is-pending")).toBeNull();
   // The last session's recorded holds go too: a stale one would keep a chat at your OK.
   opsData.ownerHolds = [{ pr: 1, repo: "owner/repo", reason: "You: hold", at: NOW }];
   // What main.ts does on sign-in; the new session's own read never answers here.
@@ -173,6 +173,161 @@ it("a new sign-in shows Ops loading, never the last session's reading", () => {
   expect(opsData.ops).toBeNull();
   expect(opsData.statuses).toBeNull();
   expect(opsData.ownerHolds).toBeNull();
-  expect(root.textContent).toContain("Loading Ops…");
+  expect(root.querySelector(".reading.is-pending")?.getAttribute("aria-label")).toBe("Reading Machines…");
   expect(root.textContent).not.toContain(last);
+});
+
+it("Code never says it shows the last numbers read when no Ops read ever landed", () => {
+  opsData.ops = null;
+  opsData.error = "Request failed (500)";
+  show("code");
+  expect(root.textContent).not.toContain("last numbers read");
+  expect(root.textContent).not.toContain("Request failed");
+  show("usage");
+  expect(root.textContent).toContain("Couldn't load Usage.");
+  opsData.error = null;
+});
+
+const respond = (fail: (path: string) => boolean) =>
+  vi.stubGlobal("fetch", vi.fn((url: string) => {
+    const path = new URL(String(url), "http://x").pathname;
+    if (fail(path)) return Promise.resolve(new Response(JSON.stringify({ error: "boom" }), { status: 500, headers: { "content-type": "application/json" } }));
+    if (path === "/api/ops") return Promise.resolve(new Response(JSON.stringify(fixture()), { status: 200, headers: { "content-type": "application/json" } }));
+    if (path === "/api/ops/timeline") return Promise.resolve(new Response(JSON.stringify({ days: [], repos: [] }), { status: 200, headers: { "content-type": "application/json" } }));
+    return new Promise(() => {});
+  }));
+
+it("Code says plainly that it couldn't load when Ops and its timeline both fail in a new session", async () => {
+  resetOps();
+  resetSession();
+  respond((path) => path === "/api/ops" || path === "/api/ops/timeline");
+  await refreshOps();
+  show("code");
+  expect(root.querySelector(".reading-failed-words")?.textContent).toBe("Couldn't load Code.");
+  expect(root.querySelector(".reading-failed .reading-btn")?.textContent).toBe("Try again");
+  expect(root.textContent).not.toMatch(/last numbers read|Request failed|boom/);
+});
+
+it("a failed timeline alone leaves Usage and Machines current, and only Code says it couldn't refresh", async () => {
+  resetOps();
+  resetSession();
+  respond(() => false);
+  await refreshOps();
+  respond((path) => path === "/api/ops/timeline");
+  await refreshOps();
+  for (const page of ["usage", "machines"] as const) {
+    show(page);
+    expect(root.querySelector(".reading-figures"), page).not.toBeNull();
+    expect(root.querySelector(".reading-stale"), page).toBeNull();
+  }
+  show("code");
+  expect(root.querySelector(".reading-stale")?.textContent).toBe("Couldn't refresh. These are the last numbers read.");
+});
+
+it("Usage with no Claude reading says a failed refresh plainly, never that it shows the last numbers read", () => {
+  opsData.error = "Request failed (500)";
+  show("usage");
+  expect(root.querySelector(".reading-failed-words")?.textContent).toBe("Couldn't load Usage.");
+  expect(root.textContent).not.toMatch(/last numbers read|Request failed/);
+  opsData.ops = { ...fixture(), claude: { at: NOW, stale: false, limits: [{ kind: "weekly_all", label: "Week", percent: 40, severity: "ok", resetsAt: null }] } } as unknown as OpsResponse;
+  show("usage");
+  expect(root.querySelector(".reading-stale")?.textContent).toBe("Couldn't refresh. These are the last numbers read.");
+  opsData.error = null;
+});
+
+it("Machines with no machine read says a failed refresh plainly, never that it shows the last numbers read", () => {
+  opsData.error = "Request failed (500)";
+  show("machines");
+  expect(root.querySelector(".reading-failed-words")?.textContent).toBe("Couldn't load Machines.");
+  expect(root.textContent).not.toMatch(/last numbers read|Request failed/);
+  opsData.ops = { ...fixture(), mac: { at: NOW, stale: false, volumes: [], load: { one: 1, five: 1, fifteen: 1, cpus: 8 }, memory: { freePct: 40, pressure: "normal" }, uptimeSec: 3600, runners: [] } } as unknown as OpsResponse;
+  show("machines");
+  expect(root.querySelector(".reading-stale")?.textContent).toBe("Couldn't refresh. These are the last numbers read.");
+  opsData.error = null;
+});
+
+it("says schedules it couldn't read in plain words, with Try again", async () => {
+  respond((path) => path === "/api/schedules");
+  show("machines");
+  for (let i = 0; i < 8; i++) await Promise.resolve();
+  await vi.waitFor(() => expect(section("schedules").textContent).toContain("Couldn't read the schedules."));
+  expect(section("schedules").textContent).not.toMatch(/Request failed|boom/);
+  expect([...section("schedules").querySelectorAll("button")].map((b) => b.textContent)).toContain("Try again");
+});
+
+it("Usage whose Claude reading names no account read says a failed refresh plainly", () => {
+  opsData.error = "Request failed (500)";
+  opsData.ops = { ...fixture(), claude: { at: NOW, stale: false, limits: [{ kind: "account_1", label: "Account ma*** (no reading)", percent: 0, severity: "ok", resetsAt: null }] } } as unknown as OpsResponse;
+  show("usage");
+  expect(root.querySelector(".reading-failed-words")?.textContent).toBe("Couldn't load Usage.");
+  expect(root.textContent).not.toContain("last numbers read");
+  opsData.error = null;
+});
+
+it("Plan says a failed feed read in plain words, never the server's", () => {
+  app.notice = "Request failed (500)";
+  show("plan");
+  expect(root.textContent).toContain("Can't reach Rivet.");
+  expect(root.textContent).not.toContain("Request failed");
+  app.notice = null;
+});
+
+it("a search hit chosen while Ops is still reading opens and scrolls to its section once it is drawn", () => {
+  const scrolled: string[] = [];
+  vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(function (this: HTMLElement) {
+    scrolled.push(this.dataset.section ?? "");
+  });
+  resetOps();
+  resetSession();
+  show("plan");
+  focusSection("timeline");
+  expect(root.querySelector('[data-section="timeline"]')).toBeNull();
+  opsData.ops = fixture();
+  opsData.timeline = { days: [], repos: [] } as unknown as typeof opsData.timeline;
+  changed();
+  expect(scrolled).toEqual(["timeline"]);
+  expect(root.querySelector<HTMLDetailsElement>('[data-section="timeline"]')!.open).toBe(true);
+  // Taken once: the next redraw scrolls nowhere.
+  changed();
+  expect(scrolled).toEqual(["timeline"]);
+  vi.restoreAllMocks();
+});
+
+it("says schedules it couldn't refresh over the ones it read, with Try again", async () => {
+  let fail = false;
+  const items = [{ id: "scan", name: "Security scan", on: true, lastRun: { result: "ok", at: NOW }, runs: [] }];
+  vi.stubGlobal("fetch", vi.fn((url: string) => {
+    if (new URL(String(url), "http://x").pathname !== "/api/schedules") return new Promise(() => {});
+    if (fail) return Promise.resolve(new Response(JSON.stringify({ error: "boom" }), { status: 500, headers: { "content-type": "application/json" } }));
+    return Promise.resolve(new Response(JSON.stringify({ at: NOW, stale: false, items }), { status: 200, headers: { "content-type": "application/json" } }));
+  }));
+  const title = () => section("schedules").querySelector(".ops-list-title")!.textContent;
+  const again = () => [...section("schedules").querySelectorAll("button")].find((b) => b.textContent === "Try again");
+  show("machines");
+  again()?.click();
+  await vi.waitFor(() => expect(section("schedules").querySelector("[data-schedule]")).not.toBeNull());
+  expect(title()).toBe("Schedules");
+  fail = true;
+  void refresh();
+  await vi.waitFor(() => expect(title()).toBe("Schedules · couldn't refresh"));
+  expect(section("schedules").querySelector("[data-schedule]")).not.toBeNull();
+  expect(section("schedules").textContent).not.toMatch(/Request failed|boom/);
+  fail = false;
+  again()!.click();
+  await vi.waitFor(() => expect(title()).toBe("Schedules"));
+});
+
+it("keeps the schedules it read under Machines' failed read", async () => {
+  const items = [{ id: "scan", name: "Security scan", on: true, lastRun: { result: "ok", at: NOW }, runs: [] }];
+  vi.stubGlobal("fetch", vi.fn((url: string) => {
+    if (new URL(String(url), "http://x").pathname !== "/api/schedules") return new Promise(() => {});
+    return Promise.resolve(new Response(JSON.stringify({ at: NOW, stale: false, items }), { status: 200, headers: { "content-type": "application/json" } }));
+  }));
+  show("machines");
+  await vi.waitFor(() => expect(section("schedules").querySelector("[data-schedule]")).not.toBeNull());
+  opsData.error = "Request failed (500)";
+  show("machines");
+  expect(root.querySelector(".reading-failed-words")?.textContent).toBe("Couldn't load Machines.");
+  expect(section("schedules").querySelector("[data-schedule]")).not.toBeNull();
+  opsData.error = null;
 });
