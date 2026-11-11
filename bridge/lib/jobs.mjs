@@ -7,6 +7,7 @@ import { defaultRepo } from "../../src/shared/repos.ts";
 import { LAUNCHCTL_BIN } from "./ops/mac.mjs";
 import { shapeText } from "./redact-cut.mjs";
 import { localZone, nextCron, parseCron } from "./schedules/words.mjs";
+import { readModelPick } from "./model-pick.mjs";
 
 // Ops › Scheduled on the Mac: each of the owner's jobs is one LaunchAgent, labelled dev.rivet-agents.job-<job id>, whose
 // only command is scripts/job-run.mjs <job id> --launchd. The server holds the job; this file only writes, switches,
@@ -244,11 +245,14 @@ const CHAT_SETTINGS = {
  */
 export function chatArgs(id, run, spec, paths) {
   if (!JOB_ID_RE.test(id) || !/^[A-Za-z0-9_-]{8,64}$/.test(run) || !SAFE_PATH.test(paths.rivet) || !SAFE_PATH.test(paths.logDir)) throw new Error("not a chat a job may open");
+  const pick = readModelPick("work-chats");
   return [
     "-p",
     jobPrompt(id, run, spec, paths),
     "--model",
-    TASK_MODEL,
+    // Rivet cannot read the Fable room check on the login a task starts in, so a Fable pick never runs here.
+    pick && pick.model !== "claude-fable-5-2" ? pick.model : TASK_MODEL,
+    ...(pick ? ["--effort", pick.effort] : []),
     "--permission-mode",
     "dontAsk",
     "--permission-prompts",

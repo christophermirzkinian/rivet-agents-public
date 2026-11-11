@@ -9,13 +9,13 @@ import { fallbackTitle, MAX_SHORT_TITLE, shownTitle } from "../src/shared/short-
 import { shortHash, ShortTitles } from "../src/server/short-titles.js";
 import { bearer, BOARD_TOKEN, BRIDGE_TOKEN, startServer, type TestServer } from "./helpers.js";
 
-// Your two long rows on 27 Oct, as your screenshot shows them.
-const LINKED = "Can we keep an eye on this https://stats.example.com/dashboard/analytics and tell me whats performing well everyday. Whatever is doing well, lets make 1 more pack similar to that, and get rid of something that isnt performing well (view/visits or whatever metrics).";
+// Two long rows, as a board shows them.
+const LINKED = "Please watch this https://stats.example.com/dashboard/analytics and send a short note each morning on the slowest page, with two fixes to try first.";
 const DOING = "Draft PR 6849 is open with reviews and 3 shells still running; waiting on your yes before marking it ready";
 
 describe("the fallback title", () => {
   it("is the words' first clause, links left out, cut at a word, never past the limit", () => {
-    expect(fallbackTitle(LINKED)).toBe("Can we keep an eye on this and…");
+    expect(fallbackTitle(LINKED)).toBe("Please watch this and send a…");
     expect(fallbackTitle(DOING)).toBe("Draft PR 6849 is open with…");
     expect(fallbackTitle("Driving demo like the sample reel: plan + look test")).toBe("Driving demo like the sample…");
     expect(fallbackTitle("Web Cache: sharper art")).toBe("Web Cache: sharper art");
@@ -38,7 +38,7 @@ describe("the fallback title", () => {
   });
 
   it("stands in for a title that is missing, too long or not one line", () => {
-    expect(shownTitle("itch: daily sales check", LINKED)).toBe("itch: daily sales check");
+    expect(shownTitle("Stats: daily page check", LINKED)).toBe("Stats: daily page check");
     expect(shownTitle(undefined, LINKED)).toBe(fallbackTitle(LINKED));
     expect(shownTitle(null, LINKED)).toBe(fallbackTitle(LINKED));
     expect(shownTitle("x".repeat(MAX_SHORT_TITLE + 1), LINKED)).toBe(fallbackTitle(LINKED));
@@ -59,12 +59,12 @@ describe("the short-title store", () => {
     expect(titles.of(LINKED)).toBe(fallbackTitle(LINKED));
     expect(titles.of(`  ${LINKED.replace(/ /g, "  ")} `)).toBe(fallbackTitle(LINKED));
     expect(titles.pending(10)).toEqual([{ hash: shortHash(LINKED), text: LINKED }]);
-    expect(titles.put(shortHash(LINKED), "itch: daily sales check")).toBe(true);
+    expect(titles.put(shortHash(LINKED), "Stats: daily page check")).toBe(true);
     expect(titles.pending(10)).toEqual([]);
-    expect(titles.of(LINKED)).toBe("itch: daily sales check");
+    expect(titles.of(LINKED)).toBe("Stats: daily page check");
     titles.close();
     const again = new ShortTitles(dir);
-    expect(again.of(LINKED)).toBe("itch: daily sales check");
+    expect(again.of(LINKED)).toBe("Stats: daily page check");
     expect(again.put("f".repeat(64), "Nothing: here")).toBe(false);
     again.close();
   });
@@ -99,12 +99,12 @@ describe("the short-title store", () => {
     const titles = new ShortTitles(dir, new Date(t0));
     titles.of(LINKED, undefined, new Date(t0));
     titles.of(DOING, undefined, new Date(t0));
-    titles.put(shortHash(LINKED), "itch: daily sales check");
+    titles.put(shortHash(LINKED), "Stats: daily page check");
     titles.put(shortHash(DOING), "Rivet: PR waits on you");
     titles.of(LINKED, undefined, new Date(t0 + 20 * day));
     titles.close();
     const later = new ShortTitles(dir, new Date(t0 + 40 * day));
-    expect(later.of(LINKED, undefined, new Date(t0 + 40 * day))).toBe("itch: daily sales check");
+    expect(later.of(LINKED, undefined, new Date(t0 + 40 * day))).toBe("Stats: daily page check");
     expect(later.of(DOING, undefined, new Date(t0 + 40 * day))).toBe(fallbackTitle(DOING));
     later.close();
   });
@@ -133,14 +133,14 @@ describe("the short-title routes", () => {
     const pending = (await (await send("GET", "/api/bridge/short-titles?limit=5", BRIDGE_TOKEN)).json()) as { rows: { hash: string; text: string }[] };
     expect(pending.rows).toEqual([{ hash: shortHash(LINKED), text: LINKED }]);
     const path = `/api/bridge/short-titles/${pending.rows[0]!.hash}`;
-    for (const title of ["x".repeat(MAX_SHORT_TITLE + 1), "itch: go live"]) {
+    for (const title of ["x".repeat(MAX_SHORT_TITLE + 1), "Stats: go live"]) {
       expect((await send("POST", path, BRIDGE_TOKEN, { title })).status).toBe(400);
     }
     expect((await send("POST", `/api/bridge/short-titles/${"0".repeat(64)}`, BRIDGE_TOKEN, { title: "A: b" })).status).toBe(404);
-    expect((await send("POST", path, BRIDGE_TOKEN, { title: "itch: daily sales check" })).status).toBe(200);
+    expect((await send("POST", path, BRIDGE_TOKEN, { title: "Stats: daily page check" })).status).toBe(200);
 
     const [after] = await list();
-    expect(after).toMatchObject({ words: LINKED, short: "itch: daily sales check" });
+    expect(after).toMatchObject({ words: LINKED, short: "Stats: daily page check" });
     // The CLI's full pages carry no short title and queue nothing.
     const all = (await (await send("GET", "/api/asks?all=1", BOARD_TOKEN)).json()) as AsksResponse;
     expect(all.asks[0]).not.toHaveProperty("short");

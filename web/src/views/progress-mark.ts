@@ -14,7 +14,7 @@ export interface NavMark {
   line: string | null;
   /** The asks in hand and when the next is done, from the summary, said calmly beside the mark and never counted in it. */
   owned?: string | null;
-  /** What you parked, "1 PR, iPhone X": draft PRs by count, the rest by name, said calmly beside the mark and never counted in it. */
+  /** What you parked, "1 PR, a test phone": draft PRs by count, the rest by name, said calmly beside the mark and never counted in it. */
   parked?: string | null;
 }
 

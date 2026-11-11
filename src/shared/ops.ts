@@ -614,7 +614,7 @@ export function accountsTotal(limits: readonly ClaudeLimit[]): UsageSum | null {
 
 /** One account's part of a provider's overall: its week (Codex: its longest window) used, out of 100%. */
 export interface UsageCell {
-  /** The masked account, "ch***"; "?***" when the label carries none. */
+  /** The masked account, "bb***"; "?***" when the label carries none. */
   who: string;
   percent: number;
   unread: boolean;

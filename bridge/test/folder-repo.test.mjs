@@ -31,7 +31,7 @@ test("a GitHub remote, https or ssh, is its owner/name; any other remote is none
   // Any host case, and a port, are still GitHub.
   assert.equal(remoteRepo("https://GitHub.com/example-org/Other-Repo.git"), "example-org/Other-Repo");
   assert.equal(remoteRepo("ssh://git@github.com:22/example-org/Other-Repo.git"), "example-org/Other-Repo");
-  assert.equal(remoteRepo("/home/someone/repos/Big-Beam"), undefined);
+  assert.equal(remoteRepo("/home/someone/repos/example-repo"), undefined);
   assert.equal(remoteRepo("https://gitlab.com/example-org/Other-Repo.git"), undefined);
 });
 

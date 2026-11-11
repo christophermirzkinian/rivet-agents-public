@@ -179,7 +179,8 @@ export function kanban(input: KanbanInput): KanbanCard[] {
   ]);
   const branches = new Set(input.workers.map((worker) => `${repoName(worker.repo)}\n${worker.branch}`));
   for (const event of merges) {
-    const name = /^[^/]+\/([^/]+)$/.exec(event.branch ?? "")?.[1];
+    // `rivet fix` opens <owner>/<yyMMdd-HHmmss>/<chat>: the stamp is skipped, the chat name stays last.
+    const name = /^[^/]+\/(?:\d{6}-\d{6}\/)?([^/]+)$/.exec(event.branch ?? "")?.[1];
     if (!name || input.now - Date.parse(event.at!) > MERGED_SHOWN_MS) continue;
     if (claimed.has(prKey(event.repo, event.number!)) || branches.has(`${repoName(event.repo)}\n${event.branch}`)) continue;
     const repo = fullRepo(event.repo, input.workers);

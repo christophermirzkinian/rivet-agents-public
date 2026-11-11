@@ -76,6 +76,22 @@ function fail(msg, code = 1) {
   return code;
 }
 
+/**
+ * A message that starts with "--" is a flag swallowed as the words (`--text --stdin` sent the owner "--stdin"), never
+ * words for the owner: the refusal names the fix, or undefined when the value is fine.
+ * @param {string} flag @param {string} value
+ */
+export function dashRefusal(flag, value) {
+  if (!value.trim().startsWith("--") && value.trim() !== "-h") return undefined;
+  const shown = sanitizeLine(value.trim(), 40);
+  if (flag === "--text") return `--text got "${shown}" as its message; for a file use --stdin alone. Nothing was sent`;
+  if (flag === "--stdin") return `--stdin got "${shown}" as its message; a message never starts with --. Nothing was sent`;
+  return `${flag} got "${shown}" as its value, a flag; give ${flag} its own value. Nothing was sent`;
+}
+
+/** A parse error printed on its own, without the usage text after it. */
+export class DashError extends Error {}
+
 /** @param {string[]} argv */
 export function parseArgs(argv) {
   /** @type {{ text?: string, replyTo?: string, stdin?: boolean, help?: boolean, images: string[], video?: string, file?: string, new?: boolean, title?: string, card?: boolean, tag?: string, thread?: string, ack?: string, pr?: number, repo?: string }} */
@@ -107,6 +123,8 @@ export function parseArgs(argv) {
     else if (a === "--text" || a === "--reply-to" || a === "--image" || a === "--video" || a === "--title" || a === "--tag" || a === "--thread" || a === "--ack") {
       const value = argv[++i];
       if (value === undefined) throw new Error(`${a} needs a value`);
+      const dash = dashRefusal(a, value);
+      if (dash) throw new DashError(dash);
       if (a === "--text") o.text = value;
       else if (a === "--tag") o.tag = value;
       else if (a === "--ack") o.ack = value;
@@ -212,6 +230,7 @@ async function main() {
   try {
     o = parseArgs(process.argv.slice(2));
   } catch (err) {
+    if (err instanceof DashError) return fail(err.message, 2);
     return fail(`${/** @type {Error} */ (err).message}\n\n${USAGE}`, 2);
   }
   const media = o.images.length > 0 || o.video !== undefined || o.file !== undefined;
@@ -222,6 +241,8 @@ async function main() {
   const text = (o.stdin ? await readStdin() : (o.text ?? "")).trim();
   if (!text && !media && o.ack === undefined) return fail("the message is empty", 2);
   if (text.length > MAX_SAY_TEXT) return fail(`the message is over ${MAX_SAY_TEXT} characters`, 2);
+  const dash = dashRefusal(o.stdin ? "--stdin" : "--text", text);
+  if (dash) return fail(dash, 2);
   const exec = makeExec();
   // A --pr with no --repo is this folder's repo's PR.
   if (o.pr !== undefined && o.repo === undefined) {

@@ -257,7 +257,7 @@ it("says schedules it couldn't read in plain words, with Try again", async () =>
 
 it("Usage whose Claude reading names no account read says a failed refresh plainly", () => {
   opsData.error = "Request failed (500)";
-  opsData.ops = { ...fixture(), claude: { at: NOW, stale: false, limits: [{ kind: "account_1", label: "Account ma*** (no reading)", percent: 0, severity: "ok", resetsAt: null }] } } as unknown as OpsResponse;
+  opsData.ops = { ...fixture(), claude: { at: NOW, stale: false, limits: [{ kind: "account_1", label: "Account jj*** (no reading)", percent: 0, severity: "ok", resetsAt: null }] } } as unknown as OpsResponse;
   show("usage");
   expect(root.querySelector(".reading-failed-words")?.textContent).toBe("Couldn't load Usage.");
   expect(root.textContent).not.toContain("last numbers read");

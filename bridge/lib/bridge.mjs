@@ -76,6 +76,7 @@ export function backoffDelay(attempt, random = Math.random) {
  *   now?: () => Date, idleMs?: number, listRetryMs?: readonly number[], holdWaitMs?: number, holdPollMs?: number,
  *   prHolds?: (repo: string, pr: number) => Promise<string[]>,
  *   actions?: readonly import("./actions/index.mjs").ActionFamily[],
+ *   onConnected?: () => void,
  * }} BridgeDeps
  */
 
@@ -761,6 +762,7 @@ export function createBridge(deps) {
       return finish({ status: "http", connected: false, code: res.status });
     }
     log("connected");
+    deps.onConnected?.();
     arm();
     const parser = new SseParser();
     const decoder = new TextDecoder("utf-8");

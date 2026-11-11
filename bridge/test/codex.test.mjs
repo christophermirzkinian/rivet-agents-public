@@ -33,15 +33,15 @@ test("collectCodex: a home signed back in whose usage read fails is no longer si
   let t = 1_000_000;
   const cache = new Map();
   let got = { limits: null, signedIn: false, email: null };
-  const pass = () => collectCodex({ codexBin: "/bin/codex", list, read: async (_, home) => (home.includes("bbb-2") ? got : { limits: week(5), signedIn: true, email: "cm@example.com" }), now: () => t, cache });
-  assert.deepEqual((await pass()).map((row) => row.label), ["cm***, week", "?*** (signed out, no reading)"]);
+  const pass = () => collectCodex({ codexBin: "/bin/codex", list, read: async (_, home) => (home.includes("bbb-2") ? got : { limits: week(5), signedIn: true, email: "cc@example.com" }), now: () => t, cache });
+  assert.deepEqual((await pass()).map((row) => row.label), ["cc***, week", "?*** (signed out, no reading)"]);
   t += CODEX_READ_TTL_MS;
-  got = { limits: null, signedIn: true, email: "ch@example.com" };
-  assert.deepEqual((await pass()).map((row) => row.label), ["cm***, week", "ch*** (no reading)"]);
+  got = { limits: null, signedIn: true, email: "bb@example.com" };
+  assert.deepEqual((await pass()).map((row) => row.label), ["cc***, week", "bb*** (no reading)"]);
 });
 
 test("parseCodexAccountRead: no account is signed out; an error or a malformed reply is unknown; only a plain address is kept", () => {
-  assert.deepEqual(parseCodexAccountRead({ id: 3, result: { account: { email: "cm@example.com" } } }), { signedIn: true, email: "cm@example.com" });
+  assert.deepEqual(parseCodexAccountRead({ id: 3, result: { account: { email: "cc@example.com" } } }), { signedIn: true, email: "cc@example.com" });
   for (const email of NOT_AN_EMAIL) assert.deepEqual(parseCodexAccountRead({ id: 3, result: { account: { email } } }), { signedIn: true, email: null }, email);
   assert.deepEqual(parseCodexAccountRead({ id: 3, result: { account: null } }), { signedIn: false, email: null });
   assert.deepEqual(parseCodexAccountRead({ id: 3, error: { message: "no" } }), { signedIn: null, email: null });
@@ -55,23 +55,23 @@ test("codexRows: every window named, shortest first, the week's row carries cred
   );
   assert.deepEqual(
     codexRows([
-      { mask: "ch***", limits: weekly },
-      { mask: "cm***", note: "stale", limits: both },
+      { mask: "bb***", limits: weekly },
+      { mask: "cc***", note: "stale", limits: both },
       { mask: "zz***", limits: null },
       { mask: "so***", note: "signed out", limits: null },
     ]),
     [
-      { kind: "codex_1_week", label: "ch***, week", percent: 47, severity: "normal", resetsAt: "2025-10-09T08:53:20.000Z", active: false, credits: 61900.4, unlimited: false },
-      { kind: "codex_2_5hr", label: "cm***, 5 hr (stale)", percent: 12, severity: "normal", resetsAt: "2025-10-09T06:06:40.000Z", active: false },
-      { kind: "codex_2_week", label: "cm***, week (stale)", percent: 100, severity: "critical", resetsAt: "2025-10-09T08:53:20.000Z", active: false, credits: null, unlimited: true },
+      { kind: "codex_1_week", label: "bb***, week", percent: 47, severity: "normal", resetsAt: "2025-10-09T08:53:20.000Z", active: false, credits: 61900.4, unlimited: false },
+      { kind: "codex_2_5hr", label: "cc***, 5 hr (stale)", percent: 12, severity: "normal", resetsAt: "2025-10-09T06:06:40.000Z", active: false },
+      { kind: "codex_2_week", label: "cc***, week (stale)", percent: 100, severity: "critical", resetsAt: "2025-10-09T08:53:20.000Z", active: false, credits: null, unlimited: true },
       { kind: "codex_3", label: "zz*** (no reading)", percent: 0, severity: "normal", resetsAt: null, active: false },
       { kind: "codex_4", label: "so*** (signed out, no reading)", percent: 0, severity: "normal", resetsAt: null, active: false },
     ],
   );
   const busy = parseCodexLimits(reply({ primary: { usedPercent: 90, windowDurationMins: 10080, resetsAt: 1 }, credits: { unlimited: false, balance: "0" } }));
-  assert.deepEqual(codexRows([{ mask: "mi***", limits: busy }])[0], {
+  assert.deepEqual(codexRows([{ mask: "hh***", limits: busy }])[0], {
     kind: "codex_1_week",
-    label: "mi***, week",
+    label: "hh***, week",
     percent: 90,
     severity: "warning",
     resetsAt: "1970-01-01T00:00:01.000Z",
@@ -92,8 +92,8 @@ test("collectCodex reads each home under its own CODEX_HOME, at most once per TT
   const reads = [];
   /** @type {Record<string, () => Promise<any>>} */
   let answer = {
-    "aaa-1": async () => ({ limits: week(5), signedIn: true, email: "cm@example.com" }),
-    "bbb-2": async () => ({ limits: week(40), signedIn: true, email: "ch@example.com" }),
+    "aaa-1": async () => ({ limits: week(5), signedIn: true, email: "cc@example.com" }),
+    "bbb-2": async () => ({ limits: week(40), signedIn: true, email: "bb@example.com" }),
   };
   const read = async (bin, home) => {
     const id = path.basename(path.dirname(home));
@@ -103,14 +103,14 @@ test("collectCodex reads each home under its own CODEX_HOME, at most once per TT
   const pass = () => collectCodex({ codexBin: "/bin/codex", list, read, now: () => t, cache });
   const labels = (rows) => rows.map((row) => `${row.label} ${row.percent}`);
 
-  assert.deepEqual(labels(await pass()), ["cm***, week 5", "ch***, week 40"]);
+  assert.deepEqual(labels(await pass()), ["cc***, week 5", "bb***, week 40"]);
   assert.deepEqual(reads, [
     ["/bin/codex", "aaa-1"],
     ["/bin/codex", "bbb-2"],
   ]);
   // Within the TTL no app-server starts at all.
   t += CODEX_READ_TTL_MS - 1;
-  assert.deepEqual(labels(await pass()), ["cm***, week 5", "ch***, week 40"]);
+  assert.deepEqual(labels(await pass()), ["cc***, week 5", "bb***, week 40"]);
   assert.equal(reads.length, 2);
 
   // Past it: one home's read throws, the other answers nothing; both keep their last reading, marked stale.
@@ -121,36 +121,36 @@ test("collectCodex reads each home under its own CODEX_HOME, at most once per TT
     },
     "bbb-2": async () => ({ limits: null, signedIn: null, email: null }),
   };
-  assert.deepEqual(labels(await pass()), ["cm***, week (stale) 5", "ch***, week (stale) 40"]);
+  assert.deepEqual(labels(await pass()), ["cc***, week (stale) 5", "bb***, week (stale) 40"]);
   assert.equal(reads.length, 4);
 
   // A home that reports signed out shows so on its own row; the other recovers.
   t += CODEX_READ_TTL_MS;
   answer = {
-    "aaa-1": async () => ({ limits: week(7), signedIn: true, email: "cm@example.com" }),
+    "aaa-1": async () => ({ limits: week(7), signedIn: true, email: "cc@example.com" }),
     "bbb-2": async () => ({ limits: null, signedIn: false, email: null }),
   };
-  assert.deepEqual(labels(await pass()), ["cm***, week 7", "ch*** (signed out, no reading) 0"]);
+  assert.deepEqual(labels(await pass()), ["cc***, week 7", "bb*** (signed out, no reading) 0"]);
 
   // After six hours with no good reading, a stale home is "no reading".
   t += CODEX_READ_TTL_MS;
   const unknown = async () => ({ limits: null, signedIn: null, email: null });
   answer = { "aaa-1": unknown, "bbb-2": unknown };
-  assert.deepEqual(labels(await pass()), ["cm***, week (stale) 7", "ch*** (signed out, no reading) 0"]);
+  assert.deepEqual(labels(await pass()), ["cc***, week (stale) 7", "bb*** (signed out, no reading) 0"]);
   t += 6 * 60 * 60_000;
-  assert.deepEqual(labels(await pass()), ["cm*** (no reading) 0", "ch*** (signed out, no reading) 0"]);
+  assert.deepEqual(labels(await pass()), ["cc*** (no reading) 0", "bb*** (signed out, no reading) 0"]);
 });
 
 test("collectCodex: a hung home times out on its own row and never stalls the pass or the other home", async () => {
   const silent = () => Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough(), kill() {} });
   const read = (bin, home) =>
-    home.includes("aaa-1") ? readCodexAccount(bin, home, { spawn: silent, timeoutMs: 50 }) : Promise.resolve({ limits: week(9), signedIn: true, email: "ch@example.com" });
+    home.includes("aaa-1") ? readCodexAccount(bin, home, { spawn: silent, timeoutMs: 50 }) : Promise.resolve({ limits: week(9), signedIn: true, email: "bb@example.com" });
   const started = Date.now();
   const rows = await collectCodex({ codexBin: "/bin/codex", list, read, cache: new Map() });
   assert.ok(Date.now() - started < 2000);
   assert.deepEqual(
     rows.map((row) => row.label),
-    ["?*** (no reading)", "ch***, week"],
+    ["?*** (no reading)", "bb***, week"],
   );
 });
 
@@ -184,7 +184,7 @@ test("readCodexAccount speaks initialize then account/rateLimits/read and accoun
         if (message.id === 2) child.stdout.write(`noise\n${JSON.stringify(reply({ primary: { usedPercent: 30, windowDurationMins: 10080, resetsAt: 1 } }))}\n`);
         if (message.id === 3) {
           assert.deepEqual(message.params, { refreshToken: false });
-          child.stdout.write(`${JSON.stringify({ id: 3, result: { account: { email: "cm@example.com" } } })}\n`);
+          child.stdout.write(`${JSON.stringify({ id: 3, result: { account: { email: "cc@example.com" } } })}\n`);
         }
       }
     });
@@ -196,7 +196,7 @@ test("readCodexAccount speaks initialize then account/rateLimits/read and accoun
   assert.deepEqual(await readCodexAccount("/bin/codex", "/home/a", { spawn: talk }), {
     limits: { windows: [{ mins: 10080, percent: 30, resetsAt: 1 }], credits: null },
     signedIn: true,
-    email: "cm@example.com",
+    email: "cc@example.com",
   });
   assert.deepEqual(fake.sent, ["initialize", "initialized", "account/rateLimits/read", "account/read"]);
   assert.equal(fake.child.killed, true);

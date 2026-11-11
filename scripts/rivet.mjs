@@ -168,6 +168,17 @@ const ISO_TIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2
 export class UsageError extends Error {}
 
 /**
+ * The next flag swallowed as a flag's value (say's `--text --stdin` sent the owner "--stdin"): a refusal naming the fix,
+ * or undefined.
+ * @param {string} flag @param {string} value
+ */
+export function swallowedFlag(flag, value) {
+  const word = value.trim();
+  if (word !== "-h" && word !== "--help" && !word.startsWith("--")) return undefined;
+  return `${flag} got "${sanitizeLine(word, 40)}" as its value, a flag; give ${flag} its own value`;
+}
+
+/**
  * @typedef {import("../bridge/lib/board-client.mjs").MediaFlags} MediaFlags
  * @typedef {{ label: string, short?: string, detail?: string, recommended?: boolean, text?: boolean }} Option
  * @typedef {{ label: string, url: string, primary?: boolean }} Link
@@ -275,7 +286,10 @@ export function parseArgs(argv) {
   const words = [];
   let i = 0;
   while (i < argv.length && !argv[i].startsWith("-") && words.length < 2) words.push(argv[i++]);
-  if (!words.length || words[0] === "help" || argv.includes("--help") || argv.includes("-h")) return { ...o, cmd: "help" };
+  // A --help right after a flag may be that flag's value (`card note u1 --text --help`): the loop below decides, and
+  // take() refuses it as a value.
+  const help = (/** @type {string} */ w) => w === "--help" || w === "-h";
+  if (!words.length || words[0] === "help" || argv.some((w, k) => help(w) && !(k > 0 && argv[k - 1].startsWith("--")))) return { ...o, cmd: "help" };
   o.cmd = words[0];
   // A conversation is a thread under the app's name for it: show and list are the thread commands; done, undone and
   // merge are its own.
@@ -301,6 +315,8 @@ export function parseArgs(argv) {
     const take = () => {
       const value = argv[++i];
       if (value === undefined) throw new UsageError(`${a} needs a value`);
+      const swallowed = swallowedFlag(a, value);
+      if (swallowed) throw new UsageError(swallowed);
       return value;
     };
     const lastOption = () => {
@@ -320,6 +336,7 @@ export function parseArgs(argv) {
         continue;
       }
     }
+    if (help(a)) return { ...o, cmd: "help" };
     if (!a.startsWith("-") || a === "-") o.args.push(a);
     else if (a === "--if-match" && writes) {
       o.ifMatch = take();

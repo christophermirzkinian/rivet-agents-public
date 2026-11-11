@@ -94,7 +94,7 @@ describe("Progress's copy button", () => {
       el.querySelector<HTMLButtonElement>(".agents-copy-btn")!.click();
       await Promise.resolve();
       expect([writeText.mock.calls.length, el.querySelector(".agents-copy-note")!.textContent]).toEqual([0, "Reading the home…"]);
-      app.board = { version: 1, updatedAt: NOW, board: { updatedAt: NOW, needs: [], coming: [], chats: [], shipped: [], waitingWM: [] } };
+      app.board = { version: 1, updatedAt: NOW, board: { updatedAt: NOW, needs: [], coming: [], chats: [], shipped: [] } };
       el.querySelector<HTMLButtonElement>(".agents-copy-btn")!.click();
       await Promise.resolve();
       expect(writeText).toHaveBeenCalledTimes(1);

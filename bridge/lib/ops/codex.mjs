@@ -44,7 +44,7 @@ export function parseCodexAccountRead(message) {
   return { signedIn: true, email: typeof email === "string" && ACCOUNT_EMAIL_RE.test(email) ? email : null };
 }
 
-/** "ch***" from an email; "?***" when it has no usable start. @param {unknown} email */
+/** An email's first two letters then three stars (ab*** for ab@x), or ?*** when it starts with nothing usable. @param {unknown} email */
 function maskOf(email) {
   const start = typeof email === "string" ? email.split("@")[0]?.slice(0, 2) ?? "" : "";
   return `${MASK_RE.test(start) ? start : "?"}***`;

@@ -82,6 +82,8 @@ export function mediaFlag(argv, i, m) {
     const last = m.audio.at(-1);
     if (value === undefined || !last || last.label !== undefined) throw new Error("--label names the --audio just before it");
     if (!value.trim() || value.length > 40) throw new Error("a label is 1 to 40 characters");
+    // The next flag swallowed as the label (say's `--text --stdin` sent the owner "--stdin", 11 Nov) is never his to read.
+    if (value.trim().startsWith("--") || value.trim() === "-h") throw new Error(`--label got "${value.trim()}" as its value, a flag; give --label its own words`);
     last.label = value;
     return i + 1;
   }

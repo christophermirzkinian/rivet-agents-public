@@ -319,7 +319,7 @@ describe("the menu's Usage number, its own screen's", () => {
       at: NOW,
       limits: [
         { kind: "weekly_all", label: "Weekly (all models)", percent: 62, severity: "normal", resetsAt: ago(-3 * 24 * 60 * MIN) },
-        ...["st", "aa", "bb", "cc"].map((who, i) => ({ kind: `account_${i + 1}`, label: `Account ${who}*** (no reading)`, percent: 0, severity: "normal", resetsAt: null })),
+        ...["ff", "aa", "bb", "cc"].map((who, i) => ({ kind: `account_${i + 1}`, label: `Account ${who}*** (no reading)`, percent: 0, severity: "normal", resetsAt: null })),
       ],
     } as unknown as typeof ops.claude;
     mount();

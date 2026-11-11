@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { claudeCwd, ExecError, withoutRivetTokens } from "./config.mjs";
 import { MAX_AI_TITLE, MAX_THREAD_TAG, ONE_LINE_RE, THREAD_PROJECTS } from "./threads.mjs";
+import { modelPickFile, readModelPick } from "./model-pick.mjs";
 
 // The thread titler: every two minutes it asks the server for chat threads active this week that no AI pass has
 // titled, runs the local Claude Code CLI once per thread on the cheapest model with no tools, and sends back a short
@@ -55,6 +56,12 @@ export function claudeArgs(model, effort, systemPrompt) {
 }
 
 export const CLAUDE_ARGS = claudeArgs(TITLER_MODEL, TITLER_EFFORT, SYSTEM_PROMPT);
+
+/** The titler's flags for its next call: the owner's Small jobs pick (Rivet → Settings), else CLAUDE_ARGS. */
+export function titlerArgs(file = modelPickFile()) {
+  const pick = readModelPick("small-jobs", file);
+  return pick ? claudeArgs(pick.model, pick.effort, SYSTEM_PROMPT) : CLAUDE_ARGS;
+}
 
 /** The CLI failed or refused: the next pass tries again, with no strike. */
 export class CliError extends Error {}
@@ -150,7 +157,7 @@ export function parseAnswer(stdout) {
 /**
  * Runs the CLI at `bin` with the prompt on stdin, from an empty directory (claudeCwd), without Rivet's tokens in its environment.
  * @param {string} bin
- * @param {readonly string[]} [args] the titler's by default
+ * @param {readonly string[] | (() => readonly string[])} [args] the titler's by default; a function is asked at each call
  * @param {number} [timeoutMs]
  * @param {Record<string, string>} [extraEnv] added to the CLI's environment (Rivet's tokens are still removed)
  * @returns {(input: string) => Promise<string>}
@@ -162,7 +169,7 @@ export function makeClaudeRun(bin, args = CLAUDE_ARGS, timeoutMs = CLAUDE_TIMEOU
     new Promise((resolve, reject) => {
       const child = execFile(
         bin,
-        [...args],
+        [...(typeof args === "function" ? args() : args)],
         { cwd: claudeCwd(), env, timeout: timeoutMs, maxBuffer: 1024 * 1024, shell: false, windowsHide: true, encoding: "utf8" },
         (err, stdout, stderr) => {
           if (!err) return resolve(stdout);
@@ -228,7 +235,7 @@ export async function runTitlerLoop(deps) {
     log("threads-titler-off", { reason: "claude not on PATH" });
     return;
   }
-  const run = deps.run ?? makeClaudeRun(/** @type {string} */ (deps.claudeBin), CLAUDE_ARGS, CLAUDE_TIMEOUT_MS);
+  const run = deps.run ?? makeClaudeRun(/** @type {string} */ (deps.claudeBin), () => titlerArgs(), CLAUDE_TIMEOUT_MS);
   const sleep = deps.sleep ?? abortableSleep;
   const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
   /** @type {Map<string, number>} */

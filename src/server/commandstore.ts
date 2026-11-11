@@ -24,6 +24,7 @@ import {
   type ChatPage,
   type MediaType,
 } from "../shared/command.js";
+import type { ModelPicks } from "../shared/models.js";
 import {
   CUTOVER_KEY,
   SEED_IDS,
@@ -291,6 +292,9 @@ export interface ActionRequest {
   op?: "comment" | "close" | "label";
   /** A scheduled job's change on the Mac (routes/jobs.ts). */
   job?: JobAction;
+  /** Settings › Who does what: every job's model and effort (kind "models"), and the save the screen picked them over. */
+  models?: ModelPicks;
+  base?: string | null;
 }
 
 type Row = Record<string, unknown>;

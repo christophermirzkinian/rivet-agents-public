@@ -46,12 +46,12 @@ describe("the status sheet's Chat button", () => {
   it("opens a branch holder in the item's repo, though another repo's record names a chat of its name", () => {
     vi.stubGlobal("fetch", () => new Promise(() => {}));
     vi.stubGlobal("matchMedia", () => ({ matches: false }));
-    const holder = { ...worker(REPO, "lab"), branch: "mirz/lab" } as Worker;
+    const holder = { ...worker(REPO, "lab"), branch: "dev/lab" } as Worker;
     app.workers = { at: new Date().toISOString(), workers: [holder] };
     app.workersAt = Date.now();
     opsData.statuses = [record({ kind: "pr", key: "3788", state: "backlog", chat: "lab", repo: OTHER })];
     const item = prItem({
-      repo: REPO, number: 3788, title: "PR 3788", url: `https://github.com/${REPO}/pull/3788`, draft: false, author: "mirz", labels: [], branch: "mirz/lab",
+      repo: REPO, number: 3788, title: "PR 3788", url: `https://github.com/${REPO}/pull/3788`, draft: false, author: "dev", labels: [], branch: "dev/lab",
       headAt: new Date().toISOString(), updatedAt: new Date().toISOString(), checks: { state: "fail", passed: 1, failed: 1, pending: 0, failing: ["rivet"] },
     } as never)!;
     openStatus(item);

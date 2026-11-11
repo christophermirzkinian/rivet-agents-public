@@ -17,7 +17,7 @@ const MIN = 60_000;
 const REPO = "example-org/example-repo" as const;
 
 function board(parts: Partial<Board> = {}): Board {
-  return { updatedAt: NOW.toISOString(), needs: [], coming: [], chats: [], shipped: [], waitingWM: [], ...parts } as Board;
+  return { updatedAt: NOW.toISOString(), needs: [], coming: [], chats: [], shipped: [], ...parts } as Board;
 }
 const row = (pr: number, extra: Partial<ComingItem> = {}): ComingItem => ({ pr, title: `Row ${pr}`, stage: "building", updatedAt: NOW.toISOString(), touchedAt: NOW.toISOString(), ...extra });
 const record = (extra: Partial<OpsStatus> & Record<string, unknown>): OpsStatus =>

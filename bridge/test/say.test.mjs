@@ -1,11 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { spawn } from "node:child_process";
 import fs from "node:fs";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-import { MAX_SAY_IMAGES, parseArgs, readPdf, sayBody } from "../../scripts/say.mjs";
+import { DashError, dashRefusal, MAX_SAY_IMAGES, parseArgs, readPdf, sayBody } from "../../scripts/say.mjs";
+
+const SAY = fileURLToPath(new URL("../../scripts/say.mjs", import.meta.url));
 
 // Rivet's photos and video in his chat answer: say.mjs takes them by absolute path and sends their store shas.
 
@@ -152,4 +157,76 @@ test("say --file reads only a real PDF of 25 MB at most, and sends it under its 
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// `say --reply-to <id> --text --stdin < file` sent the owner the word "--stdin", each "sent <id>" as normal.
+test("say refuses a flag swallowed as the message: --text --stdin, --ack --stdin and the other text flags", () => {
+  assert.throws(() => parseArgs(["--reply-to", "m1", "--text", "--stdin"]), (err) => {
+    assert.ok(err instanceof DashError);
+    assert.equal(err.message, '--text got "--stdin" as its message; for a file use --stdin alone. Nothing was sent');
+    return true;
+  });
+  assert.throws(() => parseArgs(["--reply-to", "m1", "--ack", "--stdin"]), DashError);
+  assert.throws(() => parseArgs(["--reply-to", "m1", "--ack", "--stdin"]), /--ack got "--stdin" as its value/);
+  for (const flag of ["--title", "--tag", "--thread", "--reply-to"]) assert.throws(() => parseArgs([flag, "--new"]), DashError);
+  assert.throws(() => parseArgs(["--reply-to", "m1", "--text", "--help"]), DashError);
+  assert.throws(() => parseArgs(["--reply-to", "m1", "--text", "-h"]), DashError);
+  assert.deepEqual(parseArgs(["--reply-to", "m1", "--text", "Merged -- the gate was green"]), { images: [], replyTo: "m1", text: "Merged -- the gate was green" });
+  assert.equal(dashRefusal("--stdin", "  --x\n"), '--stdin got "--x" as its message; a message never starts with --. Nothing was sent');
+  assert.equal(dashRefusal("--stdin", "Done -- the PR merged"), undefined);
+  assert.equal(dashRefusal("--text", "- one bullet"), undefined);
+});
+
+/**
+ * Runs say.mjs against a stub board on 127.0.0.1 (never the real thread or the Keychain) with the message on stdin.
+ * @param {string[]} args @param {string} stdin
+ */
+async function runSay(args, stdin) {
+  /** @type {unknown[]} */
+  const posts = [];
+  const server = http.createServer((req, res) => {
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", () => {
+      posts.push({ url: req.url, body: JSON.parse(body || "null") });
+      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ id: "stub-1" }));
+    });
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve(undefined)));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "say-dash-"));
+  try {
+    const port = /** @type {import("node:net").AddressInfo} */ (server.address()).port;
+    const child = spawn(process.execPath, [SAY, ...args], {
+      cwd: dir,
+      env: { PATH: process.env.PATH, HOME: dir, RIVET_URL: `http://127.0.0.1:${port}`, RIVET_BRIDGE_DEV: "1", RIVET_BOARD_TOKEN: "0".repeat(64) },
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => (stdout += chunk));
+    child.stderr.on("data", (chunk) => (stderr += chunk));
+    child.stdin.end(stdin);
+    const code = await new Promise((resolve) => child.on("close", resolve));
+    return { code, stdout, stderr, posts };
+  } finally {
+    server.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test("say sends nothing when the message on stdin starts with --, and sends one that has -- later on", async () => {
+  const refused = await runSay(["--reply-to", "m1", "--stdin"], "--x\nthe rest\n");
+  assert.equal(refused.code, 2);
+  assert.equal(refused.stderr, 'say: --stdin got "--x / the rest" as its message; a message never starts with --. Nothing was sent\n');
+  assert.deepEqual(refused.posts, []);
+
+  const swallowed = await runSay(["--reply-to", "m1", "--text", "--stdin"], "the real words\n");
+  assert.equal(swallowed.code, 2);
+  assert.match(swallowed.stderr, /^say: --text got "--stdin" as its message; for a file use --stdin alone\. Nothing was sent\n$/);
+  assert.deepEqual(swallowed.posts, []);
+
+  const sent = await runSay(["--reply-to", "m1", "--stdin"], "Merged -- the gate was green\n");
+  assert.equal(sent.stderr, "");
+  assert.equal(sent.code, 0);
+  assert.equal(sent.stdout, "sent stub-1\n");
+  assert.deepEqual(sent.posts, [{ url: "/api/bridge/say", body: { text: "Merged -- the gate was green", replyTo: "m1" } }]);
 });

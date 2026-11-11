@@ -14,7 +14,7 @@ const HOUR = 3600_000;
 const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
 
 function render(lists: { chats?: BoardChat[]; coming?: ComingItem[] }, workers: Partial<Worker>[] = []): void {
-  const board = { updatedAt: ago(0), needs: [], coming: [], chats: [], shipped: [], waitingWM: [], ...lists } as unknown as ServedBoard;
+  const board = { updatedAt: ago(0), needs: [], coming: [], chats: [], shipped: [], ...lists } as unknown as ServedBoard;
   app.board = { version: 1, updatedAt: board.updatedAt, board };
   app.workers = {
     at: ago(0),

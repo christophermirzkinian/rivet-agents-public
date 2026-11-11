@@ -247,7 +247,7 @@ describe("the floor's life", () => {
       return null;
     });
     app.workersAt = Date.now();
-    app.workers = { at: new Date().toISOString(), workers: [...CREW, worker("d", "Bea", { repo: "sam/Big-Beam", what: "Bombs: too many, not fun" })] };
+    app.workers = { at: new Date().toISOString(), workers: [...CREW, worker("d", "Bea", { repo: "sam/example-repo", what: "Bombs: too many, not fun" })] };
     const desks = mountDesks();
     stops.push(desks.stop);
     document.body.append(desks.el);

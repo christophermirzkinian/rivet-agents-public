@@ -10,6 +10,7 @@ import { scheduledRun } from "../bridge/lib/scheduled-run.mjs";
 import { usageCost, zoneDay } from "../bridge/lib/spend.mjs";
 import { clipUnits, plain, readings } from "../bridge/lib/templates.mjs";
 import { claudeArgs, cliDetail, makeClaudeRun } from "../bridge/lib/threads-titler.mjs";
+import { readModelPick } from "../bridge/lib/model-pick.mjs";
 
 // What every reader shares: small jobs that read on a cheap model. A reader sends redacted text to the local Claude
 // Code CLI, the client the titler uses, and takes back one JSON object of fixed fields. What it reads is data, never
@@ -60,29 +61,41 @@ export async function runReader(job, main) {
 
 /**
  * A runner for one reader: the titler's CLI flags with this job's effort and system prompt, and its output capped.
- * It runs on the user's own `claude` login.
+ * A Small jobs pick sets the model and effort of each call. It runs on the user's own `claude` login. `launched` is
+ * told the model each call starts on, the model it is priced at.
  * @param {string} bin absolute path of `claude`
  * @param {{ job: string, effort: "low" | "medium", system: string, timeoutMs?: number }} opts
- * @returns {(input: string) => Promise<string>}
+ * @returns {(input: string, launched?: (model: string) => void) => Promise<string>}
  */
 export function makeReaderRun(bin, { effort, system, timeoutMs = CLI_TIMEOUT_MS }) {
   if (!readersOn()) throw new ReadersOff("readers are off");
-  return makeClaudeRun(bin, claudeArgs(READER_MODEL, effort, system), timeoutMs, { CLAUDE_CODE_MAX_OUTPUT_TOKENS: String(READER_MAX_OUTPUT_TOKENS) });
+  const extraEnv = { CLAUDE_CODE_MAX_OUTPUT_TOKENS: String(READER_MAX_OUTPUT_TOKENS) };
+  return (input, launched) => {
+    const args = readerArgs(effort, system);
+    launched?.(args[args.indexOf("--model") + 1]);
+    return makeClaudeRun(bin, args, timeoutMs, extraEnv)(input);
+  };
+}
+
+/** A reader call's flags: its tuned effort on READER_MODEL, or the Small jobs pick's model and effort. @param {string} effort @param {string} system */
+export function readerArgs(effort, system) {
+  const pick = readModelPick("small-jobs");
+  return claudeArgs(pick?.model ?? READER_MODEL, pick?.effort ?? effort, system);
 }
 
 /**
- * The answer's JSON object and the call's cost from the CLI's `--output-format json` output.
- * @param {string} stdout
+ * The answer's JSON object and the call's cost, on the `model` it was launched on, from the CLI's `--output-format json` output.
+ * @param {string} stdout @param {string} [model]
  * @returns {{ answer: Record<string, unknown>, usd: number }}
  */
-export function parseCliOutput(stdout) {
+export function parseCliOutput(stdout, model = READER_MODEL) {
   let outer;
   try {
     outer = JSON.parse(stdout);
   } catch {
     throw new CliError("claude printed no JSON");
   }
-  const usd = outer && typeof outer === "object" ? usageCost(READER_MODEL, outer.usage) : 0;
+  const usd = outer && typeof outer === "object" ? usageCost(model, outer.usage) : 0;
   if (outer?.is_error !== false || typeof outer.result !== "string") {
     const err = new CliError(`claude ${cliDetail(stdout) || "error"}`);
     /** @type {any} */ (err).usd = usd;
@@ -409,6 +422,8 @@ export class Spend {
     this.file = path.join(dir, `${job}.json`);
     this.now = now;
     this.log = log;
+    /** The model the last call was launched on (ask). */
+    this.model = READER_MODEL;
     this.state = this.#load();
   }
 
@@ -471,7 +486,7 @@ export class Spend {
   save() {
     const keep = Object.keys(this.state.days).sort().slice(-HISTORY_DAYS);
     const days = Object.fromEntries(keep.map((day) => [day, this.state.days[day]]));
-    writeJsonAtomic(this.file, { job: this.job, model: READER_MODEL, ceilingUsd: this.ceilingUsd, days });
+    writeJsonAtomic(this.file, { job: this.job, model: this.model, ceilingUsd: this.ceilingUsd, days });
   }
 }
 
@@ -483,37 +498,41 @@ const CLI_REQUESTS_PER_CALL = 4;
  * requests is counted at a token per prompt byte (no token is shorter), the system prompt and CLI overhead, the output
  * of the requests before it, and a full capped answer (READER_MAX_OUTPUT_TOKENS, which every reader run sets). A run of
  * failures so reaches the ceiling no later than the same calls would have.
- * @param {unknown} err @param {string} input
+ * @param {unknown} err @param {string} input @param {string} [model] the model the call was launched on
  */
-export function failedCallUsd(err, input) {
+export function failedCallUsd(err, input, model = READER_MODEL) {
   const stdout = /** @type {any} */ (err)?.stdout;
   try {
     const usage = typeof stdout === "string" && stdout ? JSON.parse(stdout)?.usage : null;
-    if (usage && typeof usage === "object") return usageCost(READER_MODEL, usage);
+    if (usage && typeof usage === "object") return usageCost(model, usage);
   } catch {
     // No usable usage: estimate below.
   }
   const prompt = Buffer.byteLength(input, "utf8") + 8000 + (CLI_REQUESTS_PER_CALL - 1) * READER_MAX_OUTPUT_TOKENS;
-  return CLI_REQUESTS_PER_CALL * usageCost(READER_MODEL, { input_tokens: prompt, output_tokens: READER_MAX_OUTPUT_TOKENS });
+  return CLI_REQUESTS_PER_CALL * usageCost(model, { input_tokens: prompt, output_tokens: READER_MAX_OUTPUT_TOKENS });
 }
 
 /**
  * Asks the model once: checks the ceiling, runs the CLI, charges the cost (an error answer or a failed run is charged
  * too), and returns the parsed answer's object.
- * @param {{ run: (input: string) => Promise<string>, spend: Spend, input: string }} deps
+ * The call is priced on the model it was launched on (makeReaderRun's `launched`).
+ * @param {{ run: (input: string, launched?: (model: string) => void) => Promise<string>, spend: Spend, input: string }} deps
  */
 export async function ask({ run, spend, input }) {
   spend.check();
+  let model = READER_MODEL;
   let stdout;
   try {
-    stdout = await run(input);
+    stdout = await run(input, (launched) => void (model = launched));
   } catch (err) {
-    spend.charge(failedCallUsd(err, input));
+    spend.model = model;
+    spend.charge(failedCallUsd(err, input, model));
     spend.save();
     throw new CliError(err instanceof Error ? err.message.slice(0, 120) : "claude failed");
   }
+  spend.model = model;
   try {
-    const { answer, usd } = parseCliOutput(stdout);
+    const { answer, usd } = parseCliOutput(stdout, model);
     spend.charge(usd);
     return answer;
   } catch (err) {

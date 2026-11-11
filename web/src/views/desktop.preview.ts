@@ -777,7 +777,7 @@ const messages: ChatMessage[] = [
   mine("or6", "or1", "Chose: Yes, put it on the site", 400),
   say("or7", "or1", "Dashboard: rainbow palette is on the site", 365),
   mine("or8", "or1", "Chose: Yes, keep it", 3),
-  mine("c1", "c1", "Threads isn't working for me. Let's do a list of conversations like VS Code.", 200),
+  mine("c1", "c1", "The thread view is hard to follow. Could the chat be a list of conversations?", 200),
   say("c2", "c1", "Design is on the issue with mockups. PR 1 is the server.", 190),
   mine("c3", "c1", "ok do the issue first", 180),
   mine("g1", "g1", "The enquiry form emails are failing again", 3000),

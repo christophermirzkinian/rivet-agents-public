@@ -1,0 +1,18 @@
+{
+  "models": {
+    "claude-opus-5-5": { "label": "Opus 5.5", "efforts": ["low", "medium", "high", "xhigh", "max"] },
+    "claude-fable-5-2": { "label": "Fable 5.2", "efforts": ["low", "medium", "high", "xhigh", "max"] },
+    "claude-haiku-5-5": { "label": "Haiku 5.5", "efforts": ["low", "medium", "high", "xhigh", "max"] },
+    "gpt-6.1-sol": { "label": "GPT-6.1 Sol", "efforts": ["low", "medium", "high", "xhigh"] }
+  },
+  "jobs": [
+    { "key": "monitor", "label": "Monitor", "what": "The chat that runs the board", "models": ["claude-opus-5-5", "claude-fable-5-2"], "effort": "high" },
+    { "key": "work-chats", "label": "Work chats & building", "what": "Every task chat, its builders and searches", "models": ["claude-opus-5-5", "claude-fable-5-2"], "effort": "high" },
+    { "key": "app-look", "label": "App look & money work", "what": "How apps look; money, logins, checks", "models": ["claude-opus-5-5", "claude-fable-5-2"], "effort": "high" },
+    { "key": "review-lens", "label": "PR reviews", "what": "The fresh-eyes checks before a merge", "models": ["claude-opus-5-5", "claude-fable-5-2", "gpt-6.1-sol"], "efforts": { "claude-opus-5-5": ["high", "xhigh", "max"], "claude-fable-5-2": ["high", "xhigh", "max"], "gpt-6.1-sol": ["xhigh"] }, "effort": "high" },
+    { "key": "hard-problem", "label": "Hard problems", "what": "One tough question, own window", "models": ["claude-fable-5-2", "claude-opus-5-5"], "effort": "high" },
+    { "key": "small-jobs", "label": "Small jobs & notes", "what": "Docs, readers, chat titles", "models": ["claude-haiku-5-5", "claude-opus-5-5"], "effort": "medium" },
+    { "key": "daily-jobs", "label": "Advice & daily jobs", "what": "Fable's Advice, retro, sweeps", "models": ["claude-opus-5-5", "claude-fable-5-2"], "effort": "high" },
+    { "key": "night-jobs", "label": "Night jobs", "what": "Overnight tests and fixes, stills check", "models": ["gpt-6.1-sol"], "effort": "high" }
+  ]
+}

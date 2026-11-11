@@ -11,7 +11,7 @@ const NOW = "2026-10-04T04:00:00.000Z";
 function pr(number: number, passed: number, failed: number, pending: number): PullRequest {
   const state = failed ? "fail" : pending ? "pending" : passed ? "pass" : "none";
   return {
-    repo: "example-org/example-repo", number, title: `PR ${number}`, url: `https://github.com/x/pull/${number}`, draft: false, author: "mirz", labels: [],
+    repo: "example-org/example-repo", number, title: `PR ${number}`, url: `https://github.com/x/pull/${number}`, draft: false, author: "dev", labels: [],
     headAt: NOW, updatedAt: NOW, checks: { state, passed, failed, pending, failing: failed ? ["lint"] : [] },
   };
 }
