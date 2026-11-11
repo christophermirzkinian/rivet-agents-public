@@ -15,6 +15,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/dist ./dist
 COPY src ./src
+COPY config ./config
 COPY bridge/lib ./bridge/lib
 COPY redactor ./redactor
 COPY tsconfig.json ./
