@@ -59,7 +59,7 @@ function setup() {
     logger: { error: () => {} },
     addUpdate: (card) => {
       const stored = store.getBoard();
-      const board = stored?.board ?? { updatedAt: iso(at), needs: [], coming: [], chats: [], shipped: [], waitingWM: [] };
+      const board = stored?.board ?? { updatedAt: iso(at), needs: [], coming: [], chats: [], shipped: [] };
       if (board.needs.some((need) => need.id === card.id)) return { status: 409, error: "exists" };
       adds.push(card as unknown as Need);
       store.putBoard({ ...board, needs: [...board.needs, card as unknown as Need] }, stored?.version ?? null);
@@ -378,7 +378,7 @@ describe("Ops cards on the server", () => {
     t.record({ kind: "ci", key: "recent-fixed", state: "fixed" });
     t.record({ kind: "ci", key: "open", state: "investigating", updatedAt: old, since: old });
     t.store.putBoard(
-      { updatedAt: old, needs: [{ id: cardId({ kind: "ci", key: "kept-fixed", incident: old }), kind: "decision", title: "kept", options: [{ label: "A" }, { label: "B" }] } as unknown as Need], coming: [], chats: [], shipped: [], waitingWM: [] },
+      { updatedAt: old, needs: [{ id: cardId({ kind: "ci", key: "kept-fixed", incident: old }), kind: "decision", title: "kept", options: [{ label: "A" }, { label: "B" }] } as unknown as Need], coming: [], chats: [], shipped: [] },
       null,
     );
     expect(t.ops.foldDone()).toBe(1);
@@ -420,7 +420,7 @@ describe("a hold card reaches Sam only for a hold he placed himself", () => {
 });
 
 describe("Ops cards beside the late sweeper", () => {
-  const board = (ids: string[]) => ({ updatedAt: iso(START), needs: ids.map((id) => ({ id, kind: "decision", title: "t", options: [{ label: "A" }, { label: "B" }] }) as unknown as Need), coming: [], chats: [], shipped: [], waitingWM: [] });
+  const board = (ids: string[]) => ({ updatedAt: iso(START), needs: ids.map((id) => ({ id, kind: "decision", title: "t", options: [{ label: "A" }, { label: "B" }] }) as unknown as Need), coming: [], chats: [], shipped: [] });
 
   it("gives one failure one card: no Ops card over an open late card, no late card over an open Ops card", () => {
     const late = setup();
@@ -669,7 +669,7 @@ describe("opsCardItems", () => {
 
 describe("syncOpsCards", () => {
   function pass(needs: Record<string, unknown>[] = []) {
-    const board = { updatedAt: "x", needs, coming: [], chats: [], shipped: [], waitingWM: [] };
+    const board = { updatedAt: "x", needs, coming: [], chats: [], shipped: [] };
     const state = { stored: { board, version: 3 } as { board: typeof board; version: number } | null, added: [] as unknown[], raised: [] as unknown[], open: true };
     return {
       state,

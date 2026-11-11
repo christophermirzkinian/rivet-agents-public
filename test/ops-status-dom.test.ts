@@ -25,7 +25,7 @@ function run(extra: Partial<WorkflowRun> = {}): WorkflowRun {
 
 function pr(number: number, state: PullRequest["checks"]["state"], extra: Partial<PullRequest> = {}): PullRequest {
   return {
-    repo: MS, number, title: `PR ${number}`, url: `https://github.com/${MS}/pull/${number}`, draft: false, author: "mirz", labels: [], headAt: at(90), updatedAt: at(30),
+    repo: MS, number, title: `PR ${number}`, url: `https://github.com/${MS}/pull/${number}`, draft: false, author: "dev", labels: [], headAt: at(90), updatedAt: at(30),
     checks: { state, passed: 3, failed: state === "fail" ? 2 : 0, pending: 0, failing: state === "fail" ? ["rivet", "lint"] : [] }, ...extra,
   };
 }
@@ -129,11 +129,11 @@ describe("the status sheet", () => {
 
   it("reads a PR as the live chat's whose worktree has its branch checked out, and follows the crew", () => {
     const worker = (chat: string, branch: string, repo: Worker["repo"] = MS): Worker => ({ id: chat.padEnd(16, "0").slice(0, 16), name: chat, repo, chat, state: "working", lastOutputAt: NOW, branch });
-    app.workers = { at: at(0), workers: [worker("regions-login-fix", "mirz/regions-login-fix")] };
+    app.workers = { at: at(0), workers: [worker("regions-login-fix", "dev/regions-login-fix")] };
     app.workersAt = NOW;
     opsData.statuses = [];
     try {
-      openStatus(prItem(pr(3788, "fail", { branch: "mirz/regions-login-fix" }))!);
+      openStatus(prItem(pr(3788, "fail", { branch: "dev/regions-login-fix" }))!);
       expect(fields().Latest).toBe("regions-login-fix has this PR's branch checked out.");
       expect(document.querySelector(".ops-status-chat")?.textContent).toBe("Chat regions-login-fix");
       // The open sheet follows the crew: the chat leaves, Rivet is picking it up.

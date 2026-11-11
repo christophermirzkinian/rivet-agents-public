@@ -499,21 +499,21 @@ test("a hold or wait on the owner, his card, video or word holds, whatever word 
   }
   // The past tells how a hold ended; a job's own "held" and "waits" are no hold.
   for (const line of [
-    "## Approval\n\nMerge was held for the owner's video; he OK'd it at 10:53am: \"yes ship it\".",
+    "## Approval\n\nMerge was held for the owner's video; he OK'd it at 9:15am: \"fine by me\".",
     "It had been held for the owner until his yes.",
     "The row is held on the card until it settles.",
-    "His condition held: \"Flop looks amazing\" on 19 Sep.",
+    "His condition held: \"the new card reads well\" on 3 Mar.",
     "Lenses clean; waiting on CI.",
     "- Branch `ui-drift/report-bar`, head `99b093db84`. Nothing is waiting on the owner.",
     "The owner OK'd the video at 8:50am; nothing waits on the owner.",
     "This PR is not held for the owner.",
     "Deploy after merge waits for the monitor's go.",
     "Nothing is waiting on the owner, but CI is still running.",
-    "## Approval\n\nThis PR was a draft until the owner approved the video; the owner said \u00abyes ship it\u00bb.",
+    "## Approval\n\nThis PR was a draft until the owner approved the video; the owner said \u00abfine by me\u00bb.",
     "It was still held for the owner until his yes.",
     "- R2.2 the lobby pass held card names to the 16px default: fixed.",
     // Nor across a soft wrap.
-    "## Approval\n\nMerge was\nheld for the owner's video; he said \u00abyes ship it\u00bb.",
+    "## Approval\n\nMerge was\nheld for the owner's video; he said \u00abfine by me\u00bb.",
     "Nothing is\nwaiting on the owner.",
     "> Merge was\n> held for the owner.",
     // A "Held:" heading over "None" is none.

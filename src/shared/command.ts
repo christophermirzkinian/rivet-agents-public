@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { AskCreate } from "./asks.js";
 import { CHAT_PATTERN, fileRefsSchema, ID_PATTERN, MAX_CHAT_IMAGES, PDF_NAME_PATTERN, type FileRef } from "./board.js";
 import type { JobAction } from "./jobs.js";
+import { modelPicksSchema, type ModelPicks } from "./models.js";
 import { RIVET_NAME } from "./names.js";
 import { OPS_STATUS_KEY_PATTERN } from "./ops-status.js";
 import { isKnownRepo, NO_REPO } from "./repos.js";
@@ -108,6 +109,11 @@ export const sendCreateSchema = z.object({ clientId, repo, chat, text: ownerText
 export const pauseCreateSchema = z.object({ clientId, repo, chat }).strict();
 /** The Schedules tab's switch: one schedule, on or off. */
 export const scheduleCreateSchema = z.object({ clientId, schedule: z.string().regex(SCHEDULE_ID_PATTERN), on: z.boolean() }).strict();
+/**
+ * Settings › Who does what: every job's model and effort, whole; the Mac writes them to ~/.rivet/model-routing.json.
+ * `base` is the save the screen's view showed last (null: no file, or one no save made), and the Mac writes only over that.
+ */
+export const modelsCreateSchema = z.object({ clientId, jobs: modelPicksSchema, base: z.string().max(100).nullable() }).strict();
 export const logsLeaseSchema = z.object({ repo, chat }).strict();
 
 /** The photos one Rivet answer may carry. */
@@ -180,7 +186,7 @@ export function isSayCard(say: { replyTo?: string; new?: true; card?: true }): b
   return say.card === true || (say.replyTo === undefined && !say.new);
 }
 
-export const ACTION_KINDS = ["chat", "send", "pause", "merge", "schedule", "issue", "job"] as const;
+export const ACTION_KINDS = ["chat", "send", "pause", "merge", "schedule", "issue", "job", "models"] as const;
 export type ActionKind = (typeof ACTION_KINDS)[number];
 
 /**
@@ -289,6 +295,9 @@ export interface AuditEntry {
   /** A GitHub write on an issue: Start work's label, Close's comment then close. */
   issue?: number;
   op?: "comment" | "close" | "label";
+  /** Settings › Who does what: the whole set of picks sent, and the save they were picked over. */
+  models?: ModelPicks;
+  base?: string | null;
   detail?: ActionDetail;
 }
 

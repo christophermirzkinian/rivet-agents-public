@@ -34,7 +34,7 @@ const worker = { id: "w1", name: "Nina", repo: R, chat: data.chat, state: "worki
 const board = {
   version: 1,
   updatedAt: ago(0),
-  board: { updatedAt: ago(0), needs: [], coming: [], chats: [{ name: data.chat, state: "working", doing: data.doing, updatedAt: ago(1) }], shipped: [], waitingWM: [] },
+  board: { updatedAt: ago(0), needs: [], coming: [], chats: [{ name: data.chat, state: "working", doing: data.doing, updatedAt: ago(1) }], shipped: [] },
 } as unknown as BoardResponse;
 const workers = { at: ago(0), workers: [worker] } as unknown as WorkersResponse;
 

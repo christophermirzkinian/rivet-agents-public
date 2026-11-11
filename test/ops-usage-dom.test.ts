@@ -95,10 +95,10 @@ describe("Ops Usage page", () => {
     opsData.ops = opsFixture({
       ...usage,
       // Bridge order, not reset order: the accounts card sorts by next reset, rows without one last in bridge order.
-      limits: [...usage.limits, limit("account_1", "Account aa*** (no reading)", 0, null), limit("account_2", "Account st*** (active)", 31, "2026-10-08T13:00:00.000Z"),
-        limit("account_3", "Account zz*** (no reading)", 0, null), limit("account_4", "Account cm*** (5-hr 88%)", 51, "2026-10-05T11:00:00.000Z"),
-        { ...limit("codex_1_week", "cm***, week (active)", 100, "2026-10-03T17:00:00.000Z"), severity: "critical", credits: 0, unlimited: false },
-        { ...limit("codex_2_week", "ch***, week", 47, "2026-10-08T01:35:00.000Z"), credits: 61_900.4, unlimited: false },
+      limits: [...usage.limits, limit("account_1", "Account aa*** (no reading)", 0, null), limit("account_2", "Account ff*** (active)", 31, "2026-10-08T13:00:00.000Z"),
+        limit("account_3", "Account zz*** (no reading)", 0, null), limit("account_4", "Account cc*** (5-hr 88%)", 51, "2026-10-05T11:00:00.000Z"),
+        { ...limit("codex_1_week", "cc***, week (active)", 100, "2026-10-03T17:00:00.000Z"), severity: "critical", credits: 0, unlimited: false },
+        { ...limit("codex_2_week", "bb***, week", 47, "2026-10-08T01:35:00.000Z"), credits: 61_900.4, unlimited: false },
       ],
     });
     ops.mount(root);
@@ -116,7 +116,7 @@ describe("Ops Usage page", () => {
       [true, ""],
       [false, "51%"],
     ]);
-    expect(reset("claude")).toEqual(["Next reset", "Mon 10:00pm, in 4 days, 8h 0m", "cm***, 51% used"]);
+    expect(reset("claude")).toEqual(["Next reset", "Mon 10:00pm, in 4 days, 8h 0m", "cc***, 51% used"]);
 
     // OpenAI: each Codex account's week, summed the same way.
     expect(figures("openai")).toEqual(["1.5", "0.5"]);
@@ -124,15 +124,15 @@ describe("Ops Usage page", () => {
     // A quarter left is gold, and an account at 90% or over says so on a gold card.
     expect(hero("openai").classList.contains("t-warn")).toBe(true);
     expect(lines("openai")).toBe("1.5 used · 1 account full");
-    expect(reset("openai")).toEqual(["Next reset", "Sun 4:00am, in 2 days, 14h 0m", "cm***, 100% used"]);
+    expect(reset("openai")).toEqual(["Next reset", "Sun 4:00am, in 2 days, 14h 0m", "cc***, 100% used"]);
 
     const accounts = card("claude-accounts");
     const lists = accounts.querySelectorAll(".costs-list");
-    expect(names(lists[0]!)).toEqual(["cm***", "st***", "aa***", "zz***"]);
+    expect(names(lists[0]!)).toEqual(["cc***", "ff***", "aa***", "zz***"]);
     // An unread account reads "no reading", never "0%", with no reset; the notes are the plain line under the pill.
     expect(cards(lists[0]!).map(parts)).toEqual([
-      { name: "cm***", figure: "51%", pill: "OK", tone: "yes", meta: "resets Mon 10:00pm, in 4 days, 8h 0m", line: "5-hr 88%" },
-      { name: "st***", figure: "31%", pill: "OK", tone: "yes", meta: "resets Fri 12:00am, in 7 days, 10h 0m", line: "Active" },
+      { name: "cc***", figure: "51%", pill: "OK", tone: "yes", meta: "resets Mon 10:00pm, in 4 days, 8h 0m", line: "5-hr 88%" },
+      { name: "ff***", figure: "31%", pill: "OK", tone: "yes", meta: "resets Fri 12:00am, in 7 days, 10h 0m", line: "Active" },
       { name: "aa***", figure: "no reading", pill: "No reading", tone: "quiet", meta: "no reset time", line: null },
       { name: "zz***", figure: "no reading", pill: "No reading", tone: "quiet", meta: "no reset time", line: null },
     ]);
@@ -140,20 +140,20 @@ describe("Ops Usage page", () => {
     expect(names(lists[1]!)).toEqual(["Session (5 hr)", "Week (all models)", "Week (Opus)"]);
     // Each account carries its meter, filled to its week in its grade; an unread account's is hatched, never an empty 0%. The signed-in account's meters have theirs.
     expect(cards(lists[0]!).map(meter)).toEqual([
-      ["yes", "51%", "cm*** 51 percent used"],
-      ["yes", "31%", "st*** 31 percent used"],
+      ["yes", "51%", "cc*** 51 percent used"],
+      ["yes", "31%", "ff*** 31 percent used"],
       ["unread", null, "aa***: no reading"],
       ["unread", null, "zz***: no reading"],
     ]);
     expect(cards(lists[1]!).map((row) => meter(row)[1])).toEqual(["37%", "62%", "20%"]);
 
     const openai = card("openai-accounts");
-    expect(names(openai)).toEqual(["cm***", "ch***"]);
+    expect(names(openai)).toEqual(["cc***", "bb***"]);
     expect(cards(openai).map((row) => [parts(row).figure, parts(row).meta, parts(row).tone, parts(row).line])).toEqual([
       ["100%", "resets Sun 4:00am, in 2 days, 14h 0m", "bad", "Active"],
       ["47%", "resets Thu 12:35pm, in 6 days, 22h 35m", "yes", null],
     ]);
-    expect(cards(openai).map(meter)).toEqual([["bad", "100%", "cm*** 100 percent used"], ["yes", "47%", "ch*** 47 percent used"]]);
+    expect(cards(openai).map(meter)).toEqual([["bad", "100%", "cc*** 100 percent used"], ["yes", "47%", "bb*** 47 percent used"]]);
   });
 
   it("puts the overalls first, the details under them, and only on Usage", () => {
@@ -198,17 +198,17 @@ describe("Ops Usage page", () => {
 
   it("sums the Codex accounts the same way, each on its longest window, with an unread one in the total", () => {
     const rows: ClaudeLimit[] = [
-      limit("codex_1_5hr", "cm***, 5 hr (active)", 40, "2026-10-01T05:00:00.000Z"),
-      { ...limit("codex_1_week", "cm***, week (active)", 90, "2026-10-04T05:00:00.000Z"), severity: "warning", credits: null, unlimited: true },
-      limit("codex_2", "ch*** (no reading)", 0, null),
+      limit("codex_1_5hr", "cc***, 5 hr (active)", 40, "2026-10-01T05:00:00.000Z"),
+      { ...limit("codex_1_week", "cc***, week (active)", 90, "2026-10-04T05:00:00.000Z"), severity: "warning", credits: null, unlimited: true },
+      limit("codex_2", "bb*** (no reading)", 0, null),
     ];
     const cells = codexCells([...reading()!.limits, ...rows]);
     expect(cells.map((cell) => [cell.who, cell.percent, cell.window, cell.active, cell.unread])).toEqual([
-      ["cm***", 90, "week", true, false],
-      ["ch***", 0, "week", false, true],
+      ["cc***", 90, "week", true, false],
+      ["bb***", 0, "week", false, true],
     ]);
     expect(sumCells(cells)).toMatchObject({ used: 90, total: 200, unread: 1, tone: "bad", resetsAt: "2026-10-04T05:00:00.000Z" });
-    expect(sumCells(cells)!.next!.who).toBe("cm***");
+    expect(sumCells(cells)!.next!.who).toBe("cc***");
     expect(sumCells(codexCells([rows[2]!]))).toBeNull();
     // The last account of a full reading (12 rows) whose week the cap cut is not read: its 5-hour window never stands
     // in for the week. Short of the cap, a row without credits fields (an older bridge) is still that account's reading.
@@ -216,16 +216,16 @@ describe("Ops Usage page", () => {
     const pad = Array.from({ length: 8 }, (_, i) => limit(`account_${i + 1}`, `Account a${i}*** (no reading)`, 0, null));
     expect(pad.length + rows.length + 1).toBe(MAX_CLAUDE_LIMITS);
     const cut = codexCells([...pad, ...rows, tail]);
-    expect(cut.map((cell) => [cell.who, cell.unread])).toEqual([["cm***", false], ["ch***", true], ["zz***", true]]);
+    expect(cut.map((cell) => [cell.who, cell.unread])).toEqual([["cc***", false], ["bb***", true], ["zz***", true]]);
     expect(sumCells(cut)).toMatchObject({ used: 90, total: 300, unread: 2 });
-    expect(codexCells([...rows, tail]).map((cell) => [cell.who, cell.unread])).toEqual([["cm***", false], ["ch***", true], ["zz***", false]]);
+    expect(codexCells([...rows, tail]).map((cell) => [cell.who, cell.unread])).toEqual([["cc***", false], ["bb***", true], ["zz***", false]]);
 
     opsData.ops = opsFixture({ ...reading()!, limits: [...reading()!.limits, ...rows] });
     ops.mount(root);
     expect(figures("openai")).toEqual(["0.9", "0.1+"]);
     expect(lines("openai")).toBe("0.9 used · 1 account not read · 1 account full");
     // The shorter window rides under the account's row.
-    expect(parts(cards(card("openai-accounts"))[0]!)).toEqual({ name: "cm***", figure: "90%", pill: "High", tone: "warn", meta: "resets Sun 4:00pm, in 3 days, 2h 0m", line: "Active · 5 hr 40% · resets 4:00pm, in 2h 0m" });
+    expect(parts(cards(card("openai-accounts"))[0]!)).toEqual({ name: "cc***", figure: "90%", pill: "High", tone: "warn", meta: "resets Sun 4:00pm, in 3 days, 2h 0m", line: "Active · 5 hr 40% · resets 4:00pm, in 2h 0m" });
     ops.unmount();
     // A full shorter window keeps its red under a calm week.
     const full = [{ ...rows[0]!, percent: 100, severity: "critical" as const }, { ...rows[1]!, percent: 10, severity: "normal" as const }];
@@ -233,36 +233,36 @@ describe("Ops Usage page", () => {
     ops.mount(root);
     expect(parts(cards(card("openai-accounts"))[0]!)).toMatchObject({ figure: "10%", tone: "bad", line: "Active · 5 hr 100% · resets 4:00pm, in 2h 0m" });
     // The meter is the week's own: calm at 10%, while the pill counts the full 5 hours.
-    expect(meter(cards(card("openai-accounts"))[0]!)).toEqual(["yes", "10%", "cm*** 10 percent used"]);
+    expect(meter(cards(card("openai-accounts"))[0]!)).toEqual(["yes", "10%", "cc*** 10 percent used"]);
     ops.unmount();
     // A freshly reset account reads 0% and its meter is empty, as its overall cell is.
-    opsData.ops = opsFixture({ ...reading()!, limits: [...reading()!.limits, limit("account_1", "Account fr***", 0, "2026-10-05T11:00:00.000Z")] });
+    opsData.ops = opsFixture({ ...reading()!, limits: [...reading()!.limits, limit("account_1", "Account dd***", 0, "2026-10-05T11:00:00.000Z")] });
     ops.mount(root);
-    expect(meter(cards(card("claude-accounts"))[0]!)).toEqual(["yes", "0%", "fr*** 0 percent used"]);
+    expect(meter(cards(card("claude-accounts"))[0]!)).toEqual(["yes", "0%", "dd*** 0 percent used"]);
   });
 
   it("shows a limited account at 100% with its reset, and an idle or stale row's figure with its age, never no reading", () => {
     const resets = "2026-10-02T13:00:00.000Z";
     const rows = gradeAccounts([
-      limit("account_1", "Account st*** (limited, 2 hr old)", 100, resets),
-      limit("account_2", "Account ch*** (33 hr old)", 4, "2026-10-05T13:00:00.000Z"),
-      limit("account_3", "Account cm*** (active)", 3, "2026-10-05T11:00:00.000Z"),
+      limit("account_1", "Account ff*** (limited, 2 hr old)", 100, resets),
+      limit("account_2", "Account bb*** (33 hr old)", 4, "2026-10-05T13:00:00.000Z"),
+      limit("account_3", "Account cc*** (active)", 3, "2026-10-05T11:00:00.000Z"),
     ]);
     opsData.ops = opsFixture({ at: "2026-10-01T02:58:00.000Z", stale: false, limits: rows });
     ops.mount(root);
     expect(figures("claude")).toEqual(["1.1", "1.9"]);
     expect(hero("claude").textContent).not.toContain("not read");
     const shown = cards(card("claude-accounts")).map(parts);
-    expect(shown.find((row) => row.name === "st***")).toMatchObject({ figure: "100%", pill: "Very high", line: "Limited · 2 hr old" });
-    expect(shown.find((row) => row.name === "st***")?.meta).toContain("resets");
-    expect(shown.find((row) => row.name === "ch***")).toMatchObject({ figure: "4%", line: "33 hr old" });
+    expect(shown.find((row) => row.name === "ff***")).toMatchObject({ figure: "100%", pill: "Very high", line: "Limited · 2 hr old" });
+    expect(shown.find((row) => row.name === "ff***")?.meta).toContain("resets");
+    expect(shown.find((row) => row.name === "bb***")).toMatchObject({ figure: "4%", line: "33 hr old" });
   });
 
   it("leads the week with every account's total out of 400%, an unread one said, and grades rows from the percentage", () => {
     const week = limit("weekly_all", "Week (all models)", 89.6, null);
     const rows = [100, 98, 90, 13].map((pct, i) => limit(`account_${i + 1}`, `Account a${i}***`, pct, null));
     expect(ops.weekTotal([week, ...rows])).toEqual({ text: "3 of 4 weekly limits used", used: "3 of 4 weekly limits used", unread: null, tone: "ok", n: "3", of: "of 4" });
-    expect(ops.weekTotal([week, ...rows.slice(0, 3), limit("account_4", "Account sp*** (no reading)", 0, null)])).toEqual({
+    expect(ops.weekTotal([week, ...rows.slice(0, 3), limit("account_4", "Account ee*** (no reading)", 0, null)])).toEqual({
       text: "2.9 of 4 weekly limits used, 1 account not read",
       used: "2.9 of 4 weekly limits used",
       unread: "1 account not read",
@@ -271,8 +271,8 @@ describe("Ops Usage page", () => {
       of: "of 4",
     });
     // With no account read, this account's own week, standing in for one of them as on Usage's overall.
-    expect(ops.weekTotal([week, limit("account_2", "Account sp*** (old)", 99, null)])).toMatchObject({ text: "0.9 of 1 weekly limit used", tone: "ok" });
-    expect(ops.weekTotal([week, limit("account_2", "Account sp*** (old)", 99, null), limit("account_3", "Account aa*** (no reading)", 0, null)])).toMatchObject({
+    expect(ops.weekTotal([week, limit("account_2", "Account ee*** (old)", 99, null)])).toMatchObject({ text: "0.9 of 1 weekly limit used", tone: "ok" });
+    expect(ops.weekTotal([week, limit("account_2", "Account ee*** (old)", 99, null), limit("account_3", "Account aa*** (no reading)", 0, null)])).toMatchObject({
       text: "0.9 of 2 weekly limits used, 1 account not read",
       of: "of 2",
     });
@@ -288,31 +288,31 @@ describe("Ops Usage page", () => {
     ops.unmount();
     expect(ops.weekTotal([])).toBeNull();
     // An older bridge graded every account row normal; the server grades it from its week.
-    const graded = gradeAccounts([{ ...limit("account_1", "Account cm***", 100, null), severity: "normal" }, limit("account_2", "Account ch***", 85, null), limit("account_3", "Account st*** (old)", 99, null), week]);
+    const graded = gradeAccounts([{ ...limit("account_1", "Account cc***", 100, null), severity: "normal" }, limit("account_2", "Account bb***", 85, null), limit("account_3", "Account ff*** (old)", 99, null), week]);
     expect(graded.map((row) => row.severity)).toEqual(["critical", "warning", "normal", week.severity]);
 
     // With no account read, the overall is this account's own week, out of one limit.
-    opsData.ops = opsFixture({ ...reading()!, limits: [...reading()!.limits, limit("account_1", "Account st*** (active, old, 5-hr 88%)", 99, "2026-10-05T11:00:00.000Z")] });
+    opsData.ops = opsFixture({ ...reading()!, limits: [...reading()!.limits, limit("account_1", "Account ff*** (active, old, 5-hr 88%)", 99, "2026-10-05T11:00:00.000Z")] });
     ops.mount(root);
     expect(figures("claude")).toEqual(["0.6", "0.4"]);
     expect(lines("claude")).toBe("0.6 used");
-    expect(parts(cards(card("claude-accounts"))[0]!)).toMatchObject({ name: "st***", figure: "no reading", line: "Active · 5-hr 88%" });
+    expect(parts(cards(card("claude-accounts"))[0]!)).toMatchObject({ name: "ff***", figure: "no reading", line: "Active · 5-hr 88%" });
     ops.unmount();
 
     // The other accounts stay in the total, not read, beside the signed-in account's own week.
     opsData.ops = opsFixture({
       ...reading()!,
-      limits: [...reading()!.limits, limit("account_1", "Account st*** (active, old)", 99, null), ...["aa", "bb", "cc"].map((who, i) => limit(`account_${i + 2}`, `Account ${who}*** (no reading)`, 0, null))],
+      limits: [...reading()!.limits, limit("account_1", "Account ff*** (active, old)", 99, null), ...["aa", "bb", "cc"].map((who, i) => limit(`account_${i + 2}`, `Account ${who}*** (no reading)`, 0, null))],
     });
     ops.mount(root);
     expect(figures("claude")).toEqual(["0.6", "0.4+"]);
     expect(hero("claude").querySelector(".reading-lead-words")!.textContent).toBe("of 4 left");
     expect(lines("claude")).toBe("0.6 used · 3 accounts not read");
-    expect(reset("claude")[2]).toBe("st***, 62% used");
+    expect(reset("claude")[2]).toBe("ff***, 62% used");
     ops.unmount();
 
     // With none marked active, the own week still stands in for one of the four, never a fifth beside them.
-    opsData.ops = opsFixture({ ...reading()!, limits: [...reading()!.limits, ...["st", "aa", "bb", "cc"].map((who, i) => limit(`account_${i + 1}`, `Account ${who}*** (no reading)`, 0, null))] });
+    opsData.ops = opsFixture({ ...reading()!, limits: [...reading()!.limits, ...["ff", "aa", "bb", "cc"].map((who, i) => limit(`account_${i + 1}`, `Account ${who}*** (no reading)`, 0, null))] });
     ops.mount(root);
     expect(hero("claude").querySelector(".reading-lead-words")!.textContent).toBe("of 4 left");
     expect(lines("claude")).toBe("0.6 used · 3 accounts not read");
@@ -404,7 +404,7 @@ describe("Ops Usage page", () => {
   });
 
   it("goes stale by the clock once a cached reading outlives the Usage threshold while /api/ops fails", async () => {
-    opsData.ops = opsFixture({ ...reading()!, limits: [...reading()!.limits, { ...limit("codex_1_week", "cm***, week", 20, null), credits: null, unlimited: false }] });
+    opsData.ops = opsFixture({ ...reading()!, limits: [...reading()!.limits, { ...limit("codex_1_week", "cc***, week", 20, null), credits: null, unlimited: false }] });
     ops.mount(root);
     expect(hero("claude").classList.contains("t-ok")).toBe(true);
     expect(hero("claude").textContent).not.toContain("Read ");

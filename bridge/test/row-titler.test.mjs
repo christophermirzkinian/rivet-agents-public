@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { BadAnswer, CliError, MAX_STRIKES, TITLER_MODEL } from "../lib/threads-titler.mjs";
 import { MAX_SHORT_TITLE, parseRowAnswer, ROW_CLAUDE_ARGS, ROW_SYSTEM_PROMPT, rowPrompt, rowTitlePass, runRowTitlerLoop } from "../lib/row-titler.mjs";
 
-const WORDS = "Can we keep an eye on this https://example.test/dashboard/analytics and tell me whats performing well everyday.";
+const WORDS = "Please watch this https://example.test/dashboard/analytics and send a short note each morning on the slowest page.";
 const HASH = "a".repeat(64);
 
 /** The CLI's --output-format json answer with `result` as the model's text. */
@@ -47,7 +47,7 @@ test("runs Haiku with no tools and asks for a short Project or area: what title,
 });
 
 test("takes a fitting title and refuses one too long, blank, two lines or saying live", () => {
-  assert.equal(parseRowAnswer(cliOut('{"title": "Stats: daily sales check."}')), "Stats: daily sales check");
+  assert.equal(parseRowAnswer(cliOut('{"title": "Stats: daily page check."}')), "Stats: daily page check");
   assert.equal(parseRowAnswer(cliOut('Sure: {"title": "\\"Website: sharper art\\""}')), "Website: sharper art");
   for (const title of ["x".repeat(33), "", "bell\\u0007here", "Website: go live"]) {
     assert.throws(() => parseRowAnswer(cliOut(`{"title": "${title}"}`)), BadAnswer, title);
@@ -64,10 +64,10 @@ test("names each queued row, gives one up after three bad answers, and a failing
   const strikes = new Map();
   const logs = [];
   const log = (event, fields) => logs.push({ event, fields });
-  const run = async (input) => (input.includes("example.test") ? cliOut('{"title": "Stats: daily sales check"}') : cliOut("I cannot"));
+  const run = async (input) => (input.includes("example.test") ? cliOut('{"title": "Stats: daily page check"}') : cliOut("I cannot"));
   for (let pass = 1; pass <= MAX_STRIKES; pass++) await rowTitlePass({ call, run, strikes, log });
   assert.deepEqual(state.posts, [
-    { hash: HASH, body: { title: "Stats: daily sales check" } },
+    { hash: HASH, body: { title: "Stats: daily page check" } },
     { hash: other.hash, body: { title: null } },
   ]);
   // The words are never logged.

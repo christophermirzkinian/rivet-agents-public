@@ -190,6 +190,14 @@ describe("Agents board columns", () => {
     expect(columnOf(cards, "flaky")).toBe("merged");
   });
 
+  it("keeps a closed fix chat in Merged by the chat name after its branch's time stamp", () => {
+    const B = "sam/261111-020000/fix-app-notes-app";
+    expect(columnOf(kanban(input({ chats: [{ name: "fix-app-notes-app", state: "done" }], timeline: merged(10, 30, B) })), "fix-app-notes-app")).toBe("merged");
+    expect(columnOf(kanban(input({ timeline: merged(10, 30, B) })), "fix-app-notes-app")).toBe("merged");
+    // Only that stamp is skipped: any other three-part branch is still not a chat's.
+    expect(kanban(input({ timeline: merged(10, 30, "sam/x/fix-app-notes-app") }))).toEqual([]);
+  });
+
   it("keeps a closed chat out of Merged while a PR on its branch is open", () => {
     const B = "sam/flaky";
     const cards = kanban(input({ chats: [{ name: "flaky", state: "done" }], prs: [pr(11, { branch: B })], timeline: merged(10, 30, B) }));

@@ -513,6 +513,16 @@ test("card note posts Rivet's answer for the server to put under the card", asyn
   assert.deepEqual(calls, [{ method: "POST", path: "/api/board/needs/u1/comments", body: { text: "the lockfile is fixed" } }]);
   assert.throws(() => parseArgs(["card", "note", "u1"]), usage("card note needs --text"));
   assert.throws(() => parseArgs(["card", "note", "u1", "--text", " "]), usage("--text is 1 to 1000"));
+  // The next flag swallowed as the words (say's `--text --stdin`) is refused for every value flag.
+  assert.throws(() => parseArgs(["card", "note", "u1", "--text", "--stdin"]), usage('--text got "--stdin" as its value, a flag; give --text its own value'));
+  assert.throws(() => parseArgs(["card", "add", "a-1", "--title", "--kind", "decision"]), usage('--title got "--kind" as its value'));
+  assert.equal(parseArgs(["card", "note", "u1", "--text", "merged -- green"]).fields.text, "merged -- green");
+  // A --help or -h right after --text is the swallowed flag, not a call for help that exits 0.
+  assert.throws(() => parseArgs(["card", "note", "u1", "--text", "--help"]), usage('--text got "--help" as its value'));
+  assert.throws(() => parseArgs(["card", "note", "u1", "--text", "-h"]), usage('--text got "-h" as its value'));
+  assert.equal(parseArgs(["card", "note", "u1", "--help"]).cmd, "help");
+  assert.equal(parseArgs(["card", "add", "a-1", "--replace", "--help"]).cmd, "help");
+  assert.throws(() => parseArgs(["card", "add", "a-1", "--title", "Voices", "--audio", "/a/voice.mp3", "--label", "--skip-corner-check"]), usage('--label got "--skip-corner-check" as its value'));
 });
 
 test("card flags carry the card's proof, checked like the other card flags", async () => {

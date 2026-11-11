@@ -9,6 +9,7 @@ import { boardSchema, type PushConfigResponse, type Reply } from "../../../src/s
 import type { AuditEntry } from "../../../src/shared/command.js";
 import type { ConversationsResponse } from "../../../src/shared/conversations.js";
 import type { ClaudeUsageSnapshot, FlySnapshot, GithubSnapshot, Health, MacSnapshot, OpsResponse, TimelineResponse } from "../../../src/shared/ops.js";
+import { defaultPicks, MODEL_JOBS, picksFromFile, type ModelPicks, type ModelSettingsResponse } from "../../../src/shared/models.js";
 import type { PushSettingsResponse } from "../../../src/shared/quiet.js";
 import type { SearchItem } from "../../../src/shared/search.js";
 import type { SchedulesResponse } from "../../../src/shared/schedules.js";
@@ -478,6 +479,16 @@ const pushSettings: PushSettingsResponse = {
   quietNow: false,
 };
 
+/** Settings › Who does what: the Monitor moved to Fable, and Hard problems on Opus while Fable is at its limit. */
+let modelSettings: ModelSettingsResponse = {
+  jobs: MODEL_JOBS,
+  current: picksFromFile({ ...defaultPicks(), monitor: { model: "claude-fable-5-2", effort: "high" } }),
+  updated: { at: new Date(now.getTime() - 40 * 60_000).toISOString(), by: "The owner (Rivet)", action: "preview-models-0" },
+  fileError: null,
+  status: { "hard-problem": { model: "claude-opus-5-5", effort: "high", reason: "Fable is at 86% this week", at: new Date(now.getTime() - 2 * 3_600_000).toISOString() } },
+  reportedAt: now.toISOString(),
+};
+
 const workers: WorkersResponse = {
   at: now.toISOString(),
   workers: [
@@ -672,6 +683,15 @@ window.fetch = async (input, init) => {
   else if (url.startsWith("/api/schedules")) body = schedules;
   else if (url === "/api/jobs") body = new URLSearchParams(location.search).get("jobs") === "none" ? { ...jobs, jobs: [], limits: { ...jobs.limits, active: 0 } } : jobs;
   else if (url.startsWith("/api/ops")) body = ops;
+  else if (url.startsWith("/api/settings/models")) body = modelSettings;
+  // The Mac's write, answered at once.
+  else if (url === "/api/actions/models" && method === "POST") {
+    const sent = JSON.parse(String(init?.body)) as { clientId: string; jobs: ModelPicks };
+    const at = new Date().toISOString();
+    body = { id: `preview-models-${sent.clientId}`, clientId: sent.clientId, kind: "models", at, updatedAt: at, status: "succeeded", models: sent.jobs } satisfies AuditEntry;
+    modelSettings = { ...modelSettings, current: sent.jobs, updated: { at, by: "The owner (Rivet)", action: (body as AuditEntry).id } };
+    status = 202;
+  }
   else if (url.startsWith("/api/settings/push")) body = method === "PUT" ? { ...pushSettings, ...JSON.parse(String(init?.body)) } : pushSettings;
   else if (url.startsWith("/api/workers")) body = workers;
   else if (url.startsWith("/api/replies")) body = { replies };

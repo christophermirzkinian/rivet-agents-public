@@ -54,7 +54,6 @@ const fake: PreviewData = {
         { name: "boot-fallbacks", state: "done", doing: "Stalled loads fail over", prs: [433], updatedAt: ago(170) },
       ],
       shipped: [],
-      waitingWM: [],
     },
   },
   workers: {

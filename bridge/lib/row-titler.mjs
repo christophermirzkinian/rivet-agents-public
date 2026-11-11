@@ -1,5 +1,6 @@
 import { BadAnswer, CliError, claudeArgs, isRefusal, makeClaudeRun, cliDetail, MAX_STRIKES, TITLER_EFFORT, TITLER_MODEL } from "./threads-titler.mjs";
 import { ONE_LINE_RE } from "./threads.mjs";
+import { modelPickFile, readModelPick } from "./model-pick.mjs";
 
 // The row titler: every minute it asks the server for asks and chat rows whose words no Haiku pass has named
 // (src/server/short-titles.ts), runs the local Claude Code CLI on Haiku with no tools for each, as the thread titler
@@ -28,6 +29,12 @@ export const ROW_SYSTEM_PROMPT = [
 ].join("\n");
 
 export const ROW_CLAUDE_ARGS = claudeArgs(TITLER_MODEL, TITLER_EFFORT, ROW_SYSTEM_PROMPT);
+
+/** The row titler's flags for its next call: the owner's Small jobs pick (Rivet → Settings), else ROW_CLAUDE_ARGS. */
+export function rowTitlerArgs(file = modelPickFile()) {
+  const pick = readModelPick("small-jobs", file);
+  return pick ? claudeArgs(pick.model, pick.effort, ROW_SYSTEM_PROMPT) : ROW_CLAUDE_ARGS;
+}
 
 /** @param {string} text the row's words @returns {string} what the CLI reads on stdin */
 export function rowPrompt(text) {
@@ -115,7 +122,7 @@ export async function runRowTitlerLoop(deps) {
     log("row-titler-off", { reason: "claude not on PATH" });
     return;
   }
-  const run = deps.run ?? makeClaudeRun(/** @type {string} */ (deps.claudeBin), ROW_CLAUDE_ARGS, CLAUDE_TIMEOUT_MS);
+  const run = deps.run ?? makeClaudeRun(/** @type {string} */ (deps.claudeBin), () => rowTitlerArgs(), CLAUDE_TIMEOUT_MS);
   const sleep = deps.sleep ?? abortableSleep;
   const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
   /** @type {Map<string, number>} */

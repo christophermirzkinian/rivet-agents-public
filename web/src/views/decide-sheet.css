@@ -243,7 +243,7 @@
 }
 
 /* The card's stills and clips stay short in the sheet, whole and uncropped, so the card and its answers fit above the
-   say-line on your 412x915. */
+   say-line on a large phone (412x915). */
 .decide-sheet .card-body > .card-media .media-still img {
   height: min(20vh, 180px);
 }

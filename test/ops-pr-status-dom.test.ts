@@ -14,7 +14,7 @@ setDefaultRepo(REPO);
 const headSha = "a".repeat(40);
 const pr = (extra: Partial<PullRequest> = {}): PullRequest => ({
   repo: REPO, number: 42, title: "Example", url: `https://github.com/${REPO}/pull/42`,
-  draft: false, author: "mirz", labels: [], headAt: null, updatedAt: "2026-10-08T00:00:00Z", headSha,
+  draft: false, author: "dev", labels: [], headAt: null, updatedAt: "2026-10-08T00:00:00Z", headSha,
   checks: { state: "pass", passed: 1, failed: 0, pending: 0, failing: [] }, ...extra,
 });
 const need = (extra: Partial<ServedNeed> = {}): ServedNeed => ({

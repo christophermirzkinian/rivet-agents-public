@@ -15,6 +15,7 @@ const KIND_WORDS: Record<AuditEntry["kind"], string> = {
   schedule: "Schedule switch",
   issue: "On GitHub",
   job: "Scheduled job",
+  models: "Who does what",
 };
 
 const STATUS_WORDS: Record<AuditEntry["status"], string> = {
@@ -49,6 +50,8 @@ function summary(entry: AuditEntry): string {
       return entry.chat ? chatName(entry.chat) : "";
     case "schedule":
       return `${entry.on ? "On" : "Off"}: ${entry.schedule ?? ""}`;
+    case "models":
+      return "Model and effort picks";
     case "issue":
       return `${entry.op === "close" ? "Close" : "Comment on"} #${entry.issue ?? ""}`;
     default:

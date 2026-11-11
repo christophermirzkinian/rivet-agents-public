@@ -26,6 +26,7 @@ import {
   MAX_LOG_LINES,
   MAX_QUOTE_TEXT,
   MAX_WORKER_TEXT,
+  modelsCreateSchema,
   quoteText,
   saySchema,
   scheduleCreateSchema,
@@ -100,6 +101,7 @@ const EVENT: Record<ActionKind, string> = {
   schedule: "schedule",
   issue: "issue",
   job: "job",
+  models: "models",
 };
 
 /** Up to 120 characters of a message, centred on the match so the header's ranking still finds the term in it. */
@@ -243,20 +245,20 @@ export function register(router: Router): void {
   }
 
   function bridgePayload(entry: AuditEntry): Record<string, unknown> {
-    const { id, at, repo, chat, pr, headSha, target, schedule, on, text, image, images, files, replyTo, quote, job } = entry;
+    const { id, at, repo, chat, pr, headSha, target, schedule, on, text, image, images, files, replyTo, quote, job, models, base } = entry;
     // A chat window names the conversation it was typed in, so Rivet has the context without looking it up.
     const thread = entry.kind === "chat" ? commands.threadOf(id) : null;
     const title = thread ? commands.conversationTitle(thread) : null;
     const conversation = thread && title !== null ? { id: thread, title } : undefined;
     return Object.fromEntries(
-      Object.entries({ id, at, repo, chat, pr, headSha, target, schedule, on, text, image, images, files, replyTo, quote, conversation, job }).filter(
+      Object.entries({ id, at, repo, chat, pr, headSha, target, schedule, on, text, image, images, files, replyTo, quote, conversation, job, models, base }).filter(
         ([, value]) => value !== undefined,
       ),
     );
   }
 
   function sameRequest(entry: AuditEntry, kind: ActionKind, request: ActionRequest): boolean {
-    const keys: (keyof ActionRequest)[] = ["repo", "chat", "pr", "headSha", "target", "schedule", "on", "text", "image", "images", "replyTo", "conversation", "job"];
+    const keys: (keyof ActionRequest)[] = ["repo", "chat", "pr", "headSha", "target", "schedule", "on", "text", "image", "images", "replyTo", "conversation", "job", "models", "base"];
     // Files by their bytes only: the server renames them when it stores the request, so a retry's names may differ.
     return entry.kind === kind && keys.every((key) => JSON.stringify(entry[key]) === JSON.stringify(request[key])) && sameFiles(entry.files, request.files);
   }
@@ -787,6 +789,12 @@ export function register(router: Router): void {
       if (!item.toggle.can) return { status: 409, reason: item.toggle.why };
       return null;
     }),
+  );
+
+  // Settings › Who does what. The whole set of picks goes each time; the Mac checks it again, writes it only over the save
+  // the screen last saw, and reads it back.
+  router.on("POST", "/api/actions/models", (ctx) =>
+    startAction(ctx, "models", parseWith(modelsCreateSchema, (body) => ({ models: body.jobs, base: body.base }), "model picks")),
   );
 
   router.on("GET", "/api/actions/status", ({ request, response, url }) => {

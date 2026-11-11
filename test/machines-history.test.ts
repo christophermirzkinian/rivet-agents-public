@@ -11,7 +11,7 @@ import { bearer, BRIDGE_TOKEN, browser, startServer, type TestServer } from "./h
 const T0 = new Date("2026-10-08T00:00:00Z");
 const min = (n: number) => new Date(T0.getTime() + n * 60_000);
 const desk = (cpuUsedPct: number) => ({ id: "desk", name: "Desk Mac", readings: { cpuUsedPct, memUsedPct: 40, diskFreePct: 23 } });
-const phone = { id: "iphone-13", name: "iPhone 13", readings: { batteryPct: 100 } };
+const phone = { id: "phone-a", name: "Phone A", readings: { batteryPct: 100 } };
 
 const dirs: string[] = [];
 function dataDir(): string {
@@ -32,7 +32,7 @@ describe("Machines history store", () => {
     const read = history.read(min(6));
     expect(read.now).toBe(min(6).toISOString());
     const byId = Object.fromEntries(read.machines.map((m) => [m.id, m]));
-    expect(Object.keys(byId).sort()).toEqual(["desk", "iphone-13"]);
+    expect(Object.keys(byId).sort()).toEqual(["desk", "phone-a"]);
     expect(byId.desk).toEqual({
       id: "desk",
       name: "Desk Mac",
@@ -40,7 +40,7 @@ describe("Machines history store", () => {
       values: { cpuUsedPct: [55, 62], memUsedPct: [40, 40], diskFreePct: [23, 23] },
     });
     // No CPU, memory or CI readings on a phone: the metrics are absent, never zeros.
-    expect(byId["iphone-13"]!.values).toEqual({ batteryPct: [100] });
+    expect(byId["phone-a"]!.values).toEqual({ batteryPct: [100] });
     history.close();
   });
 
@@ -90,7 +90,7 @@ describe("Machines history store", () => {
     expect(read.machines.map((m) => [m.id, m.values])).toEqual(
       expect.arrayContaining([
         ["desk", { cpuUsedPct: [42], memUsedPct: [40], diskFreePct: [23] }],
-        ["iphone-13", { batteryPct: [100] }],
+        ["phone-a", { batteryPct: [100] }],
       ]),
     );
     again.close();

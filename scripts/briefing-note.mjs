@@ -41,6 +41,8 @@ export function parseArgs(argv) {
 export function checkNote(text) {
   const line = sanitizeLine(text, 10_000);
   if (!line) return { error: "the note is empty" };
+  // The next flag swallowed as the note (say's `--text --stdin` sent the owner "--stdin", 11 Nov) is never his to read.
+  if (line.startsWith("--") || line === "-h") return { error: `--text got "${sanitizeLine(line, 40)}" as the note, a flag; give --text the note itself. Nothing was sent` };
   if (line.length > NOTE_MAX) return { error: `the note is ${line.length} characters; the limit is ${NOTE_MAX}` };
   return { line };
 }

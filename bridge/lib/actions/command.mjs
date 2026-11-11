@@ -9,6 +9,7 @@ import { fetchImage } from "../images.mjs";
 import { runJobAction, validJobAction } from "../jobs.mjs";
 import { wakeSchedules } from "../schedules/index.mjs";
 import { SCHEDULE_ID_RE, toggleSchedule } from "../schedules/toggle.mjs";
+import { currentBase, savedReason, sendModelReport, validPicks, writePicks } from "../model-routing.mjs";
 import { isChatName, isId, isImageId, MAX_CHAT_IMAGES, validFiles } from "../validate.mjs";
 import { isRepo, repoAllowlist } from "../../../src/shared/repos.ts";
 import { runMerge } from "./merge.mjs";
@@ -73,7 +74,7 @@ function legacyDetail(detail) {
 export { MAX_CHAT_IMAGES };
 
 /** Server action kinds the bridge answers for after a reconnect; chat is replayed instead. */
-const OUTSTANDING_KINDS = new Set(["send", "pause", "merge", "schedule", "job"]);
+const OUTSTANDING_KINDS = new Set(["send", "pause", "merge", "schedule", "job", "models"]);
 /** Reports after which the bridge does nothing more for an action. */
 const DONE = new Set(["typed", "unconfirmed", "failed", "refused", "merged", "succeeded"]);
 
@@ -87,7 +88,7 @@ const isPr = (v) => typeof v === "number" && Number.isSafeInteger(v) && v > 0;
 /**
  * @param {string} event
  * @param {unknown} raw
- * @returns {{ ok: true, value: { id: string, pr?: number, headSha?: string, schedule?: string, on?: boolean, job?: import("../jobs.mjs").JobAction, issue?: number, op?: "comment" | "close" | "label", text?: string, image?: string, images?: string[], files?: import("../validate.mjs").FileRef[], replyTo?: string, quote?: import("../command-templates.mjs").Quote, conversation?: import("../command-templates.mjs").Conversation, repo?: string, chat?: string } }
+ * @returns {{ ok: true, value: { id: string, pr?: number, headSha?: string, schedule?: string, on?: boolean, job?: import("../jobs.mjs").JobAction, issue?: number, op?: "comment" | "close" | "label", text?: string, image?: string, images?: string[], files?: import("../validate.mjs").FileRef[], replyTo?: string, quote?: import("../command-templates.mjs").Quote, conversation?: import("../command-templates.mjs").Conversation, repo?: string, chat?: string, models?: unknown, base?: unknown } }
  *   | { ok: false, id: string, reason: string }}
  */
 export function validateCommand(event, raw) {
@@ -103,7 +104,7 @@ export function validateCommand(event, raw) {
     if (typeof r.headSha !== "string" || !/^[0-9a-f]{40}$/.test(r.headSha)) return bad("bad-head");
     return { ok: true, value: { id, repo: r.repo, pr: /** @type {number} */ (r.pr), headSha: r.headSha } };
   }
-  /** @type {{ id: string, schedule?: string, on?: boolean, job?: import("../jobs.mjs").JobAction, issue?: number, op?: "comment" | "close" | "label", text?: string, image?: string, images?: string[], files?: import("../validate.mjs").FileRef[], replyTo?: string, quote?: import("../command-templates.mjs").Quote, conversation?: import("../command-templates.mjs").Conversation, repo?: string, chat?: string }} */
+  /** @type {{ id: string, schedule?: string, on?: boolean, job?: import("../jobs.mjs").JobAction, issue?: number, op?: "comment" | "close" | "label", text?: string, image?: string, images?: string[], files?: import("../validate.mjs").FileRef[], replyTo?: string, quote?: import("../command-templates.mjs").Quote, conversation?: import("../command-templates.mjs").Conversation, repo?: string, chat?: string, models?: unknown, base?: unknown }} */
   const value = { id };
   if (event === "chat" && r.image !== undefined) {
     if (!isImageId(r.image)) return bad("bad-image");
@@ -169,6 +170,11 @@ export function validateCommand(event, raw) {
     value.schedule = r.schedule;
     value.on = r.on;
   }
+  // Checked against the allowlist when it runs, so a bad set of picks is answered refused, not dropped unanswered.
+  if (event === "models") {
+    value.models = r.models;
+    value.base = r.base;
+  }
   if (event === "job") {
     const job = validJobAction(r.job);
     if (!job) return bad("bad-job");
@@ -212,7 +218,8 @@ export const newChatName = (id) => `chat-${id.replace(/[^A-Za-z0-9]/g, "").slice
 
 /**
  * @param {{ sleep?: (ms: number) => Promise<void>, now?: () => number, journal?: ActionJournal, env?: NodeJS.ProcessEnv, holdsFile?: string,
- *   toggle?: typeof toggleSchedule, jobAction?: typeof runJobAction, nodeBin?: string }} [options]
+ *   toggle?: typeof toggleSchedule, jobAction?: typeof runJobAction, nodeBin?: string, modelRoutingFile?: string, modelStatusFile?: string,
+ *   writePicks?: typeof writePicks }} [options]
  */
 export function createCommandFamily(options = {}) {
   const sleep = options.sleep ?? ((/** @type {number} */ ms) => new Promise((resolve) => setTimeout(resolve, ms).unref?.()));
@@ -225,6 +232,8 @@ export function createCommandFamily(options = {}) {
   const running = new Set();
   /** Each job's last action, so its next waits its turn. @type {Map<string, Promise<void>>} */
   const jobQueues = new Map();
+  /** Settings' model picks, written one after another. @type {Promise<void>} */
+  let modelsQueue = Promise.resolve();
   /** @type {ActionJournal | null} */
   let journal = options.journal ?? null;
   /** @param {ActionContext} ctx */
@@ -320,13 +329,19 @@ export function createCommandFamily(options = {}) {
    */
   async function outstanding(ctx, actions) {
     const book = journalOf(ctx);
+    let picksAnswered = false;
     for (const { id, kind } of actions) {
       if (running.has(id)) continue;
+      picksAnswered ||= kind === "models";
       const entry = book.get(id);
       const typed = ctx.deps.state.get(`${kind}-${id}`);
       book.start(id, kind, new Date(now()).toISOString());
       if (entry?.last && DONE.has(entry.last.status)) await ack(ctx, id, entry.last.status, entry.last.shaped === true ? entry.last.detail : legacyDetail(entry.last.detail));
       else if (typed) await ack(ctx, id, typed.delivery.confirmed ? "typed" : "unconfirmed");
+      else if (entry && kind === "models" && (await currentBase(options.modelRoutingFile)) === id)
+        // The restart came after the picks file took this save, so it is in force.
+        await ack(ctx, id, "succeeded", { reason: savedReason(options.modelRoutingFile) });
+      else if (entry && kind === "models") await ack(ctx, id, "failed", { reason: "the Mac restarted while saving these picks; check Settings before trying again" });
       else if (entry) {
         const check = kind === "schedule" ? "the Schedules tab" : kind === "job" ? "the job" : "the chat";
         await ack(ctx, id, "failed", { reason: `the Mac restarted during this action; check ${check} before trying again` });
@@ -334,6 +349,11 @@ export function createCommandFamily(options = {}) {
       else await ack(ctx, id, "failed", { reason: "the Mac never received this action; nothing was run", unseen: true });
       ctx.deps.log("outstanding-answered", { id, kind });
     }
+    // The connect's own report can land before these acks, and Settings opens again only on one the server takes after.
+    if (picksAnswered)
+      await sendModelReport(ctx.deps, { file: options.modelRoutingFile, statusFile: options.modelStatusFile }).catch((err) =>
+        ctx.deps.log("models-report-failed", { error: short(err) }),
+      );
   }
 
   /**
@@ -528,6 +548,63 @@ export function createCommandFamily(options = {}) {
   }
 
   /**
+   * Settings › Who does what (model-routing.mjs): the picks checked against config/model-jobs.json again, written to
+   * the Mac's file only over the save the screen last saw (`base`) and read back, the file reported to the server, then
+   * acked. Writes run one at a time, in the order they came; an action already answered is answered again, never rerun.
+   * @param {ActionContext} ctx
+   * @param {{ id: string, models?: unknown, base?: unknown }} v
+   */
+  function models(ctx, v) {
+    const turn = modelsQueue.then(() => modelsOnce(ctx, v));
+    modelsQueue = turn.catch(() => {});
+    return turn;
+  }
+
+  /** @param {ActionContext} ctx @param {{ id: string, models?: unknown, base?: unknown }} v */
+  async function modelsOnce(ctx, v) {
+    const { log } = ctx.deps;
+    const done = journalOf(ctx).get(v.id)?.last;
+    if (done) {
+      log("models-repeat", { id: v.id, status: done.status });
+      await ack(ctx, v.id, done.status, done.detail);
+      return;
+    }
+    const files = { file: options.modelRoutingFile, statusFile: options.modelStatusFile };
+    const report = () => sendModelReport(ctx.deps, files).catch((err) => log("models-report-failed", { id: v.id, error: short(err) }));
+    const picks = validPicks(v.models);
+    const refusal = picks ? await baseRefusal(v.base, files.file) : "These picks are not on the allowed list for every job, so nothing was written.";
+    if (!picks || refusal) {
+      log("models-refused", { id: v.id });
+      await ack(ctx, v.id, "refused", { reason: refusal ?? "" });
+      // Settings opens again only on a report the server takes after this ack.
+      await report();
+      return;
+    }
+    let result = await (options.writePicks ?? writePicks)(picks, { file: files.file, action: v.id, now: () => new Date(now()) });
+    // A step after the rename failed (flushing the folder, reading back), yet the file holds this save, so it is in force.
+    if (result.status !== "succeeded" && (await currentBase(files.file)) === v.id) result = { status: "succeeded", reason: savedReason(files.file) };
+    log("models-written", { id: v.id, status: result.status });
+    // Reported before the ack: Settings says Saved only once the server's report carries this action.
+    await report();
+    await ack(ctx, v.id, result.status, { reason: result.reason });
+    if (result.status !== "succeeded") await report();
+  }
+
+  /**
+   * Why a save is turned away before anything is written: the file moved on from the one the screen saw (another
+   * screen saved first), or can't be read to tell.
+   * @param {unknown} base
+   * @param {string | undefined} file
+   */
+  async function baseRefusal(base, file) {
+    if (base !== null && typeof base !== "string") return "This save didn't say which picks it was changed from, so nothing was written.";
+    const current = await currentBase(file);
+    if (current === undefined) return "Can't read the Mac's picks file, so nothing was written.";
+    if (base !== current) return "Changed on another screen first, so nothing was written. Showing the latest.";
+    return null;
+  }
+
+  /**
    * A backlog issue's Start work label, or a comment or close, on a repo in RIVET_REPOS, made with the Mac's own gh login,
    * the owner's words on stdin. The journal notes each step, so the same action sent again is answered, never run twice:
    * one a restart stopped mid-comment or mid-close is reported, not retried, as it may have gone. The journal keeps a hash
@@ -601,7 +678,7 @@ export function createCommandFamily(options = {}) {
 
   return {
     family: "command",
-    events: Object.freeze(["chat", "send", "pause", "merge", "schedule", "job", "issue", "actions.outstanding"]),
+    events: Object.freeze(["chat", "send", "pause", "merge", "schedule", "job", "issue", "models", "actions.outstanding"]),
     /**
      * @param {string} event
      * @param {unknown} raw
@@ -644,6 +721,9 @@ export function createCommandFamily(options = {}) {
           return "delivered";
         case "job":
           background(value.id, job(ctx, value));
+          return "delivered";
+        case "models":
+          background(value.id, models(ctx, value));
           return "delivered";
         case "issue":
           background(value.id, issueWrite(ctx, value, before));

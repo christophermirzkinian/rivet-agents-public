@@ -18,6 +18,7 @@ import { fingerprint, formatLog, makeExec, readToken, resolveBin, serverOrigin }
 import { collectClaude } from "./lib/ops/claude.mjs";
 import { createFalseAlarmRetry } from "./lib/ops/false-alarm.mjs";
 import { runOpsLoop } from "./lib/ops/index.mjs";
+import { runModelReportLoop } from "./lib/model-routing.mjs";
 import { createCollector, runSchedulesLoop } from "./lib/schedules/index.mjs";
 import { aggregate, collect, emptyState, runSpendLoop } from "./lib/spend.mjs";
 import { StateStore } from "./lib/state.mjs";
@@ -89,7 +90,8 @@ async function main() {
     });
   }
   runLogRotateLoop({ stop: stopCtrl.signal, log });
-  const bridge = createBridge({ origin, token, ghBin, gitBin: optionalBin("git"), monitorChat, chatRunner, exec, fetch, state, log });
+  const models = runModelReportLoop({ origin, token, fetch, log, stop: stopCtrl.signal });
+  const bridge = createBridge({ origin, token, ghBin, gitBin: optionalBin("git"), monitorChat, chatRunner, exec, fetch, state, log, onConnected: models.kick });
   const stop = stopCtrl.signal;
   const falseAlarm = createFalseAlarmRetry({ exec, ghBin, log });
   const spend = runSpendLoop({ origin, token, fetch, log, stop });
@@ -97,7 +99,7 @@ async function main() {
   const schedules = runSchedulesLoop({ origin, token, fetch, exec, ghBin, log, stop, falseAlarm });
   const titler = runTitlerLoop({ origin, token, fetch, claudeBin: optionalBin("claude"), log, stop: stopCtrl.signal });
   const rowTitler = runRowTitlerLoop({ origin, token, fetch, claudeBin: optionalBin("claude"), log, stop: stopCtrl.signal });
-  await Promise.all([runLoop(bridge, { stop: stopCtrl.signal, log }), runWorkerFeed(bridge, { stop: stopCtrl.signal, log }), spend, ops, schedules, titler, rowTitler]);
+  await Promise.all([runLoop(bridge, { stop: stopCtrl.signal, log }), runWorkerFeed(bridge, { stop: stopCtrl.signal, log }), spend, ops, schedules, titler, rowTitler, models.done]);
   log("stopped");
   return 0;
 }

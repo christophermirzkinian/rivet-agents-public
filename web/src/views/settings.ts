@@ -7,12 +7,14 @@ import { button, describe, h, keepFocus } from "../dom.js";
 import { loadPushHealth, onPushChanged, pushBanner, pushChanged } from "../push-health.js";
 import { disablePush, enablePush, pushState, type PushState } from "../push.js";
 import { app, changed, sameSession, signedOut, subscribe } from "../state.js";
+import { closeModels, loadModels, modelSettings } from "./model-settings.js";
 import * as patchNotes from "./patch-notes.js";
 import { openSheet } from "./sheet.js";
 import { flash } from "./toast.js";
 import { voiceSettings } from "./voice-settings.js";
 
-// The header's settings sheet: this phone's read-aloud voice, notifications and devices.
+// The header's settings sheet: who does what (each job's model, kept on the Mac), then this phone's read-aloud voice,
+// notifications and devices.
 
 let push: PushState | null = null;
 let pushBusy = false;
@@ -44,6 +46,7 @@ export function mount(el: HTMLElement): void {
   unsubscribe = subscribe(render);
   stopListening = onPushChanged(readPushState);
   render();
+  void loadModels();
   void loadPushHealth();
   // Read on every open: a resync or the phone's own settings may have changed it since.
   readPushState();
@@ -54,6 +57,7 @@ export function unmount(): void {
   unsubscribe = null;
   stopListening?.();
   stopListening = null;
+  closeModels();
 }
 
 /** `done` is said only when the task ends in `expect`: a blocked phone answers "denied", never "on". */
@@ -189,7 +193,7 @@ function patchNotesPanel(): HTMLElement {
 
 function renderSettings(el: HTMLElement): void {
   const scroll = el.querySelector(".set")?.scrollTop ?? 0;
-  const body = h("div", { class: "set" }, pushBanner(), voiceSettings(), notifications(), device(), patchNotesPanel());
+  const body = h("div", { class: "set" }, pushBanner(), modelSettings(), voiceSettings(), notifications(), device(), patchNotesPanel());
   const refocus = keepFocus(el);
   el.replaceChildren(body);
   refocus();

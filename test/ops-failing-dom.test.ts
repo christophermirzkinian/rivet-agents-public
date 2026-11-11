@@ -13,7 +13,7 @@ const PUSHED = "2026-10-02T01:00:00.000Z";
 
 function opsFixture(redCi: number, failingSchedules: number, failingPrs = 0, youngPrs = 0, runs: unknown[] = []): OpsResponse {
   const pr = (number: number, state: "fail" | "pass", headAt = PUSHED) => ({
-    repo: "example-org/example-repo", number, title: `PR ${number}`, url: `https://github.com/x/pull/${number}`, draft: false, author: "mirz", labels: [],
+    repo: "example-org/example-repo", number, title: `PR ${number}`, url: `https://github.com/x/pull/${number}`, draft: false, author: "dev", labels: [],
     headAt, updatedAt: NOW, checks: { state, passed: 1, failed: state === "fail" ? 1 : 0, pending: 0, failing: state === "fail" ? ["lint"] : [] },
   });
   return {
@@ -52,7 +52,7 @@ beforeEach(() => {
   app.tab = "progress";
   app.opsPage = "code";
   // All clear is said only once the board has loaded (review F1).
-  app.board = { version: 1, updatedAt: NOW, board: { updatedAt: NOW, needs: [], chats: [], coming: [], shipped: [], waitingWM: [] } } as never;
+  app.board = { version: 1, updatedAt: NOW, board: { updatedAt: NOW, needs: [], chats: [], coming: [], shipped: [] } } as never;
 });
 
 afterEach(() => {

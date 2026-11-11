@@ -12,7 +12,8 @@ import type { MindNodeResponse, MindResponse, MindSearchResponse } from "../../s
 import type { SearchItem } from "../../src/shared/search.js";
 import type { Summary } from "../../src/shared/summary.js";
 import type { CardThreadsResponse } from "../../src/shared/threads.js";
-import type { ChatMessage } from "../../src/shared/command.js";
+import type { AuditEntry, ChatMessage } from "../../src/shared/command.js";
+import type { ModelPicks, ModelSettingsResponse } from "../../src/shared/models.js";
 import type { UsageAsk, UsageDevice, UsageReport } from "../../src/shared/usage-ids.js";
 import type { WorkersResponse } from "../../src/shared/workers.js";
 import { sameSession, StaleSession } from "./session.js";
@@ -243,6 +244,9 @@ export const searchMind = (q: string) => call<MindSearchResponse>("GET", `/api/m
 export const getTimeline = () => call<TimelineResponse>("GET", "/api/ops/timeline");
 export const getBriefing = (id?: string) => call<{ briefing: Briefing | null }>("GET", `/api/briefing${id === undefined ? "" : `?id=${encodeURIComponent(id)}`}`);
 export const searchHistory = (query: string) => call<{ results: SearchItem[] }>("GET", `/api/ops/search?q=${encodeURIComponent(query)}`);
+export const getModelSettings = () => call<ModelSettingsResponse>("GET", "/api/settings/models");
+/** Every job's pick, whole, over the save `base` the screen saw; the action's ack says whether the Mac wrote it. */
+export const postModels = (clientId: string, jobs: ModelPicks, base: string | null) => call<AuditEntry>("POST", "/api/actions/models", { clientId, jobs, base });
 
 
 type Options<T> = { flowId: string; options: T };
