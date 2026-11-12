@@ -115,7 +115,7 @@ export function focusSection(section: string): void {
 /** Opens one page: Plan on the Floor, a reading from the menu. */
 export function openOpsPage(next: OpsPage): void {
   setOpsPage(next);
-  go(next === "plan" ? "floor" : next);
+  go(next);
   changed();
 }
 

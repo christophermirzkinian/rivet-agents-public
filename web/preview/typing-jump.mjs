@@ -32,8 +32,8 @@ let bad = 0;
 try {
   // Height: the screen a phone's keyboard leaves on each phone.
   for (const [w, hgt, kb, dpr] of [
-    [412, 915, 470, 3],
-    [320, 693, 350, 2],
+    [390, 844, 434, 3],
+    [320, 568, 287, 2],
   ]) {
     const context = await browser.newContext({ viewport: { width: w, height: hgt }, deviceScaleFactor: dpr, isMobile: true, hasTouch: true });
     const page = await context.newPage();

@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { chromium } from "playwright";
 
 const browser = await chromium.launch({ headless: true });
-const context = await browser.newContext({ viewport: { width: 412, height: 915 }, deviceScaleFactor: 1 });
+const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
 const page = await context.newPage();
 const base = process.env.CHAT_QA_URL || `http://127.0.0.1:${process.env.PORT || 5230}`;
 const out = process.env.WORKER_OUT || "output/rivet-chat-state";
@@ -96,7 +96,7 @@ try {
   await release();
   await capture("adopted-draft-after-send");
   assert.equal(await page.locator(".chat-text").inputValue(), "ok ", "Pending send must keep another tab’s adopted draft");
-  console.log("PASS: direct-link Back, covered first send, adopted draft (412x915)");
+  console.log("PASS: direct-link Back, covered first send, adopted draft (phone-sized viewport)");
 } finally {
   writeFileSync(join(out, "states.json"), JSON.stringify(results, null, 2));
   await browser.close();

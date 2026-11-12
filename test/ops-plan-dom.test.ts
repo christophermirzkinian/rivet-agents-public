@@ -362,7 +362,7 @@ describe("Plan", () => {
 });
 
 describe("Plan's Readings", () => {
-  it("are pages under More, each opened by name, Plan among them", () => {
+  it("are pages under More, each opened by name, while Plan is on the home screen", () => {
     show(fixture());
     const plan = mountPlan();
     expect(plan.querySelector('[data-plan-group="readings"]')).toBeNull();
@@ -370,7 +370,7 @@ describe("Plan's Readings", () => {
     ops.openOpsPage("usage");
     expect([app.tab, app.morePage, app.opsPage]).toEqual(["more", "usage", "usage"]);
     ops.openOpsPage("plan");
-    expect([app.tab, app.opsPage]).toEqual(["more", "plan"]);
+    expect([app.tab, app.opsPage]).toEqual(["progress", "plan"]);
   });
 });
 

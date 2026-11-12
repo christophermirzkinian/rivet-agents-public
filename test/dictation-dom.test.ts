@@ -275,40 +275,40 @@ describe("voice typing", () => {
 });
 
 describe("voice typing across pauses", () => {
-  // the owner's phone, 2026-09-30: each result carried the whole sentence so far and the
-  // field read "can do a review can do a review can do a review of …".
-  it("writes mobile engines' (Android Chrome, iOS) cumulative results once: your sentence", () => {
+  // Some phone engines send the whole sentence so far with each result, so a field that
+  // adds each one reads "open the list open the list open the list of …".
+  it("writes mobile engines' (Android Chrome, iOS) cumulative results once", () => {
     const area = field();
     mount(area).click();
     const said: string[] = [];
-    for (const words of ["can do a review", "can do a review", "can do a review of", "can do a review of the", "can do a review of the app"]) {
+    for (const words of ["open the list", "open the list", "open the list of", "open the list of new", "open the list of new cards"]) {
       said.push(words);
       last().hear(...said);
     }
-    expect(area.value).toBe("can do a review of the app");
+    expect(area.value).toBe("open the list of new cards");
   });
 
   it("writes Android Chrome's cumulative results once when case or spacing differ, and a repeated final once", () => {
     const area = field();
     mount(area).click();
     const first = last();
-    first.hear("Can do");
-    first.hear("Can do", " can do a revie");
-    first.hear("Can do", " can do a revie", " can do a review");
-    expect(area.value).toBe("can do a review");
-    first.hear("Can do", " can do a revie", " can do a review", "  can  do a review of the app ");
-    expect(area.value).toBe("can do a review of the app");
+    first.hear("Open the");
+    first.hear("Open the", " open the lis");
+    first.hear("Open the", " open the lis", " open the list");
+    expect(area.value).toBe("open the list");
+    first.hear("Open the", " open the lis", " open the list", "  open  the list of new cards ");
+    expect(area.value).toBe("open the list of new cards");
     // The final result comes again after the interim one.
-    first.hear("Can do a review of the app", " Can do a review of the app");
-    expect(area.value).toBe("Can do a review of the app");
+    first.hear("Open the list of new cards", " Open the list of new cards");
+    expect(area.value).toBe("Open the list of new cards");
     first.end();
 
     const second = last();
     // Punctuation added to a repeated word is still the same word.
-    second.hear("please", " Please.");
-    expect(area.value).toBe("Can do a review of the app Please.");
-    second.hear("please", " Please fix it");
-    expect(area.value).toBe("Can do a review of the app Please fix it");
+    second.hear("now", " Now.");
+    expect(area.value).toBe("Open the list of new cards Now.");
+    second.hear("now", " Now sort them");
+    expect(area.value).toBe("Open the list of new cards Now sort them");
   });
 
   it("writes iOS's cumulative results once across a pause and a restart, revisions included", () => {
@@ -333,16 +333,16 @@ describe("voice typing across pauses", () => {
     const area = field();
     mount(area).click();
     const first = last();
-    first.hear("can do");
-    first.hear("can do", " a review");
-    first.hear("can do", " a review", " of the app");
-    expect(area.value).toBe("can do a review of the app");
+    first.hear("open the");
+    first.hear("open the", " list");
+    first.hear("open the", " list", " of new cards");
+    expect(area.value).toBe("open the list of new cards");
     first.end();
 
     const second = last();
     // Spacing after a piece separates it as well as spacing before the next.
-    second.hear("please ", "fix it", " today");
-    expect(area.value).toBe("can do a review of the app please fix it today");
+    second.hear("now ", "sort them", " by date");
+    expect(area.value).toBe("open the list of new cards now sort them by date");
   });
 
   it("keeps repeated words inside a piece and words that start another, and each session joins its own pieces", () => {

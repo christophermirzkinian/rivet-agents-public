@@ -338,8 +338,8 @@ function agentRow(w: Worker, i: number, asks: readonly Ask[], now: number, crew:
 
 /** The rows a crowded map leaves off, under their projects, as the map would seat them; it follows the crew while open. */
 function openRest(): void {
-  const title = h("h2", { class: "floor-sheet-title" });
-  const body = h("div", { class: "floor-sheet-body desks-rest" });
+  const title = h("h2", { class: "home-sheet-title" });
+  const body = h("div", { class: "home-sheet-body desks-rest" });
   let stop = () => {};
   const paint = () => {
     const crew = underWay();
@@ -365,7 +365,7 @@ function openRest(): void {
     "More under way",
     {
       mount(el) {
-        el.replaceChildren(h("header", { class: "floor-sheet-head" }, title, close), body);
+        el.replaceChildren(h("header", { class: "home-sheet-head" }, title, close), body);
         const unsubscribe = subscribe(paint);
         const unwatchAsks = watchAsks(paint);
         stop = () => {
@@ -376,7 +376,7 @@ function openRest(): void {
       },
       unmount: () => stop(),
     },
-    { className: "floor-sheet desks-rest-sheet", use: "desks.rest" },
+    { className: "home-sheet desks-rest-sheet", use: "desks.rest" },
   );
 }
 

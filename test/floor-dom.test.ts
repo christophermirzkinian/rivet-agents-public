@@ -35,10 +35,10 @@ vi.mock("../web/src/voice.js", async (original) => ({
   stopVoice: () => {},
 }));
 
-// The app's frame: on a phone no tab bar, the menu button on the band, Your asks, and a dock of Decide N and Rivet.
-// Cards, Chat and a page are sheets over it, so an old tab id, a link or a push lands where it went. A wide window's
-// rail is the menu: Your asks, Decide or a page fill the middle column, and Rivet's chat stays on the right. The Floor,
-// the desks then Plan, is a menu page like any other.
+// The app's frame: on a phone no tab bar, the menu button on the band, the home screen (the desks then Plan), and a
+// dock of Decide N and Rivet. Cards, Chat and a page are sheets over it, so an old tab id, a link or a push lands where
+// it went. A wide window's rail is the menu: the home screen, Decide or a page fill the middle column, and Rivet's chat
+// stays on the right.
 
 const NOW = "2026-10-07T05:00:00.000Z";
 const ops = (): OpsResponse =>
@@ -128,9 +128,10 @@ describe("the app's frame", () => {
     const band = document.querySelector(".topbar.home-band")!;
     expect(band.firstElementChild?.className).toBe("menu-open");
     expect(band.firstElementChild?.getAttribute("aria-label")).toBe("Menu");
-    expect([...band.children].map((one) => one.className)).toEqual(["menu-open", "home-status", "floor-line"]);
-    expect(band.querySelector(".home-status")!.textContent!.trim()).toBe("Your asks");
-    expect(document.querySelector('.view[data-tab="home"] .home .home-asks')).not.toBeNull();
+    expect([...band.children].map((one) => one.className)).toEqual(["menu-open", "home-title", "topbar-end", "home-line"]);
+    expect(band.querySelector(".home-title")!.textContent!.trim()).toBe("Rivet");
+    expect(document.querySelector('.view[data-tab="home"] .home .progress-scene .desks')).not.toBeNull();
+    expect(document.querySelector('.view[data-tab="home"] .home .progress-plan')).not.toBeNull();
     expect([...document.querySelectorAll<HTMLElement>(".home-dock button")].map((one) => one.dataset.key)).toEqual(["decide", "rivet"]);
     expect(sheet()).toBeNull();
   });
@@ -140,26 +141,26 @@ describe("the app's frame", () => {
     wide(true);
     mount();
     const rows = () => [...document.querySelectorAll<HTMLElement>(".tabs .menu-row")];
-    expect(rows().map((one) => one.dataset.key)).toEqual(["asks", "floor", "usage", "machines", "code", "mind", "what-you-used", "home", "media", "settings"]);
-    expect(rows().map((one) => one.querySelector(".menu-name")?.textContent)).toEqual(["Your asks", "Floor", "Usage", "Machines", "Code", "Rivet's mind", "What you used", "Home", "Media", "Settings"]);
+    expect(rows().map((one) => one.dataset.key)).toEqual(["asks", "usage", "code", "machines", "mind", "what-you-used", "home", "media", "settings"]);
+    expect(rows().map((one) => one.querySelector(".menu-name")?.textContent)).toEqual(["Home", "Usage", "Code", "Machines", "Rivet's mind", "What you used", "Home Assistant", "Media", "Settings"]);
     expect([...document.querySelectorAll<HTMLElement>(".tabs .rail-tool")].map((one) => one.dataset.key)).toEqual(["Chat"]);
     expect(document.querySelector(".home-dock")).toBeNull();
     expect(document.querySelector('.view[data-tab="home"] .home')).not.toBeNull();
     expect(document.querySelector("aside.side .chat")).not.toBeNull();
     expect(rows()[0]!.getAttribute("aria-current")).toBe("page");
 
-    rows()[2]!.click();
+    rows()[1]!.click();
     expect(document.querySelector('.view[data-tab="page"] .more-page[data-page="usage"]')).not.toBeNull();
     expect(document.querySelector(".topbar-title")?.textContent).toBe("Usage");
     expect(document.querySelector(".topbar .home-back, .topbar [aria-label='Back to Readings']")).toBeNull();
-    expect(rows()[2]!.getAttribute("aria-current")).toBe("page");
+    expect(rows()[1]!.getAttribute("aria-current")).toBe("page");
     expect(rows()[0]!.hasAttribute("aria-current")).toBe(false);
     expect(sheet()).toBeNull();
     rows()[0]!.click();
     expect(document.querySelector('.view[data-tab="home"] .home')).not.toBeNull();
   });
 
-  it("on a wide window a decision opens in the middle pane, chat staying on the right; Close goes back to Your asks", async () => {
+  it("on a wide window a decision opens in the middle pane, chat staying on the right; Close goes back home", async () => {
     wide(true);
     mount();
     deal([card("d1"), card("d2")]);
@@ -171,12 +172,12 @@ describe("the app's frame", () => {
     expect(document.querySelector('.view[data-tab="decide"].decide-pane .card.top')?.getAttribute("data-need")).toBe("d2");
     expect(decideShown()).toBe("d2");
     expect(document.querySelector("aside.side .chat")).not.toBeNull();
-    // Your asks' menu row stays lit under it: a decision opens where Your asks was.
+    // The home screen's menu row stays lit under it: a decision opens where the home screen was.
     expect(document.querySelector('.tabs .menu-row[data-key="asks"]')!.getAttribute("aria-current")).toBe("page");
     // Its way back is in words in the header, not the sheet's down arrow.
     expect(document.querySelector(".decide-pane .decide-close")).toBeNull();
     const homeBack = document.querySelector<HTMLButtonElement>(".topbar .home-back, .home-back")!;
-    expect(homeBack.textContent).toBe("‹ Your asks");
+    expect(homeBack.textContent).toBe("‹ Home");
     homeBack.click();
     expect(document.querySelector(".home-back")).toBeNull();
     expect(app.tab).toBe("progress");
@@ -228,7 +229,7 @@ describe("Decide N", () => {
       ],
     } as never;
     try {
-      go("floor");
+      go("progress");
       mount();
       const n = Number(button("decide").querySelector(".home-decide-n")?.textContent);
       expect(n).toBe(openCards().length);
@@ -324,7 +325,7 @@ describe("each sheet over the home screen", () => {
     expect(app.tab).toBe("progress");
   });
 
-  it("the drawer's Your asks row closes it and leaves the bare home screen", async () => {
+  it("the drawer's Home row closes it and leaves the bare home screen", async () => {
     mount();
     menuRow("asks").click();
     await settle();
@@ -333,40 +334,27 @@ describe("each sheet over the home screen", () => {
     expect(app.tab).toBe("progress");
   });
 
-  it("the Floor row opens the desks then a live Plan in a page sheet, with no second Your asks; Back goes home", async () => {
+  it("the home screen is the desks then a live Plan; a page's sheet takes Plan and Back gives it back", async () => {
     mount();
-    menuRow("floor").click();
-    await settle();
-    expect(kind()).toBe("page-sheet");
-    expect([app.tab, app.morePage]).toEqual(["more", "floor"]);
-    expect(sheet()!.querySelector(".home-sheet-title")?.textContent).toBe("Floor");
-    const page = sheet()!.querySelector<HTMLElement>('.more-page[data-page="floor"] .floor')!;
-    expect([...page.children].map((one) => one.className)).toEqual(["progress-scene", "floor-room", "progress-plan"]);
-    expect(page.querySelector(".floor-stage .desks-grid, .floor-stage .desk.is-rivet")).not.toBeNull();
-    expect(page.querySelector(".home-dock, .home-asks")).toBeNull();
-    expect(document.querySelectorAll(".home-asks")).toHaveLength(1);
+    const page = document.querySelector<HTMLElement>('.view[data-tab="home"] .progress.home')!;
+    expect([...page.children].map((one) => one.className)).toEqual(["progress-scene", "progress-plan"]);
+    expect(page.querySelector(".progress-scene .desks .desk.is-rivet")).not.toBeNull();
     expect(app.opsPage).toBe("plan");
-    // Ops draws into the Floor's Plan, and keeps drawing on each change.
+    // Ops draws into the home screen's Plan, and keeps drawing on each change.
     const plan = page.querySelector<HTMLElement>(".progress-plan")!;
     plan.append(Object.assign(document.createElement("i"), { className: "stale-mark" }));
     changed();
     expect(plan.querySelector(".stale-mark")).toBeNull();
+    expect(plan.childElementCount).toBeGreaterThan(0);
+    menuRow("usage").click();
+    await settle();
+    expect(kind()).toBe("page-sheet");
+    expect(plan.childElementCount).toBe(0);
     await back();
     expect(sheet()).toBeNull();
     expect(app.tab).toBe("progress");
-    expect(document.querySelector(".floor")).toBeNull();
-  });
-
-  it("the Floor's Agent Chat row opens the Team room in Chat", async () => {
-    mount();
-    menuRow("floor").click();
-    await settle();
-    const row = sheet()!.querySelector<HTMLElement>(".floor-room")!;
-    expect(row.textContent).toContain("Agent Chat");
-    row.click();
-    await settle();
-    expect(app.tab).toBe("chat");
-    expect(openConversation()).toBe("team-room");
+    expect(app.opsPage).toBe("plan");
+    expect(plan.childElementCount).toBeGreaterThan(0);
   });
 
   it("widening puts the menu on the rail", async () => {
@@ -423,7 +411,7 @@ describe("old tab ids", () => {
     ["costs", "progress", null],
     ["machines", "more", "machines"],
     ["scheduled", "progress", null],
-    ["floor", "more", "floor"],
+    ["floor", "progress", null],
     ["code", "more", "code"],
     ["settings", "more", "settings"],
     ["no-such-tab", "progress", null],
@@ -444,7 +432,7 @@ describe("old tab ids", () => {
     ["yard", null],
     ["ops", null],
     ["progress", null],
-  ])("saved as %s, a phone opens Your asks with %s over it", async (id, cls) => {
+  ])("saved as %s, a phone opens the home screen with %s over it", async (id, cls) => {
     deal([card("a")]);
     go(id);
     mount();
@@ -502,12 +490,12 @@ describe("old tab ids", () => {
 
 describe("the band's one line", () => {
   const MIN = 60_000;
-  const lineEl = () => document.querySelector<HTMLElement>(".home-band .floor-line")!;
-  const say = () => lineEl().querySelector<HTMLElement>(".floor-line-say");
+  const lineEl = () => document.querySelector<HTMLElement>(".home-band .home-line")!;
+  const say = () => lineEl().querySelector<HTMLElement>(".home-line-say");
   const on = () => lineEl().classList.contains("is-on");
   const job = (id: string, minutes: number): Ask =>
     ({ id, words: `Job ${id}`, who: "owner", stage: "building", chat: `chat-${id}`, prs: [], dueHistory: [], timeline: [], dueAt: new Date(Date.parse(NOW) + minutes * MIN).toISOString(), createdAt: NOW, stageAt: NOW, updatedAt: NOW, version: 1 }) as Ask;
-  /** Your asks as the server serves them, read into the Floor. */
+  /** The asks as the server serves them, read into the home screen. */
   const serveAsks = async (served: Ask[]) => {
     vi.stubGlobal("fetch", vi.fn(async (url: string) => (String(url).includes("/api/asks") ? new Response(JSON.stringify({ asks: served }), { status: 200, headers: { "content-type": "application/json" } }) : new Promise(() => {}))));
     await asks.refresh();
@@ -533,7 +521,7 @@ describe("the band's one line", () => {
     expect(lineEl().getAttribute("aria-hidden")).toBe("true");
     // A line folded away keeps its last words, so it fades out as it was; the rest of the band says only Rivet's name.
     const shown = [...document.querySelector(".home-band")!.children].filter((one) => one !== lineEl());
-    expect(shown.map((one) => one.textContent!.trim()).join("")).toBe("Your asks");
+    expect(shown.map((one) => one.textContent!.trim()).join("")).toBe("Rivet");
   });
 
   it("says the first of: cards waiting, a job due within the hour, a machine amber or red, Usage near its cap", async () => {
@@ -547,7 +535,7 @@ describe("the band's one line", () => {
     expect(say()!.dataset.use).toBe("floor.line.cards");
     expect(say()!.textContent).toBe("2 cards wait for you›");
     expect(say()!.getAttribute("aria-label")).toBe("2 cards wait for you, open Decide");
-    expect(say()!.className).toBe("floor-line-say t-cards");
+    expect(say()!.className).toBe("home-line-say t-cards");
     // Decide N in the dock still says the count as well.
     expect(document.querySelector(".home-decide .home-decide-n")?.textContent).toBe("2");
 
@@ -556,19 +544,19 @@ describe("the band's one line", () => {
 
     deal([]);
     expect(say()!.dataset.use).toBe("floor.line.due");
-    expect(say()!.querySelector(".floor-line-lead")!.textContent).toMatch(/^By \d{1,2}:\d{2}[ap]m ·$/);
-    expect(say()!.querySelector(".floor-line-text")!.textContent).toBe("Job soon");
+    expect(say()!.querySelector(".home-line-lead")!.textContent).toMatch(/^By \d{1,2}:\d{2}[ap]m ·$/);
+    expect(say()!.querySelector(".home-line-text")!.textContent).toBe("Job soon");
 
     await serveAsks([job("later", 90)]);
     expect(say()!.dataset.use).toBe("floor.line.machine");
-    expect(say()!.querySelector(".floor-line-text")!.textContent).toBe("ci-box-1 needs a look");
-    expect(say()!.className).toBe("floor-line-say t-bad");
+    expect(say()!.querySelector(".home-line-text")!.textContent).toBe("ci-box-1 needs a look");
+    expect(say()!.className).toBe("home-line-say t-bad");
 
     show();
     usageNear();
     changed();
     expect(say()!.dataset.use).toBe("floor.line.usage");
-    expect(say()!.querySelector(".floor-line-text")!.textContent).toBe("Usage 3.6 of 4 · near the cap");
+    expect(say()!.querySelector(".home-line-text")!.textContent).toBe("Usage 3.6 of 4 · near the cap");
 
     show();
     changed();
@@ -633,8 +621,8 @@ describe("the band's one line", () => {
     opsData.ops = { ...opsData.ops!, mac: tight } as unknown as OpsResponse;
     mount();
     expect(say()!.dataset.use).toBe("floor.line.machine");
-    expect(say()!.querySelector(".floor-line-text")!.textContent).toBe("Mac needs a look");
-    expect(say()!.className).toBe("floor-line-say t-warn");
+    expect(say()!.querySelector(".home-line-text")!.textContent).toBe("Mac needs a look");
+    expect(say()!.className).toBe("home-line-say t-warn");
 
     show();
     opsData.ops = { ...opsData.ops!, mac: { ...tight, stale: true } } as unknown as OpsResponse;
@@ -653,7 +641,7 @@ describe("the band's one line", () => {
     runnerDown();
     changed();
     expect(say()!.dataset.use).toBe("floor.line.machine");
-    expect(say()!.querySelector(".floor-line-text")!.textContent).toBe("ci-box-1 needs a look");
+    expect(say()!.querySelector(".home-line-text")!.textContent).toBe("ci-box-1 needs a look");
   });
 
   it("counts every machine, not the rows Machines folds them into", () => {
@@ -664,7 +652,7 @@ describe("the band's one line", () => {
     } as unknown as OpsResponse;
     mount();
     expect(say()!.dataset.use).toBe("floor.line.machine");
-    expect(say()!.querySelector(".floor-line-text")!.textContent).toBe("ci-box-1 needs a look · 4 more");
+    expect(say()!.querySelector(".home-line-text")!.textContent).toBe("ci-box-1 needs a look · 4 more");
   });
 
   it("says near the cap only of a current Usage reading", () => {
@@ -688,10 +676,10 @@ describe("the band's one line", () => {
     await serveAsks([pickup(5)]);
     changed();
     expect(say()!.dataset.use).toBe("floor.line.due");
-    const lead = say()!.querySelector(".floor-line-lead")!.textContent!;
+    const lead = say()!.querySelector(".home-line-lead")!.textContent!;
     const by = `by ${when(at(20), Date.parse(NOW))}`;
     expect(lead).toBe(`${by.charAt(0).toUpperCase()}${by.slice(1)} ·`);
-    expect(say()!.querySelector(".floor-line-text")!.textContent).not.toBe("Job pickup");
+    expect(say()!.querySelector(".home-line-text")!.textContent).not.toBe("Job pickup");
   });
 });
 
@@ -1096,8 +1084,8 @@ describe("links and pushes, as main.ts opens them", () => {
 });
 
 describe("the home screen before and between reads", () => {
-  const pills = () => [...document.querySelectorAll<HTMLElement>(".home-band .floor-line .floor-line-say")];
-  const lineOn = () => document.querySelector(".home-band .floor-line")!.classList.contains("is-on");
+  const pills = () => [...document.querySelectorAll<HTMLElement>(".home-band .home-line .home-line-say")];
+  const lineOn = () => document.querySelector(".home-band .home-line")!.classList.contains("is-on");
 
   afterEach(() => {
     app.notice = null;

@@ -216,7 +216,7 @@ describe("the desks", () => {
     const el = mount();
     el.querySelector<HTMLButtonElement>(`.desk-slot[data-place="${MS}"]`)!.click();
     const sheet = document.querySelector<HTMLElement>(".sheet.backlog-sheet")!;
-    expect(sheet.querySelector(".floor-sheet-title")!.textContent).toBe("example-repo");
+    expect(sheet.querySelector(".home-sheet-title")!.textContent).toBe("example-repo");
     expect(sheet.querySelector(".backlog-head-sub")!.textContent).toBe("Loading…");
     await vi.waitFor(() => expect(sheet.querySelector(".backlog-section")).not.toBeNull());
     expect(BACKLOG.reads).toBe(1);
@@ -263,7 +263,7 @@ describe("the desks", () => {
       const sheet = document.querySelector<HTMLElement>(".sheet.backlog-sheet")!;
       await vi.waitFor(() => expect(sheet.querySelector('.backlog-row[data-key="issue-73"]')).not.toBeNull());
       sheet.querySelector<HTMLButtonElement>('.backlog-row[data-key="issue-73"]')!.click();
-      expect(sheet.querySelector(".floor-sheet-title")!.textContent).toBe("example-repo · #73");
+      expect(sheet.querySelector(".home-sheet-title")!.textContent).toBe("example-repo · #73");
       await vi.waitFor(() => expect(sheet.querySelector(".backlog-issue-meta")!.textContent).toMatch(/^Opened by sam · .+ · 2 comments$/));
       expect(sheet.querySelector(".backlog-head-sub")!.textContent).toBe("Issue · open");
       expect(sheet.querySelector(".backlog-issue-chips")!.textContent).toBe("No labels");
@@ -286,13 +286,13 @@ describe("the desks", () => {
       close.click();
       await vi.waitFor(() => expect(BACKLOG.closed).toHaveLength(1));
       // Close goes back to the list, read again, and the sheet stays open.
-      await vi.waitFor(() => expect(sheet.querySelector(".floor-sheet-title")!.textContent).toBe("example-repo"));
+      await vi.waitFor(() => expect(sheet.querySelector(".home-sheet-title")!.textContent).toBe("example-repo"));
       expect(document.querySelector(".sheet.backlog-sheet")).not.toBeNull();
 
       sheet.querySelector<HTMLButtonElement>('.backlog-row[data-key="issue-73"]')!.click();
-      expect(sheet.querySelector(".floor-sheet-title")!.textContent).toBe("example-repo · #73");
+      expect(sheet.querySelector(".home-sheet-title")!.textContent).toBe("example-repo · #73");
       sheet.querySelector<HTMLButtonElement>('[data-use="backlog.issue.back"]')!.click();
-      await vi.waitFor(() => expect(sheet.querySelector(".floor-sheet-title")!.textContent).toBe("example-repo"));
+      await vi.waitFor(() => expect(sheet.querySelector(".home-sheet-title")!.textContent).toBe("example-repo"));
       expect(document.querySelector(".sheet.backlog-sheet")).not.toBeNull();
     } finally {
       closeTallSheet();
@@ -722,14 +722,14 @@ describe("a crowded floor", () => {
     const el = mount();
     el.querySelector<HTMLButtonElement>("button.desks-more")!.click();
     const sheet = rest()!;
-    expect(sheet.querySelector(".floor-sheet-title")!.textContent).toBe("3 more under way");
+    expect(sheet.querySelector(".home-sheet-title")!.textContent).toBe("3 more under way");
     expect([...sheet.querySelectorAll(".desks-rest-group > .desk-name")].map((name) => name.textContent)).toEqual(["example-repo", "other-repo"]);
     // With no card on the floor, the last building one is left off: the building go before those waiting.
     expect(whats(sheet)).toEqual(["Job 42", "Job 40", "Job 41"]);
     expect([...sheet.querySelectorAll(".desk-agent-meta")].map((meta) => meta.textContent)).toEqual(["Building", "Waiting", "Waiting"]);
     crew(...many(), worker("w43", "W43", { repo: OTHER, what: "Job 43", state: "waiting" }));
     expect(el.querySelector("button.desks-more")!.textContent).toBe("4 more ›");
-    expect(rest()!.querySelector(".floor-sheet-title")!.textContent).toBe("4 more under way");
+    expect(rest()!.querySelector(".home-sheet-title")!.textContent).toBe("4 more under way");
     window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
     for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
     expect(rest()).toBeNull();

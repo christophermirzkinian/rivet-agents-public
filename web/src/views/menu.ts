@@ -9,12 +9,12 @@ import { usageStale, weekTotal } from "./ops.js";
 import { navMark, opsStatus } from "./progress-mark.js";
 import { closeSheet, openSheet } from "./sheet.js";
 
-// The menu: every page in one list, your asks first, the readings, then what is yours under a rule. A phone opens it as
-// a drawer from the band's menu button, with Usage at its head; a computer shows it on the rail.
+// The menu: every page in one list, the home screen first, the readings, then what is yours under a rule. A phone
+// opens it as a drawer from the band's menu button, with Usage at its head; a computer shows it on the rail.
 
 export type MenuKey = "asks" | MorePage;
 
-/** The screen on now: your asks under a decision too. */
+/** The screen on now: the home screen under a decision too. */
 function lit(key: MenuKey): boolean {
   if (key === "asks") return app.tab === "progress" || app.tab === "cards";
   return app.tab === "more" && app.morePage === key;
@@ -56,7 +56,7 @@ export function menuList(onPick: () => void = () => {}): HTMLElement {
   return h(
     "div",
     { class: "menu", attrs: { role: "group", "aria-label": "Menu" } },
-    row("asks", ICONS.progress, home.TITLE, onPick),
+    row("asks", ICONS.progress, "Home", onPick),
     ...READINGS.map(page),
     h("hr", { class: "menu-rule" }),
     ...YOURS.map(page),

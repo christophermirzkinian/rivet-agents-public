@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 // A view's own column (a bare class with a max-width, centred) pulls in anything else that wears its class. Board →
 // Chats rows wore the Chat view's `.chat`, and stacked as a 760px column; the Town's crew wrapper wore Team Chat's
-// `.team`, and the Town drew as a 760px strip on your Mac (2026-10-09). Each column class belongs to one view.
+// `.team`, and the Town drew as a 760px strip. Each column class belongs to one view.
 
 const WEB = join(import.meta.dirname, "../web/src");
 

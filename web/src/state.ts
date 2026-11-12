@@ -14,7 +14,7 @@ import { screenMoved } from "./usage.js";
 
 export { isWorking };
 
-/** Cards, your asks (the home screen), Chat, and a page from the menu. */
+/** Cards, the home screen, Chat, and a page from the menu. */
 export const TABS = ["cards", "progress", "chat", "more"] as const;
 export type Tab = (typeof TABS)[number];
 
@@ -22,7 +22,7 @@ export type Tab = (typeof TABS)[number];
 export const OPS_PAGES = ["plan", "usage", "machines", "code"] as const;
 export type OpsPage = (typeof OPS_PAGES)[number];
 
-export const MORE_PAGES = ["floor", "usage", "mind", "machines", "code", "home", "media", "settings", "what-you-used"] as const;
+export const MORE_PAGES = ["usage", "mind", "machines", "code", "home", "media", "settings", "what-you-used"] as const;
 export type MorePage = (typeof MORE_PAGES)[number];
 
 /** Where a tab id lands (a saved link, a notification, `?tab=`); an id never known lands on the home screen. */

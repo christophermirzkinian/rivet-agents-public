@@ -68,7 +68,7 @@ describe("Ops's pages", () => {
     opsData.ops = fixture();
     app.opsPage = "machines";
     ops.openOps();
-    expect([app.tab, app.morePage, app.opsPage]).toEqual(["more", "floor", "plan"]);
+    expect([app.tab, app.opsPage]).toEqual(["progress", "plan"]);
   });
 
   it("start on Plan whatever page an older build stored", async () => {

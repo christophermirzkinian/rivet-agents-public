@@ -214,7 +214,7 @@
 }
 
 /* The options stay in sight at the foot of the card as its body scrolls under them: the answer at the thumb, with no
-   scroll on a small 320x693 (plan Risks). Four or more scroll in their own tray, kept under half the sheet. */
+   scroll on a small phone-sized viewport (plan Risks). Four or more scroll in their own tray, kept under half the sheet. */
 .decide-sheet .choices {
   position: sticky;
   bottom: 0;
@@ -243,7 +243,7 @@
 }
 
 /* The card's stills and clips stay short in the sheet, whole and uncropped, so the card and its answers fit above the
-   say-line on a large phone (412x915). */
+   say-line on a large phone-sized viewport. */
 .decide-sheet .card-body > .card-media .media-still img {
   height: min(20vh, 180px);
 }

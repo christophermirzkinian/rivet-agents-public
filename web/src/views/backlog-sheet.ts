@@ -74,7 +74,7 @@ function sectionEl(section: BacklogSection, openIssue: (row: BacklogRow) => void
 /** Opens `repo`'s backlog: a loading line, then the sheet as read. */
 export function openBacklog(repo: string): void {
   const sub = h("p", { class: "backlog-head-sub" }, "Loading…");
-  const body = h("div", { class: "floor-sheet-body backlog-body" });
+  const body = h("div", { class: "home-sheet-body backlog-body" });
   const foot = h("div", { class: "backlog-foot" });
   let alive = true;
   let read: BacklogResponse | null = null;
@@ -106,7 +106,7 @@ export function openBacklog(repo: string): void {
     );
     foot.replaceChildren(...(backlog.foot ? [h("a", { class: "backlog-all", attrs: { href: backlog.foot.url, target: "_blank", rel: "noopener", "data-use": "backlog.all" } }, backlog.foot.label)] : []));
   };
-  const head = h("header", { class: "floor-sheet-head backlog-head" }, close, h("div", { class: "backlog-head-text" }, h("h2", { class: "floor-sheet-title" }, projectName(repo)), sub));
+  const head = h("header", { class: "home-sheet-head backlog-head" }, close, h("div", { class: "backlog-head-text" }, h("h2", { class: "home-sheet-title" }, projectName(repo)), sub));
   const load = () =>
     getBacklog()
       .then((data) => {
@@ -141,6 +141,6 @@ export function openBacklog(repo: string): void {
         unwatch?.();
       },
     },
-    { className: "floor-sheet backlog-sheet", use: "desks.backlog", historyDepth: () => page?.depth() ?? 0 },
+    { className: "home-sheet backlog-sheet", use: "desks.backlog", historyDepth: () => page?.depth() ?? 0 },
   );
 }

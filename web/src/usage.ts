@@ -32,7 +32,6 @@ export const OUTBOX_MAX = 500;
 export const FLUSH_AT = 50;
 const CONTROL = 'button, a[href], summary, [role="switch"], [role="tab"], [role="option"], [data-use]';
 const MORE_SCREENS: Record<string, string> = {
-  floor: "floor",
   usage: "more.usage",
   mind: "more.mind",
   machines: "more.machines",

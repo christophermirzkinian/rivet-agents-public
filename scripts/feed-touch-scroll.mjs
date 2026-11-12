@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Fails when a finger cannot scroll the phone's Decide sheet through a whole card or the whole Answered list: a large
- * phone (412x915) and a small one with Display Zoom (320x693). Serves the dev preview (web/preview/desktop.html,
+ * phone-sized viewport and a small one. Serves the dev preview (web/preview/desktop.html,
  * fake data) with Vite and swipes with real touch events, not scrollTo: up from the middle of what shows until the foot
  * shows, then down until the top shows again. A phone has no Feed list: Cards opens the Decide sheet, one card at a time with Skip, so the rows a
  * finger must reach are a card taller than the sheet and Answered's rows. A card whose own scroll kept the swipe
@@ -27,8 +27,8 @@ for (const dir of [video, shots]) if (dir) mkdirSync(dir, { recursive: true });
 /** The preview's tallest card: it runs past the sheet on both phones. */
 const TALL = "ace-straight-climb";
 const PHONES = [
-  { name: "412", viewport: { width: 412, height: 915 } },
-  { name: "320", viewport: { width: 320, height: 693 } },
+  { name: "390", viewport: { width: 390, height: 844 } },
+  { name: "320", viewport: { width: 320, height: 568 } },
 ].flatMap((phone) => [
   { ...phone, name: `${phone.name} card`, leg: "card" },
   { ...phone, name: `${phone.name} answered`, leg: "answered" },

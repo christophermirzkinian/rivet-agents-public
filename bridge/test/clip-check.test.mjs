@@ -55,11 +55,11 @@ test("videoFrame reads a real clip, and paddedEdge finds its padding", { skip: !
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rivet-clip-"));
   const make = (/** @type {string} */ name, /** @type {string} */ vf) => {
     const file = path.join(dir, name);
-    execFileSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "testsrc2=s=320x694:d=1:r=30", "-vf", vf, "-c:v", "libx264", "-pix_fmt", "yuv420p", file]);
+    execFileSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "testsrc2=s=360x640:d=1:r=30", "-vf", vf, "-c:v", "libx264", "-pix_fmt", "yuv420p", file]);
     return file;
   };
-  const padded = make("padded.mp4", "pad=640:1388:0:0:color=0x7e817e");
-  const clean = make("clean.mp4", "scale=640:1388");
+  const padded = make("padded.mp4", "pad=720:1280:0:0:color=0x7e817e");
+  const clean = make("clean.mp4", "scale=720:1280");
   const tenth = path.join(dir, "tenth.mp4");
   execFileSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "color=c=blue:s=576x640:d=1:r=30", "-vf", "pad=640:640:0:0:color=0x7e817e", "-c:v", "libx264", "-pix_fmt", "yuv420p", tenth]);
   assert.equal(paddedEdge(/** @type {Buffer} */ (await videoFrame(tenth))), "right");

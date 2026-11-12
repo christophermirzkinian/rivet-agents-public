@@ -183,11 +183,11 @@ test("--media refuses a clip recorded bigger than the viewport, before any uploa
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rivet-corner-"));
   const make = (/** @type {string} */ name, /** @type {string} */ vf) => {
     const file = path.join(dir, name);
-    execFileSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "testsrc2=s=320x694:d=1:r=30", "-vf", vf, "-c:v", "libx264", "-pix_fmt", "yuv420p", file]);
+    execFileSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "testsrc2=s=360x640:d=1:r=30", "-vf", vf, "-c:v", "libx264", "-pix_fmt", "yuv420p", file]);
     return file;
   };
-  const clean = make("before.mp4", "scale=640:1388");
-  const padded = make("after.mp4", "pad=640:1388:0:0:color=0x7e817e");
+  const clean = make("before.mp4", "scale=720:1280");
+  const padded = make("after.mp4", "pad=720:1280:0:0:color=0x7e817e");
   const uploads = () => seen.filter((r) => r.url?.startsWith("/api/bridge/media/")).length;
   const was = uploads();
   const refused = await run(["--media", "pr2022-staging", "--before", clean, "--after", padded]);

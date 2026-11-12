@@ -1,0 +1,52 @@
+/* The Desks tab (town-paper.ts): the desks view (desks.css) filling the stage, OK / Not OK over its top left. */
+.paper {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.paper-home {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+
+.paper .dot {
+  box-shadow: none;
+}
+
+/* The stage takes the height there is; the desks scroll inside it. */
+.paper-stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Flow: the head of a scrolling page (Progress) at its natural height, the page scrolling it and whatever comes under
+   it; nothing pinned to the window. */
+.paper.is-flow {
+  min-height: 0;
+}
+
+.paper.is-flow .paper-home,
+.paper.is-flow .paper-stage {
+  flex: none;
+}
+
+.paper.is-flow .paper-stage {
+  overflow: visible;
+}
+
+.paper.is-flow .desks {
+  position: relative;
+  inset: auto;
+  overflow: visible;
+}
+
+.paper.is-flow .desks::before {
+  display: none;
+}

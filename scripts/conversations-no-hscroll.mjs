@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * Fails when the Chat tab's conversations scroll sideways on a large phone (412x915). Serves the dev preview (web/preview/desktop.html, fake data) with Vite and measures the
+ * Fails when the Chat tab's conversations scroll sideways on a large phone-sized viewport. Serves the dev preview (web/preview/desktop.html, fake data) with Vite and measures the
  * page and every panel in it, naming the elements past the right edge of each one that scrolls. Then Feed, Desks and Chat
- * with Claude's usage read, at 412 and 360: the header, view and tab bar each end inside the screen (a header chip can widen the
+ * with Claude's usage read, at 390 and 360: the header, view and tab bar each end inside the screen (a header chip can widen the
  * whole page while the page itself, overflow hidden, never scrolls).
  *   node scripts/conversations-no-hscroll.mjs [--shots <dir>]
  */
@@ -17,10 +17,10 @@ const shotsAt = process.argv.indexOf("--shots");
 const shots = shotsAt > 0 ? process.argv[shotsAt + 1] : null;
 if (shots) mkdirSync(shots, { recursive: true });
 
-const HEADER_PHONES = [412, 360];
+const HEADER_PHONES = [390, 360];
 const HEADER_TABS = ["cards", "progress", "chat", "more"];
 const PHONES = [
-  { name: "412", viewport: { width: 412, height: 915 } },
+  { name: "390", viewport: { width: 390, height: 844 } },
 ];
 /**
  * The conversation with Rivet, a new draft, and things' pages: one with chips and a card answer, an
@@ -92,7 +92,7 @@ try {
   }
   for (const width of HEADER_PHONES) {
     for (const tab of HEADER_TABS) {
-      const page = await browser.newPage({ viewport: { width, height: 915 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+      const page = await browser.newPage({ viewport: { width, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
       await page.goto(`${base}preview/desktop.html?tab=${tab}&chip=1`);
       await page.waitForSelector(".topbar > *", { state: "attached" });
       await page.evaluate(() => document.fonts.ready);
