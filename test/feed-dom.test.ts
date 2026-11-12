@@ -2641,7 +2641,7 @@ describe("the desktop layout", () => {
     await signIn();
     await settle(4000);
     expect(app.tab).toBe("cards");
-    expect(root.querySelector(".home-back")?.textContent).toBe("‹ Your asks");
+    expect(root.querySelector(".home-back")?.textContent).toBe("‹ Home");
     expect(root.querySelector(".decide-close")).toBeNull();
     root.querySelector<HTMLButtonElement>(".home-back")!.click();
     expect(app.tab).toBe("progress");
@@ -2877,7 +2877,7 @@ describe("the desktop layout", () => {
     expect(side.hidden).toBe(false);
     expect(side.querySelector(".chat")).not.toBeNull();
     // The menu, Chat being the pane beside it, then the Chat tool.
-    expect([...root.querySelectorAll(".tabs .menu-name")].map((name) => name.textContent)).toEqual(["Your asks", "Floor", "Usage", "Machines", "Code", "Rivet's mind", "What you used", "Home", "Media", "Settings"]);
+    expect([...root.querySelectorAll(".tabs .menu-name")].map((name) => name.textContent)).toEqual(["Home", "Usage", "Code", "Machines", "Rivet's mind", "What you used", "Home Assistant", "Media", "Settings"]);
     expect([...root.querySelectorAll(".tabs .rail-tool")].map((one) => one.getAttribute("data-key"))).toEqual(["Chat"]);
     // The icon rail hides the names, so each row is named by its title, never only by its badge.
     for (const row of root.querySelectorAll<HTMLElement>(".tabs .menu-row")) {

@@ -158,7 +158,7 @@ describe("the banner", () => {
 describe("resync", () => {
   const OFF = "rivet.push.off";
 
-  it("subscribes a phone that allows them but has no subscription and was never turned off (your phone on 2026-10-01)", async () => {
+  it("subscribes a phone that allows them but has no subscription and was never turned off", async () => {
     stubBrowser(GONE);
     const { resyncPush } = await import("../web/src/push.js");
     await resyncPush();

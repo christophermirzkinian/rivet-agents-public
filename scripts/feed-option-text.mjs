@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Fails when a decision button on the Feed hides any of its text: a large phone (412x915), a small one with Display
- * Zoom (320x693) and the desktop layout. Serves the dev preview (web/preview/desktop.html, fake data) with Vite and opens
+ * Fails when a decision button on the Feed hides any of its text: a large phone-sized viewport, a small one and the
+ * desktop layout. Serves the dev preview (web/preview/desktop.html, fake data) with Vite and opens
  * the "open-sign-up" card, whose three shorts are the card format's 40 characters, then again with ?long=1: a
  * 200-character label with no short (the desktop's bar then points to the card's own list, which must show it whole),
  * and an unbroken 40-character short. On the desktop one set of answers shows, never two: with short answers the bar's picks are the set and the card lists none. A phone's answers are the card's own boxes, with no row under it. A two-line clamp cut "Ship it: invited…"
@@ -20,8 +20,8 @@ const shots = at > 0 ? process.argv[at + 1] : null;
 if (shots) mkdirSync(shots, { recursive: true });
 
 const SCREENS = [
-  { name: "412", viewport: { width: 412, height: 915 }, phone: true },
-  { name: "320", viewport: { width: 320, height: 693 }, phone: true },
+  { name: "390", viewport: { width: 390, height: 844 }, phone: true },
+  { name: "320", viewport: { width: 320, height: 568 }, phone: true },
   { name: "desktop", viewport: { width: 1280, height: 800 }, phone: false },
 ];
 const CARD = "open-sign-up";

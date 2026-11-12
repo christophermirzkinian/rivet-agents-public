@@ -1,6 +1,5 @@
 // Read-aloud in the phone's own voice (the browser's speechSynthesis), free and on the device: Australian English
-// first, then British, and never any other. A phone with neither stays silent (The owner:
-// no "extremely bored American").
+// first, then British, and never any other. A phone with neither stays silent.
 
 import { rivetWords } from "../../src/shared/names.js";
 

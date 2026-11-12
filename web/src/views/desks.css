@@ -8,7 +8,7 @@
   flex-direction: column;
   align-items: center;
   gap: 18px;
-  /* The floor's top space, under the OK pill: taller while Not OK says why (floor.ts). */
+  /* The floor's top space, under the OK pill: taller while Not OK says why (town-paper.ts). */
   padding: var(--paper-top, 70px) 14px 20px;
   background:
     radial-gradient(circle at 1px 1px, rgba(214, 205, 255, 0.16) 1.2px, transparent 1.6px) 0 0 / 22px 22px,
@@ -847,8 +847,8 @@ button.desk.is-rivet:focus-visible {
   }
 }
 
-/* An agent holding an open card (decide-sheet.ts): a gold ? on its seat, a mark and never a count (decision
-   2026-10-24), and the whole row opens its Decide sheet. */
+/* An agent holding an open card (decide-sheet.ts): a gold ? on its seat, a mark and never a count,
+   and the whole row opens its Decide sheet. */
 .desk-agent.has-card,
 .desk-agent.has-chat {
   position: relative;

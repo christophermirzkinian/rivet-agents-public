@@ -38,16 +38,16 @@ let active: { stop(): void } | null = null;
 const visited = new WeakSet<Field>();
 
 // Mobile engines (Android Chrome, iOS) report each result as the whole transcript so
-// far, repeats and revisions included: ["can do a review", "Can do a review", "can do a
-// review of"]. Desktop Chrome reports the new words only, spaced from the piece before:
-// ["can do", " a review", " of"]. A piece that starts with everything heard so far
+// far, repeats and revisions included: ["open the list", "Open the list", "open the
+// list of"]. Desktop Chrome reports the new words only, spaced from the piece before:
+// ["open the", " list", " of"]. A piece that starts with everything heard so far
 // (ignoring case and spacing), or that no space separates from the piece before, is the
 // whole text so far; any other piece adds to it. So a desktop piece that exactly repeats
 // the words before it is written once.
 const plain = (text: string) => text.replace(/\s+/g, " ").trim();
 
 // Whether a piece starts with the words so far. A mobile interim can stop mid-word
-// ("can do a revie"), but a single word must end where it did ("hello" then "hello."
+// ("open the lis"), but a single word must end where it did ("hello" then "hello."
 // repeats; "I" then "insist" is two words).
 const repeats = (part: string, text: string) =>
   part.toLowerCase().startsWith(text.toLowerCase()) && (text.includes(" ") || !/[\p{L}\p{N}]/u.test(part.charAt(text.length)));

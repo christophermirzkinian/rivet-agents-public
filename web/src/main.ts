@@ -137,7 +137,7 @@ async function startApp(): Promise<void> {
   const linked = front !== null && front === startCard;
   startCard = null;
   if (front && navStamp() === stamp && (!desk || app.board?.board?.needs.some((need) => need.id === front))) showPushed(front, linked);
-  // Phone and wide window open on your asks, whose Decide N says how many decisions wait; only a link or a notification
+  // Phone and wide window open on the home screen, whose Decide N says how many decisions wait; only a link or a notification
   // opens Decide.
   settleOpening(asked ?? "progress", stamp);
   if (loaded) recoverOutbox();

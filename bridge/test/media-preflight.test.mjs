@@ -316,7 +316,7 @@ test("a real testsrc clip passes and a flat grey one is blank", { skip: !ffmpeg 
   );
   if (rotates) assert.deepEqual(await preflight([{ role: "before", file: turned }], { ...opts, viewport: { width: 320, height: 160 } }), { ok: true, problems: [] });
 
-  // A jpg coded 640x320 with EXIF Orientation 6 shows as 320x640. The APP1 segment is written by hand: no exiftool.
+  // A jpg coded 640x320 with EXIF Orientation 6 shows as 320 wide by 640 tall. The APP1 segment is written by hand: no exiftool.
   const coded = path.join(TMP, "coded.jpg");
   await exec(ffmpeg, ["-v", "error", "-nostdin", "-f", "lavfi", "-i", "testsrc=size=640x320", "-frames:v", "1", "-y", coded], { timeout: 60_000 });
   const tiff = Buffer.from([0x4d, 0x4d, 0, 0x2a, 0, 0, 0, 8, 0, 1, 0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0]);

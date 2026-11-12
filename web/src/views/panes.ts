@@ -3,8 +3,8 @@ import { h, svg } from "../dom.js";
 import { changed } from "../state.js";
 import { needYou } from "../../../src/shared/words.js";
 
-// The desktop layout's pane controls: the chevron on each pane's edge that folds it away (the owner: on the
-// panes themselves, not the top bar), the slim strip a collapsed pane leaves behind, and the grip that drags a pane's
+// The desktop layout's pane controls: the chevron on each pane's edge that folds it away (on the
+// pane itself, not the top bar), the slim strip a collapsed pane leaves behind, and the grip that drags a pane's
 // width. The layout itself lives in desk-layout.ts.
 
 export const PANE_ICONS = {

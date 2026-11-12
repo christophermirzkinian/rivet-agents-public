@@ -76,12 +76,6 @@ const mount = () => {
 };
 /** The phone's Decide N, in the home screen's dock. */
 const decideN = () => document.querySelector(".home-decide.has-cards .home-decide-n")?.textContent ?? null;
-/** The Floor, where the desks are. */
-const floor = () => {
-  app.tab = "more";
-  app.morePage = "floor";
-  mount();
-};
 
 beforeEach(() => {
   vi.useFakeTimers({ now: new Date(NOW), toFake: ["Date"] });
@@ -198,7 +192,8 @@ function disagreements(): string[] {
     nav: needsYou(),
     deck: deck().length,
   };
-  floor();
+  app.tab = "progress";
+  mount();
   // Each chat waiting on you says Needs you under its agent on the map.
   shown.bubble = document.querySelectorAll(".desk.is-project .desk-agent-meta.is-needs").length;
   const desk = document.querySelector(".desk.is-rivet .desk-mood")?.textContent ?? null;
@@ -229,7 +224,8 @@ describe("every needs-you on Cards and Progress is the summary's", () => {
     expect(deck().map((card) => card.id)).toEqual(["got-it-news"]);
     expect(summary()!.needsYou).toBe(0);
     expect(needsYou()).toBe(0);
-    floor();
+    app.tab = "progress";
+    mount();
     expect(document.querySelector(".desk.is-rivet .desk-mood")?.textContent).not.toBe(NEEDS_YOU);
     // Its chat's desk, working, has no Needs you bubble either, and Decide counts nothing.
     expect(document.querySelectorAll(".desk.is-project .desk-agent-meta.is-needs")).toHaveLength(0);

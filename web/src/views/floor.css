@@ -1,26 +1,56 @@
-/* The Floor (floor.ts): the desks at their natural height, the page scrolling them and Plan under them; and the
-   phone band's one line. Every word 14px or more, every control 44px or more. */
-.floor-stage {
-  background: var(--bg);
-  color: var(--text);
+/* The home screen (home.ts): the band on top, the map filling the middle and the dock at the thumb.
+   Every word 14px or more, every control 44px or more. */
+.view[data-tab="home"] {
+  container-type: size;
 }
 
-.floor-stage .dot {
-  box-shadow: none;
+/* The map takes the screen, so Plan is a scroll under it. */
+.home > .progress-scene {
+  min-height: 100cqh;
 }
 
-.floor-stage .desks {
-  position: relative;
-  inset: auto;
-  overflow: visible;
+/* The band: the menu button, Rivet's name in the middle and the Mac pill while the Mac is offline; under them one
+   line, only while something is for you. The sides
+ are equal so the name
+   stays in the middle whether the pill is there or not. */
+.topbar.home-band {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0 6px;
+  padding-bottom: 4px;
+  container: home-band / inline-size;
 }
 
-.floor-stage .desks::before {
-  display: none;
+.home-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 26px;
+  font-weight: 900;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.home-band > .topbar-end {
+  min-width: 0;
+}
+
+.home-band .pill {
+  padding: 6px 9px;
+  font-size: 14px;
+}
+
+/* The pill's dot and "offline" say it at 320, where "Mac" would meet the name. */
+@container home-band (max-width: 359px) {
+  .home-band .pill-mac {
+    display: none;
+  }
 }
 
 /* The line opens and closes over 300ms; folded it keeps its words, so it fades out as it was. */
-.floor-line {
+.home-line {
   display: grid;
   grid-column: 1 / -1;
   grid-template-rows: 0fr;
@@ -30,12 +60,12 @@
     opacity 0.3s ease;
 }
 
-.floor-line.is-on {
+.home-line.is-on {
   grid-template-rows: 1fr;
   opacity: 1;
 }
 
-.floor-line-fold {
+.home-line-fold {
   display: flex;
   justify-content: center;
   min-height: 0;
@@ -43,12 +73,12 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .floor-line {
+  .home-line {
     transition: none;
   }
 }
 
-.floor-line-say {
+.home-line-say {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -66,55 +96,120 @@
   white-space: nowrap;
 }
 
-.floor-line-dot {
+.home-line-dot {
   flex: none;
   width: 10px;
   height: 10px;
   border-radius: 50%;
 }
 
-.floor-line-lead,
-.floor-line-more {
+.home-line-lead,
+.home-line-more {
   flex: none;
 }
 
-.floor-line-text {
+.home-line-text {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.floor-line-say.t-cards {
+.home-line-say.t-cards {
   border-color: rgba(255, 194, 61, 0.45);
   color: var(--apricot);
 }
 
-.floor-line-say.t-cards > .floor-line-dot {
+.home-line-say.t-cards > .home-line-dot {
   background: var(--apricot);
 }
 
-.floor-line-say.t-due > .floor-line-dot {
+.home-line-say.t-due > .home-line-dot {
   background: var(--later);
 }
 
-.floor-line-say.t-warn {
+.home-line-say.t-warn {
   border-color: rgba(255, 194, 61, 0.45);
 }
 
-.floor-line-say.t-warn > .floor-line-dot {
+.home-line-say.t-warn > .home-line-dot {
   background: var(--apricot);
 }
 
-.floor-line-say.t-bad {
+.home-line-say.t-bad {
   border-color: color-mix(in srgb, var(--no) 55%, transparent);
 }
 
-.floor-line-say.t-bad > .floor-line-dot {
+.home-line-say.t-bad > .home-line-dot {
   background: var(--no);
 }
 
-/* The sheets over the Floor: a head with Close, then their own scroll. */
-.floor-sheet-head {
+/* The dotted home runs to the very top: it is the app's own while the phone's band is there, under a band, the home screen
+   and its Plan with no ground of their own. */
+.app.signed-in:has(> .home-band) {
+  background:
+    radial-gradient(circle at 1px 1px, rgba(214, 205, 255, 0.16) 1.2px, transparent 1.6px) 0 0 / 22px 22px,
+    radial-gradient(70% 40% at 50% 20%, rgba(255, 194, 61, 0.1), transparent 70%),
+    var(--bg);
+}
+
+.app.signed-in:has(> .home-band) :is(.desks, .paper) {
+  background: transparent;
+}
+
+.app.signed-in:has(> .home-band) .desks::before {
+  display: none;
+}
+
+/* The dock: Decide N (gold while a decision waits) and Rivet, at the thumb. */
+.home-dock {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 8px;
+  padding: 6px 14px calc(env(safe-area-inset-bottom) + 8px);
+  border-top: 1px solid var(--line);
+  background: var(--bg);
+}
+
+.home-decide,
+.home-rivet {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 56px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-xl);
+  font-weight: 900;
+}
+
+.home-decide.has-cards {
+  border-color: transparent;
+  background: #ffc23d;
+  color: #2a1a00;
+}
+
+.home-decide-n {
+  font-size: 20px;
+}
+
+.home-dot {
+  position: absolute;
+  top: 10px;
+  right: 14px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--pom);
+}
+
+/* The sheets over the home screen: a head with Close, then their own scroll. */
+.home-sheet-head {
   display: flex;
   flex: none;
   align-items: center;
@@ -122,7 +217,7 @@
   padding-bottom: 8px;
 }
 
-.floor-sheet-title {
+.home-sheet-title {
   flex: 1;
   min-width: 0;
   margin: 0;
@@ -131,42 +226,54 @@
   overflow-wrap: anywhere;
 }
 
-.floor-sheet-body {
+.home-sheet-body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
 
-.floor-sheet-body > .your-asks {
+.home-sheet-body > .your-asks {
   padding: 0;
 }
 
-.sheet.is-tall.floor-sheet {
+.home-back[hidden] {
+  display: none;
+}
+
+.home-back .btn-icon {
+  width: 24px;
+  height: 24px;
+}
+
+/* Rivet's chat fills a full-height sheet; its own list, messages and box lay out inside. */
+.sheet.is-tall.rivet-sheet {
+  height: calc(var(--vv-h, 100dvh) - 40px);
+}
+
+.home-chat {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* The chat centres itself with auto margins, which would size it to its widest line: it takes the sheet's width. */
+.home-chat > .chat {
+  width: 100%;
+  min-width: 0;
+}
+
+.sheet.is-tall.home-sheet {
   min-height: 50dvh;
 }
 
 /* A row's line wraps in the sheet rather than ending in an ellipsis. */
-.floor-sheet .ask-sub {
+.home-sheet .ask-sub {
   overflow: visible;
   white-space: normal;
   overflow-wrap: anywhere;
   text-overflow: clip;
-}
-
-.floor-room {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  width: 100%;
-  min-height: 44px;
-  padding: 10px 14px;
-  border: 0;
-  border-bottom: 1px solid var(--line);
-  background: none;
-  color: var(--text);
-  font: inherit;
-  font-weight: 600;
-  text-align: left;
-  cursor: pointer;
 }

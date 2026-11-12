@@ -38,8 +38,8 @@
   box-sizing: border-box;
 }
 
-/* The one card style, on every screen, phone and desktop (card option C "Photo first"; The owner:
-   no thick left line): a 1px line, a 10px radius, the panel fill and no shadow. A state shows only in the
+/* The one card style, on every screen, phone and desktop: a 1px line, a 10px radius, the panel fill, no shadow and no
+   thick left line. A state shows only in the
    border colour, through --edge: red when broken, apricot when it needs a look or is waiting, green while working.
    --edge does not inherit, so an ok card inside a red one (a briefing item) keeps the plain line. */
 @property --edge {

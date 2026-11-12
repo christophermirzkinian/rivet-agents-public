@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Fails when any card is wider than the screen: a large phone (412x915), a small one with Display Zoom (320x693) and
- * the desktop layout. Serves the dev preview (web/preview/desktop.html?v4=1, fake data with today's answers) with Vite
+ * Fails when any card is wider than the screen: a large phone-sized viewport, a small one and the
+ * desktop layout. Serves the dev preview (web/preview/desktop.html?v4=1, fake data with today's answers) with Vite
  * and opens every card in turn as the open one, so each media kind (stills, video, before/after, sound, files, a still
  * with a file) and the thread line show at full size, then Answered. A phone shows them in the Decide sheet, its head and
  * switch measured with them; the desktop in the Feed. Names each
@@ -33,8 +33,8 @@ const clips = Object.fromEntries([
 ].map(([size, file]) => [size, readFileSync(new URL(`./fixtures/${file}`, import.meta.url)).toString("base64")]));
 
 const SCREENS = [
-  { name: "412", viewport: { width: 412, height: 915 }, phone: true },
-  { name: "320", viewport: { width: 320, height: 693 }, phone: true },
+  { name: "390", viewport: { width: 390, height: 844 }, phone: true },
+  { name: "320", viewport: { width: 320, height: 568 }, phone: true },
   { name: "desktop", viewport: { width: 1280, height: 800 }, phone: false },
 ];
 

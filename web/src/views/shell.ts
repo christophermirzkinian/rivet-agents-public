@@ -6,13 +6,12 @@ import { DESK_QUERY, typing } from "../desk.js";
 import { forgetLayout, paneOpen, readLayout, toggleFocus, togglePane, WIDE_RAIL_QUERY, writeLayout, type Pane } from "../desk-layout.js";
 import * as cmd from "../command-api.js";
 import { h, ICONS, keepFocus, modalOpen, svg } from "../dom.js";
-import { watchOps } from "../ops-data.js";
-import { attachPullRefresh } from "../pull-refresh.js";
-import { app, changed, go, macOffline, subscribe, TABS, type Tab } from "../state.js";
 import { useTap, watchDepth } from "../usage.js";
+import { attachPullRefresh } from "../pull-refresh.js";
+import { watchOps } from "../ops-data.js";
+import { app, changed, go, macOffline, subscribe, TABS, type Tab } from "../state.js";
 import * as chat from "./chat.js";
 import * as decide from "./decide-sheet.js";
-import * as floor from "./floor.js";
 import * as home from "./home.js";
 import * as more from "./more.js";
 import { applyWidths, MIN_CARD, PANE_ICONS, paneFold, paneGrip, paneStrip, updateLayout } from "./panes.js";
@@ -31,11 +30,11 @@ import type { View } from "./view.js";
  * menu; chat is the pane beside them.
  */
 type Shown = "home" | "wide-home" | "decide" | "page";
-const wideHome: View = { mount: (el) => home.mount(el, true), unmount: home.unmount, refresh: home.refresh };
-const VIEWS: Record<Shown, View> = { home, "wide-home": wideHome, decide: decide.pane, page: more };
+const wideFloor: View = { mount: (el) => home.mount(el, true), unmount: home.unmount, refresh: home.refresh };
+const VIEWS: Record<Shown, View> = { home, "wide-home": wideFloor, decide: decide.pane, page: more };
 const WIDE: Record<Exclude<Tab, "chat">, Shown> = { progress: "wide-home", cards: "decide", more: "page" };
-/** The wide window's header: your asks, a decision, or the page open. */
-export const TITLES: Record<Exclude<Tab, "chat" | "more">, string> = { progress: home.TITLE, cards: "Decide" };
+/** The wide window's header: the home screen, a decision, or the page open. */
+export const TITLES: Record<Exclude<Tab, "chat" | "more">, string> = { progress: "Home", cards: "Decide" };
 
 /** The header's title: the tab's name, or the page's. */
 export function title(): string {
@@ -84,9 +83,9 @@ export function mountShell(root: HTMLElement): () => void {
     document.documentElement.classList.toggle("desktop", desk);
     // An old tab id (a saved session, a link, a notification) lands where its page went (state.ts landing).
     if (!(TABS as readonly string[]).includes(app.tab)) go(app.tab);
-    // A page tab with no page is the home screen.
+    // A page tab with no page (there is no list now) is the home screen.
     if (app.tab === "more" && !app.morePage) app.tab = "progress";
-    // On a wide window chat lives alongside, so the Chat tab (a notification's, say) opens it there, beside your asks.
+    // On a wide window chat lives alongside, so the Chat tab (a notification's, say) opens it there, beside the home screen.
     if (desk && app.tab === "chat") {
       app.tab = "progress";
       writeLayout({ ...readLayout(), focus: false, chat: true });
@@ -160,9 +159,9 @@ export function mountShell(root: HTMLElement): () => void {
   };
   const onWidth = () => changed();
   const unsubscribe = subscribe(render);
-  const unwatchAsks = keepAsks(render);
+  // The Progress mark reads Plan, so Ops loads while the shell is up.
   const unwatchOps = watchOps(render);
-  const unwatchLine = floor.watchLine();
+  const unwatchAsks = keepAsks(render);
   wide?.addEventListener?.("change", onWidth);
   railWide?.addEventListener?.("change", onWidth);
   document.addEventListener("keydown", onKey);
@@ -170,9 +169,8 @@ export function mountShell(root: HTMLElement): () => void {
   return () => {
     unsubscribe();
     unread.watch(false);
-    unwatchAsks();
     unwatchOps();
-    unwatchLine();
+    unwatchAsks();
     wide?.removeEventListener?.("change", onWidth);
     railWide?.removeEventListener?.("change", onWidth);
     document.removeEventListener("keydown", onKey);
@@ -255,14 +253,13 @@ function macPill(): HTMLElement | null {
   );
 }
 
-/** A wide window's own place for the alerts the phone shows on its band's line (floor.ts alerts). */
-function alertPill(alert: floor.Said): HTMLElement {
-  return h(
-    "div",
-    { class: "pill pill-alert warn", attrs: { role: "status", "data-key": `alert-${alert.key}`, "aria-label": alert.label } },
-    h("span", { class: "dot" }),
-    h("span", { class: "pill-text" }, alert.text),
-  );
+/** A wide window's own place for the home screen's alerts, which the phone shows on its band's line (home.ts alerts). */
+function alertPill(alert: home.Said): HTMLElement {
+  const parts = [h("span", { class: "dot" }), h("span", { class: "pill-text" }, alert.text)];
+  const cls = `pill pill-alert ${alert.tone === "bad" ? "off" : "warn"}`;
+  return alert.open
+    ? h("button", { class: cls, attrs: { type: "button", "data-key": `alert-${alert.key}`, "data-use": `shell.header.${alert.key}`, "aria-label": alert.label }, on: { click: alert.open } }, ...parts)
+    : h("div", { class: cls, attrs: { role: "status", "data-key": `alert-${alert.key}`, "aria-label": alert.label } }, ...parts);
 }
 
 /** Focus: the open card alone. The panes' own controls sit on the panes (panes.ts). */
@@ -280,16 +277,16 @@ function focusToggle(on: boolean, focus: () => void): HTMLElement {
 }
 
 /** Decide's way back on a wide window, in words. */
-function homeBack(): HTMLElement {
-  const toHome = () => {
+function floorBack(): HTMLElement {
+  const toFloor = () => {
     go("progress");
     changed();
   };
-  return h("button", { class: "home-back", attrs: { type: "button", "data-use": "shell.header.floor" }, on: { click: toHome } }, `‹ ${home.TITLE}`);
+  return h("button", { class: "home-back", attrs: { type: "button", "data-use": "shell.header.floor" }, on: { click: toFloor } }, "‹ Home");
 }
 
 function renderHeader(header: HTMLElement, desk: boolean, focusOn: boolean, focus: () => void): void {
-  const back = app.tab === "cards" && desk ? homeBack() : null;
+  const back = app.tab === "cards" && desk ? floorBack() : null;
   header.classList.toggle("home-band", !desk);
   if (desk) {
     header.replaceChildren(
@@ -300,17 +297,17 @@ function renderHeader(header: HTMLElement, desk: boolean, focusOn: boolean, focu
         // Focus is the open card alone, so it is Decide's own.
         app.tab === "cards" ? focusToggle(focusOn, focus) : null,
         // Decide's pane says its stale cards in its own bar.
-        ...floor.alerts().filter((alert) => !(alert.key === "offline" && app.tab === "cards")).map(alertPill),
+        ...home.alerts().filter((alert) => !(alert.key === "offline" && app.tab === "cards")).map(alertPill),
         macPill(),
       ),
     );
     return;
   }
-  // The phone's band: the menu button, the app's name, the Mac pill while the Mac is offline, and one line under them
-  // while something is for you. The line stays the same element, which floor.ts paints.
-  const pill = macPill();
-  const kids = [menuButton(), h("div", { class: "home-status" }, h("h1", { class: "topbar-title" }, title())), ...(pill ? [h("div", { class: "topbar-end" }, pill)] : [])];
-  const line = floor.line();
+  // The phone's band: the menu button, Rivet's name in the middle, the Mac pill while the Mac is offline, and under
+  // them the home screen's one line while something is for you.
+  const kids = [menuButton(), home.title(), h("div", { class: "topbar-end" }, macPill())];
+  const line = home.line();
+  // The line stays in place: taken out and put back, it would jump to its new height instead of opening.
   if (line.parentElement !== header) return header.replaceChildren(...kids, line);
   for (const old of [...header.children]) if (old !== line) old.remove();
   line.before(...kids);
@@ -334,9 +331,10 @@ function renderTabs(tabs: HTMLElement, desk: boolean, chatOpen: boolean, toggleC
     svg(ICONS.note, "tab-icon"),
     h("span", { class: "tab-label" }, "Chat"),
   );
-  // The menu, as on the phone: Decide N is under your asks and Rivet's chat is the pane beside them. Then the pane tools.
+  // The menu, as on the phone: Decide N is under the map and Rivet's chat is the pane beside it. Then the pane tools.
   tabs.replaceChildren(
     h("div", { class: "rail-brand" }, h("img", { class: "brand-icon", attrs: { src: "/icon.svg", alt: "" } }), h("span", { class: "brand-name" }, APP_NAME)),
+
     menuList(),
     h("div", { class: "rail-gap" }),
     chatTool,

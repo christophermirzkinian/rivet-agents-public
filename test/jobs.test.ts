@@ -153,7 +153,7 @@ describe("a job's times", () => {
     const iso = (times: Date[]) => times.map((at) => at.toISOString());
     setTimeZone("Pacific/Auckland");
     try {
-      // Sun 27 Sep 2026: 2:00am NZST goes to 3:00am NZDT, so there is no 2:30am.
+      // Sun 27 Sep 2026: 2:00am standard time goes to 3:00am daylight time, so there is no 2:30am.
       const hourly = { every: "hours", hours: 1, minute: 30 } as const;
       expect(iso(runTimes(hourly, new Date("2026-09-26T12:00:00.000Z"), new Date("2026-09-26T17:00:00.000Z")))).toEqual([
         "2026-09-26T12:30:00.000Z",
@@ -163,7 +163,7 @@ describe("a job's times", () => {
         "2026-09-26T16:30:00.000Z",
       ]);
       expect(runTimes({ every: "day", at: "02:30" }, new Date("2026-09-26T00:00:00.000Z"), new Date("2026-09-27T00:00:00.000Z"))).toEqual([]);
-      // Sun 4 Apr 2027: 3:00am NZDT goes back to 2:00am NZST; 2:30am is one run.
+      // Sun 4 Apr 2027: 3:00am daylight time goes back to 2:00am standard time; 2:30am is one run.
       const back = iso(runTimes(hourly, new Date("2027-04-03T11:00:00.000Z"), new Date("2027-04-03T18:00:00.000Z")));
       expect(back).toHaveLength(6);
       expect(new Set(back).size).toBe(6);

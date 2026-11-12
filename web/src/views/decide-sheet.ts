@@ -103,7 +103,7 @@ export function openDecide(first: readonly string[], look: { answered?: boolean;
 /**
  * A wide window's Decide: the same view in the middle
  * pane, where the open card was, on the card put on top (a push, a link, an agent's tap) or the first open one. Its
- * The header's ‹ Your asks and Esc go back to the home screen, the last card answered is cheered where it was and then the home screen
+ * The header's ‹ Home and Esc go back to the home screen, the last card answered is cheered where it was and then the home screen
  * comes back by itself, and the keys answer as the open card's did.
  */
 export const pane = {
@@ -466,7 +466,7 @@ function decideView(first: readonly string[], look: { answered?: boolean; untilR
           rivet("asking", { tone: "agent", size: 40, className: "decide-face" }),
           h("div", { class: "decide-who" }, name, count),
           skip,
-          // The pane's way back is the header's ‹ Your asks (shell.ts).
+          // The pane's way back is the header's ‹ Home (shell.ts).
           inPane ? null : closeBtn,
         ),
         segsRow,
