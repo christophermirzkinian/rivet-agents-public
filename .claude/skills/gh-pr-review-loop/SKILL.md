@@ -127,7 +127,8 @@ no findings.
 - **Triage every finding in the main loop** against the code. This cannot be delegated.
   Reject false positives with a reason. Fix the class, not the instance.
 - **One push per round.** Triage the whole round, fix every accepted finding, push once,
-  then re-review the new head.
+  then re-review the new head. The repo's push queue may hold a second push inside a
+  round; its logged override is the way past.
 - **Two rounds, then triage by impact.** A round is one review of one head, counted from
   1. After about two rounds, fix and re-review *material* findings: auth or data
   exposure, a crash or broken core flow, an exploit, data loss, a CI or gate break,
