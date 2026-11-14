@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -6,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import * as runner from "./chat-runner.mjs";
 import { hasMedia, mediaFlag, mediaOf, readMedia, replyRecord, serverError, uploadClips } from "../bridge/lib/board-client.mjs";
 import { makeExec, readToken, resolveBin, serverOrigin } from "../bridge/lib/config.mjs";
+import { cardHoldPrs, definitiveRefusal, dropCardHold, holdForCard, isVideoCard } from "../bridge/lib/card-holds.mjs";
 import { HOLDS_FILE, readHolds, updateHolds } from "../bridge/lib/holds-file.mjs";
 import { isMergeHoldLabel, readMergeHolds } from "../bridge/lib/merge-holds.mjs";
 import { parseViewport, preflight } from "../bridge/lib/media-preflight.mjs";
@@ -51,6 +53,8 @@ export const USAGE = `Rivet's board, asks, replies and chats from the command li
                                              add a card (refused when the id exists, unless --replace)
   rivet card edit <id> [card flags] [--unset <field>]... [--json <file|->]
                                              change fields of a card; media flags replace its media
+                                             a video card about a PR (--pr, or a PR its title or ask names) holds
+                                             its merge in holds.json until the owner's yes on it (by hand: rivet unhold --card <id>)
   rivet card add|edit <id> --args -         the card flags as a JSON array of words on stdin, so a card's text
                                              never sits in the command's arguments
   rivet card drop <id>...                   remove cards
@@ -145,9 +149,11 @@ Card flags: --kind (default decision; a card is for what you must confirm or cho
                                              an "${HOLD_OPENING} …" comment, the PR made a draft, and the
                                              owner's hold on the server
   rivet unhold <pr> [--reason "<the owner's OK>"] [--repo owner/name]
-                                             drop the holds.json entries for the PR and the owner's hold on the server,
-                                             edit each hold comment to "Released …", leave the draft as it is, and
-                                             name any hold still left (exit 1 while one is)
+                                             drop the holds.json entries for the PR but a video card's (named; unhold --card
+                                             drops those) and the owner's hold on the server, edit each hold comment to
+                                             "Released …", leave the draft as it is, and name any hold still left (exit 1
+                                             while one is)
+  rivet unhold --card <id> [<pr>]           drop only video card <id>'s holds.json merge holds (on <pr>), and nothing else
 Writes take --if-match <version> (409 when the board, or for ask set, status and close the ask, or for status set and
   clear the status, moved on; status set --if-match 0 only creates).
 Ask stages: ${ASK_STAGES.join(", ")}. Other commands print JSON with --json.
@@ -443,6 +449,7 @@ export function parseArgs(argv) {
     else if (o.cmd === "chat" && o.sub === "send" && a === "--text") o.text = take();
     else if (o.cmd === "chat" && o.sub === "send" && a === "--text-file") o.textFile = take();
     else if ((o.cmd === "hold" || o.cmd === "unhold") && a === "--reason") o.fields.reason = take();
+    else if (o.cmd === "unhold" && a === "--card") o.fields.card = take();
     else if (o.cmd === "fix" && Object.hasOwn(FIX_FLAGS, a)) o.fields[FIX_FLAGS[/** @type {keyof typeof FIX_FLAGS} */ (a)]] = take();
     else if (a === "--repo" && (o.cmd === "hold" || o.cmd === "unhold" || o.cmd === "fix" || (o.cmd === "status" && o.sub === "key"))) {
       o.repo = take();
@@ -533,7 +540,13 @@ function check(o) {
     if (o.args.length < min || o.args.length > max) throw new UsageError(`${o.sub ? `${o.cmd} ${o.sub}` : o.cmd} takes ${what}`);
   };
   if (o.cmd === "board" || o.cmd === "replies") count(0, 0, "no arguments");
-  if (o.cmd === "hold" || o.cmd === "unhold") {
+  if (o.cmd === "unhold" && o.fields.card !== undefined) {
+    count(0, 1, "at most one PR number with --card");
+    if (o.args.length && !NUMBER_RE.test(o.args[0])) throw new UsageError("the PR is its number");
+    if (!isId(String(o.fields.card))) throw new UsageError("--card is a card id ([A-Za-z0-9._-]{1,100})");
+    if (o.fields.reason !== undefined) throw new UsageError("unhold --card takes no --reason: it edits no hold comment");
+    if (o.repo !== undefined) throw new UsageError("unhold --card takes no --repo: holds.json names no repository");
+  } else if (o.cmd === "hold" || o.cmd === "unhold") {
     count(1, 1, "one PR number");
     if (!NUMBER_RE.test(o.args[0])) throw new UsageError("the PR is its number");
     const reason = /** @type {string | undefined} */ (o.fields.reason);
@@ -1030,8 +1043,9 @@ async function hold(o, d) {
       () =>
         updateHolds(
           (holds) => {
-            // Only an open-ended entry is the same hold: one with an until lapses before the OK.
-            const there = holds.some((h) => Number(h.pr) === pr && h.until === undefined);
+            // Only an open-ended entry is the same hold: one with an until lapses before the OK, and a video card's
+            // goes with that card's yes.
+            const there = holds.some((h) => Number(h.pr) === pr && h.until === undefined && h.card === undefined);
             return { holds: there ? null : [...holds, { pr, reason }], result: [`merge hold on #${pr} ${there ? "already there" : "added"}`] };
           },
           { file: d.holdsFile },
@@ -1082,6 +1096,19 @@ async function hold(o, d) {
 
 /** @param {Parsed} o @param {Deps} d */
 async function unhold(o, d) {
+  if (o.fields.card !== undefined) {
+    const card = String(o.fields.card);
+    const prs = o.args.length ? [Number(o.args[0])] : undefined;
+    return steps(d, [
+      [
+        "holds.json",
+        () => {
+          const gone = dropCardHold(card, { file: d.holdsFile, prs });
+          return gone.length ? gone.map((n) => `removed video card ${card}'s merge hold on #${n}`) : [`no merge hold of video card ${card}${prs ? ` on #${prs[0]}` : ""}`];
+        },
+      ],
+    ]);
+  }
   const pr = Number(o.args[0]);
   const repo = holdRepo(o, d);
   const why = /** @type {string | undefined} */ (o.fields.reason);
@@ -1092,11 +1119,14 @@ async function unhold(o, d) {
       () =>
         updateHolds(
           (holds) => {
-            const gone = holds.filter((h) => Number(h.pr) === pr);
-            return {
-              holds: gone.length ? holds.filter((h) => !gone.includes(h)) : null,
-              result: gone.length ? [`removed merge hold on #${pr}`] : [`no entry for #${pr}`],
-            };
+            // A video card's hold is its card's to release (unhold --card), not the OK on another hold's.
+            const gone = holds.filter((h) => Number(h.pr) === pr && h.card === undefined);
+            const cards = [...new Set(holds.filter((h) => Number(h.pr) === pr && typeof h.card === "string").map((h) => String(h.card)))];
+            const lines = [
+              ...(gone.length ? [`removed merge hold on #${pr}`] : []),
+              ...cards.map((card) => `left video card ${card}'s merge hold on #${pr} (rivet unhold --card ${card})`),
+            ];
+            return { holds: gone.length ? holds.filter((h) => !gone.includes(h)) : null, result: lines.length ? lines : [`no entry for #${pr}`] };
           },
           { file: d.holdsFile },
         ),
@@ -1227,22 +1257,78 @@ async function card(o, d) {
     }
   }
   const c = await connect(d);
-  const ifMatch = await checkStanding(o, c, id, body);
+  const { ifMatch, card } = await checkStanding(o, c, id, body);
   const clips = hasMedia(o.media) ? await readMedia({ ...o.media, skipCorner: true }, (msg) => d.stderr(`rivet: ${msg}\n`)) : [];
   if (clips.length) {
     await uploadClips(clips, { origin: c.origin, token: c.token, fetch: d.fetch, log: (msg) => d.stderr(`${msg}\n`) });
     body.media = mediaOf(clips);
   }
-  const target = `/api/board/needs/${encodeURIComponent(id)}`;
-  if (o.sub === "add") {
-    const doc = await c.write("PUT", o.replace ? target : `${target}?create=only`, body, o.ifMatch).catch((err) => {
-      throw /\bhttp 409: card .* already exists/.test(err.message) ? new Error(`${err.message} (add --replace to overwrite it)`) : err;
-    });
-    done(o, d, `added card ${id}, version ${doc.version}`, doc);
-  } else {
-    const doc = await c.write("PATCH", target, body, ifMatch);
-    done(o, d, `edited card ${id}, version ${doc.version}`, doc);
+  // Judged on the card as it will stand: an edit may bring the video without the PR, or the PR without the video.
+  const whole = { ...card, ...body };
+  // Held before it is posted, so no merge slips between the card and the hold. A new video re-stamps the card's holds
+  // to it, so only a yes to the card showing it releases them.
+  /** @type {{ pr: number, added: boolean }[]} */
+  let held = [];
+  const write = randomUUID();
+  const brings = ["media", "pr", "repo", "title", "ask", "links"].some((field) => body[field] !== undefined);
+  if ((o.sub === "add" || brings) && isVideoCard(whole) && whole.kind !== UPDATE) {
+    const posted = { ...whole, id };
+    try {
+      held = holdForCard(posted, { file: d.holdsFile, now: d.now(), restamp: isVideoCard(body), write });
+    } catch (err) {
+      d.stderr(`rivet: the video card's merge hold on #${cardHoldPrs(posted).join(", #")} could not be written (${/** @type {Error} */ (err).message}); nothing posted\n`);
+      return 1;
+    }
+    if (!held.length && isVideoCard(posted) && typeof posted.pr === "number")
+      d.stderr(`rivet: card ${id} is about ${String(posted.repo)}#${posted.pr}: holds.json holds only ${defaultRepo() ?? "the main repo's (none is set in RIVET_REPOS)"} PRs, so no merge hold was placed\n`);
   }
+  const target = `/api/board/needs/${encodeURIComponent(id)}`;
+  // The board version the write returned, for the hold placed again once it lands.
+  /** @type {number | undefined} */
+  let landed;
+  try {
+    if (o.sub === "add") {
+      const doc = await c.write("PUT", o.replace ? target : `${target}?create=only`, body, o.ifMatch).catch((err) => {
+        throw /\bhttp 409: card .* already exists/.test(err.message) ? new Error(`${err.message} (add --replace to overwrite it)`) : err;
+      });
+      if (typeof doc?.version === "number") landed = doc.version;
+      done(o, d, `added card ${id}, version ${doc.version}`, doc);
+    } else {
+      const doc = await c.write("PATCH", target, body, ifMatch);
+      if (typeof doc?.version === "number") landed = doc.version;
+      done(o, d, `edited card ${id}, version ${doc.version}`, doc);
+    }
+  } catch (err) {
+    // Only a refusal takes the new hold back, and only while it is still this write's: a same-id writer that took it
+    // since owns it. A 409 may be a same-id add that posted on it, and a lost answer may have posted the card.
+    const added = held.filter((h) => h.added).map((h) => h.pr);
+    const status = Number(/^http (\d{3})\b/.exec(/** @type {Error} */ (err).message)?.[1]);
+    if (added.length && definitiveRefusal(status)) {
+      try {
+        dropCardHold(id, { file: d.holdsFile, prs: added, write });
+      } catch {}
+    } else if (added.length)
+      d.stderr(`rivet: the merge hold on #${added.join(", #")} is kept, as card ${id} may be up; if it is not: rivet unhold --card ${id}\n`);
+    // The write may have landed with its answer lost: placed again and re-stamped as if it had, so a stale yes taken
+    // during it cannot leave the video unheld.
+    if (held.length && isVideoCard(body) && !definitiveRefusal(status)) {
+      try {
+        holdForCard({ ...whole, id }, { file: d.holdsFile, now: d.now(), restamp: true, write });
+      } catch {}
+    }
+    throw err;
+  }
+  // Placed again and re-stamped once the write lands: a yes the bridge took during the write (to a video before this
+  // one, which a before-only video cannot tell apart, or after another writer's) never leaves this video unheld. Marked
+  // as this write's, so a same-id writer's refusal leaves it; skipped when a later write's version is recorded.
+  if (held.length && isVideoCard(body)) {
+    try {
+      held = holdForCard({ ...whole, id }, { file: d.holdsFile, now: d.now(), restamp: true, write, version: landed });
+    } catch (err) {
+      d.stderr(`rivet: card ${id} is up, but its merge hold could not be re-stamped after the write (${/** @type {Error} */ (err).message}); check holds.json for #${held.map((h) => h.pr).join(", #")}\n`);
+    }
+  }
+  for (const { pr } of held) d.stderr(`rivet: held #${pr} until the owner's yes on video card ${id} (holds.json)\n`);
   if (o.sub === "add" || body.replyTo !== undefined) await sayConversation(c, d, id, body);
   return 0;
 }
@@ -1295,7 +1381,7 @@ function checkShape(card) {
 
 /**
  * Checks the card's shape as the write leaves it. An edit reads the board first and writes against the version it read,
- * so a card changed meanwhile is not written unchecked; returns the version to write against.
+ * so a card changed meanwhile is not written unchecked; returns the version to write against and the card as it will stand.
  * @param {Parsed} o @param {Awaited<ReturnType<typeof connect>>} c @param {string} id @param {Record<string, unknown>} body
  */
 async function checkStanding(o, c, id, body) {
@@ -1307,11 +1393,11 @@ async function checkStanding(o, c, id, body) {
     const doc = await res.json();
     ifMatch ??= Number.isSafeInteger(doc?.version) ? String(doc.version) : undefined;
     const before = doc?.board?.needs?.find((/** @type {any} */ need) => need?.id === id);
-    if (!before) return ifMatch;
+    if (!before) return { ifMatch, card };
     card = Object.fromEntries(Object.entries({ ...before, ...body }).filter(([, value]) => value !== null));
   }
   checkShape(card);
-  return ifMatch;
+  return { ifMatch, card };
 }
 
 /**

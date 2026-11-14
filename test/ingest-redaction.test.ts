@@ -20,6 +20,48 @@ describe("redactText", () => {
       expect(redactText(text)).toBe(text);
   });
 
+  it("keeps a public post's link whole and still redacts a secret in its query, path or user", () => {
+    const links = [
+      "https://youtube.com/shorts/qT7vLm2pR9x",
+      "https://youtube.com/shorts/-kB3nD4wF5g",
+      "https://youtube.com/shorts/Xz8Wv6Ut4Sr",
+      "https://www.youtube.com/watch?v=qT7vLm2pR9x",
+      "https://youtu.be/Xz8Wv6Ut4Sr",
+      "https://www.youtube.com/@exampleapp/shorts",
+      "https://www.instagram.com/exampleapp/reel/Cx2mNp8Qr--/",
+      "https://www.instagram.com/reel/Cx2mNp8Qr--/",
+      "https://www.instagram.com/p/Cx2mNp8Qr--/",
+      "https://www.reddit.com/r/IndieDev/comments/1qwert7/",
+      "https://www.reddit.com/r/IndieDev/comments/1qwert7/a_physics_puzzle_game/",
+      "https://www.reddit.com/r/IndieDev/s/AbCdEf1234",
+      "https://www.tiktok.com/@exampleapp/video/7312345678901234567",
+      "https://vm.tiktok.com/ZMkpwRxyz/",
+      "https://apps.apple.com/au/app/example-app/id6478123456",
+      "https://play.google.com/store/apps/details?id=dev.example.app",
+    ];
+    // As the monitor's reply carried them: one to a line, after a word, and at a sentence's end.
+    const reply = `Here are the posts:\n${links.map((link) => `- ${link}`).join("\n")}\nWatch https://youtu.be/Xz8Wv6Ut4Sr.`;
+    expect(redactText(reply)).toBe(reply);
+    for (const link of links) expect(redactUrl(link)).toBe(link);
+    const query = `Zx8Qp2Lm7Rt4${"Vw9Ks3Nb"}`;
+    for (const text of [
+      `https://youtu.be/Xz8Wv6Ut4Sr?si=${query}`,
+      `https://youtube.com/shorts/qT7vLm2pR9x?token=${PASSWORD}`,
+      `https://www.instagram.com/reel/Cx2mNp8Qr--/?igsh=${query}`,
+      `https://youtube.com/shorts/qT7vLm2pR9x/${GH}`,
+      `https://youtube.com/shorts/${GH}`,
+      `https://www.instagram.com/${GH}/reel/Cx2mNp8Qr--/`,
+      `https://www.instagram.com/${query}/reel/Cx2mNp8Qr--/`,
+      `https://www.reddit.com/r/${query}/s/AbCdEf1234`,
+      `https://bob:${PASSWORD}@youtube.com/shorts/qT7vLm2pR9x`,
+    ]) {
+      expect(leaked(redactText(text))).toEqual([]);
+      expect(redactText(text)).not.toContain(query);
+    }
+    // A value under a secret's name goes, link-shaped or not.
+    expect(redactText("password: https://youtu.be/Xz8Wv6Ut4Sr")).not.toContain("Xz8Wv6Ut4Sr");
+  });
+
   it("redacts a token or a password, never longer than it was", () => {
     for (const text of [`gh api -H 'Authorization: Bearer ${GH}' /user failed`, `- step\n  DB password: ${PASSWORD}\n- next`, `token ${GH}`]) {
       const out = redactText(text);

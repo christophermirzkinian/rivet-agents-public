@@ -8,9 +8,12 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { DashError, dashRefusal, MAX_SAY_IMAGES, parseArgs, readPdf, sayBody } from "../../scripts/say.mjs";
+import { DashError, dashRefusal, holdSayCard, MAX_SAY_IMAGES, parseArgs, postSay, readPdf, sayBody } from "../../scripts/say.mjs";
+import { releaseForYes } from "../lib/card-holds.mjs";
 
 const SAY = fileURLToPath(new URL("../../scripts/say.mjs", import.meta.url));
+// A video card holds only the main repository's PRs: the first of RIVET_REPOS.
+process.env.RIVET_REPOS = "example-org/example-repo,example-org/other-repo";
 
 // Rivet's photos and video in his chat answer: say.mjs takes them by absolute path and sends their store shas.
 
@@ -229,4 +232,118 @@ test("say sends nothing when the message on stdin starts with --, and sends one 
   assert.equal(sent.code, 0);
   assert.equal(sent.stdout, "sent stub-1\n");
   assert.deepEqual(sent.posts, [{ url: "/api/bridge/say", body: { text: "Merged -- the gate was green", replyTo: "m1" } }]);
+});
+
+test("say --card with a video holds the merge of the PR the server stored on the card, and throws when it cannot", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "say-hold-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, "holds.json");
+  const video = { kind: "video", after: { sha256: "a".repeat(64), type: "video/mp4" } };
+  const needs = [
+    { id: "vc-1", title: "Menu redesign: crests", pr: 41, media: video },
+    { id: "vc-2", title: "OTHER", pr: 5, repo: "example-org/other-repo", media: video },
+  ];
+  /** @type {any[]} */
+  const reads = [];
+  const fetchFn = /** @type {typeof fetch} */ (async (url, init) => {
+    reads.push({ url, auth: /** @type {any} */ (init?.headers).authorization });
+    return new Response(JSON.stringify({ version: 1, board: { needs } }), { status: 200 });
+  });
+  const now = new Date("2026-11-14T03:00:00.000Z");
+  const o = { origin: "http://127.0.0.1:1", token: "t", fetch: fetchFn, file, now };
+  assert.deepEqual(await holdSayCard("vc-1", o), ["held #41 until the owner's yes on video card vc-1 (holds.json)"]);
+  assert.deepEqual(reads, [{ url: "http://127.0.0.1:1/api/board", auth: "Bearer t" }]);
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")).map((/** @type {any} */ h) => [h.pr, h.card, h.since]), [[41, "vc-1", now.toISOString()]]);
+  assert.deepEqual(await holdSayCard("vc-2", o), ["card vc-2 is about example-org/other-repo#5: holds.json holds only example-org/example-repo PRs, so no merge hold was placed"]);
+  await assert.rejects(holdSayCard("vc-9", o), /card vc-9 is not on the board/);
+  const down = /** @type {typeof fetch} */ (async () => new Response("{}", { status: 503 }));
+  await assert.rejects(holdSayCard("vc-1", { ...o, fetch: down }), /board read: http 503/);
+  assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).length, 1);
+});
+
+test("say --card with a video holds its PR before the post, moves the hold to the card the server names, and keeps it when unsure", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "say-pending-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const now = new Date("2026-11-14T03:00:00.000Z");
+  const hold = { pr: 41, text: "Menu redesign: crests", video: { sha256: "a".repeat(64), type: "video/mp4" } };
+  const media = { kind: "video", after: hold.video };
+  const read = (/** @type {string} */ file) => JSON.parse(fs.readFileSync(file, "utf8")).map((/** @type {any} */ h) => [h.pr, h.card]);
+  /**
+   * @param {(file: string) => Response | Promise<Response>} answer the POST's answer, given the holds file as it stands then
+   * @param {any[]} [needs]
+   */
+  async function post(answer, needs = [{ id: "vc-1", pr: 41, media }]) {
+    const file = path.join(fs.mkdtempSync(path.join(dir, "h-")), "holds.json");
+    /** @type {string[]} */
+    const lines = [];
+    /** @type {unknown[]} */
+    let atPost = [];
+    const fetchFn = /** @type {typeof fetch} */ (async (url) => {
+      if (String(url).endsWith("/api/bridge/say")) {
+        atPost = read(file);
+        return answer(file);
+      }
+      return new Response(JSON.stringify({ version: 1, board: { needs } }), { status: 200 });
+    });
+    const r = await postSay({ text: hold.text, card: true }, { origin: "http://127.0.0.1:1", token: "t", fetch: fetchFn, file, now, hold, out: (l) => lines.push(`out ${l}`), err: (l) => lines.push(`err ${l}`) });
+    return { ...r, lines, atPost, held: fs.existsSync(file) ? read(file) : [] };
+  }
+  const ok = (/** @type {unknown} */ doc) => () => new Response(JSON.stringify(doc), { status: 200 });
+
+  const sent = await post(ok({ id: "m1", card: "vc-1" }));
+  assert.equal(sent.code, 0);
+  assert.equal(sent.atPost.length, 1);
+  assert.match(String(/** @type {any[]} */ (sent.atPost[0])[1]), /^say-pending-[0-9a-f-]{36}$/);
+  assert.deepEqual(sent.held, [[41, "vc-1"]]);
+  assert.deepEqual(sent.lines, ["out sent m1", "err held #41 until the owner's yes on video card vc-1 (holds.json)"]);
+
+  // A PR the server found itself is held beside it.
+  const found = await post(ok({ id: "m1", card: "vc-1" }), [{ id: "vc-1", pr: 41, ask: "and PR #42", media }]);
+  assert.deepEqual(found.held, [[41, "vc-1"], [42, "vc-1"]]);
+
+  // A refusal takes the provisional hold back; an unsure answer keeps it.
+  const refused = await post(() => new Response(JSON.stringify({ error: "bad reply" }), { status: 400 }));
+  assert.deepEqual([refused.code, refused.posted, refused.held], [1, false, []]);
+  assert.deepEqual(refused.lines, ["err http 400: bad reply"]);
+  for (const answer of [() => new Response("{}", { status: 503 }), () => new Response("{}", { status: 409 }), () => Promise.reject(new Error("socket hang up"))]) {
+    const unsure = await post(answer);
+    assert.equal(unsure.code, 1);
+    assert.equal(unsure.held.length, 1);
+    assert.match(unsure.lines.join("\n"), /the merge hold on #41 is kept, as the card may be up \(if it is not: rivet unhold --card say-pending-[0-9a-f-]{36}\)/);
+  }
+
+  // Posted, but the board cannot be read: the hold stays, under the card's id, and say fails loudly.
+  const blind = await post(ok({ id: "m1", card: "vc-1" }), []);
+  assert.deepEqual([blind.code, blind.posted, blind.held], [1, true, [[41, "vc-1"]]]);
+  assert.match(blind.lines.at(-1) ?? "", /^err WARNING a PR the server found on video card vc-1 may not be held \(card vc-1 is not on the board\): #41 is held until his yes \(by hand: rivet unhold --card vc-1\); tell the monitor$/);
+  // No card named: the provisional hold stays.
+  const nameless = await post(ok({ id: "m1" }));
+  assert.equal(nameless.code, 1);
+  assert.match(String(nameless.held[0][1]), /^say-pending-/);
+  assert.match(nameless.lines.at(-1) ?? "", /WARNING the server named no card .* after it, rivet unhold --card say-pending-[0-9a-f-]{36}$/);
+
+  // A hold that cannot be written sends nothing.
+  const bad = path.join(dir, "bad.json");
+  fs.writeFileSync(bad, "[{\"pr\": 1}]");
+  let posts = 0;
+  const r = await postSay({ text: "x", card: true }, { origin: "http://127.0.0.1:1", token: "t", fetch: /** @type {typeof fetch} */ (async () => (posts++, new Response("{}"))), file: bad, now, hold, out: () => {}, err: () => {} });
+  assert.deepEqual([r.code, r.posted, posts], [1, false, 0]);
+});
+
+test("say does not hold again a PR his yes released between the post and the board read; one the server found is held", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "say-race-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, "holds.json");
+  const now = new Date("2026-11-14T03:00:00.000Z");
+  const hold = { pr: 41, text: "Menu redesign: crests", video: { sha256: "a".repeat(64), type: "video/mp4" } };
+  const needs = [{ id: "vc-1", pr: 41, ask: "and PR #42", media: { kind: "video", after: hold.video } }];
+  const fetchFn = /** @type {typeof fetch} */ (async (url) => {
+    if (String(url).endsWith("/api/bridge/say")) return new Response(JSON.stringify({ id: "m1", card: "vc-1" }), { status: 200 });
+    // The bridge takes his yes on the card before the board read answers.
+    assert.deepEqual(releaseForYes({ itemId: "vc-1", at: "2026-11-14T03:00:01.000Z", decision: "approve", item: { pr: 41, video: hold.video } }, { file }).released, [41]);
+    return new Response(JSON.stringify({ version: 1, board: { needs } }), { status: 200 });
+  });
+  const r = await postSay({ text: hold.text, card: true }, { origin: "http://127.0.0.1:1", token: "t", fetch: fetchFn, file, now, hold, out: () => {}, err: () => {} });
+  assert.deepEqual([r.code, r.posted], [0, true]);
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")).map((/** @type {any} */ h) => [h.pr, h.card]), [[42, "vc-1"]]);
 });

@@ -398,8 +398,11 @@ export function filesSentence(id, files) {
  * @param {GithubResult | undefined} github
  * @param {Route} route
  * @param {Attachment[]} [attachments] the reply's images, in order, as the bridge saved them
+ * @param {string} [tail] text the bridge ends the line with (a merge-hold release); its room is kept back before the
+ *   owner's note is fitted, so a cut note keeps its recovery instruction
  */
-export function chatLine(reply, github, route, attachments = []) {
+export function chatLine(reply, github, route, attachments = [], tail = "") {
+  const max = MAX_LINE - Array.from(tail).length;
   let line = `Rivet app — owner decision on card [${reply.itemId}]: ${chatDecision(reply)}.${changesSentence(reply)}${revisionSentence(reply)}${choiceDetailSentence(reply)}`;
   // Routing, repo and GitHub context come before the owner's note and the card
   // text, so a line truncated at MAX_LINE only ever loses the variable text.
@@ -414,7 +417,7 @@ export function chatLine(reply, github, route, attachments = []) {
   const cut = ` The owner's note was cut to fit this line; read it whole with: node ~/.rivet-agents/app/scripts/push-board.mjs --verify ${reply.id}.`;
   const wrapper = Array.from(" Owner's note: \"\".").length;
   const whole = reply.text === undefined ? undefined : field(reply.text, Infinity);
-  const noteRoom = MAX_LINE - Array.from(line + attached).length - wrapper;
+  const noteRoom = max - Array.from(line + attached).length - wrapper;
   // When paths exhaust the budget, the recovery instruction must precede them or the final cap would erase it too.
   const earlyNotice = whole !== undefined && Array.from(whole).length > noteRoom && noteRoom < Array.from(cut).length + 1;
   if (earlyNotice) line += cut;
@@ -423,12 +426,12 @@ export function chatLine(reply, github, route, attachments = []) {
     // Paths come first and are long, so the note gets what room is left. A note that has to be cut says so and where
     // the whole one is, rather than ending mid-condition as if that were all of it.
     // The card's title follows and gives way first; the one character kept back is the "…" a cut line ends with.
-    const room = MAX_LINE - Array.from(line).length - wrapper;
+    const room = max - Array.from(line).length - wrapper;
     if (Array.from(whole ?? "").length <= room) line += ` Owner's note: "${whole}".`;
     else line += ` Owner's note: "${field(reply.text, Math.max(0, room - Array.from(cut).length - 1))}".${cut}`;
   }
   line += cardTitle(reply);
-  return sanitizeLine(line);
+  return `${sanitizeLine(line, max)}${tail}`;
 }
 
 /**

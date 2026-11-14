@@ -198,6 +198,45 @@ describe("POST /api/replies", () => {
     }
   });
 
+  it("records the comparison a merge hold is bound to on a video card's reply, and the links on every card's", async () => {
+    const mp4 = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from("ftypisom"), Buffer.alloc(120, 7)]);
+    const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(120, 1)]);
+    const shaOf = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
+    for (const [bytes, type] of [[mp4, "video/mp4"], [png, "image/png"]] as const) {
+      const put = await fetch(`${server.base}/api/bridge/media/${shaOf(bytes)}`, { method: "PUT", headers: { ...bearer(BOARD_TOKEN), "content-type": type }, body: new Uint8Array(bytes) });
+      expect(put.status).toBe(201);
+    }
+    const cases = [
+      { kind: "video", after: { sha256: shaOf(mp4), type: "video/mp4" } },
+      { kind: "stills", stills: [{ sha256: shaOf(png), type: "image/png" }] },
+      { kind: "video", before: { sha256: shaOf(mp4), type: "video/mp4" } },
+      { kind: "video", before: { sha256: shaOf(png), type: "image/png" }, after: { sha256: shaOf(mp4), type: "video/mp4" } },
+      { kind: "video", before: { sha256: shaOf(mp4), type: "video/mp4" }, after: { sha256: shaOf(png), type: "image/png" } },
+      undefined,
+    ] as const;
+    const { validateReply } = (await import("../bridge/lib/validate.mjs" as string)) as { validateReply(reply: unknown): { ok: boolean } };
+    for (const [n, media] of cases.entries()) {
+      const board = structuredClone(REPLY_BOARD) as Board;
+      board.needs[0]!.options = [{ label: "Ship it", recommended: true }, { label: "Change it", text: true }];
+      board.needs[0]!.links = [{ label: "PR", url: "https://github.com/example-org/example-repo/pull/41", primary: true }];
+      if (media) board.needs[0]!.media = media as never;
+      else delete board.needs[0]!.media;
+      expect((await putBoard(server.base, board)).status).toBe(200);
+      const response = await postReply({ clientId: `client-video-${n}`, itemId: board.needs[0]!.id, decision: "choice", choice: "Ship it" });
+      expect(response.status).toBe(201);
+      const reply = (await response.json()) as Reply;
+      // The comparison a merge hold is bound to, on a card with a video: the after media `+` the before media.
+      const m = media as { after?: { sha256: string; type: string }; before?: { sha256: string; type: string } } | undefined;
+      const hasVideo = [m?.after, m?.before].some((clip) => clip?.type.startsWith("video/"));
+      expect(reply.item.videoSha).toBe(hasVideo ? [m?.after, m?.before].flatMap((clip) => (clip ? [clip.sha256] : [])).join("+") : undefined);
+      // Links on every card, as shown: a video card's merge hold may be on a PR only a link names.
+      expect(reply.item.links).toEqual([{ label: "PR", url: "https://github.com/example-org/example-repo/pull/41" }]);
+      expect(validateReply(reply)).toMatchObject({ ok: true });
+      const listed = (await (await fetch(`${server.base}/api/replies?limit=10`, { headers: bearer(BOARD_TOKEN) })).json()) as { replies: Reply[] };
+      expect(listed.replies.find((item) => item.id === reply.id)?.item.videoSha).toBe(reply.item.videoSha);
+    }
+  });
+
   it("omits missing or malformed legacy option details without refusing the answer", async () => {
     const validatePath = "../bridge/lib/validate.mjs";
     const { validateReply } = (await import(validatePath)) as { validateReply(reply: unknown): { ok: boolean } };

@@ -96,10 +96,11 @@ async function closingHolds({ repo, pr, view, closes, gh, shown }) {
  * `shown` gives a text as its hold line may be shown: the bridge passes its redactor here, as this file does not import it. For an open PR, `closing` lists the refusals for the other open pull requests a closing keyword in
  * its squash text names (closingHolds; `closes` lists the ones whose close is meant), apart from the holds: they stop
  * the merge only, and change when another PR does. `squashTitle` is the title the merge request must set; null unless
- * the PR is open. `forMerge: false` skips that merge-only read, for a caller that only wants the holds.
- * @param {{repo: string, pr: number, gh: (args: string[]) => Promise<string>, holdsFile?: string, now?: number, shown?: (text: string) => string, closes?: number[], rngStop?: string, forMerge?: boolean}} options
+ * the PR is open. `forMerge: false` skips that merge-only read, for a caller that only wants the holds. `ignoreCard`
+ * leaves out that video card's own holds.json holds.
+ * @param {{repo: string, pr: number, gh: (args: string[]) => Promise<string>, holdsFile?: string, now?: number, shown?: (text: string) => string, closes?: number[], rngStop?: string, forMerge?: boolean, ignoreCard?: string}} options
  */
-export async function readMergeHolds({ repo, pr, gh, holdsFile, now, shown, closes = [], forMerge = true }) {
+export async function readMergeHolds({ repo, pr, gh, holdsFile, now, shown, closes = [], forMerge = true, ignoreCard }) {
   const root = `repos/${repo}`;
   const json = async (/** @type {string} */ route) => JSON.parse(await gh(["api", `${root}/${route}`]));
   const view = await json(`pulls/${pr}`);
@@ -136,6 +137,6 @@ export async function readMergeHolds({ repo, pr, gh, holdsFile, now, shown, clos
   if (line !== null) holds.push(`PR text: ${shown ? (holdLines(live.map((text) => shown(String(text ?? "")))) ?? "[redacted]") : line}`);
   const { closing, squashTitle } = view.state === "open" && forMerge ? await closingHolds({ repo, pr, view, closes, gh, shown }) : { closing: [], squashTitle: null };
   // Read after the last await, so a hold written during the lookups still holds the merge.
-  holds.push(...fileHolds(pr, { file: holdsFile, now: now ?? Date.now() }));
+  holds.push(...fileHolds(pr, { file: holdsFile, now: now ?? Date.now(), ignoreCard }));
   return { holds, closing, squashTitle, texts, comments, view, labels: view.labels.map((/** @type {any} */ l) => l.name) };
 }

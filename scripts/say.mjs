@@ -1,15 +1,19 @@
 #!/usr/bin/env node
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { documentName, MAX_MEDIA_BYTES, readClip, uploadClips } from "../bridge/lib/board-client.mjs";
+import { definitiveRefusal, dropCardHold, holdForCard, isVideoCard, rekeyCardHold } from "../bridge/lib/card-holds.mjs";
 import { makeExec, readToken, resolveBin, serverOrigin } from "../bridge/lib/config.mjs";
 import { folderRepo, prRepo } from "../bridge/lib/folder-repo.mjs";
+import { HOLDS_FILE } from "../bridge/lib/holds-file.mjs";
 import { preflight } from "../bridge/lib/media-preflight.mjs";
 import { sanitizeLine } from "../bridge/lib/templates.mjs";
 import { isId } from "../bridge/lib/validate.mjs";
+import { defaultRepo } from "../src/shared/repos.ts";
 
 const REPO_RE = /^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/;
 
@@ -40,7 +44,9 @@ and one line in the conversation that opens it ("Card: <title> >"); a --tag or
 it. Nor does an answer to you go as an update card: the board refuses an update
 card that answers one of your messages. --pr <n> (with --repo <owner/name>, or
 the working folder's repo when that is left off) names the PR it is about, and
-your yes is that PR's decision of record.
+your yes is that PR's decision of record. A --card with a --video about a PR of
+the main repo (the first of RIVET_REPOS) holds that PR's merge in holds.json from
+the moment it is posted until your yes on it (by hand: rivet unhold --card <id>).
 
 --reply-to <id> --ack "<words>" sets the status line on your message
 ("Rivet: building it · ~9:45") instead of posting a bubble: no unread, no push.
@@ -214,6 +220,105 @@ export function readPdf(file) {
   return readClip(file, { ".pdf": "application/pdf" });
 }
 
+/**
+ * Holds the merge of the PR a posted video card is about, as the server stored it (it may have found the PR itself),
+ * beside the PRs already `held` for it, which it leaves as they are: his yes may have released one since. Returns the
+ * lines to print; throws when the board cannot be read or the hold cannot be written.
+ * @param {string} cardId @param {{ origin: string, token: string, fetch: typeof fetch, file?: string, now?: Date, held?: number[] }} o
+ * @returns {Promise<string[]>}
+ */
+export async function holdSayCard(cardId, { origin, token, fetch: fetchFn, file = HOLDS_FILE, now, held = [] }) {
+  const res = await fetchFn(`${origin}/api/board`, { headers: { authorization: `Bearer ${token}` }, redirect: "error", signal: AbortSignal.timeout(30_000) });
+  if (!res.ok) throw new Error(`board read: http ${res.status}`);
+  const doc = await res.json();
+  const need = doc?.board?.needs?.find((/** @type {any} */ n) => n?.id === cardId);
+  if (!need) throw new Error(`card ${cardId} is not on the board`);
+  const prs = [...held, ...holdForCard(need, { file, now, skip: held }).map(({ pr }) => pr)];
+  if (prs.length) return prs.map((pr) => `held #${pr} until the owner's yes on video card ${cardId} (holds.json)`);
+  if (isVideoCard(need) && typeof need.pr === "number") return [`card ${cardId} is about ${String(need.repo)}#${need.pr}: holds.json holds only ${defaultRepo() ?? "the main repo's (none is set in RIVET_REPOS)"} PRs, so no merge hold was placed`];
+  return [];
+}
+
+/**
+ * Posts the say body. A --card with a video (`hold`) holds its PR's merge first, under a provisional id moved to the
+ * card the server names, so no merge slips between the card and its hold; whatever goes wrong after, the hold stays.
+ * Lines go to `out` and `err`; `posted` is whether the message went up.
+ * @param {Record<string, unknown>} body
+ * @param {{ origin: string, token: string, fetch: typeof fetch, file?: string, now?: Date, out: (line: string) => void,
+ *   err: (line: string) => void, hold?: { pr?: number, repo?: string, text: string, video: { sha256: string, type: string } } }} o
+ * @returns {Promise<{ code: number, posted: boolean }>}
+ */
+export async function postSay(body, { origin, token, fetch: fetchFn, file = HOLDS_FILE, now = new Date(), out, err, hold }) {
+  const why = (/** @type {unknown} */ e) => sanitizeLine(/** @type {Error} */ (e).message, 200);
+  const pending = `say-pending-${randomUUID()}`;
+  /** @type {number[]} */
+  let held = [];
+  if (hold) {
+    const card = { id: pending, pr: hold.pr, repo: hold.repo, title: hold.text, ask: hold.text, media: { kind: "video", after: hold.video } };
+    try {
+      held = holdForCard(card, { file, now }).map(({ pr }) => pr);
+    } catch (e) {
+      err(`the video card's merge hold could not be written (${why(e)}); nothing was sent`);
+      return { code: 1, posted: false };
+    }
+  }
+  const prs = `#${held.join(", #")}`;
+  const unhold = `rivet unhold --card ${pending}`;
+  const kept = held.length ? `; the merge hold on ${prs} is kept, as the card may be up (if it is not: ${unhold})` : "";
+  const drop = () => {
+    if (!held.length) return "";
+    try {
+      dropCardHold(pending, { file });
+      return "";
+    } catch (e) {
+      return `; the merge hold on ${prs} could not be taken back (${why(e)}): ${unhold}`;
+    }
+  };
+  let res;
+  try {
+    res = await fetchFn(`${origin}/api/bridge/say`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify(body),
+      redirect: "error",
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch (e) {
+    err(`${why(e)}${kept}`);
+    return { code: 1, posted: false };
+  }
+  if (!res.ok) {
+    const doc = await res.json().catch(() => null);
+    const line = `http ${res.status}${typeof doc?.error === "string" ? `: ${sanitizeLine(doc.error, 200)}` : ""}`;
+    err(`${line}${definitiveRefusal(res.status) ? drop() : kept}`);
+    return { code: 1, posted: false };
+  }
+  const doc = await res.json().catch(() => null);
+  out(`sent ${typeof doc?.id === "string" ? sanitizeLine(doc.id, 100) : ""}`);
+  if (!hold) return { code: 0, posted: true };
+  if (typeof doc?.card !== "string") {
+    if (!held.length) return { code: 0, posted: true };
+    err(`WARNING the server named no card for the video, so the merge hold on ${prs} stays under ${pending}: his yes will not release it; after it, ${unhold}`);
+    return { code: 1, posted: true };
+  }
+  const cardId = sanitizeLine(doc.card, 100);
+  if (held.length) {
+    try {
+      rekeyCardHold(pending, doc.card, { file });
+    } catch (e) {
+      err(`WARNING the merge hold on ${prs} stays under ${pending}, not video card ${cardId} (${why(e)}): his yes will not release it; after it, ${unhold}`);
+      return { code: 1, posted: true };
+    }
+  }
+  try {
+    for (const line of await holdSayCard(doc.card, { origin, token, fetch: fetchFn, file, now, held })) err(line);
+  } catch (e) {
+    err(`WARNING a PR the server found on video card ${cardId} may not be held (${why(e)}): ${held.length ? `${prs} is held until his yes (by hand: rivet unhold --card ${cardId})` : "no merge hold was written"}; tell the monitor`);
+    return { code: 1, posted: true };
+  }
+  return { code: 0, posted: true };
+}
+
 async function readStdin() {
   const chunks = [];
   let size = 0;
@@ -281,20 +386,16 @@ async function main() {
   const origin = serverOrigin(process.env.RIVET_URL || undefined);
   const token = await readToken(exec, "RIVET_BOARD_TOKEN");
   await uploadClips(clips, { origin, token, fetch, log: (msg) => process.stderr.write(`say: ${msg}\n`) });
-  const res = await fetch(`${origin}/api/bridge/say`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-    body: JSON.stringify(sayBody(text, o.replyTo, clips, { new: o.new, title: o.title, card: o.card, pr: o.pr, repo: o.repo, tag: o.tag, thread: o.thread, ack: o.ack })),
-    redirect: "error",
-    signal: AbortSignal.timeout(30_000),
+  const video = o.card ? clips.find((clip) => clip.role === "video") : undefined;
+  const { code, posted } = await postSay(sayBody(text, o.replyTo, clips, { new: o.new, title: o.title, card: o.card, pr: o.pr, repo: o.repo, tag: o.tag, thread: o.thread, ack: o.ack }), {
+    origin,
+    token,
+    fetch,
+    out: (line) => process.stdout.write(`${line}\n`),
+    err: (line) => process.stderr.write(`say: ${line}\n`),
+    ...(video ? { hold: { pr: o.pr, repo: o.repo, text, video: { sha256: video.sha256, type: video.type } } } : {}),
   });
-  if (!res.ok) {
-    const doc = await res.json().catch(() => null);
-    return fail(`http ${res.status}${typeof doc?.error === "string" ? `: ${sanitizeLine(doc.error, 200)}` : ""}`);
-  }
-  const doc = await res.json().catch(() => null);
-  process.stdout.write(`sent ${typeof doc?.id === "string" ? sanitizeLine(doc.id, 100) : ""}\n`);
-  return 0;
+  return code;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(fs.realpathSync(process.argv[1])).href) {

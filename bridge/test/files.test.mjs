@@ -221,3 +221,14 @@ test("a note of many short lines, longer once its line breaks are folded, still 
   assert.ok(Array.from(line).length <= MAX_LINE);
   assert.match(line, /The owner's note was cut to fit this line; read it whole with: node ~\/\.rivet-agents\/app\/scripts\/push-board\.mjs --verify r_lines\./);
 });
+
+test("a tail the bridge adds (a merge-hold release) gets its room before the note is fitted, so a cut note keeps its recovery instruction", () => {
+  const files = Array.from({ length: 4 }, (_, i) => ({ sha256: String(i).repeat(64), name: `${"a".repeat(90)}${i}.pdf`, type: "application/pdf", bytes: 10 }));
+  const attachments = Array.from({ length: 10 }, (_, i) => ({ path: path.join(os.homedir(), ".rivet-agents", "bridge", "images", `${String(i).repeat(64)}.jpg`) }));
+  const note = `${"Read the brief first. ".repeat(180)}staging only; do not deploy production.`;
+  const tail = " PR #31 is still held: his yes answered another video of card vc-1; the hold waits for his answer on the card as it is now.".repeat(3);
+  const line = chatLine(reply({ id: "r_tail", decision: "approve", text: note, files }), undefined, { target: "rivet", chat: "monitor", reason: "relay" }, attachments, tail);
+  assert.match(line, /The owner's note was cut to fit this line; read it whole with: node ~\/\.rivet-agents\/app\/scripts\/push-board\.mjs --verify r_tail\./);
+  assert.ok(line.endsWith(tail));
+  assert.ok(Array.from(line).length <= MAX_LINE);
+});

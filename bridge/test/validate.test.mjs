@@ -30,6 +30,22 @@ test("keeps only known fields", () => {
   assert.equal("extra" in v.reply, false);
 });
 
+test("keeps the answered revision's after video and links, which a video card's merge hold is bound to; drops malformed ones", () => {
+  const video = { sha256: "a".repeat(64), type: "video/mp4" };
+  const links = [{ label: "PR", url: "https://github.com/example-org/example-repo/pull/41", extra: 1 }];
+  const v = validateReply(reply({}, { video: { ...video, extra: 1 }, videoSha: "b".repeat(64), links }));
+  assert.deepEqual([v.reply.item.video, v.reply.item.videoSha, v.reply.item.links], [video, "b".repeat(64), [{ label: links[0].label, url: links[0].url }]]);
+  assert.equal(validateReply(reply({}, { videoSha: "B".repeat(64) })).reply.item.videoSha, undefined);
+  // A comparison: the after video `+` the before media.
+  assert.equal(validateReply(reply({}, { videoSha: `${"b".repeat(64)}+${"c".repeat(64)}` })).reply.item.videoSha, `${"b".repeat(64)}+${"c".repeat(64)}`);
+  assert.equal(validateReply(reply({}, { videoSha: `${"b".repeat(64)}+` })).reply.item.videoSha, undefined);
+  for (const bad of [{ sha256: "abc", type: "video/mp4" }, { sha256: video.sha256, type: "image/png" }, "x", null]) {
+    const w = validateReply(reply({}, { video: bad, links: [{ label: 1 }] }));
+    assert.equal(w.ok, true);
+    assert.deepEqual([w.reply.item.video, w.reply.item.links], [undefined, undefined]);
+  }
+});
+
 test("accepts any well-formed repo and null optional fields", () => {
   for (const repo of ["example-org/example-repo", "example-org/other-repo", "someone/else"]) {
     assert.equal(validateReply(reply({}, { repo })).ok, true);

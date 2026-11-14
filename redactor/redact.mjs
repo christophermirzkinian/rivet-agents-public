@@ -232,16 +232,44 @@ function nameLike(segment) {
 }
 
 /**
+ * A public post's link up to its query, on its own host's path shape: a YouTube video or Short, an Instagram reel or
+ * post, a Reddit share link and a TikTok short link. Its id (`ID`) is a name by design, which the shape check reads as
+ * a key (`qT7vLm2pR9x`); each id has its host's own length, 12 characters at most, so no credential fits one. Only the
+ * id is spared: the run is matched whole, and the rest of it (an account, a subreddit) is still read as any path is.
+ */
+const PUBLIC_POST = new RegExp(
+  "^(?://)?(?:" +
+    [
+      "(?:www\\.|m\\.)?youtube\\.com/(?:shorts|embed|live)/[A-Za-z0-9_-]{11}",
+      "youtu\\.be/[A-Za-z0-9_-]{11}",
+      "(?:www\\.)?instagram\\.com/(?:[A-Za-z0-9._]{1,30}/)?(?:p|reels?|tv)/[A-Za-z0-9_-]{10,12}",
+      "(?:www\\.|old\\.)?reddit\\.com/r/[A-Za-z0-9_]{2,21}/s/[A-Za-z0-9]{10}",
+      "(?:vm|vt)\\.tiktok\\.com/[A-Za-z0-9]{8,10}",
+      "(?:www\\.)?tiktok\\.com/t/[A-Za-z0-9]{8,10}",
+    ].join("|") +
+    ")/?\\.?$",
+);
+/** A public post's id at the end of its run (`PUBLIC_POST`), with the `/` and `.` that may follow it. */
+const ID = /\/[A-Za-z0-9_-]{8,12}\/?\.?$/;
+/**
+ * What may follow a public post's link: its query or fragment, read as their own runs, or the end of a word, after
+ * closing marks (a bracket, a brace, a quote, curly ones too, a full stop). A `%`, `~` or other path character goes on with the path (`…/shorts/AKIA…%34…`), so the link
+ * is not one.
+ */
+const LINK_END = /^(?:[?#]|[)\]}>"'`*,;:!.\u2019\u201d\u00bb]*(?:\s|$))/;
+
+/**
  * A token is safe only when every `/` segment reads as a name, no part is a
  * secret candidate, and its mixed-case parts joined are not one either.
  * Otherwise the whole token goes, so neither a leading `/` or `./` nor slashes
  * that cut a secret into name-sized pieces can clear it. pnpm shortens a long
  * store folder name with `_` and a 26-character base32 hash, which is dropped
- * before the check.
- * @param {string} token
+ * before the check. A public post's id is spared when its link ends the run (`PUBLIC_POST`, `LINK_END`).
+ * @param {string} token @param {string} [after] what follows the run
  */
-function looksSecret(token) {
+function looksSecret(token, after = "") {
   if (token.includes("[redacted")) return false;
+  if (PUBLIC_POST.test(token) && LINK_END.test(after)) token = token.replace(ID, "");
   const segments = token.split("/").map((segment, i, all) => (all[i - 1] === ".pnpm" ? segment.replace(/_[a-z2-7]{26}$/, "") : segment)).filter(Boolean);
   if (segments.flatMap(partsOf).some(candidate)) return true;
   const capitalParts = segments.filter((segment) => !FILE_EXT.test(segment)).flatMap(partsOf).filter((part) => /[A-Z]/.test(part) && !/^[A-Z]+$/.test(part));
@@ -722,7 +750,7 @@ function inspectEscapes(line, context = null, home = "", options = {}) {
         // separator. Any newly masked character that was published is a leak.
         if (display.exposed.some((one, i) => one && !masked.exposed[i]) ||
             [...visible.matchAll(/[A-Za-z0-9+/_.@-]{16,}={0,2}/g)].some((match) =>
-              looksSecret(match[0]) && display.exposed.slice(match.index, match.index + match[0].length).some(Boolean))) result = Math.max(result, 1);
+              looksSecret(match[0], visible.slice(match.index + match[0].length)) && display.exposed.slice(match.index, match.index + match[0].length).some(Boolean))) result = Math.max(result, 1);
         // An address the decoded reading shows and the line as written does not, published in part.
         // Counted, not only named: the same address written plainly elsewhere on the line shows no more of this one.
         const extra = new Map();
@@ -921,7 +949,7 @@ function display(line, home, max) {
 /** @param {string} out a displayed line @param {number} max */
 function scrub(out, max) {
   for (const [pattern, replacement] of RULES) out = out.replace(pattern, /** @type {any} */ (replacement));
-  out = out.replace(/[A-Za-z0-9+/_.@-]{16,}={0,2}/g, (token) => (looksSecret(token) ? "[redacted]" : token));
+  out = out.replace(/[A-Za-z0-9+/_.@-]{16,}={0,2}/g, (token, at, all) => (looksSecret(token, all.slice(at + token.length)) ? "[redacted]" : token));
   return clipUnits(out, max);
 }
 

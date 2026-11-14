@@ -135,7 +135,8 @@ no findings.
   something the owner mandated. *Low-impact* findings (edge-case hardening, style, minor
   cleanup, speculative scenarios) are recorded `noted: <reason>`, with no issue, and the
   PR goes to the gate. A material finding left unfixed is filed and recorded
-  `deferred: #N`.
+  `deferred: #N`. After about two rounds, ship the core fix and move the extras
+  the rounds turned up (scope past the ask) to one follow-up issue.
 - **Standard tier from round 3:** review the fix diff only (`git diff <last reviewed
   head>..HEAD`), rank every lens's findings together, most severe first, and fix at most
   3. The rest are filed or noted as above. The one exception is a finding in a high-tier

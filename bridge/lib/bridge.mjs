@@ -24,6 +24,8 @@ import { defaultRepo, isRepo, repoAllowlist } from "../../src/shared/repos.ts";
 export const TIMEOUTS = Object.freeze({ gh: 30_000, http: 15_000, prHolds: 60_000 });
 /** A pick-up older than this is left for the server's next tick, which reads the item again. */
 const PICKUP_STALE_MS = 9 * 60_000;
+/** At most this many PRs named in the line a card answer's hold release adds; the rest are counted. */
+const MAX_HOLD_LINES = 3;
 export const IDLE_MS = 45_000;
 export const BACKOFF_MIN_MS = 1_000;
 export const BACKOFF_MAX_MS = 30_000;
@@ -76,6 +78,7 @@ export function backoffDelay(attempt, random = Math.random) {
  *   now?: () => Date, idleMs?: number, listRetryMs?: readonly number[], holdWaitMs?: number, holdPollMs?: number,
  *   prHolds?: (repo: string, pr: number) => Promise<string[]>,
  *   actions?: readonly import("./actions/index.mjs").ActionFamily[],
+ *   releaseCardHold?: (reply: Reply) => { released: number[], kept: { pr: number, card: string, why?: string }[] },
  *   onConnected?: () => void,
  * }} BridgeDeps
  */
@@ -402,6 +405,35 @@ export function createBridge(deps) {
       }
     }
 
+    // His yes on a video card releases the merge hold its posting placed (card-holds.mjs), before the ack: a merge-ready
+    // card's merge starts only after it. A replay finds nothing left to release.
+    let released = "";
+    if (deps.releaseCardHold) {
+      try {
+        const { released: prs, kept } = deps.releaseCardHold(reply);
+        if (prs.length) {
+          log("card-hold-released", { id: reply.id, itemId: reply.itemId, prs });
+          const named = prs.slice(0, MAX_HOLD_LINES).map((pr) => `PR #${pr}`).join(", ");
+          released = ` His yes released the video-card merge hold on ${named}${prs.length > MAX_HOLD_LINES ? ` and ${prs.length - MAX_HOLD_LINES} more PRs` : ""}.`;
+        }
+        if (kept.length) log("card-hold-kept", { id: reply.id, itemId: reply.itemId, kept });
+        if (kept.length > MAX_HOLD_LINES)
+          released += ` ${kept.length - MAX_HOLD_LINES} more PRs are still held by video cards (~/.rivet-agents/holds.json).`;
+        for (const { pr, card, why } of kept.slice(0, MAX_HOLD_LINES))
+          released +=
+            card !== reply.itemId
+              ? ` PR #${pr} is still held by video card ${card}.`
+              : why === "unnamed"
+                ? ` PR #${pr} is still held: the version of card ${card} he answered did not name it; the hold waits for his answer on the card as it is now.`
+                : why === "video"
+                  ? ` PR #${pr} is still held: his yes answered another video of card ${card}; the hold waits for his answer on the card as it is now.`
+                  : ` PR #${pr} is still held: his yes answered an earlier video of card ${card}; the hold waits for his answer on the new one.`;
+      } catch (err) {
+        log("card-hold-release-failed", { id: reply.id, itemId: reply.itemId, error: short(err) });
+        released = ` The video-card merge hold of card ${reply.itemId} was not released (${short(err)}): rivet unhold --card ${reply.itemId}.`;
+      }
+    }
+
     /** @type {import("./terminals.mjs").Terminal[]} */
     let terminals = [];
     try {
@@ -416,7 +448,7 @@ export function createBridge(deps) {
     const handle = found?.handle ?? newChatName(reply.id);
     /** @type {Route} */
     const route = { target: found && !found.direct ? "rivet" : "chat", chat: handle, ...(found?.direct ? {} : { reason: chat ? "relay" : "no-chat" }) };
-    const line = chatLine(reply, github, route, attachments);
+    const line = chatLine(reply, github, route, attachments, released);
     /** @type {{ confirmed: boolean, stages: string[] }} */
     let receipt;
     try {

@@ -7,6 +7,8 @@ import { mock, test } from "node:test";
 import { createCommandFamily } from "../lib/actions/command.mjs";
 import { actionTable } from "../lib/actions/index.mjs";
 import { backoffDelay, createBridge, runLoop, UNAUTHORIZED_MS } from "../lib/bridge.mjs";
+import { releaseForYes } from "../lib/card-holds.mjs";
+import { readMergeHolds } from "../lib/merge-holds.mjs";
 import { StateStore } from "../lib/state.mjs";
 import { reply } from "./fixtures.mjs";
 
@@ -129,9 +131,114 @@ function harness(opts = {}) {
     listRetryMs: [0, 0],
     holdWaitMs: 0,
     ...(opts.actions ? { actions: opts.actions } : {}),
+    ...(opts.releaseCardHold ? { releaseCardHold: opts.releaseCardHold } : {}),
   });
   return { workerPuts, bridge, lists: () => lists, calls, sent, started, starts, acks, actionAcks, lateAskAcks, reopenAcks, logs, state };
 }
+
+test("his yes on a video card releases its merge hold, and the merge door no longer refuses; Change it leaves it", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rivet-card-hold-"));
+  const file = path.join(dir, "holds.json");
+  const hold = { pr: 22, reason: "video card vc-1 waits for the owner's yes; his yes on that card releases it (by hand: rivet unhold --card vc-1)", card: "vc-1", since: "2026-09-28T00:00:00.000Z" };
+  const monitor = { pr: 22, reason: "deploy order" };
+  fs.writeFileSync(file, JSON.stringify([hold, monitor]));
+  const gh = async (/** @type {string[]} */ args) => JSON.stringify(args[1].endsWith("pulls/22") ? { number: 22, body: "", labels: [] } : []);
+  const fileHolds = async () =>
+    (await readMergeHolds({ repo: "example-org/example-repo", pr: 22, gh, holdsFile: file, forMerge: false })).holds;
+  assert.deepEqual(await fileHolds(), [`holds file: ${hold.reason}`, "holds file: deploy order"]);
+
+  const releaseCardHold = (/** @type {any} */ r) => releaseForYes(r, { file });
+  const change = harness({ releaseCardHold });
+  assert.equal(await change.bridge.processReply(reply({ itemId: "vc-1", decision: "choice", choice: "Change it", text: "slower" }, { id: "vc-1", pr: 22 })), "delivered");
+  assert.equal((await fileHolds()).length, 2);
+  assert.doesNotMatch(change.sent[0].line, /merge hold/);
+
+  const yes = harness({ releaseCardHold });
+  assert.equal(await yes.bridge.processReply(reply({ id: "r_02", itemId: "vc-1", decision: "choice", choice: "Yes, keep it" }, { id: "vc-1", pr: 22 })), "delivered");
+  assert.deepEqual(await fileHolds(), ["holds file: deploy order"]);
+  assert.match(yes.sent[0].line, / His yes released the video-card merge hold on PR #22\.$/);
+  assert.ok(yes.logs.some((l) => l.startsWith("card-hold-released ")));
+
+  // A hold that cannot be released is said, with the hand release.
+  const broken = harness({ releaseCardHold: () => { throw new Error("holds.json is malformed; fix it by hand"); } });
+  assert.equal(await broken.bridge.processReply(reply({ id: "r_03", itemId: "vc-1" }, { id: "vc-1", pr: 22 })), "delivered");
+  assert.match(broken.sent[0].line, / The video-card merge hold of card vc-1 was not released \(holds\.json is malformed; fix it by hand\): rivet unhold --card vc-1\.$/);
+  assert.ok(broken.logs.some((l) => l.startsWith("card-hold-release-failed ")));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("a release naming many PRs is capped, so the owner's answer and note still reach the monitor whole", async () => {
+  const prs = Array.from({ length: 100 }, (_, n) => 30 + n);
+  const h = harness({ releaseCardHold: () => ({ released: prs.slice(0, 50), kept: prs.slice(50).map((pr) => ({ pr, card: "vc-1", why: "video" })) }) });
+  assert.equal(await h.bridge.processReply(reply({ id: "r_09", itemId: "vc-1", decision: "choice", choice: "Yes, keep it", text: "the grill smoke is perfect" }, { id: "vc-1", pr: 22 })), "delivered");
+  const line = h.sent[0].line;
+  assert.match(line, /the grill smoke is perfect/);
+  assert.match(line, / His yes released the video-card merge hold on PR #30, PR #31, PR #32 and 47 more PRs\./);
+  assert.match(line, / 47 more PRs are still held by video cards \(~\/\.rivet-agents\/holds\.json\)\./);
+  assert.equal((line.match(/is still held: /g) ?? []).length, 3);
+});
+
+test("his yes on a merge-ready video card releases its hold before the ack; another video card's hold on the PR is named", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rivet-card-hold-"));
+  const file = path.join(dir, "holds.json");
+  const since = "2026-09-28T00:00:00.000Z";
+  const mine = { pr: 22, reason: "video card mr-1 waits", card: "mr-1", since };
+  const other = { pr: 22, reason: "video card vc-2 waits", card: "vc-2", since };
+  fs.writeFileSync(file, JSON.stringify([mine, other]));
+  const h = harness({ releaseCardHold: (/** @type {any} */ r) => releaseForYes(r, { file }) });
+  const armed = reply({ itemId: "mr-1", decision: "choice", choice: "Merge" }, { id: "mr-1", pr: 22, kind: "merge-ready", merge: true });
+  assert.equal(await h.bridge.processReply(armed), "delivered");
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")), [other]);
+  assert.match(h.sent[0].line, / His yes released the video-card merge hold on PR #22\. PR #22 is still held by video card vc-2\.$/);
+  assert.ok(h.logs.some((l) => l.startsWith("card-hold-kept ")));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("his yes on an earlier video of the card keeps the hold, and the line asks for his answer on the new one, not a hand release", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rivet-card-hold-"));
+  const file = path.join(dir, "holds.json");
+  const restamped = { pr: 22, reason: "video card vc-1 waits", card: "vc-1", since: "2026-09-28T01:02:04.000Z" };
+  fs.writeFileSync(file, JSON.stringify([restamped]));
+  const h = harness({ releaseCardHold: (/** @type {any} */ r) => releaseForYes(r, { file }) });
+  assert.equal(await h.bridge.processReply(reply({ itemId: "vc-1", decision: "choice", choice: "Yes, keep it" }, { id: "vc-1", pr: 22 })), "delivered");
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")), [restamped]);
+  assert.match(h.sent[0].line, / PR #22 is still held: his yes answered an earlier video of card vc-1; the hold waits for his answer on the new one\.$/);
+  assert.doesNotMatch(h.sent[0].line, /unhold/);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("his yes to a version of the card that showed another video or did not name the PR keeps the hold, and the line says so", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rivet-card-hold-"));
+  const file = path.join(dir, "holds.json");
+  const since = "2026-09-28T00:00:00.000Z";
+  const onB = { pr: 22, reason: "video card vc-1 waits", card: "vc-1", since, video: "b".repeat(64) };
+  const unnamed = { pr: 23, reason: "video card vc-1 waits", card: "vc-1", since };
+  fs.writeFileSync(file, JSON.stringify([onB, unnamed]));
+  const h = harness({ releaseCardHold: (/** @type {any} */ r) => releaseForYes(r, { file }) });
+  const old = reply({ itemId: "vc-1", decision: "choice", choice: "Yes, keep it" }, { id: "vc-1", pr: 22, videoSha: "a".repeat(64) });
+  assert.equal(await h.bridge.processReply(old), "delivered");
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")), [onB, unnamed]);
+  assert.match(
+    h.sent[0].line,
+    / PR #22 is still held: his yes answered another video of card vc-1; the hold waits for his answer on the card as it is now\. PR #23 is still held: the version of card vc-1 he answered did not name it; the hold waits for his answer on the card as it is now\.$/,
+  );
+  assert.doesNotMatch(h.sent[0].line, /unhold/);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("his yes on the video the hold recorded releases it through the reply check: the item's videoSha and links reach the release", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rivet-card-hold-"));
+  const file = path.join(dir, "holds.json");
+  const video = { sha256: "c".repeat(64), type: "video/mp4" };
+  const byLink = { pr: 24, reason: "video card vc-7 waits", card: "vc-7", since: "2026-09-28T00:00:00.000Z", video: video.sha256 };
+  const own = { ...byLink, pr: 22 };
+  fs.writeFileSync(file, JSON.stringify([own, byLink]));
+  const h = harness({ releaseCardHold: (/** @type {any} */ r) => releaseForYes(r, { file }) });
+  const links = [{ label: "PR", url: "https://github.com/example-org/example-repo/pull/24" }];
+  assert.equal(await h.bridge.processReply(reply({ itemId: "vc-7", decision: "choice", choice: "Yes, keep it" }, { id: "vc-7", pr: 22, videoSha: video.sha256, links })), "delivered");
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")), []);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
 
 test("happy path: GitHub comment, one line typed into the card's own chat, ack, state", async () => {
   const h = harness();

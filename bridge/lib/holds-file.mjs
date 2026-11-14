@@ -152,11 +152,11 @@ export function updateHolds(change, { file = HOLDS_FILE, waitMs = LOCK_WAIT_MS, 
 }
 
 /**
- * The holds file's lines that hold `pr`'s merge, for the confirm sheet and the refusal.
- * @param {number} pr @param {{ file?: string, now?: number }} [opts]
+ * The holds file's lines that hold `pr`'s merge, for the confirm sheet and the refusal; none of video card `ignoreCard`'s.
+ * @param {number} pr @param {{ file?: string, now?: number, ignoreCard?: string }} [opts]
  * @returns {string[]}
  */
-export function fileHolds(pr, { file = HOLDS_FILE, now = Date.now() } = {}) {
+export function fileHolds(pr, { file = HOLDS_FILE, now = Date.now(), ignoreCard } = {}) {
   let text;
   try {
     text = fs.readFileSync(file, "utf8");
@@ -172,7 +172,7 @@ export function fileHolds(pr, { file = HOLDS_FILE, now = Date.now() } = {}) {
   }
   if (!Array.isArray(doc) || !doc.every(wellFormed)) return ["holds file: malformed, so nothing merges"];
   return doc
-    .filter((entry) => entry.pr === pr && (entry.until === undefined || Date.parse(entry.until) > now))
+    .filter((entry) => entry.pr === pr && (entry.until === undefined || Date.parse(entry.until) > now) && (ignoreCard === undefined || entry.card !== ignoreCard))
     // Never cut here: the bridge redacts a hold whole and only then cuts it to the merge preview's 200 UTF-16 units.
     .map((entry) => `holds file: ${entry.reason}${entry.until ? ` (until ${entry.until})` : ""}`);
 }

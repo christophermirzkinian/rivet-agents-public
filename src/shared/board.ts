@@ -582,6 +582,10 @@ export interface ReplyItem {
   merge?: true;
   /** A merge-ready card's head: the one its yes merges. */
   headSha?: string;
+  /** The comparison a merge hold is bound to, on a card with a video: the after media's sha256 `+` the before media's (either alone when it has one). */
+  videoSha?: string;
+  /** The card's links as shown, on every card that has them. */
+  links?: { label: string; url: string }[];
   /** Answered after Answer again: the earlier answer this one changes. */
   changes?: { replyId: string; decision: Decision; choice?: string };
 }

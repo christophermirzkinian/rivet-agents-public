@@ -56,6 +56,7 @@ export const FILE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9 ._()-]{0,95}\.(?:pdf|txt|log
 /**
  * @typedef {{ id: string, title: string, kind: string, ask?: string, choiceDetail?: string, steps?: string[], chat?: string, pr?: number,
  *   issue?: number, repo: string | null, risk?: string, merge?: true, headSha?: string,
+ *   video?: { sha256: string, type: string }, videoSha?: string, links?: { label: string, url: string }[],
  *   changes?: { replyId: string, decision: string, choice?: string } }} ReplyItem
  * @typedef {{ sha256: string, name: string }} FileRef
  * @typedef {{ id: string, itemId: string, decision: "approve"|"reject"|"choice"|"comment"|"done"|"seen"|"dismiss",
@@ -261,6 +262,16 @@ export function validateReply(raw) {
       decision: changes.decision,
       ...(typeof changes.choice === "string" && changes.choice.length <= 200 ? { choice: changes.choice } : {}),
     };
+  // The answered revision's after video, its video's sha (after, else before) and links, which a video card's merge hold is bound to (card-holds.mjs);
+  // context only, so a malformed one is left out and the hold stays.
+  const video = /** @type {{ sha256?: unknown, type?: unknown } | null | undefined} */ (item.video);
+  if (video && typeof video === "object" && typeof video.sha256 === "string" && /^[0-9a-f]{64}$/.test(video.sha256) && (video.type === "video/mp4" || video.type === "video/webm"))
+    outItem.video = { sha256: video.sha256, type: video.type };
+  if (typeof item.videoSha === "string" && /^[0-9a-f]{64}(\+[0-9a-f]{64})?$/.test(item.videoSha)) outItem.videoSha = item.videoSha;
+  if (Array.isArray(item.links) && item.links.length <= 20) {
+    const links = item.links.filter((/** @type {any} */ l) => l && typeof l === "object" && typeof l.label === "string" && l.label.length <= 200 && typeof l.url === "string" && l.url.length <= 2000);
+    if (links.length) outItem.links = links.map((/** @type {any} */ l) => ({ label: l.label, url: l.url }));
+  }
 
   /** @type {Reply} */
   const reply = {

@@ -855,6 +855,12 @@ export function createApp(
     // After Answer again, the answer this one changes: Rivet acts on this one instead.
     const earlier = need.again ? store.getReply(need.again.after) : null;
     const changes = earlier ? { replyId: earlier.id, decision: earlier.decision, ...(earlier.choice ? { choice: earlier.choice } : {}) } : undefined;
+    // The comparison a merge hold is bound to (bridge/lib/card-holds.mjs cardVideo): on a card with a video in either
+    // role, the after media and the before media's sha256 joined by `+` (either alone when the card has only one).
+    const after = need.media?.after;
+    const before = need.media?.before;
+    const isVideo = (clip: typeof before) => clip?.type === "video/mp4" || clip?.type === "video/webm";
+    const videoSha = isVideo(after) || isVideo(before) ? [after, before].flatMap((clip) => (clip ? [clip.sha256] : [])).join("+") || undefined : undefined;
     const item: ReplyItem = {
       id: need.id,
       title: need.title,
@@ -872,6 +878,9 @@ export function createApp(
       ...(need.risk ? { risk: need.risk } : {}),
       ...(arming ? { merge: true as const } : {}),
       ...(changes ? { changes } : {}),
+      ...(videoSha ? { videoSha } : {}),
+      // Every card's links, video or not: a video card's merge hold may be on a PR only a link names (card-holds.mjs).
+      ...(need.links?.length ? { links: need.links.map((link) => ({ label: String(link.label), url: String(link.url) })) } : {}),
     };
     const reply = store.addReply({
       clientId: body.clientId,

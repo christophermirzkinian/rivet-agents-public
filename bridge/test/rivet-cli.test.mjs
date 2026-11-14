@@ -1,13 +1,19 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { dropCardHold, holdForCard, releaseForYes } from "../lib/card-holds.mjs";
+import { readHolds } from "../lib/holds-file.mjs";
+import { readMergeHolds } from "../lib/merge-holds.mjs";
 import { cardBody, parseArgs, run, stdinArgs } from "../../scripts/rivet.mjs";
 
 const TOKEN = "cd".repeat(32);
 const ENV = { RIVET_BRIDGE_DEV: "1", RIVET_BOARD_TOKEN: TOKEN, RIVET_URL: "http://localhost:5999", PATH: "" };
 const NOW = new Date("2026-10-01T02:00:00.000Z");
+// A video card holds only the main repository's PRs: the first of RIVET_REPOS.
+process.env.RIVET_REPOS = "example-org/example-repo,example-org/other-repo";
 
 /** @param {string} msg */
 function usage(msg) {
@@ -111,6 +117,8 @@ async function cli(argv, deps = {}) {
     },
     tmpdir: fs.mkdtempSync(path.join(os.tmpdir(), "rivet-cli-")),
     folderRepo: async () => undefined,
+    // Never the real ~/.rivet-agents/holds.json: a video card about a PR writes its hold there.
+    holdsFile: holdsFile(),
     ...deps,
     stdout: (s) => void (stdout += s),
     stderr: (s) => void (stderr += s),
@@ -607,4 +615,312 @@ test("chat ls and chat send go through the chat runner", async () => {
   });
   assert.equal(failing.code, 1);
   assert.match(failing.stderr, /no chat gone/);
+});
+
+/** @param {unknown} [doc] a holds.json in a temp folder, written when given */
+function holdsFile(doc) {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "rivet-holds-")), "holds.json");
+  if (doc !== undefined) fs.writeFileSync(file, typeof doc === "string" ? doc : JSON.stringify(doc));
+  return file;
+}
+
+const OTHER_HOLD = { pr: 13, reason: "The owner: not yet" };
+
+/** A file that stands in for a video, and the board stub's routes for the owner's holds. */
+function clipFile() {
+  const clip = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "rivet-card-")), "after.mp4");
+  fs.writeFileSync(clip, "not really a video");
+  return clip;
+}
+
+/** Two clips that are different videos to the card, and their sha256. */
+function twoClips() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rivet-card-"));
+  const clip = (/** @type {string} */ name) => {
+    const file = path.join(dir, `${name}.mp4`);
+    fs.writeFileSync(file, `video ${name}`);
+    return { file, sha256: createHash("sha256").update(`video ${name}`).digest("hex"), type: "video/mp4" };
+  };
+  return { a: clip("a"), b: clip("b") };
+}
+
+test("a video card about a PR holds its merge in holds.json before it is posted", async () => {
+  const file = holdsFile([OTHER_HOLD]);
+  const server = stubServer();
+  const clip = clipFile();
+  /** @type {string[]} */
+  const atPut = [];
+  const fetchFn = /** @type {typeof fetch} */ (async (url, init) => {
+    if (init?.method === "PUT" && String(url).includes("/api/board/needs/")) atPut.push(fs.readFileSync(file, "utf8"));
+    return server.fetch(url, init);
+  });
+  const argv = ["card", "add", "vc-1", "--title", "Menu redesign: crests", "--pr", "41", "--option", "Yes, keep it", "--after", clip, "--skip-preflight"];
+  const r = await cli(argv, { fetch: fetchFn, holdsFile: file });
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stderr, /rivet: held #41 until the owner's yes on video card vc-1 \(holds\.json\)\n/);
+  assert.equal(atPut.length, 1);
+  const { write, ...entry } = JSON.parse(atPut[0]).find((/** @type {any} */ h) => h.card === "vc-1");
+  assert.match(write, /^[0-9a-f-]{36}$/);
+  const video = createHash("sha256").update("not really a video").digest("hex");
+  assert.deepEqual(entry, { pr: 41, reason: "video card vc-1 waits for the owner's yes; his yes on that card releases it (by hand: rivet unhold --card vc-1)", card: "vc-1", since: NOW.toISOString(), video });
+  // Again, and with --replace: one hold still.
+  assert.equal((await cli([...argv, "--replace"], { fetch: fetchFn, holdsFile: file })).code, 0);
+  assert.deepEqual(readHolds(file).holds.map((h) => h.pr), [13, 41]);
+  const read = await readMergeHolds({ repo: "example-org/example-repo", pr: 41, gh: async (/** @type {string[]} */ args) => JSON.stringify(args[1] === "repos/example-org/example-repo/pulls/41" ? { number: 41, body: "", labels: [] } : []), holdsFile: file, forMerge: false });
+  assert.ok(read.holds.some((line) => line.includes("video card vc-1 waits for the owner's yes")), JSON.stringify(read.holds));
+
+  // A card with no video, or about another repo's PR, holds nothing.
+  const plain = holdsFile([]);
+  assert.equal((await cli(["card", "add", "p", "--title", "Theme refresh", "--pr", "41", "--option", "Yes"], { fetch: server.fetch, holdsFile: plain })).code, 0);
+  const other = await cli(["card", "add", "g", "--title", "Other", "--pr", "5", "--repo", "example-org/other-repo", "--option", "Yes", "--after", clip, "--skip-preflight"], { fetch: server.fetch, holdsFile: plain });
+  assert.equal(other.code, 0, other.stderr);
+  assert.match(other.stderr, /card g is about example-org\/other-repo#5: holds\.json holds only example-org\/example-repo PRs/);
+  assert.deepEqual(readHolds(plain).holds, []);
+});
+
+test("a video card whose hold cannot be written is not posted; a refused post takes its new hold back, an unsure one keeps it", async () => {
+  const server = stubServer();
+  const clip = clipFile();
+  const argv = ["card", "add", "vc-2", "--title", "Theme refresh", "--pr", "41", "--option", "Yes, keep it", "--after", clip, "--skip-preflight"];
+  const bad = holdsFile("[{\"pr\": 1}]");
+  const refused = await cli(argv, { fetch: server.fetch, holdsFile: bad });
+  assert.equal(refused.code, 1);
+  assert.match(refused.stderr, /rivet: the video card's merge hold on #41 could not be written \(.*malformed.*\); nothing posted\n/);
+  assert.equal(server.state.calls.filter((c) => c.path.startsWith("/api/board/needs/")).length, 0);
+
+  /** @param {() => Response} answer */
+  const putting = (answer) => /** @type {typeof fetch} */ (async (url, init) =>
+    init?.method === "PUT" && String(url).includes("/api/board/needs/") ? answer() : server.fetch(url, init));
+  const other = { pr: 41, reason: "video card vc-3 waits", card: "vc-3", since: NOW.toISOString() };
+  const file = holdsFile([other]);
+  const failed = await cli(argv, { fetch: putting(() => new Response(JSON.stringify({ error: "bad card" }), { status: 400 })), holdsFile: file });
+  assert.equal(failed.code, 1);
+  // Its own new hold goes; another card's stays.
+  assert.deepEqual(readHolds(file).holds.map((h) => h.card), ["vc-3"]);
+  assert.doesNotMatch(failed.stderr, /is kept/);
+
+  // A same-id add that posted on this hold, a server error, a lost answer: the card may be up, so the hold stays.
+  for (const answer of [
+    () => new Response(JSON.stringify({ error: "card vc-2 already exists" }), { status: 409 }),
+    () => new Response(JSON.stringify({ error: "down" }), { status: 503 }),
+    () => new Response("not json", { status: 200 }),
+    () => {
+      throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+    },
+  ]) {
+    const unsure = holdsFile([other]);
+    const r = await cli(argv, { fetch: putting(answer), holdsFile: unsure });
+    assert.equal(r.code, 1);
+    assert.deepEqual(readHolds(unsure).holds.map((h) => h.card), ["vc-3", "vc-2"]);
+    assert.match(r.stderr, /rivet: the merge hold on #41 is kept, as card vc-2 may be up; if it is not: rivet unhold --card vc-2\n/);
+  }
+});
+
+test("an edit that puts a PR on a video card holds it, and a new video re-stamps the hold", async () => {
+  const server = stubServer();
+  const clip = clipFile();
+  const file = holdsFile([]);
+  const added = await cli(["card", "add", "vc-4", "--title", "Theme refresh", "--option", "Yes, keep it", "--after", clip, "--skip-preflight"], { fetch: server.fetch, holdsFile: file });
+  assert.equal(added.code, 0, added.stderr);
+  assert.deepEqual(readHolds(file).holds, []);
+  const edited = await cli(["card", "edit", "vc-4", "--pr", "41"], { fetch: server.fetch, holdsFile: file });
+  assert.equal(edited.code, 0, edited.stderr);
+  assert.deepEqual(readHolds(file).holds.map((h) => [h.pr, h.card, h.since]), [[41, "vc-4", NOW.toISOString()]]);
+
+  const later = new Date(NOW.getTime() + 60_000);
+  const revideo = await cli(["card", "edit", "vc-4", "--after", clip, "--skip-preflight"], { fetch: server.fetch, holdsFile: file, now: () => later });
+  assert.equal(revideo.code, 0, revideo.stderr);
+  assert.deepEqual(readHolds(file).holds.map((h) => [h.pr, h.card, h.since]), [[41, "vc-4", later.toISOString()]]);
+  // A text edit leaves the stamp.
+  assert.equal((await cli(["card", "edit", "vc-4", "--title", "Theme refresh 2"], { fetch: server.fetch, holdsFile: file, now: () => new Date(later.getTime() + 60_000) })).code, 0);
+  assert.equal(readHolds(file).holds[0].since, later.toISOString());
+});
+
+test("a yes to the old video keeps the hold, whether the bridge takes it during the new video's write or after; a yes on the new one releases it", async () => {
+  const { a, b } = twoClips();
+  for (const during of [true, false]) {
+    const server = stubServer();
+    const file = holdsFile([]);
+    assert.equal((await cli(["card", "add", "vc-5", "--title", "Theme refresh", "--pr", "41", "--option", "Yes, keep it", "--after", a.file, "--skip-preflight"], { fetch: server.fetch, holdsFile: file })).code, 0);
+    const later = new Date(NOW.getTime() + 60_000);
+    const old = { itemId: "vc-5", at: new Date(later.getTime() + 500).toISOString(), decision: "approve", item: { pr: 41, videoSha: a.sha256 } };
+    const fetchFn = /** @type {typeof fetch} */ (async (url, init) => {
+      if (during && init?.method === "PATCH") assert.deepEqual(releaseForYes(old, { file }).released, []);
+      return server.fetch(url, init);
+    });
+    const r = await cli(["card", "edit", "vc-5", "--after", b.file, "--skip-preflight"], { fetch: fetchFn, holdsFile: file, now: () => later });
+    assert.equal(r.code, 0, r.stderr);
+    assert.deepEqual(releaseForYes(old, { file }), { released: [], kept: [{ pr: 41, card: "vc-5", why: "video" }] });
+    assert.deepEqual(readHolds(file).holds.map((h) => [h.pr, h.since, h.video]), [[41, later.toISOString(), b.sha256]]);
+    assert.deepEqual(releaseForYes({ ...old, item: { pr: 41, videoSha: b.sha256 } }, { file }).released, [41]);
+  }
+});
+
+test("a before-only video edit: a yes to the old video taken during the write is undone once the write lands", async () => {
+  const { a, b } = twoClips();
+  const server = stubServer();
+  const file = holdsFile([]);
+  assert.equal((await cli(["card", "add", "vc-6", "--title", "Theme refresh", "--pr", "41", "--option", "Yes, keep it", "--after", a.file, "--skip-preflight"], { fetch: server.fetch, holdsFile: file })).code, 0);
+  let t = NOW.getTime() + 60_000;
+  const now = () => new Date((t += 1000));
+  const old = { itemId: "vc-6", at: new Date(NOW.getTime() + 61_500).toISOString(), decision: "approve", item: { pr: 41, videoSha: a.sha256 } };
+  const fetchFn = /** @type {typeof fetch} */ (async (url, init) => {
+    if (init?.method === "PATCH") releaseForYes(old, { file });
+    return server.fetch(url, init);
+  });
+  const r = await cli(["card", "edit", "vc-6", "--before", b.file, "--skip-preflight"], { fetch: fetchFn, holdsFile: file, now });
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(readHolds(file).holds.map((h) => [h.pr, h.card]), [[41, "vc-6"]]);
+  assert.deepEqual(releaseForYes(old, { file }).released, []);
+});
+
+test("a before-only video edit whose answer is lost: the hold is placed again as if it landed, so a queued stale yes keeps it", async () => {
+  const { a, b } = twoClips();
+  const server = stubServer();
+  const file = holdsFile([]);
+  assert.equal((await cli(["card", "add", "vc-8", "--title", "Theme refresh", "--pr", "41", "--option", "Yes, keep it", "--after", a.file, "--skip-preflight"], { fetch: server.fetch, holdsFile: file })).code, 0);
+  let t = NOW.getTime() + 60_000;
+  const now = () => new Date((t += 1000));
+  const old = { itemId: "vc-8", at: new Date(NOW.getTime() + 61_500).toISOString(), decision: "approve", item: { pr: 41, videoSha: a.sha256 } };
+  const fetchFn = /** @type {typeof fetch} */ (async (url, init) => {
+    if (init?.method !== "PATCH") return server.fetch(url, init);
+    releaseForYes(old, { file });
+    await server.fetch(url, init);
+    throw new TypeError("fetch failed");
+  });
+  const r = await cli(["card", "edit", "vc-8", "--before", b.file, "--skip-preflight"], { fetch: fetchFn, holdsFile: file, now });
+  assert.notEqual(r.code, 0);
+  assert.deepEqual(releaseForYes(old, { file }).released, []);
+  assert.deepEqual(readHolds(file).holds.map((h) => [h.pr, h.card]), [[41, "vc-8"]]);
+});
+
+test("the hold placed again after the write is this write's: a same-id writer's refusal meanwhile leaves it", async () => {
+  const { a, b } = twoClips();
+  const server = stubServer();
+  const file = holdsFile([]);
+  assert.equal((await cli(["card", "add", "vc-9", "--title", "Theme refresh", "--pr", "41", "--option", "Yes, keep it", "--after", a.file, "--skip-preflight"], { fetch: server.fetch, holdsFile: file })).code, 0);
+  const fetchFn = /** @type {typeof fetch} */ (async (url, init) => {
+    if (init?.method === "PATCH") {
+      // A yes cleared the hold, and a same-id writer placed its own before its refusal comes back.
+      dropCardHold("vc-9", { file });
+      holdForCard({ id: "vc-9", pr: 41, media: { after: { sha256: b.sha256, type: "video/mp4" } } }, { file, write: "w-y" });
+    }
+    return server.fetch(url, init);
+  });
+  assert.equal((await cli(["card", "edit", "vc-9", "--after", b.file, "--skip-preflight"], { fetch: fetchFn, holdsFile: file })).code, 0);
+  assert.deepEqual(dropCardHold("vc-9", { file, prs: [41], write: "w-y" }), []);
+  assert.deepEqual(readHolds(file).holds.map((h) => [h.pr, h.card]), [[41, "vc-9"]]);
+});
+
+test("a reused card id: a yes to the revision about the new PR and video releases that PR only", async () => {
+  const { a, b } = twoClips();
+  const server = stubServer();
+  const file = holdsFile([]);
+  assert.equal((await cli(["card", "add", "vid", "--title", "Theme refresh", "--pr", "41", "--option", "Yes, keep it", "--after", a.file, "--skip-preflight"], { fetch: server.fetch, holdsFile: file })).code, 0);
+  const r = await cli(["card", "add", "vid", "--replace", "--title", "Theme refresh", "--pr", "50", "--option", "Yes, keep it", "--after", b.file, "--skip-preflight"], { fetch: server.fetch, holdsFile: file });
+  assert.equal(r.code, 0, r.stderr);
+  const yes = releaseForYes({ itemId: "vid", at: new Date(NOW.getTime() + 1_000).toISOString(), decision: "approve", item: { pr: 50, videoSha: b.sha256 } }, { file });
+  assert.deepEqual(yes, { released: [50], kept: [{ pr: 41, card: "vid", why: "unnamed" }] });
+  assert.deepEqual(readHolds(file).holds.map((h) => h.pr), [41]);
+});
+
+test("a --pr edit: a yes to the revision before it keeps the new PR's hold", async () => {
+  const { a } = twoClips();
+  const server = stubServer();
+  const file = holdsFile([]);
+  assert.equal((await cli(["card", "add", "vc-7", "--title", "Theme refresh", "--pr", "41", "--option", "Yes, keep it", "--after", a.file, "--skip-preflight"], { fetch: server.fetch, holdsFile: file })).code, 0);
+  assert.equal((await cli(["card", "edit", "vc-7", "--pr", "50"], { fetch: server.fetch, holdsFile: file })).code, 0);
+  const before = releaseForYes({ itemId: "vc-7", at: new Date(NOW.getTime() + 1_000).toISOString(), decision: "approve", item: { pr: 41, videoSha: a.sha256 } }, { file });
+  assert.deepEqual(before.kept, [{ pr: 50, card: "vc-7", why: "unnamed" }]);
+  assert.deepEqual(readHolds(file).holds.map((h) => h.pr), [50]);
+});
+
+test("a refused writer takes back only the hold that is still its own: a same-id writer that took it meanwhile keeps it", async () => {
+  const server = stubServer();
+  const clip = clipFile();
+  const file = holdsFile([]);
+  const later = new Date(NOW.getTime() + 1_000);
+  const fetchFn = /** @type {typeof fetch} */ (async (url, init) => {
+    if (init?.method !== "PUT" || !String(url).includes("/api/board/needs/")) return server.fetch(url, init);
+    // Writer B posts vc-6 with a new video while A's write is on its way, and re-stamps A's hold.
+    holdForCard({ id: "vc-6", pr: 41, media: { kind: "video", after: { sha256: "a".repeat(64), type: "video/mp4" } } }, { file, now: later, restamp: true, write: "w-b" });
+    return new Response(JSON.stringify({ error: "bad card" }), { status: 400 });
+  });
+  const a = await cli(["card", "add", "vc-6", "--title", "Theme refresh", "--pr", "41", "--option", "Yes, keep it", "--after", clip, "--skip-preflight"], { fetch: fetchFn, holdsFile: file });
+  assert.equal(a.code, 1);
+  assert.deepEqual(readHolds(file).holds.map((h) => [h.pr, h.card, h.since]), [[41, "vc-6", later.toISOString()]]);
+});
+
+test("a same-id --pr edit with no new video, made during a refused writer's delayed answer, keeps its hold", async () => {
+  const server = stubServer();
+  const clip = clipFile();
+  const file = holdsFile([]);
+  assert.equal((await cli(["card", "add", "v", "--title", "Theme refresh", "--option", "Yes, keep it", "--after", clip, "--skip-preflight"], { fetch: server.fetch, holdsFile: file })).code, 0);
+  assert.deepEqual(readHolds(file).holds, []);
+  /** @type {{ code: number, stderr: string } | undefined} */
+  let b;
+  const fetchFn = /** @type {typeof fetch} */ (async (url, init) => {
+    if (init?.method !== "PUT" || !String(url).includes("/api/board/needs/")) return server.fetch(url, init);
+    // Writer B edits v's PR while A's answer is on its way; then A is refused.
+    b = await cli(["card", "edit", "v", "--pr", "41"], { fetch: server.fetch, holdsFile: file });
+    return new Response(JSON.stringify({ error: "media unavailable" }), { status: 422 });
+  });
+  const a = await cli(["card", "add", "v", "--replace", "--title", "Theme refresh", "--pr", "41", "--option", "Yes, keep it", "--after", clip, "--skip-preflight"], { fetch: fetchFn, holdsFile: file });
+  assert.equal(a.code, 1);
+  assert.equal(b?.code, 0, b?.stderr);
+  assert.deepEqual(readHolds(file).holds.map((h) => [h.pr, h.card]), [[41, "v"]]);
+});
+
+/** The CLI with the owner's holds on the board stub and no GitHub: the steps after holds.json fail and say so. */
+function holdDeps(/** @type {string} */ file) {
+  const server = stubServer();
+  const fetchFn = /** @type {typeof fetch} */ (async (url, init) =>
+    String(url).includes("/api/ops/holds/") ? new Response(JSON.stringify({ added: true, removed: 1 }), { status: 200 }) : server.fetch(url, init));
+  return { fetch: fetchFn, holdsFile: file };
+}
+
+test("rivet hold places its own entry beside a video card's hold, and that card's yes leaves it", async () => {
+  const card = { pr: 12, reason: "video card vc-1 waits", card: "vc-1", since: NOW.toISOString() };
+  const file = holdsFile([card]);
+  const r = await cli(["hold", "12", "--reason", "not until the review", "--repo", "example-org/example-repo"], holdDeps(file));
+  assert.match(r.stdout, /^holds\.json: merge hold on #12 added\n/);
+  assert.deepEqual(readHolds(file).holds, [card, { pr: 12, reason: "not until the review" }]);
+  assert.deepEqual(releaseForYes({ itemId: "vc-1", at: new Date(NOW.getTime() + 1_000).toISOString(), decision: "approve", item: { pr: 12 } }, { file }).released, [12]);
+  assert.deepEqual(readHolds(file).holds, [{ pr: 12, reason: "not until the review" }]);
+});
+
+test("plain unhold leaves a video card's merge hold and names it", async () => {
+  const card = { pr: 12, reason: "video card v1 waits for the owner's yes; his yes on that card releases it (by hand: rivet unhold --card v1)", card: "v1", since: NOW.toISOString() };
+  const file = holdsFile([{ pr: 12, reason: "x" }, card, { ...card, pr: 13 }]);
+  const r = await cli(["unhold", "12", "--repo", "example-org/example-repo"], holdDeps(file));
+  assert.deepEqual(readHolds(file).holds, [card, { ...card, pr: 13 }]);
+  assert.match(r.stdout, /^holds\.json: removed merge hold on #12\nholds\.json: left video card v1's merge hold on #12 \(rivet unhold --card v1\)\n/);
+  const again = await cli(["unhold", "12", "--repo", "example-org/example-repo"], holdDeps(file));
+  assert.match(again.stdout, /^holds\.json: left video card v1's merge hold on #12 \(rivet unhold --card v1\)\n/);
+});
+
+test("unhold --card drops only that card's holds.json entries, and touches neither the server nor GitHub", async () => {
+  assert.deepEqual(parseArgs(["unhold", "--card", "vc-1"]).fields.card, "vc-1");
+  assert.deepEqual(parseArgs(["unhold", "--card", "vc-1", "41"]).args, ["41"]);
+  assert.throws(() => parseArgs(["unhold", "--card", "vc 1"]), usage("--card is a card id"));
+  assert.throws(() => parseArgs(["unhold", "--card", "vc-1", "41", "42"]), usage("at most one PR number with --card"));
+  assert.throws(() => parseArgs(["unhold", "--card", "vc-1", "#41"]), usage("the PR is its number"));
+  assert.throws(() => parseArgs(["unhold", "--card", "vc-1", "--reason", "ok"]), usage("unhold --card takes no --reason"));
+  assert.throws(() => parseArgs(["unhold", "--card", "vc-1", "--repo", "example-org/example-repo"]), usage("unhold --card takes no --repo"));
+  assert.throws(() => parseArgs(["hold", "41", "--reason", "x", "--card", "vc-1"]), usage("--card"));
+
+  const since = NOW.toISOString();
+  const owner = { pr: 41, reason: "The owner: not until the review" };
+  const other = { pr: 41, reason: "video card vc-2 waits", card: "vc-2", since };
+  const file = holdsFile([OTHER_HOLD, owner, { pr: 41, reason: "video card vc-1 waits", card: "vc-1", since }, other, { pr: 42, reason: "video card vc-1 waits", card: "vc-1", since }]);
+  const untouched = { exec: async () => assert.fail("no gh"), fetch: async () => assert.fail("no server"), holdsFile: file };
+  const one = await cli(["unhold", "--card", "vc-1", "41"], untouched);
+  assert.equal(one.code, 0, one.stderr);
+  assert.equal(one.stdout, "holds.json: removed video card vc-1's merge hold on #41\n");
+  const rest = await cli(["unhold", "--card", "vc-1"], untouched);
+  assert.equal(rest.stdout, "holds.json: removed video card vc-1's merge hold on #42\n");
+  assert.deepEqual(readHolds(file).holds, [OTHER_HOLD, owner, other]);
+  const none = await cli(["unhold", "--card", "vc-1"], untouched);
+  assert.equal(none.code, 0);
+  assert.equal(none.stdout, "holds.json: no merge hold of video card vc-1\n");
 });

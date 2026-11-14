@@ -22,7 +22,8 @@ describe("the usage registry", () => {
       expect(entry.label.length, entry.id).toBeGreaterThan(0);
       expect(entry.where.length, entry.id).toBeGreaterThan(0);
       expect(entry.added, entry.id).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-      if (entry.removed) expect(entry.removed > entry.added, entry.id).toBe(true);
+      // The same day is fine: a key may go the day it came.
+      if (entry.removed) expect(entry.removed >= entry.added, entry.id).toBe(true);
     }
   });
 

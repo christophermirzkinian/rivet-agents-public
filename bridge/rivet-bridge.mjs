@@ -12,6 +12,8 @@
 //   node rivet-bridge.mjs --usage     print one Claude usage reading
 //   node rivet-bridge.mjs --schedules print one schedules reading
 import { createBridge, runLoop, runWorkerFeed } from "./lib/bridge.mjs";
+import { releaseForYes } from "./lib/card-holds.mjs";
+import { HOLDS_FILE } from "./lib/holds-file.mjs";
 import { acquireInstanceLock } from "./lib/instance.mjs";
 import { runLogRotateLoop } from "./lib/log-rotate.mjs";
 import { fingerprint, formatLog, makeExec, readToken, resolveBin, serverOrigin } from "./lib/config.mjs";
@@ -91,7 +93,8 @@ async function main() {
   }
   runLogRotateLoop({ stop: stopCtrl.signal, log });
   const models = runModelReportLoop({ origin, token, fetch, log, stop: stopCtrl.signal });
-  const bridge = createBridge({ origin, token, ghBin, gitBin: optionalBin("git"), monitorChat, chatRunner, exec, fetch, state, log, onConnected: models.kick });
+  const bridge = createBridge({ origin, token, ghBin, gitBin: optionalBin("git"), monitorChat, chatRunner, exec, fetch, state, log, onConnected: models.kick,
+    releaseCardHold: (reply) => releaseForYes(reply, { file: HOLDS_FILE }) });
   const stop = stopCtrl.signal;
   const falseAlarm = createFalseAlarmRetry({ exec, ghBin, log });
   const spend = runSpendLoop({ origin, token, fetch, log, stop });
