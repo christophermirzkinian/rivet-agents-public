@@ -170,9 +170,9 @@ test("his yes on a video card releases its merge hold, and the merge door no lon
 test("a release naming many PRs is capped, so the owner's answer and note still reach the monitor whole", async () => {
   const prs = Array.from({ length: 100 }, (_, n) => 30 + n);
   const h = harness({ releaseCardHold: () => ({ released: prs.slice(0, 50), kept: prs.slice(50).map((pr) => ({ pr, card: "vc-1", why: "video" })) }) });
-  assert.equal(await h.bridge.processReply(reply({ id: "r_09", itemId: "vc-1", decision: "choice", choice: "Yes, keep it", text: "the grill smoke is perfect" }, { id: "vc-1", pr: 22 })), "delivered");
+  assert.equal(await h.bridge.processReply(reply({ id: "r_09", itemId: "vc-1", decision: "choice", choice: "Yes, keep it", text: "the colours look right" }, { id: "vc-1", pr: 22 })), "delivered");
   const line = h.sent[0].line;
-  assert.match(line, /the grill smoke is perfect/);
+  assert.match(line, /the colours look right/);
   assert.match(line, / His yes released the video-card merge hold on PR #30, PR #31, PR #32 and 47 more PRs\./);
   assert.match(line, / 47 more PRs are still held by video cards \(~\/\.rivet-agents\/holds\.json\)\./);
   assert.equal((line.match(/is still held: /g) ?? []).length, 3);

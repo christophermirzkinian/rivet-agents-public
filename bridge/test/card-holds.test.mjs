@@ -165,7 +165,7 @@ test("his yes releases only the answered card's holds; another card's on the sam
   const newer = { pr: 41, reason: "video card out-later waits", card: "out-later", since: "2026-11-14T03:00:00.000Z" };
   const elsewhere = { pr: 8200, reason: "video card out-x waits", card: "out-x", since: "2026-11-14T00:00:00.000Z" };
   const monitor = { pr: 41, reason: "deploy order" };
-  const owner = { pr: 41, reason: "The owner 9:10am: 'dont merge'", app: "play" };
+  const owner = { pr: 41, reason: "The owner: hold it", app: "example-app" };
   const file = holdsFile(t, [older, mine, newer, elsewhere, monitor, owner]);
   const before = fs.readFileSync(file, "utf8");
   const at = "2026-11-14T04:00:00.000Z";
