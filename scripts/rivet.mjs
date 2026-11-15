@@ -104,6 +104,8 @@ Card flags: --kind (default decision; a card is for what you must confirm or cho
   clears it; --kind update is a note with its --tag leading its title and its push quiet; it takes no --option,
   --reply, --risk or --step) --title --ask <text> | --ask-file <file> --chat --pr --issue --repo owner/name
   --risk money|auth|fairness --reply text --since <iso> (default now) --push needs-you|fyi
+  --ask-id a-N     the ask the card is about: your answer makes it that ask's card, so the card stays "under way"
+                   until the ask closes
   --pr N with no --repo is a PR of the working folder's repo (by its origin remote); outside any checkout it names no repo
   --reply-to <id>  your ask (or Rivet's line, or the card this one follows): the card, its answers and comments
                    sit in that conversation; without it the server matches one by card-id stem, PR or chat
@@ -205,7 +207,7 @@ export function swallowedFlag(flag, value) {
  */
 
 /** Which flags each command takes; a card flag outside card add/edit is a usage error. */
-const CARD_FLAGS = new Set(["--kind", "--title", "--ask", "--ask-file", "--chat", "--pr", "--issue", "--repo", "--risk", "--reply", "--reply-to", "--since", "--push", "--thread", "--tag"]);
+const CARD_FLAGS = new Set(["--kind", "--title", "--ask", "--ask-file", "--ask-id", "--chat", "--pr", "--issue", "--repo", "--risk", "--reply", "--reply-to", "--since", "--push", "--thread", "--tag"]);
 /** The evidence flags: the field each sets and its values or longest length (src/shared/board.ts evidenceSchema). */
 const EVIDENCE_FLAGS = {
   "--ci": { key: "ci", values: ["green", "red", "running"] },
@@ -356,6 +358,10 @@ export function parseArgs(argv) {
       const value = take();
       if (key === "pr" || key === "issue") o.fields[key] = positive(a, value);
       else if (key === "ask-file") o.askFile = value;
+      else if (key === "ask-id") {
+        if (!/^[a-z0-9-]{1,40}$/.test(value)) throw new UsageError("--ask-id takes an ask id, as a-1");
+        o.fields.askId = value;
+      }
       else if (key === "reply-to") {
         if (!isId(value)) throw new UsageError("--reply-to is the id of your ask (or Rivet's line, or the card this one follows)");
         o.fields.replyTo = value;

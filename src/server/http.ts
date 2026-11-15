@@ -897,6 +897,8 @@ export function createApp(
     if (failing) schedules.answer(failing, now());
     // Kept as answered, for Cards' Answered list and Reopen, once it leaves the feed.
     if (!generated && keepsAnswer(need)) store.keepAnswered(need, body.rev, reply.id, reply.at);
+    // The ask the card is about takes it as its card, so Answered shows it under way until that ask closes.
+    if (!generated && keepsAnswer(need) && need.askId && body.decision !== "dismiss") linkAsk(need.askId, need.id);
     // Seen goes to no chat: it is handled as it lands, and the card leaves the Feed (UPDATE_KEEP_MS keeps it on the board).
     if (body.decision === "seen") {
       // Kept as seen, for Show older once it leaves the board.
@@ -1027,6 +1029,13 @@ export function createApp(
     if (shown(next) === shown(stored.board)) return;
     const { status, body } = writeBoard(null, (board) => ({ board }), { sizeCap: false });
     if (status !== 200) logger.error(`[board] wait cards not refreshed: ${String((body as { error?: unknown }).error ?? status)}`);
+  }
+
+  /** Makes card `cardId` the card of ask `askId`, when that ask is there and names no card yet. */
+  function linkAsk(askId: string, cardId: string): void {
+    const ask = store.getAsk(askId);
+    if (!ask || ask.cardId) return;
+    if (store.replaceAsk({ ...ask, cardId, updatedAt: now().toISOString(), version: ask.version + 1 }, ask.version)) refreshWaits();
   }
 
   /** Whether `reopen` reopened `rev` after its merge ran: an answer to it is a follow-up. */
@@ -1325,6 +1334,8 @@ export function needRev(need: Need): string {
     ...pick(need, ["id", "kind", "title", "ask", "chat", "pr", "issue", "repo", "headSha", "risk", "reply"]),
     // A plan card's: a changed scope, size or ETA is a new revision, so an old approval cannot land on it.
     ...pick(need, ["points", "size", "eta"]),
+    // A card's ask: a changed one is a new revision, so an answer read before cannot make the card the new ask's.
+    ...pick(need, ["askId"]),
     ...(need.options ? { options: need.options.map((option) => pick(option, ["label", "short", "detail", "recommended", "text"])) } : {}),
     ...(need.links ? { links: need.links.map((link) => pick(link, ["label", "url", "primary"])) } : {}),
     // Absent on older cards, so their revs are unchanged; a new video is a new card.

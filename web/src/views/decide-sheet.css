@@ -398,6 +398,16 @@
   font-size: var(--fs-xl);
 }
 
+/* Under way below the card on screen: its head and the top of a row in sight and the rest scrolled, so the card keeps
+   the sheet; on the shortest phone a fixed 168px left the card a strip too short to swipe back to its top. */
+.decide-card > .ans-under {
+  flex: none;
+  max-height: min(168px, calc(var(--vv-h, 100dvh) * 0.15));
+  margin-top: 12px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 /* An answer's Undo toast sits over the sheet, which stays open on the next card: under it, Undo could not be tapped. */
 body:has(.decide-sheet) .toasts {
   z-index: 41;

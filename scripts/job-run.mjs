@@ -43,7 +43,6 @@ export const UP_TIMEOUT_MS = 30_000;
 export const LOG_LINES = 20;
 const KEEP_LINES = 2000;
 const LOCK_STALE_MS = 3 * 3_600_000;
-const USAGE_STALE_MS = 15 * 60_000;
 const GIT = "/usr/bin/git";
 const RUN_ID = /^[A-Za-z0-9_-]{8,64}$/;
 const READ_TIMEOUT_MS = 60_000;
@@ -64,18 +63,6 @@ const NO_REPO = { state: /** @type {const} */ ("skipped"), line: "skipped: no re
  */
 
 export const newRunId = () => `r${Date.now().toString(36)}${randomBytes(4).toString("hex")}`;
-
-/** Claude usage now, the higher of session and week, or null when it is not known or the reading is stale. @param {Deps} d */
-export function readUsage(d) {
-  try {
-    const doc = JSON.parse(fs.readFileSync(path.join(d.home, ".rivet-agents", "claude-usage.json"), "utf8"));
-    if (!(d.now() - Date.parse(doc?.at) < USAGE_STALE_MS)) return null;
-    const values = [doc?.session?.percent, doc?.weekly?.percent].filter((v) => typeof v === "number" && v >= 0 && v <= 100);
-    return values.length ? Math.max(...values) : null;
-  } catch {
-    return null;
-  }
-}
 
 /** @param {Deps} d @param {string} id @param {Record<string, unknown>} body @param {"runs" | "report"} to */
 async function send(d, id, body, to) {
@@ -409,7 +396,7 @@ export async function main(argv, d) {
     return 0;
   }
   const run = newRunId();
-  const start = await put(d, id, { run, state: "start", usage: readUsage(d), ...(manual ? { manual: true } : {}), ...(action ? { action } : {}) });
+  const start = await put(d, id, { run, state: "start", ...(manual ? { manual: true } : {}), ...(action ? { action } : {}) });
   if (!start.go) {
     d.stdout(`skipped: ${start.note}\n`);
     return 1;
@@ -422,7 +409,7 @@ export async function main(argv, d) {
   }
   const outcome = await checkAndReport(d, id, start.run, /** @type {Check} */ (check), LOOK_BUDGET_MS, false);
   // Only a script that ran and failed has a cause to look for; the chat is a task run, so the server holds it to those limits.
-  const look = outcome.state === "red" && outcome.ran ? await put(d, id, { run: start.run, state: "look", usage: readUsage(d) }) : null;
+  const look = outcome.state === "red" && outcome.ran ? await put(d, id, { run: start.run, state: "look" }) : null;
   if (look?.go) d.detach(["--chat", id, start.run, JSON.stringify({ kind: "check", name: start.job.name, check, line: outcome.line })]);
   d.stdout(`${outcome.state}: ${outcome.line}${look && !look.go ? ` (no chat: ${look.note})` : ""}\n`);
   return outcome.state === "green" ? 0 : 1;

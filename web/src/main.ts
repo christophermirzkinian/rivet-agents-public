@@ -15,6 +15,7 @@ import { app, changed, go, navStamp, networkChanged, refresh, resetSession, sett
 import { openConversation, receiveShare, refresh as refreshChat, showConversation } from "./views/chat.js";
 import { dropLeave, leaveOverlays } from "./views/navigation.js";
 import { decideShown, showPushed } from "./views/decide-sheet.js";
+import { offerOvernightNotice } from "./views/overnight.js";
 import { closeSheet, closeTallSheet } from "./views/sheet.js";
 import { cardsSegment, flushHeld, recoverOutbox, resetFeed } from "./views/feed.js";
 import { mountShell } from "./views/shell.js";
@@ -120,13 +121,14 @@ async function startApp(): Promise<void> {
   startConversation = null;
   unmountShell = mountShell(root);
   // What the Share menu sent waits through a signed-out start, and lands in the chat on the first one signed in.
-  void takeShare().then((share) => {
-    if (!share) return;
+  const shared = takeShare().then((share) => {
+    if (!share) return false;
     receiveShare(share);
     if (signedIn && app.tab !== "chat") {
       app.tab = "chat";
       changed();
     }
+    return true;
   });
   const stamp = navStamp();
   const loaded = await refresh();
@@ -141,6 +143,10 @@ async function startApp(): Promise<void> {
   // opens Decide.
   settleOpening(asked ?? "progress", stamp);
   if (loaded) recoverOutbox();
+  // The one-time overnight-jobs notice, on a plain start only: a card's link or a shared item opens what it asked for.
+  if (loaded && !front && !link) void shared.then((share) => {
+      if (!share) void offerOvernightNotice();
+    });
   stopPolling();
   polling = window.setInterval(() => {
     if (document.visibilityState === "visible") {

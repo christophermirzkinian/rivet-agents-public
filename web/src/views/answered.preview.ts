@@ -1,4 +1,4 @@
-import type { AnsweredCard, AnsweredResponse, Reopen } from "../../../src/shared/answered.js";
+import type { AnsweredAsk, AnsweredCard, AnsweredResponse, Reopen } from "../../../src/shared/answered.js";
 import type { Decision, Need, Reply, ServedNeed } from "../../../src/shared/board.js";
 
 // The preview's Cards › Answered (desktop.html?tab=cards): a fixture list, and Reopen and Send again as the server does
@@ -22,16 +22,18 @@ interface Fixture {
   delivery?: "ok" | "unconfirmed";
   /** The server found its work finished (answeredDone): its PR merged, or its ask is done. */
   done?: true;
+  /** The ask that names it as its card: under way, done or called off (answeredAsk). */
+  linked?: AnsweredAsk;
 }
 
 const FIXTURES: Fixture[] = [
-  { id: "banner-art", title: "Home banner: new art first", ask: "The banner shows the new art before the old. A yes merges it and deploys.", chat: "banner-art", pr: 3990, decision: "choice", choice: "Yes, keep it", at: 40, delivery: "ok", done: true },
-  { id: "report-chart", title: "Reports: bigger chart", ask: "The chart is bigger and animates for 3 s. A yes merges it.", chat: "report-chart", pr: 3988, decision: "choice", choice: "Change it", text: "slower, 2 s", at: 62, delivery: "unconfirmed" },
+  { id: "banner-art", title: "Home banner: new art first", ask: "The banner shows the new art before the old. A yes merges it and deploys.", chat: "banner-art", pr: 3990, decision: "choice", choice: "Yes, keep it", at: 40, delivery: "ok", done: true, linked: { state: "done", id: "a-3", stage: "shipped", stageAt: minutesAgo(10), note: "deployed with PR 3990" } },
+  { id: "report-chart", title: "Reports: bigger chart", ask: "The chart is bigger and animates for 3 s. A yes merges it.", chat: "report-chart", pr: 3988, decision: "choice", choice: "Change it", text: "slower, 2 s", at: 62, delivery: "unconfirmed", linked: { state: "underWay", id: "a-2", stage: "building", stageAt: minutesAgo(50) } },
   { id: "checkout-saved", title: "Checkout: SAVED by the bar", ask: "SAVED closes up to the bar on a small phone.", chat: "checkout-bar", pr: 3984, decision: "approve", at: 4 * 60, delivery: "ok", done: true },
   { id: "pricing-table", title: "Pricing: plan table", ask: "The plan table shows its prices beside the names.", chat: "pricing-table", pr: 3975, decision: "approve", at: 15 * 60, delivery: "ok", done: true },
-  { id: "session-keys-30", title: "Session keys: 30 days", ask: "How long a session key is kept.", chat: "session-keys", decision: "choice", choice: "30 days", at: 15 * 60 + 24, delivery: "ok" },
+  { id: "session-keys-30", title: "Session keys: 30 days", ask: "How long a session key is kept.", chat: "session-keys", decision: "choice", choice: "30 days", at: 15 * 60 + 24, delivery: "ok", linked: { state: "underWay", id: "a-5", stage: "review", stageAt: minutesAgo(15 * 60) } },
   { id: "welcome-music", title: "Welcome: intro music", ask: "The intro music: the new loop or the old one?", chat: "welcome-music", decision: "comment", text: "Later, after the art", at: 20 * 60 },
-  { id: "upload-sound", title: "Uploads: 50% sound", ask: "A softer chime at half way.", chat: "upload-sound", pr: 3962, decision: "approve", at: 30 * 60, delivery: "ok" },
+  { id: "upload-sound", title: "Uploads: 50% sound", ask: "A softer chime at half way.", chat: "upload-sound", pr: 3962, decision: "approve", at: 30 * 60, delivery: "ok", linked: { state: "calledOff", id: "a-4", stage: "parked", stageAt: minutesAgo(20 * 60), note: "you kept the old chime" } },
   { id: "form-refused", title: "Forms: a refused save stays refused", ask: "A refused save stays refused after a reload.", chat: "form-refused", pr: 3955, decision: "approve", at: 40 * 60, delivery: "ok", done: true },
   { id: "landing-banner", title: "Landing: rainbow first banner", ask: "The rainbow banner slides in first.", chat: "landing-banner", pr: 3971, decision: "reject", text: "too dark", at: 3 * 24 * 60, delivery: "ok" },
 ];
@@ -64,7 +66,7 @@ function entry(fixture: Fixture, index: number): AnsweredCard {
     item: { id: fixture.id, title: fixture.title, kind: "decision", ask: fixture.ask, chat: fixture.chat, repo: "example-org/example-repo", ...(fixture.pr ? { pr: fixture.pr } : {}) },
     ...(fixture.delivery ? { delivery: { target: "chat" as const, chat: fixture.chat, at, ...(fixture.delivery === "unconfirmed" ? { confirmed: false } : {}) } } : {}),
   };
-  return { card, reply, ...(fixture.done ? { done: true as const } : {}) };
+  return { card, reply, ...(fixture.done ? { done: true as const } : {}), ...(fixture.linked ? { ask: fixture.linked } : {}) };
 }
 
 const params = new URLSearchParams(location.search);

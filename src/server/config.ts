@@ -25,6 +25,8 @@ export interface Config {
   webRoot: string;
   /** The chat a message with no Reply goes to; empty when each such message starts a new chat. */
   monitorChat: string;
+  /** RIVET_OVERNIGHT_NOTICE_SEEN=1: this app starts with the overnight-jobs notice seen. */
+  overnightNoticeSeen?: boolean;
   /** RIVET_MERGE=on: a merge-ready card's yes merges its PR. Off, the yes is a plain approve. */
   merge: boolean;
   /** RIVET_HEALTH_URLS: the apps Ops checks, in the order given. Empty with nothing set. */
@@ -93,6 +95,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     vapid: vapidOf(env),
     webRoot: resolve(PACKAGE_ROOT, "dist/web"),
     monitorChat,
+    overnightNoticeSeen: env.RIVET_OVERNIGHT_NOTICE_SEEN === "1",
     merge: env.RIVET_MERGE === "on",
     healthChecks: healthChecksOf(env.RIVET_HEALTH_URLS),
   };

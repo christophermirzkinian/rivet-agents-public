@@ -256,9 +256,16 @@ describe("JobsStore", () => {
     expect(store.list(SAT_7AM).jobs[0]!.owned).toBe(true);
   });
 
-  it("skips a task over the day's 6 runs or while usage is high or unknown, never queueing it", () => {
+  it("starts a task, and its Run now, with no usage reported: Rivet reads no Claude usage", () => {
+    store.create("j-uuuuuuuu", task({ when: { every: "hours", hours: 4, minute: 0 } }), SAT_7AM);
+    const begun = start("j-uuuuuuuu", SAT_7AM);
+    expect(begun?.go).toBe(true);
+    if (begun?.go) store.report("j-uuuuuuuu", begun.run, "green", "nothing new", undefined, SAT_7AM);
+    expect(start("j-uuuuuuuu", new Date(SAT_7AM.getTime() + HOUR), { manual: true })?.go).toBe(true);
+  });
+
+  it("skips a task over the day's 6 runs or while its reported usage is high, never queueing it", () => {
     store.create("j-dddddddd", task({ when: { every: "hours", hours: 4, minute: 0 } }), SAT_7AM);
-    expect(start("j-dddddddd", SAT_7AM)).toEqual({ go: false, note: "Claude usage not known" });
     expect(start("j-dddddddd", SAT_7AM, { usage: 85 })).toEqual({ go: false, note: "usage high" });
     for (let n = 0; n < 6; n += 1) {
       const at = new Date(SAT_7AM.getTime() + n * HOUR);
@@ -268,7 +275,7 @@ describe("JobsStore", () => {
     }
     expect(start("j-dddddddd", new Date(SAT_7AM.getTime() + 7 * HOUR), { usage: 40 })).toEqual({ go: false, note: "6 task runs today already" });
     const skipped = store.list(SAT_7AM).jobs[0]!.runs.filter((run) => run.result === "skipped");
-    expect(skipped.map((run) => run.line)).toEqual(["skipped: 6 task runs today already", "skipped: usage high", "skipped: Claude usage not known"]);
+    expect(skipped.map((run) => run.line)).toEqual(["skipped: 6 task runs today already", "skipped: usage high"]);
     // The next local day starts again.
     expect(start("j-dddddddd", new Date(SAT_7AM.getTime() + 20 * HOUR), { usage: 40 })?.go).toBe(true);
   });
@@ -369,9 +376,8 @@ describe("JobsStore", () => {
     const red = start("j-llllllll", SAT_7AM);
     if (!red?.go) throw new Error("did not start");
     finish("j-llllllll", red.run, "red", SAT_7AM, "boom");
-    expect(look("j-llllllll", red.run, null)).toEqual({ go: false, note: "Claude usage not known" });
     expect(look("j-llllllll", red.run, 90)).toEqual({ go: false, note: "usage high" });
-    expect(look("j-llllllll", red.run, 10)?.go).toBe(true);
+    expect(look("j-llllllll", red.run, null)?.go).toBe(true);
     expect(look("j-llllllll", red.run, 10)).toEqual({ go: false, note: "a chat looked into that run already" });
     expect(store.tasksToday(SAT_7AM)).toBe(1);
     const card = start("j-mmmmmmmm", SAT_7AM);
@@ -388,6 +394,39 @@ describe("JobsStore", () => {
     if (!seventh?.go) throw new Error("did not start");
     finish("j-llllllll", seventh.run, "red", SAT_7AM);
     expect(look("j-llllllll", seventh.run, 10)).toEqual({ go: false, note: "6 task runs today already" });
+  });
+
+  it("skips scheduled task chats and look chats with \"Overnight jobs are off\" while the switch is off", () => {
+    expect(store.overnight()).toEqual({ on: true, noticeSeen: false });
+    store.create("j-nnnnnnnn", task({ when: { every: "hours", hours: 4, minute: 0 } }), SAT_7AM);
+    store.create("j-oooooooo", check({ name: "Look", check: { script: "memory:lint", where: "mac", onRed: "look" }, when: { every: "hours", hours: 1, minute: 0 } }), SAT_7AM);
+    const red = start("j-oooooooo", SAT_7AM);
+    if (!red?.go) throw new Error("did not start");
+    finish("j-oooooooo", red.run, "red", SAT_7AM, "boom");
+    expect(store.setOvernight({ on: false }, SAT_7AM)).toEqual({ on: false, noticeSeen: false });
+    expect(start("j-nnnnnnnn", SAT_7AM, { usage: 10 })).toEqual({ go: false, note: "Overnight jobs are off" });
+    expect(store.look("j-oooooooo", { run: red.run, state: "look", usage: 10 }, SAT_7AM)).toEqual({ go: false, note: "Overnight jobs are off" });
+    // A check is no chat: it still runs. A Run now the user taps still goes.
+    expect(start("j-oooooooo", SAT_7AM)?.go).toBe(true);
+    expect(start("j-nnnnnnnn", SAT_7AM, { usage: 10, manual: true, action: "act-1" })?.go).toBe(true);
+    expect(store.tasksToday(SAT_7AM)).toBe(1);
+    expect(store.list(SAT_7AM).jobs.find((job) => job.id === "j-nnnnnnnn")!.runs.some((run) => run.line === "skipped: Overnight jobs are off")).toBe(true);
+    // Back on, the same red run's look chat opens.
+    store.setOvernight({ on: true }, SAT_7AM);
+    expect(store.look("j-oooooooo", { run: red.run, state: "look", usage: 10 }, SAT_7AM)?.go).toBe(true);
+  });
+
+  it("keeps the switch and the notice seen across a restart, and a seed never turns the switch back on", () => {
+    store.setOvernight({ on: false }, SAT_7AM);
+    store.close();
+    store = new JobsStore(dir);
+    expect(store.overnight()).toEqual({ on: false, noticeSeen: false });
+    store.seedNotice(SAT_7AM);
+    expect(store.overnight()).toEqual({ on: false, noticeSeen: true });
+    expect(store.setOvernight({ on: true }, SAT_7AM)).toEqual({ on: true, noticeSeen: true });
+    store.close();
+    store = new JobsStore(dir);
+    expect(store.overnight()).toEqual({ on: true, noticeSeen: true });
   });
 
   it("a red after a green in the same millisecond is the newer run, whatever the runner named them", () => {
@@ -407,10 +446,10 @@ describe("JobsStore", () => {
     if (!red?.go) throw new Error("did not start");
     expect(store.report("j-ssssssss", red.run, "red", "two issues need you", undefined, SAT_7AM).outcome?.fresh).toHaveLength(1);
     for (let n = 1; n <= 60; n += 1) expect(start("j-ssssssss", new Date(SAT_7AM.getTime() + n * 1000), { usage: 90 })).toEqual({ go: false, note: "usage high" });
-    start("j-ssssssss", new Date(SAT_7AM.getTime() + 61_000));
+    expect(start("j-ssssssss", new Date(SAT_7AM.getTime() + 61_000))?.go).toBe(true);
     const job = store.list(SAT_7AM).jobs[0]!;
     expect(job.redStreak).toBe(1);
-    expect(job.runs.map((run) => run.line)).toEqual(["skipped: Claude usage not known", "skipped: usage high", "two issues need you"]);
+    expect(job.runs.map((run) => run.line)).toEqual([undefined, "skipped: usage high", "two issues need you"]);
     expect(store.failing()).toHaveLength(1);
   });
 

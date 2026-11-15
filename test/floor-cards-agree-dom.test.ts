@@ -98,7 +98,7 @@ describe("the Floor and Cards on the board of 4 Nov", async () => {
   });
 
   it("keeps a Coming item at owner-ok from saying Needs you with no open card, and lets it with one", () => {
-    const w = { ...worker("a", "cover-build"), delivering: { title: "Bull Rider plan", stage: "owner-ok" } } as Worker;
+    const w = { ...worker("a", "cover-build"), delivering: { title: "Cover plan", stage: "owner-ok" } } as Worker;
     expect(deskBubble(w, [], NOW, false)).toEqual({ text: "Waiting", tone: null });
     expect(deskBubble(w, [], NOW, true).text).toBe("Needs you");
     expect(agentLines(w, [], undefined, false).join(" ")).not.toContain("Needs you");

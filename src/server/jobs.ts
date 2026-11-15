@@ -15,6 +15,7 @@ import {
   MAX_ACTIVE_JOBS,
   MAX_TASK_RUNS_A_DAY,
   nextRunTime,
+  OVERNIGHT_OFF_NOTE,
   RUN_EARLY_MS,
   dayTimeWords,
   TASK_USAGE_LIMIT,
@@ -24,6 +25,8 @@ import {
   type JobSpec,
   type JobState,
   type JobsResponse,
+  type OvernightChange,
+  type OvernightSettings,
   type RunReport,
   type RunResult,
   type RunStart,
@@ -71,6 +74,12 @@ CREATE TABLE IF NOT EXISTS job_looks (
   reported_at TEXT,
   PRIMARY KEY (job_id, run_id)
 );
+CREATE TABLE IF NOT EXISTS job_settings (
+  id             INTEGER PRIMARY KEY CHECK (id = 1),
+  overnight      INTEGER NOT NULL,
+  notice_seen_at TEXT
+);
+INSERT OR IGNORE INTO job_settings (id, overnight) VALUES (1, 1);
 CREATE TABLE IF NOT EXISTS job_cards (
   job_id      TEXT PRIMARY KEY,
   card_id     TEXT NOT NULL,
@@ -295,13 +304,32 @@ export class JobsStore {
       .run(now.toISOString(), `skipped: the Mac did not start it: ${reason}`, jobId, actionId);
   }
 
+  /** "Run jobs while I sleep" (default on) and whether its one-time set-up notice was seen. */
+  overnight(): OvernightSettings {
+    const row = this.db.prepare("SELECT overnight, notice_seen_at FROM job_settings WHERE id = 1").get() as { overnight: number; notice_seen_at: string | null };
+    return { on: row.overnight === 1, noticeSeen: row.notice_seen_at !== null };
+  }
+
+  /** The switch, and/or "Got it": a notice once seen stays seen. */
+  setOvernight(change: OvernightChange, at: Date): OvernightSettings {
+    if (change.on !== undefined) this.db.prepare("UPDATE job_settings SET overnight = ? WHERE id = 1").run(change.on ? 1 : 0);
+    if (change.noticeSeen) this.seedNotice(at);
+    return this.overnight();
+  }
+
+  /** Marks the notice seen without touching the switch: an app set up with RIVET_OVERNIGHT_NOTICE_SEEN=1 starts here. */
+  seedNotice(at: Date): void {
+    this.db.prepare("UPDATE job_settings SET notice_seen_at = COALESCE(notice_seen_at, ?) WHERE id = 1").run(at.toISOString());
+  }
+
   isRunning(jobId: string): boolean {
     return !!this.db.prepare("SELECT 1 FROM job_runs WHERE job_id = ? AND result = 'running'").get(jobId);
   }
 
   /**
    * A run asks to start. Over a limit it is kept as skipped with the note and never queued: a task over the day's
-   * runs, or while Claude usage is high or unknown; a check while its last run is still going. A task's start is one
+   * runs, or while a reported usage is high (unknown usage holds none), or a scheduled one while overnight jobs are off (a Run now you
+   * tap still goes); a check while its last run is still going. A task's start is one
    * chat, which job-run.mjs starts itself.
    */
   start(jobId: string, report: RunReport, now: Date): RunStart | null {
@@ -318,17 +346,17 @@ export class JobsStore {
     };
     if (running) return skip("the last run is still going");
     if (job.spec.kind === "task") {
+      if (!report.manual && !this.overnight().on) return skip(OVERNIGHT_OFF_NOTE);
       if (this.tasksToday(now) >= MAX_TASK_RUNS_A_DAY) return skip(`${MAX_TASK_RUNS_A_DAY} task runs today already`);
-      if (report.usage === undefined || report.usage === null) return skip("Claude usage not known");
-      if (report.usage >= TASK_USAGE_LIMIT) return skip("usage high");
+      if (report.usage != null && report.usage >= TASK_USAGE_LIMIT) return skip("usage high");
     }
     this.insertRun(job, { id: report.run, at: now, result: "running", manual: report.manual, action: report.manual ? report.action : undefined });
     return go;
   }
 
   /**
-   * A look check's red run asks to open its chat. The chat is a task run: the day's task runs and Claude usage hold it,
-   * and it counts as one. Once per red run.
+   * A look check's red run asks to open its chat. The chat is a task run: the overnight switch, the day's task runs and
+   * Claude usage hold it, and it counts as one. Once per red run.
    */
   look(jobId: string, report: RunReport, now: Date): RunStart | null {
     const job = this.get(jobId);
@@ -337,9 +365,9 @@ export class JobsStore {
     if (job.state !== "active") return { go: false, note: stateNote(job.state) };
     if (this.run(jobId, report.run)?.result !== "red") return { go: false, note: "that run is not red" };
     if (this.db.prepare("SELECT 1 FROM job_looks WHERE job_id = ? AND run_id = ?").get(jobId, report.run)) return { go: false, note: "a chat looked into that run already" };
+    if (!this.overnight().on) return { go: false, note: OVERNIGHT_OFF_NOTE };
     if (this.tasksToday(now) >= MAX_TASK_RUNS_A_DAY) return { go: false, note: `${MAX_TASK_RUNS_A_DAY} task runs today already` };
-    if (report.usage === undefined || report.usage === null) return { go: false, note: "Claude usage not known" };
-    if (report.usage >= TASK_USAGE_LIMIT) return { go: false, note: "usage high" };
+    if (report.usage != null && report.usage >= TASK_USAGE_LIMIT) return { go: false, note: "usage high" };
     this.db.prepare("INSERT INTO job_looks (job_id, run_id, at) VALUES (?, ?, ?)").run(jobId, report.run, now.toISOString());
     return { go: true, run: report.run, job: { id: job.id, kind: job.spec.kind, name: job.spec.name, words: job.spec.words, check: job.spec.check } };
   }

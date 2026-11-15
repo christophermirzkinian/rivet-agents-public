@@ -110,6 +110,15 @@ test("say --card --pr names the PR an outcome card is about, --repo its repo; on
   assert.deepEqual(sayBody("x", "m1", [], { card: true, pr: 7, repo: "example-org/other-repo" }), { text: "x", replyTo: "m1", card: true, pr: 7, repo: "example-org/other-repo" });
 });
 
+test("say --card --ask names the ask an outcome card is about, so it stays under way; on an outcome card only", () => {
+  assert.deepEqual(parseArgs(["--reply-to", "m1", "--card", "--text", "The new reels", "--ask", "a-1"]), { images: [], replyTo: "m1", card: true, text: "The new reels", ask: "a-1" });
+  assert.deepEqual(sayBody("The new reels", "m1", [], { card: true, ask: "a-1" }), { text: "The new reels", replyTo: "m1", card: true, ask: "a-1" });
+  assert.deepEqual(sayBody("hi", "m1", [], { ask: "a-1" }), { text: "hi", replyTo: "m1" });
+  assert.throws(() => parseArgs(["--reply-to", "m1", "--text", "x", "--ask", "a-1"]), /--ask names the ask of an outcome card/);
+  assert.throws(() => parseArgs(["--reply-to", "m1", "--card", "--text", "x", "--ask", "A 601"]), /--ask takes an ask id/);
+  assert.throws(() => parseArgs(["--reply-to", "m1", "--card", "--text", "x", "--ask"]), /--ask takes an ask id/);
+});
+
 test("say --ack sets the status line on your message: a reply id and the words, nothing else", () => {
   assert.deepEqual(parseArgs(["--reply-to", "m1", "--ack", "building it, ~9:45"]), { images: [], replyTo: "m1", ack: "building it, ~9:45" });
   assert.deepEqual(sayBody("", "m1", [], { ack: " building it, ~9:45 " }), { replyTo: "m1", ack: "building it, ~9:45" });

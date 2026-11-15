@@ -13,6 +13,7 @@ import {
   MAX_ACTIVE_JOBS,
   jobRemoveSchema,
   nextRunTime,
+  overnightChangeSchema,
   runReportSchema,
   dayTimeWords,
   taskReportSchema,
@@ -90,6 +91,22 @@ export function registerJobs(router: Router, commands: CommandStore, deps: JobRo
   function sweep(): void {
     publish(jobs.sweep(now()));
   }
+  if (config.overnightNoticeSeen) jobs.seedNotice(now());
+
+  // "Run jobs while I sleep": the app's Settings switch and the one-time set-up notice's "Got it".
+  router.on("GET", "/api/settings/overnight", ({ request, response }) => {
+    requireSession(request);
+    json(response, 200, jobs.overnight());
+  });
+
+  router.on("PUT", "/api/settings/overnight", async ({ request, response }) => {
+    requireSameOrigin(request, config.origin);
+    requireSession(request);
+    const parsed = overnightChangeSchema.safeParse(await readJson(request, JOB_BODY_MAX));
+    if (!parsed.success) throw new HttpError(400, "invalid overnight settings");
+    json(response, 200, jobs.setOvernight(parsed.data, now()));
+  });
+
   const timer = setInterval(sweep, SWEEP_MS);
   timer.unref();
   router.onClose(() => clearInterval(timer));

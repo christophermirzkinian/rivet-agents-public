@@ -99,6 +99,14 @@ failure scenario; never summarise or approve.* Ask for `severity`, `file`, `line
 `scenario` and `material` per finding, plus `checked`. Never review in the authoring
 context; escalate instead.
 
+**Visual lens.** A PR whose body carries before/after stills also runs a `visual`
+lens beside its tier's lenses: on round 1, and on any later push that changes the
+look. Brief it with only the stills and the ask: the requester's words verbatim, the
+viewport, and which still is before and which after. Never the diff, the code, the
+author's defence or an earlier score. It answers "does the after do what was asked?"
+in the same finding shape (`file` is the still). It is an extra lens: it never stands
+in for a tier lens, and the gate does not require it.
+
 **Validate the round's findings** before fixing any. This collects evidence; it is not
 a lens and it judges nothing. Run one fresh read-only `explorer` with every finding
 verbatim (lens, file, line, scenario) and the head SHA: *for each finding, locate the

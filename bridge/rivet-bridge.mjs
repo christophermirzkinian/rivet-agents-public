@@ -9,7 +9,6 @@
 //   node rivet-bridge.mjs             run the daemon
 //   node rivet-bridge.mjs --check     verify token, server, chat runner, gh and the monitor chat
 //   node rivet-bridge.mjs --spend     print one spend reading
-//   node rivet-bridge.mjs --usage     print one Claude usage reading
 //   node rivet-bridge.mjs --schedules print one schedules reading
 import { createBridge, runLoop, runWorkerFeed } from "./lib/bridge.mjs";
 import { releaseForYes } from "./lib/card-holds.mjs";
@@ -17,7 +16,6 @@ import { HOLDS_FILE } from "./lib/holds-file.mjs";
 import { acquireInstanceLock } from "./lib/instance.mjs";
 import { runLogRotateLoop } from "./lib/log-rotate.mjs";
 import { fingerprint, formatLog, makeExec, readToken, resolveBin, serverOrigin } from "./lib/config.mjs";
-import { collectClaude } from "./lib/ops/claude.mjs";
 import { createFalseAlarmRetry } from "./lib/ops/false-alarm.mjs";
 import { runOpsLoop } from "./lib/ops/index.mjs";
 import { runModelReportLoop } from "./lib/model-routing.mjs";
@@ -32,7 +30,7 @@ import { isChatName } from "./lib/validate.mjs";
 import { liveWorkersByRepo } from "./lib/workers.mjs";
 import { repoAllowlist } from "../src/shared/repos.ts";
 
-const USAGE = "usage: node rivet-bridge.mjs [--check | --spend | --usage | --schedules]\n";
+const USAGE = "usage: node rivet-bridge.mjs [--check | --spend | --schedules]\n";
 
 /** @param {string} event @param {Record<string, unknown>} [fields] */
 function log(event, fields) {
@@ -45,7 +43,7 @@ async function main() {
     process.stdout.write(USAGE);
     return 0;
   }
-  if (args.length > 1 || args.some((a) => !["--check", "--spend", "--usage", "--schedules"].includes(a))) {
+  if (args.length > 1 || args.some((a) => !["--check", "--spend", "--schedules"].includes(a))) {
     process.stderr.write(USAGE);
     return 2;
   }
@@ -53,10 +51,6 @@ async function main() {
     const scan = emptyState();
     const { files, records, skipped } = await collect(scan);
     process.stdout.write(`${JSON.stringify({ files, records, skippedLines: skipped, ...aggregate(scan) }, null, 2)}\n`);
-    return 0;
-  }
-  if (args.includes("--usage")) {
-    process.stdout.write(`${JSON.stringify(await collectClaude({ exec: makeExec(), fetch }), null, 2)}\n`);
     return 0;
   }
   if (args.includes("--schedules")) {

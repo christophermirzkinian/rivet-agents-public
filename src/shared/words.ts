@@ -128,6 +128,26 @@ export function youAnswered(answer: string, at: At, now: At = Date.now()): strin
   return `You: ${answer} · ${when(at, now)}`;
 }
 
+// An answered card whose ask is still open (GitHub sweep idea 3, the owner's pick 15 Nov): answered.ts answeredAsk's states.
+
+/** The list under the open cards of the answered cards whose ask has not closed. */
+export const UNDER_WAY = "Under way";
+
+/** An answered card under way: `You said Yes · Building`. */
+export function youSaidUnderWay(answer: string, stage: Stage): string {
+  return `You said ${answer} · ${stageWord(stage)}`;
+}
+
+/** Its ask closed deployed or done: `Done: shipped in PR 8170`, or `Done` with no note. */
+export function askDone(note?: string): string {
+  return note ? `Done: ${note}` : "Done";
+}
+
+/** Its ask was parked: `You said Yes · Called off: the owner dropped it`, or `… · Called off` with no note. */
+export function youSaidCalledOff(answer: string, note?: string): string {
+  return `You said ${answer} · Called off${note ? `: ${note}` : ""}`;
+}
+
 export const REOPEN = "Reopen";
 export const SEND_AGAIN = "Send again";
 export const ALREADY_MERGED = "Already merged; a new answer is a follow-up.";

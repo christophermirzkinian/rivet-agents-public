@@ -10,7 +10,7 @@ import { ExecError } from "../lib/config.mjs";
 import { calendarOf, chatArgs, readCommand, jobLabel, jobPrompt, plistText, programArgs, runJobAction, validJobAction } from "../lib/jobs.mjs";
 import { LAUNCHCTL_BIN } from "../lib/ops/mac.mjs";
 import { collectMac, PLUTIL_BIN } from "../lib/schedules/index.mjs";
-import { CLONE_SYNC, held, main, outputCollector, readUsage, runCheck, spawnRun, stopped, upUrl } from "../../scripts/job-run.mjs";
+import { CLONE_SYNC, held, main, outputCollector, runCheck, spawnRun, stopped, upUrl } from "../../scripts/job-run.mjs";
 import { withRival } from "../../scripts/lock-race-fixture.mjs";
 import { tryLock } from "../../scripts/token-lock.mjs";
 
@@ -669,23 +669,20 @@ test("job-run: an up check runs in the background and opens no chat", async () =
   }
 });
 
-test("job-run: a task goes on the server's word, with Claude usage, and its chat starts in the background; a refused start opens nothing", async () => {
+test("job-run: a task goes on the server's word with no usage reading, Run now too, and its chat starts in the background; a refused start opens nothing", async () => {
   const task = runner({ start: { go: true, run: "r-run-0002", job: { id: ID, kind: "task", name: "Issues", words: "look over the open issues" } } });
   const paused = runner({ start: { go: false, note: "paused" } });
   try {
-    fs.mkdirSync(path.join(task.home, ".rivet-agents"), { recursive: true });
-    fs.writeFileSync(path.join(task.home, ".rivet-agents", "claude-usage.json"), JSON.stringify({ at: new Date(task.d.now()).toISOString(), session: { percent: 40 }, weekly: { percent: 62 } }));
     assert.equal(await main([ID, "--launchd", ON_TIME], task.d), 0);
-    assert.equal(task.puts[0].body.usage, 62);
+    assert.equal(Object.hasOwn(task.puts[0].body, "usage"), false, "Rivet reads no Claude usage, so it sends none");
     assert.deepEqual(task.detached, [["--chat", ID, "r-run-0002", JSON.stringify({ kind: "task", name: "Issues", words: "look over the open issues" })]]);
     assert.equal(task.out.at(-1), "background\n");
     assert.equal(await main(["--manual", ID], task.d), 0, "Run now's answer to the bridge");
     assert.equal(task.detached.length, 2);
+    assert.equal(task.puts[1].body.manual, true);
+    assert.equal(Object.hasOwn(task.puts[1].body, "usage"), false);
     assert.equal(await main([ID, "--launchd", ON_TIME], paused.d), 1);
-    assert.equal(paused.puts[0].body.usage, null);
     assert.equal(paused.out.at(-1), "skipped: paused\n");
-    fs.writeFileSync(path.join(task.home, ".rivet-agents", "claude-usage.json"), JSON.stringify({ at: "2026-10-24T05:00:00Z", session: { percent: 40 } }));
-    assert.equal(readUsage(task.d), null, "a stale reading is not known");
     assert.equal(await main(["--exec", "j-bad"], task.d), 2);
   } finally {
     task.cleanup();

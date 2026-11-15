@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { cardFromReply, type AnsweredResponse } from "../src/shared/answered.js";
+import { OUTCOME_OPTIONS } from "../src/shared/answers.js";
 import { needSchema, type Reply } from "../src/shared/board.js";
 import { Store } from "../src/server/store.js";
 import { bearer, BOARD_TOKEN, BRIDGE_TOKEN, browser, fakeClock, putBoard, revOf, startServer, type TestServer } from "./helpers.js";
@@ -123,6 +124,67 @@ describe("Answered and Reopen", () => {
     expect(parked.status, await parked.clone().text()).toBe(201);
     const after = await answered();
     expect(Object.fromEntries(after.cards.map((entry) => [entry.card.id, entry.done ?? false]))).toEqual({ "plan-6586": true, "q-other": false, "plan-later": true, "plan-stopped": false });
+  });
+
+  it("an answer to a card naming its ask makes it that ask's card, and Answered says it under way, done or called off (GitHub sweep idea 3, the owner's pick 15 Nov)", async () => {
+    const asks = (method: string, path: string, body?: unknown) => fetch(`${server.base}/api/asks${path}`, { method, headers: bearer(BOARD_TOKEN), ...(body ? { body: JSON.stringify(body) } : {}) });
+    const card = (id: string, askId: string, pr?: number) => ({ id, kind: "decision", title: `Plan ${id}`, ask: "Go?", chat: "cards-progress-4", askId, ...(pr ? { pr } : {}) });
+    expect((await asks("POST", "", { id: "a-under", words: "Under plan", stage: "building" })).status).toBe(201);
+    expect((await asks("POST", "", { id: "a-taken", words: "Taken plan", cardId: "other-card", stage: "building" })).status).toBe(201);
+    expect((await asks("POST", "", { id: "a-dismissed", words: "Dismissed plan", stage: "building" })).status).toBe(201);
+    expect((await putBoard(server.base, { ...BASE, needs: [card("plan-under", "a-under", 7001), { ...card("plan-taken", "a-taken"), options: OUTCOME_OPTIONS.map((option) => ({ ...option })) }, card("plan-none", "a-nowhere"), card("plan-dismissed", "a-dismissed")] })).status).toBe(200);
+    await answer("plan-under", { decision: "approve" });
+    await answer("plan-taken", { decision: "choice", choice: OUTCOME_OPTIONS[0]!.label });
+    await answer("plan-none", { decision: "approve" });
+    const stream = await connect("image,chat-window,changes,dismiss");
+    await answer("plan-dismissed", { decision: "dismiss" });
+    stream.abort();
+    expect(((await (await asks("GET", "/a-under")).json()) as { cardId?: string }).cardId).toBe("plan-under");
+    expect(((await (await asks("GET", "/a-taken")).json()) as { cardId?: string }).cardId).toBe("other-card");
+    // A Dismiss asked for nothing: the ask is left as it was.
+    expect(((await (await asks("GET", "/a-dismissed")).json()) as { cardId?: string }).cardId).toBeUndefined();
+
+    // Its PR shipped while the ask is still open: under way, not done.
+    expect((await putBoard(server.base, { ...BASE, needs: [], shipped: [{ pr: 7001, title: "Plan plan-under" }] })).status).toBe(200);
+    const byId = async () => Object.fromEntries((await answered()).cards.map((entry) => [entry.card.id, entry]));
+    let cards = await byId();
+    expect(cards["plan-under"]!.ask).toEqual({ state: "underWay", id: "a-under", stage: "building", stageAt: expect.any(String) });
+    expect(cards["plan-under"]!.done).toBeUndefined();
+    // Its own askId, though the ask names another card: that ask's, and not done by its answer while the ask is open.
+    expect(cards["plan-taken"]!.ask).toEqual({ state: "underWay", id: "a-taken", stage: "building", stageAt: expect.any(String) });
+    expect(cards["plan-taken"]!.done).toBeUndefined();
+    expect(cards["plan-none"]!.ask).toBeUndefined();
+    expect(cards["plan-dismissed"]!.ask).toBeUndefined();
+    expect(cards["plan-dismissed"]!.done).toBe(true);
+
+    expect((await asks("PATCH", "/a-under", { stage: "done", note: "merged in PR 7001" })).status).toBe(200);
+    cards = await byId();
+    expect(cards["plan-under"]!.ask).toMatchObject({ state: "done", stage: "done", note: "merged in PR 7001" });
+    expect(cards["plan-under"]!.done).toBe(true);
+
+    expect((await asks("PATCH", "/a-under", { stage: "parked", note: "The owner dropped it" })).status).toBe(200);
+    cards = await byId();
+    expect(cards["plan-under"]!.ask).toMatchObject({ state: "calledOff", stage: "parked", note: "The owner dropped it" });
+    // Called off is not done, though its PR shipped: Show done off still lists it.
+    expect(cards["plan-under"]!.done).toBeUndefined();
+  });
+
+  it("keeps an answered card whose ask is under way past 30 days and past the cap, until the ask closes", async () => {
+    const asks = (method: string, path: string, body?: unknown) => fetch(`${server.base}/api/asks${path}`, { method, headers: bearer(BOARD_TOKEN), ...(body ? { body: JSON.stringify(body) } : {}) });
+    expect((await asks("POST", "", { id: "a-long", words: "Long plan", stage: "building" })).status).toBe(201);
+    const long = { id: "plan-long", kind: "decision", title: "Long plan", ask: "Go?", chat: "cards-progress-5", askId: "a-long" };
+    expect((await putBoard(server.base, { ...BASE, needs: [long, plan] })).status).toBe(200);
+    await answer("plan-long", { decision: "approve" });
+    clock.advance(1000);
+    await answer("plan-6586", { decision: "approve" });
+    // The cap cuts the older answer, unless its ask is under way.
+    expect(server.app.store.keptAnswered(new Date(0).toISOString(), 1).map(({ card }) => card.id)).toEqual(["plan-6586", "plan-long"]);
+
+    clock.advance(31 * 24 * 3600_000);
+    expect((await answered()).cards.map((entry) => [entry.card.id, entry.ask?.state])).toEqual([["plan-long", "underWay"]]);
+    expect((await asks("PATCH", "/a-long", { stage: "done" })).status).toBe(200);
+    expect((await answered()).cards).toEqual([]);
+    expect(server.app.store.keptAnsweredCard("plan-long")).toBeNull();
   });
 
   it("reopens a card off the board: back on the open deck, its chat told once the bridge acks, the first answer kept", async () => {

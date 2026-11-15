@@ -13,7 +13,7 @@ export const DISK_BAD = 0.05;
 export const GITHUB_STALE_MS = 5 * 60_000;
 export const MAC_STALE_MS = 5 * 60_000;
 export const FLY_STALE_MS = 20 * 60_000;
-/** The bridge reads Claude usage every two minutes; a reading older than this is shown as stale. */
+/** The bridge sends the Codex usage rows every minute while they are fresh; a reading older than this is shown as stale. */
 export const CLAUDE_STALE_MS = 10 * 60_000;
 /** An app counts as down after this many failed health checks in a row. */
 export const DOWN_AFTER_FAILS = 2;

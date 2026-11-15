@@ -299,6 +299,11 @@ export const needSchema = z
      * and its answers and comments land there (2026-10-09). Unset, the server matches one (src/server/routes/conversations.ts).
      */
     replyTo: z.string().regex(ID_PATTERN).optional(),
+    /**
+     * The ask the card is about (`a-1`): your answer makes it that ask's card when it has none, and the answered
+     * card stays under way until the ask closes. asks.ts's ASK_ID_PATTERN, which this file cannot import (asks.ts imports it).
+     */
+    askId: z.string().regex(/^[a-z0-9-]{1,40}$/).optional(),
     /** How its push lands; unset, the kind decides (push.ts KIND_LEVELS). */
     push: z.enum(["needs-you", "fyi"]).optional(),
     links: z.array(linkSchema).max(20).optional(),

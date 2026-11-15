@@ -416,3 +416,36 @@ describe("run reports", () => {
     expect((await board()).needs.filter((need) => need.id.startsWith("schedule-job-"))).toEqual([]);
   });
 });
+
+describe("the overnight-jobs switch", () => {
+  const overnight = (headers: Record<string, string> = { cookie }) => fetch(`${server.base}/api/settings/overnight`, { headers });
+
+  it("is on with the notice unseen by default, and only a same-origin session reads or changes it", async () => {
+    expect(await (await overnight()).json()).toEqual({ on: true, noticeSeen: false });
+    expect((await overnight({})).status).toBe(401);
+    expect((await overnight(bearer(BOARD_TOKEN))).status).toBe(401);
+    expect((await send("PUT", "/api/settings/overnight", { on: false }, bearer(BOARD_TOKEN))).status).toBe(403);
+    expect((await send("PUT", "/api/settings/overnight", { on: false }, { cookie, "content-type": "application/json" })).status).toBe(403);
+    expect((await send("PUT", "/api/settings/overnight", {}, browser(cookie))).status).toBe(400);
+    expect((await send("PUT", "/api/settings/overnight", { noticeSeen: false }, browser(cookie))).status).toBe(400);
+    expect((await send("PUT", "/api/settings/overnight", { on: false, extra: 1 }, browser(cookie))).status).toBe(400);
+    const off = await send("PUT", "/api/settings/overnight", { on: false }, browser(cookie));
+    expect(await off.json()).toEqual({ on: false, noticeSeen: false });
+    const seen = await send("PUT", "/api/settings/overnight", { noticeSeen: true }, browser(cookie));
+    expect(await seen.json()).toEqual({ on: false, noticeSeen: true });
+  });
+
+  it("skips a scheduled task's run with the note while off", async () => {
+    const id = await madeJob({ name: "Nightly tidy", words: "tidy the memory notes", kind: "task", when: { every: "day", at: "03:00" }, cards: "red" });
+    await send("PUT", "/api/settings/overnight", { on: false }, browser(cookie));
+    const started = await report(id, { run: "run-overnight-1", state: "start", usage: 10 });
+    expect(await started.json()).toEqual({ go: false, note: "Overnight jobs are off" });
+  });
+
+  it("starts the owner's own app with the notice seen and the switch on", async () => {
+    await server.close();
+    server = await startServer({ RIVET_OVERNIGHT_NOTICE_SEEN: "1" }, { now: clock.now });
+    cookie = server.cookie();
+    expect(await (await overnight()).json()).toEqual({ on: true, noticeSeen: true });
+  });
+});

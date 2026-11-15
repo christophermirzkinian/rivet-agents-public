@@ -3,7 +3,7 @@ import { mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 
-import { ANSWERED_KEEP_MS, cardFromReply, DONE_ASK_STAGES, type Reopen } from "../shared/answered.js";
+import { ANSWERED_KEEP_MS, answeredAsk, cardFromReply, DONE_ASK_STAGES, type Reopen } from "../shared/answered.js";
 import { type Ask, type AskStage } from "../shared/asks.js";
 import { FILE_TYPES, type Board, type BridgeAck, type Decision, type FileRef, type FileType, type Need, type PushRemoval, type PushRemovalReason, type Reply, type ReplyItem } from "../shared/board.js";
 import { IMAGE_TYPES } from "../shared/command.js";
@@ -94,6 +94,8 @@ CREATE TABLE IF NOT EXISTS asks (
   version    INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS asks_created ON asks (created_at, id);
+-- An answered card's ask by the card it names (cardAsk), without a scan of every ask.
+CREATE INDEX IF NOT EXISTS asks_card ON asks (json_extract(json, '$.cardId'));
 CREATE TABLE IF NOT EXISTS ops_status (
   kind       TEXT NOT NULL,
   key        TEXT NOT NULL,
@@ -336,6 +338,9 @@ export interface UsageAskRow {
   answer: string | null;
   answeredAt: string | null;
 }
+
+/** SQL over `answered_cards a`: the card names an ask, or an ask names it as its card (asks_card). Else it has no ask. */
+const MAY_HAVE_ASK = "(json_extract(a.card, '$.askId') IS NOT NULL OR a.id IN (SELECT json_extract(json, '$.cardId') FROM asks))";
 
 export class Store {
   private readonly db: DatabaseSync;
@@ -628,6 +633,30 @@ export class Store {
     return new Set(rows.map((row) => String(row.card)));
   }
 
+  /**
+   * The ask behind an answered card, for Answered's Under way, Done and Called off: the one the card names (`askId`), else
+   * the one that names it as its card, of two the one whose stage moved last. Several cards may follow one ask.
+   */
+  cardAsk(card: Pick<Need, "id" | "askId">): Ask | null {
+    const named = card.askId ? this.getAsk(card.askId) : null;
+    if (named) return named;
+    const row = this.db.prepare("SELECT json FROM asks WHERE json_extract(json, '$.cardId') = ? ORDER BY status_at DESC, id DESC LIMIT 1").get(card.id) as Row | undefined;
+    return row ? (JSON.parse(row.json as string) as Ask) : null;
+  }
+
+  /** `cardAsk` of each card, by card id; a card with no ask is absent. */
+  cardAsks(cards: readonly Pick<Need, "id" | "askId">[]): Map<string, Ask> {
+    return new Map(cards.flatMap((card) => {
+      const ask = this.cardAsk(card);
+      return ask ? [[card.id, ask] as const] : [];
+    }));
+  }
+
+  /** Whether a kept answered card's ask is under way (answeredAsk): it stays past 30 days and past the cap until that ask closes. */
+  private underWay(card: Need, decision: Decision): boolean {
+    return answeredAsk({ decision }, this.cardAsk(card))?.state === "underWay";
+  }
+
   getAsk(id: string): Ask | null {
     const row = this.db.prepare("SELECT json FROM asks WHERE id = ?").get(id) as Row | undefined;
     return row ? (JSON.parse(row.json as string) as Ask) : null;
@@ -850,15 +879,17 @@ export class Store {
     this.pruneAnswered(new Date(Date.parse(answeredAt) - ANSWERED_KEEP_MS).toISOString());
   }
 
-  /** The kept answered cards answered at or after `since`, the newest answer first, at most `limit`, each with that answer. */
+  /**
+   * The kept answered cards answered at or after `since`, the newest answer first, at most `limit`, each with that answer;
+   * then, older or past the cap, those whose ask is under way.
+   */
   keptAnswered(since: string, limit: number): { card: Need; rev: string; reply: Reply }[] {
-    const rows = this.db
-      .prepare(
-        `SELECT a.card AS kept_card, a.rev AS kept_rev, r.* FROM answered_cards a JOIN replies r ON r.id = a.reply_id
-         WHERE a.answered_at >= ? ORDER BY a.answered_at DESC, a.id DESC LIMIT ?`,
-      )
-      .all(since, limit) as Row[];
-    return rows.map((row) => ({ card: JSON.parse(row.kept_card as string) as Need, rev: row.kept_rev as string, reply: toReply(row) }));
+    const kept = (row: Row) => ({ card: JSON.parse(row.kept_card as string) as Need, rev: row.kept_rev as string, reply: toReply(row) });
+    const select = "SELECT a.card AS kept_card, a.rev AS kept_rev, r.* FROM answered_cards a JOIN replies r ON r.id = a.reply_id";
+    const page = (this.db.prepare(`${select} WHERE a.answered_at >= ? ORDER BY a.answered_at DESC, a.id DESC LIMIT ?`).all(since, limit) as Row[]).map(kept);
+    // Only a card with an ask can be under way: one naming an ask, or one an ask names as its card.
+    const rest = (this.db.prepare(`${select} WHERE a.id NOT IN (SELECT value FROM json_each(?)) AND ${MAY_HAVE_ASK} ORDER BY a.answered_at DESC, a.id DESC`).all(JSON.stringify(page.map(({ card }) => card.id))) as Row[]).map(kept);
+    return [...page, ...rest.filter(({ card, reply }) => this.underWay(card, reply.decision))];
   }
 
   /** One kept answered card, or null. */
@@ -868,11 +899,14 @@ export class Store {
   }
 
   /**
-   * Drops the answered cards and Reopens from before `before`. A merged Reopen stays: a later Reopen of the same card
-   * carries its `merged` on, so no answer down the line arms the merge that ran again.
+   * Drops the answered cards and Reopens from before `before`. A card whose ask is under way stays until that ask closes.
+   * A merged Reopen stays: a later Reopen of the same card carries its `merged` on, so no answer down the line arms the
+   * merge that ran again.
    */
   pruneAnswered(before: string): void {
-    this.db.prepare("DELETE FROM answered_cards WHERE answered_at < ?").run(before);
+    const old = this.db.prepare(`SELECT a.id, a.card, r.decision FROM answered_cards a JOIN replies r ON r.id = a.reply_id WHERE a.answered_at < ? AND ${MAY_HAVE_ASK}`).all(before) as Row[];
+    const stay = old.filter((row) => this.underWay(JSON.parse(row.card as string) as Need, row.decision as Decision)).map((row) => String(row.id));
+    this.db.prepare("DELETE FROM answered_cards WHERE answered_at < ? AND id NOT IN (SELECT value FROM json_each(?))").run(before, JSON.stringify(stay));
     this.db.prepare("DELETE FROM reopens WHERE at < ? AND merged = 0").run(before);
   }
 

@@ -15,7 +15,7 @@ import { FULL_SCREEN_EVENTS, fullScreenElement, h, ICONS, keepFocus, modalOpen, 
 import { watchOps } from "../ops-data.js";
 import { rivet } from "../rivet/rivet.js";
 import { app, boardRead, cardState, changed, countedCards, deck, frontCard, isMinimised, navigated, navStamp, readAgain, refresh, subscribe, unminimise } from "../state.js";
-import { answeredCount, answeredList } from "./answered.js";
+import { answeredCount, answeredList, underWayList } from "./answered.js";
 import { stopCardMedia } from "./card-media.js";
 import { answerCard, answerTapsLocked, cardKey, cardOnItsWay, cardsSegment, cheerView, feedKeyUp, guardTaps, keyHints, offlineBar, releaseKeys, setCardsSegment, showCard } from "./feed.js";
 import { leaveOverlays } from "./navigation.js";
@@ -358,12 +358,16 @@ function decideView(first: readonly string[], look: { answered?: boolean; untilR
     if (inPane) card.append(keyHints(need));
     paintedData = app.dataRev;
     // A redraw that changes nothing leaves the card alone, so a clip playing in it plays on.
-    const drawn = slot.lastElementChild;
-    if (painted === at && drawn && bare(drawn) === bare(card)) return showing(at);
+    const drawn = slot.firstElementChild;
+    if (painted === at && drawn && bare(drawn) === bare(card)) {
+      underWayBelow(drawn);
+      return showing(at);
+    }
     const moved = painted !== at;
     if (moved && isBig) setBig(false);
     if (!inPane) card.querySelector(".card-head .head-tools")?.prepend(big);
     slot.replaceChildren(card);
+    underWayBelow(card);
     painted = at;
     paintedRev = need.rev;
     shownNeed = need;
@@ -387,12 +391,27 @@ function decideView(first: readonly string[], look: { answered?: boolean; untilR
     stopCardMedia();
   }
 
+  /** Under way below the card on screen, put back only when it changed, so its own scroll stays where it was. */
+  function underWayBelow(card: Element): void {
+    const next = underWayList();
+    const shown = card.nextElementSibling;
+    if ((shown?.outerHTML ?? "") === (next?.outerHTML ?? "")) return;
+    shown?.remove();
+    if (next) card.after(next);
+  }
+
   /** Answered's rows (Reopen, Send again) or the line saying nothing is open: no card is on screen. */
   /**
    * None open: "Nothing needs you.", or with minimised cards waiting
    * "N cards wait for you, all minimised." and "Show them ›", which opens the first one here.
    */
   function noneOpen(): HTMLElement {
+    const under = underWayList();
+    const line = noneLine();
+    return under ? h("div", { class: "decide-under" }, line, under) : line;
+  }
+
+  function noneLine(): HTMLElement {
     const waiting = minimisedWaiting();
     if (!waiting.length) return h("p", { class: "feed-quiet decide-none" }, NOTHING_NEEDS_YOU);
     const show = () => {

@@ -1366,7 +1366,7 @@ function overallViews(ops: OpsResponse | null): [Overall, Overall] {
   const usage = ops?.claude ?? null;
   const codex = usage ? codexCells(usage.limits) : [];
   return [
-    { id: "claude", name: "Claude", cells: usage ? claudeOverall(usage) : [], usage, empty: usage ? "No meters in the last reading." : "No Claude usage read yet." },
+    { id: "claude", name: "Claude", cells: usage ? claudeOverall(usage) : [], usage, empty: "Rivet doesn't read Claude usage." },
     { id: "openai", name: "OpenAI", cells: codex, usage: codex.length ? usage : null, empty: "No OpenAI accounts read yet." },
   ];
 }

@@ -59,5 +59,8 @@ describe("needRev and a card's proof", () => {
     expect(needRev({ ...card, evidence: { review: "findings" } } as typeof card)).not.toBe(clean);
     expect(needRev({ ...card })).not.toBe(clean);
     expect(needRev({ ...card, evidence: undefined } as typeof card)).toBe(needRev(card));
+    // A changed ask is a new revision; a card naming none keeps its old one.
+    expect(needRev({ ...card, askId: "a-1" } as typeof card)).not.toBe(needRev({ ...card, askId: "a-2" } as typeof card));
+    expect(needRev({ ...card, askId: undefined } as typeof card)).toBe(needRev(card));
   });
 });

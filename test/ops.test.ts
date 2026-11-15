@@ -12,8 +12,6 @@ import { collectGithub, emptyGithubCache } from "../bridge/lib/ops/github.mjs";
 // @ts-expect-error the bridge is plain ESM without type declarations
 import { collectMac } from "../bridge/lib/ops/mac.mjs";
 // @ts-expect-error the bridge is plain ESM without type declarations
-import { parseUsage } from "../bridge/lib/ops/claude.mjs";
-// @ts-expect-error the bridge is plain ESM without type declarations
 import { showsToken, TOKEN } from "../bridge/test/padded-token.mjs";
 import { boardSchema, type BoardResponse } from "../src/shared/board.js";
 import { brokenOnMain, isOneOff, longRed, PR_RED_GRACE_MS, newImage, offlineSince, resetText, retiredRunners, zoneClock, type Briefing, type FlySnapshot, type GithubSnapshot, type MacSnapshot, type OpsResponse, type WorkflowRun } from "../src/shared/ops.js";
@@ -1296,14 +1294,12 @@ describe("timeline and alerts", () => {
     expect(longRed(pr("pass", 3 * PR_RED_GRACE_MS), at)).toBe(false);
   });
 
-  it("accepts the bridge's own Claude usage rows, weekly and scoped labels included", () => {
-    const limits = parseUsage({
-      limits: [
-        { kind: "session", percent: 85, severity: "warning", resets_at: "2026-09-28T04:30:00+00:00", is_active: true },
-        { kind: "weekly_all", percent: 43, severity: "normal", resets_at: "2026-10-03T17:00:00+00:00" },
-        { kind: "weekly_scoped", percent: 22, severity: "normal", resets_at: null, scope: { model: { display_name: "Opus" } } },
-      ],
-    });
+  it("accepts usage rows, weekly and scoped labels included", () => {
+    const limits = [
+      { kind: "session", label: "Session (5 hr)", percent: 85, severity: "warning" as const, resetsAt: "2026-09-28T04:30:00.000Z", active: true },
+      { kind: "weekly_all", label: "Week (all models)", percent: 43, severity: "normal" as const, resetsAt: "2026-10-03T17:00:00.000Z", active: false },
+      { kind: "weekly_scoped", label: "Week (Opus)", percent: 22, severity: "normal" as const, resetsAt: null, active: false },
+    ];
     const parsed = claudeUsageSnapshotSchema.safeParse({ at: "2026-09-28T02:00:00.000Z", limits });
     expect(parsed.success).toBe(true);
     expect(parsed.data?.limits.map((limit) => limit.label)).toEqual(["Session (5 hr)", "Week (all models)", "Week (Opus)"]);

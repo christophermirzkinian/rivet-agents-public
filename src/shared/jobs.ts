@@ -35,8 +35,23 @@ export function reportUrlOk(value: string): boolean {
 export const CHECK_MIN_HOURS = 1;
 export const TASK_MIN_HOURS = 4;
 export const MAX_TASK_RUNS_A_DAY = 6;
-/** Task runs are skipped at or above this Claude usage, and while usage is unknown. */
+/** Task runs are skipped at or above this reported Claude usage; unknown usage holds none. */
 export const TASK_USAGE_LIMIT = 85;
+/** The note a task chat or look chat skips with while "Run jobs while I sleep" is off. */
+export const OVERNIGHT_OFF_NOTE = "Overnight jobs are off";
+
+/** The "Run jobs while I sleep" switch (default on), and whether the one-time set-up notice about it was seen. */
+export interface OvernightSettings {
+  on: boolean;
+  noticeSeen: boolean;
+}
+
+/** A change from the app: the switch, and/or "Got it" on the notice (it is never un-seen). */
+export const overnightChangeSchema = z
+  .object({ on: z.boolean().optional(), noticeSeen: z.literal(true).optional() })
+  .strict()
+  .refine((change) => change.on !== undefined || change.noticeSeen !== undefined, { message: "nothing to change" });
+export type OvernightChange = z.infer<typeof overnightChangeSchema>;
 export const TASK_MODEL = "claude-opus-5-5";
 export const TASK_MAX_MINUTES = 30;
 export const JOB_LOG_LINES = 20;
@@ -169,7 +184,7 @@ export const runReportSchema = z
     manual: z.boolean().optional(),
     /** The Run now action that started it, so only that action's failure lets go of it. */
     action: z.string().regex(ID_PATTERN).optional(),
-    /** Claude usage now, the higher of session and week, or null when it is not known: a task start needs it. */
+    /** Claude usage now, the higher of session and week, or null when it is not known; Rivet reads none, so its runner sends none. */
     usage: z.number().min(0).max(100).nullable().optional(),
     line: plain(MAX_JOB_LINE).optional(),
     log: z.array(z.string().max(MAX_JOB_LOG_LINE)).max(JOB_LOG_LINES).optional(),

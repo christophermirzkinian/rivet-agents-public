@@ -158,6 +158,7 @@ test("parses every command", () => {
   assert.deepEqual(edit.unset, ["risk", "media"]);
   assert.equal(edit.json, "-");
   assert.equal(edit.jsonOut, true);
+  assert.deepEqual(parseArgs(["card", "add", "pick", "--ask", "Which?", "--ask-id", "a-1"]).fields, { ask: "Which?", askId: "a-1" });
   assert.deepEqual(parseArgs(["card", "drop", "a", "b", "--json"]).args, ["a", "b"]);
   assert.equal(parseArgs(["card", "add", "x", "--pr", "7", "--repo", "example-org/example-repo"]).fields.repo, "example-org/example-repo");
   assert.throws(() => parseArgs(["card", "add", "x", "--repo", "example-repo"]), /--repo is owner\/name/);
@@ -190,6 +191,7 @@ test("refuses bad usage", () => {
     [["card", "add", "a", "--link", "nourl"], "<label>=<https url>"],
     [["card", "add", "a", "--link", "x=http://x"], "<label>=<https url>"],
     [["card", "add", "a", "--pr", "0"], "positive whole number"],
+    [["card", "add", "a", "--ask-id", "A 601"], "--ask-id takes an ask id"],
     [["card", "add", "a", "--reply", "yes"], "--reply takes text"],
     [["card", "add", "a", "--unset", "risk"], "unknown option --unset"],
     [["card", "edit", "a", "--replace"], "unknown option --replace"],

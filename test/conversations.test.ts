@@ -376,6 +376,25 @@ describe("conversation routes", () => {
     expect(await card({})).toMatchObject({ pr: 4050 });
   });
 
+  it("--card --ask names the ask the outcome card is about: the card carries it, with that ask's PR", async () => {
+    await list();
+    const asked = await owner("Make Docs Sync darker", { conversation: null });
+    await rivet("On it.", { replyTo: asked });
+    expect((await send("POST", "/api/asks", { id: "a-dark", words: "Docs Sync darker", replyId: asked, stage: "building", prs: [4050] })).status).toBe(201);
+    expect((await send("POST", "/api/asks", { id: "a-glow", words: "Docs Sync glow", replyId: asked, stage: "building", prs: [4070] })).status).toBe(201);
+    clock.advance(60_000);
+    const card = async (body: Record<string, unknown>) => {
+      const line = (await (await send("POST", "/api/bridge/say", { text: "Docs Sync: the video", replyTo: asked, card: true, ...body })).json()) as ChatMessage;
+      const board = (await (await send("GET", "/api/board")).json()) as { board: { needs: Record<string, unknown>[] } };
+      return board.board.needs.find((need) => need.id === line.card);
+    };
+    expect(await card({ ask: "a-dark" })).toMatchObject({ kind: "decision", askId: "a-dark", pr: 4050 });
+    expect(await card({ ask: "a-glow" })).toMatchObject({ askId: "a-glow", pr: 4070 });
+    expect((await card({}))?.askId).toBeUndefined();
+    expect((await send("POST", "/api/bridge/say", { text: "x", replyTo: asked, ask: "a-dark" })).status).toBe(400);
+    expect((await send("POST", "/api/bridge/say", { text: "x", replyTo: asked, card: true, ask: "A 1" })).status).toBe(400);
+  });
+
   it("--card answers an ask with an outcome card in Needs you, Yes, keep it or Change it, and one line that opens it", async () => {
     await list();
     const asked = await owner("Make Docs Sync darker", { conversation: null });

@@ -4,7 +4,7 @@ import { ANSWERED_WINDOWS, answeredShown, cardFromReply, DEFAULT_ANSWERED_WINDOW
 import type { Decision, Reply, ServedNeed } from "../../../src/shared/board.js";
 import { dayHeading } from "../../../src/shared/when.js";
 import { localDay } from "../day.js";
-import { answeredChip, CHAT_TOLD, noAnsweredIn, REOPEN, reopenedBand, SEND_AGAIN, SHOW_DONE, YES, youAnswered, type ChatTold } from "../../../src/shared/words.js";
+import { answeredChip, askDone, CHAT_TOLD, noAnsweredIn, REOPEN, reopenedBand, SEND_AGAIN, SHOW_DONE, UNDER_WAY, YES, youAnswered, youSaidCalledOff, youSaidUnderWay, type ChatTold } from "../../../src/shared/words.js";
 import * as api from "../api.js";
 import { answerState } from "../answer-state.js";
 import { button, h } from "../dom.js";
@@ -242,24 +242,56 @@ function reopenButton(entry: AnsweredCard, variant: string): HTMLButtonElement {
   return element;
 }
 
-/** One answered row: its title, `You: <answer> · <time>`, where the answer got to, and Reopen. */
+/**
+ * One answered row: its title, `You: <answer> · <time>`, where the answer got to, and Reopen. A card whose ask is open
+ * or called off says so in place of `You:`; one whose ask is done says Done and its note in place of where it got to.
+ */
 function row(entry: AnsweredCard, reopens: boolean): HTMLElement {
-  const { card, reply } = entry;
-  const state = answerState(reply, macOffline());
+  const { card, reply, ask } = entry;
+  const delivery = answerState(reply, macOffline());
+  const state = ask?.state === "done" ? { tone: "ok", text: askDone(ask.note) } : delivery;
+  const said = ask?.state === "underWay" ? youSaidUnderWay(answerText(reply), ask.stage) : ask?.state === "calledOff" ? youSaidCalledOff(answerText(reply), ask.note) : youAnswered(answerText(reply), reply.at);
   return h(
     "li",
     {
       class: `ans-row box${found?.reply.id === reply.id ? " found" : ""}`,
-      attrs: { "data-card": card.id, "data-reply": reply.id },
+      attrs: { "data-card": card.id, "data-reply": reply.id, ...(ask ? { "data-ask": ask.state } : {}) },
     },
     h(
       "div",
       { class: "ans-text" },
       h("span", { class: "ans-t" }, card.title),
-      h("span", { class: "ans-you" }, ...withAnswer(youAnswered(answerText(reply), reply.at), reply)),
+      h("span", { class: "ans-you" }, ...withAnswer(said, reply)),
       h("span", { class: `ans-state ${state.tone}` }, state.text),
     ),
     reopens ? reopenButton(entry, "ans-reopen") : null,
+  );
+}
+
+/**
+ * Under way, below the open cards (GitHub sweep idea 3, the owner's pick 15 Nov): each answered card whose ask has not closed,
+ * newest answer first, as `You said <answer> · <stage>` with Reopen and no answers; null with none, or before a read.
+ */
+export function underWayList(): HTMLElement | null {
+  readIfStale();
+  const rows = (data?.cards ?? []).filter((entry) => entry.ask?.state === "underWay");
+  if (!rows.length) return null;
+  return h(
+    "section",
+    { class: "ans ans-under", attrs: { "aria-label": UNDER_WAY } },
+    h("h2", { class: "ans-day" }, UNDER_WAY),
+    h(
+      "ol",
+      { class: "ans-list" },
+      ...rows.map((entry) =>
+        h(
+          "li",
+          { class: "ans-row box", attrs: { "data-card": entry.card.id, "data-reply": entry.reply.id, "data-ask": "underWay" } },
+          h("div", { class: "ans-text" }, h("span", { class: "ans-t" }, entry.card.title), h("span", { class: "ans-you" }, ...withAnswer(youSaidUnderWay(answerText(entry.reply), entry.ask!.stage), entry.reply))),
+          reopenButton(entry, "ans-reopen"),
+        ),
+      ),
+    ),
   );
 }
 

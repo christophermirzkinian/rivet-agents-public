@@ -1,6 +1,5 @@
 import { ancestryCache, provePatchMerges, refreshHistory } from "./ancestry.mjs";
 import { BACKLOG_INTERVAL_MS, collectBacklog } from "./backlog.mjs";
-import { CLAUDE_INTERVAL_MS, collectClaude, limitedUsage, MAX_LIMITS, writeUsageFile } from "./claude.mjs";
 import { CODEX_INTERVAL_MS, CODEX_STALE_MS, collectCodex } from "./codex.mjs";
 import { collectFly, emptyFlyCache, flyApps } from "./fly.mjs";
 import { collectGithub, emptyGithubCache } from "./github.mjs";
@@ -10,12 +9,12 @@ import { collectMac } from "./mac.mjs";
 import { putSnapshot } from "../snapshot-compat.mjs";
 import { defaultRepo } from "../../../src/shared/repos.ts";
 
-// The Ops collectors: Mac health and GitHub every minute, Claude usage every two, Codex (OpenAI) usage, Fly and each
-// repo's open issues every five minutes, Home Assistant every minute, as separate loops so a slow Fly pass never delays
-// the rest. Fly and Home Assistant run only with their settings. Each pass sends one PUT with the bridge token; a failure
-// is logged and the next pass tries again. They read only; nothing they run changes anything, apart from fetching main
-// into the bridge's own history clone (RIVET_HISTORY_REPO) and, when given a falseAlarm, re-running a red CI run on main
-// once when it failed on a GitHub hiccup (./false-alarm.mjs).
+// The Ops collectors: Mac health and GitHub every minute, Codex (OpenAI) usage, Fly and each repo's open issues every
+// five minutes, Home Assistant every minute, as separate loops so a slow Fly pass never delays the rest. Fly and Home
+// Assistant run only with their settings. Each pass sends one PUT with the bridge token; a failure is logged and the
+// next pass tries again. They read only; nothing they run changes anything, apart from fetching main into the bridge's
+// own history clone (RIVET_HISTORY_REPO) and, when given a falseAlarm, re-running a red CI run on main once when it
+// failed on a GitHub hiccup (./false-alarm.mjs).
 
 export const OPS_INTERVAL_MS = 60_000;
 export const FLY_INTERVAL_MS = 5 * 60_000;
@@ -28,10 +27,10 @@ export class Unauthorized extends Error {}
  * @param {{ origin: string, token: string, fetch: typeof fetch, exec: import("../config.mjs").Exec,
  *   ghBin: string, flyBin: string | null, codexBin?: string | null, log: (event: string, fields?: Record<string, unknown>) => void,
  *   stop: AbortSignal, now?: () => Date, sleep?: (ms: number, stop: AbortSignal) => Promise<void>,
- *   usageFile?: string | null, holdsFile?: string | null,
- *   falseAlarm?: ReturnType<typeof import("./false-alarm.mjs").createFalseAlarmRetry> | null, haUrl?: string | null }} deps (usageFile
- *   null writes no file; holdsFile null reads no merge holds file, absent reads HOLDS_FILE; falseAlarm absent or null re-runs
- *   nothing; haUrl absent reads RIVET_HA_URL, and with neither the Home page stays unread)
+ *   holdsFile?: string | null,
+ *   falseAlarm?: ReturnType<typeof import("./false-alarm.mjs").createFalseAlarmRetry> | null, haUrl?: string | null }} deps (holdsFile
+ *   null reads no merge holds file, absent reads HOLDS_FILE; falseAlarm absent or null re-runs nothing; haUrl absent reads
+ *   RIVET_HA_URL, and with neither the Home page stays unread)
  */
 export function runOpsLoop(deps) {
   const { origin, token, log, stop } = deps;
@@ -40,7 +39,7 @@ export function runOpsLoop(deps) {
   const cache = emptyGithubCache();
   const flyCache = emptyFlyCache();
   const patchCache = ancestryCache();
-  /** The latest Codex rows and when they were read; they ride on the Claude usage PUT. */
+  /** The latest Codex rows and when they were read; the codex-usage loop sends them. */
   let codex = { rows: /** @type {Awaited<ReturnType<typeof collectCodex>>} */ ([]), at: 0 };
   const nowMs = () => (deps.now ?? (() => new Date()))().getTime();
 
@@ -83,21 +82,11 @@ export function runOpsLoop(deps) {
     every("mac", OPS_INTERVAL_MS, async () => {
       await call("/api/bridge/ops/mac", "PUT", await collectMac({ exec: deps.exec, now: deps.now }));
     }),
-    every("claude", CLAUDE_INTERVAL_MS, async () => {
-      // A failed reading is logged and the pass goes on: the Codex rows still reach the server, so one collector never
-      // stops the other.
-      let snapshot = await collectClaude({ exec: deps.exec, fetch: deps.fetch, now: deps.now }).catch((/** @type {unknown} */ err) => {
-        log("ops-claude-usage-failed", { error: err instanceof Error ? err.message.slice(0, 200) : "error" });
-        return null;
-      });
-      if (snapshot && deps.usageFile !== null) writeUsageFile(snapshot, deps.usageFile);
-      // A limited account's last reading stands in for a failed one, after the write: the file keeps the real reading.
-      snapshot ??= limitedUsage({ file: deps.usageFile, now: deps.now });
-      const openai = nowMs() - codex.at <= CODEX_STALE_MS ? codex.rows : [];
-      const limits = [...(snapshot?.limits ?? []), ...openai].slice(0, MAX_LIMITS);
-      // The server takes one row at least: with none there is nothing new to say.
+    every("codex-usage", OPS_INTERVAL_MS, async () => {
+      // The server takes one row at least and 12 at most.
+      const limits = nowMs() - codex.at <= CODEX_STALE_MS ? codex.rows.slice(0, 12) : [];
       if (!limits.length) return;
-      await call("/api/bridge/ops/claude", "PUT", { at: snapshot?.at ?? new Date(nowMs()).toISOString(), limits });
+      await call("/api/bridge/ops/claude", "PUT", { at: new Date(codex.at).toISOString(), limits });
     }),
     every("github", OPS_INTERVAL_MS, async () => {
       const snapshot = await collectGithub({ exec: deps.exec, ghBin: deps.ghBin, now: deps.now, cache, log, holdsFile: deps.holdsFile === undefined ? HOLDS_FILE : deps.holdsFile });

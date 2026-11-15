@@ -623,7 +623,8 @@ export function register(router: Router): void {
     // A question card names none: his answer goes back to the conversation of its line (cardThread), never to a PR.
     const owner = kind
       ? undefined
-      : ((say.replyTo !== undefined ? asks.find((one) => one.replyId === say.replyTo) : undefined) ??
+      : ((say.ask !== undefined ? asks.find((one) => one.id === say.ask) : undefined) ??
+        (say.replyTo !== undefined ? asks.find((one) => one.replyId === say.replyTo) : undefined) ??
         homeAsks.find((one) => namesWord(text, one.id)) ??
         homeAsks.find((one) => one.chat !== undefined && namesWord(text, one.chat)) ??
         homeAsks[0]);
@@ -661,6 +662,7 @@ export function register(router: Router): void {
         ...(pr !== undefined ? { pr } : {}),
         ...(repo ? { repo } : {}),
         ...(chat ? { chat } : {}),
+        ...(outcome && say.ask ? { askId: say.ask } : {}),
         ...(thread ? { thread } : {}),
         // A card with no line opening it is shown in the conversation its text names (2026-10-09).
         ...(conversation && say.replyTo === undefined ? { replyTo: conversation } : {}),

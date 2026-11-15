@@ -2,7 +2,7 @@ import type { FeedEntry } from "./log-feed.js";
 import type { ScreenItem } from "./screen-view.js";
 import { z } from "zod";
 
-import type { AskCreate } from "./asks.js";
+import { ASK_ID_PATTERN, type AskCreate } from "./asks.js";
 import { CHAT_PATTERN, fileRefsSchema, ID_PATTERN, MAX_CHAT_IMAGES, PDF_NAME_PATTERN, type FileRef } from "./board.js";
 import type { JobAction } from "./jobs.js";
 import { modelPicksSchema, type ModelPicks } from "./models.js";
@@ -156,6 +156,8 @@ export const saySchema = z
      */
     pr: z.number().int().positive().max(1_000_000_000).optional(),
     repo: repo.optional(),
+    /** With card (say.mjs --card --ask): the ask the outcome is about, its `askId`; his answer makes it that ask's card. */
+    ask: z.string().regex(ASK_ID_PATTERN).optional(),
     /** An update card's tag and thread, as needSchema caps them. */
     tag: z.string().trim().min(1).max(40).optional(),
     thread: z.string().trim().min(1).max(80).optional(),
@@ -177,6 +179,7 @@ export const saySchema = z
   .refine((value) => !value.card || value.replyTo !== undefined, "a card answer replies to a message")
   .refine((value) => (value.pr === undefined && value.repo === undefined) || (value.card === true && value.replyTo !== undefined), "a PR goes on an outcome card (card with replyTo)")
   .refine((value) => value.repo === undefined || value.pr !== undefined, "a repo names the PR's repo: give pr")
+  .refine((value) => value.ask === undefined || (value.card === true && value.replyTo !== undefined), "an ask goes on an outcome card (card with replyTo)")
   .refine((value) => (value.tag === undefined && value.thread === undefined) || isSayCard(value), "a tag or thread goes on a card")
   .refine((value) => value.schedule === undefined || (value.replyTo === undefined && !value.new), "a schedule goes on an update card")
   .refine((value) => value.files === undefined || !isSayCard(value), "a file goes on a chat reply or a new conversation, not a card");

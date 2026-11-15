@@ -390,7 +390,7 @@ describe("Ops Usage page", () => {
   it("shows the Usage page's no-reading state instead of numbers, and the age of a stale reading", () => {
     opsData.ops = opsFixture(null);
     ops.mount(root);
-    expect(hero("claude").querySelector(".usage-hero-empty")!.textContent).toBe("No Claude usage read yet.");
+    expect(hero("claude").querySelector(".usage-hero-empty")!.textContent).toBe("Rivet doesn't read Claude usage.");
     expect(hero("openai").querySelector(".usage-hero-empty")!.textContent).toBe("No OpenAI accounts read yet.");
     expect(root.querySelector(".usage-heroes")!.textContent).not.toMatch(/\d/);
     expect(root.querySelector('[data-section="claude-accounts"]')).toBeNull();

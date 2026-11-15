@@ -1373,3 +1373,68 @@
 [data-dismissed] .ops-row-fail {
   color: var(--muted);
 }
+
+/* Settings › Overnight jobs, and the one-time set-up notice */
+
+.night,
+.night-notice .sheet-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.night-key {
+  color: var(--muted);
+}
+
+.night-planned {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.night-key-note {
+  margin: -6px 0 0;
+}
+
+.night-lead {
+  margin: 0;
+  font-size: var(--fs-l);
+  line-height: 1.4;
+}
+
+.night-tile {
+  padding: 6px 16px 12px;
+}
+
+.night-tile-state {
+  margin: -8px 0 0;
+  color: var(--muted);
+  font-size: var(--fs-m);
+}
+
+.night-good {
+  margin: 0;
+  padding: 14px 16px;
+  font-size: var(--fs-m);
+  line-height: 1.5;
+}
+
+.night-chip {
+  margin-right: 4px;
+  background: var(--apricot);
+  color: #1b1405;
+}
+
+.night-alt {
+  color: var(--apricot);
+  font-weight: 800;
+}
+
+.night-notice .sheet > .btn {
+  min-height: var(--tap-big);
+  background: var(--apricot);
+  color: #1b1405;
+  font-weight: 900;
+  font-size: var(--fs-l);
+}

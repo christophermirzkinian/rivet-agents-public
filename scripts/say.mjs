@@ -23,7 +23,7 @@ const USAGE = `Answer you in the Rivet Agents app: a chat reply, a card you must
   node say.mjs --stdin [--reply-to <message id>]       read the message from stdin
   node say.mjs --image <abs path> [--reply-to <message id>]   a photo alone
   node say.mjs --new [--title "<title>"] --text "<message>"   start a conversation of its own
-  node say.mjs --reply-to <message id> --card --text "<result>" [--image <abs path> ...] [--video <abs path>] [--pr <n> [--repo <owner/name>]]
+  node say.mjs --reply-to <message id> --card --text "<result>" [--image <abs path> ...] [--video <abs path>] [--pr <n> [--repo <owner/name>]] [--ask <ask id>]
   node say.mjs --reply-to <message id> --ack "building it, ~9:45"
 
 Where it lands: --reply-to <id> is a chat reply (acks and talk) in the
@@ -44,7 +44,10 @@ and one line in the conversation that opens it ("Card: <title> >"); a --tag or
 it. Nor does an answer to you go as an update card: the board refuses an update
 card that answers one of your messages. --pr <n> (with --repo <owner/name>, or
 the working folder's repo when that is left off) names the PR it is about, and
-your yes is that PR's decision of record. A --card with a --video about a PR of
+your yes is that PR's decision of record. Pass --ask a-N, the ask the card is
+about, so the card stays "under way" until the ask closes: your answer makes it
+that ask's card, and Cards shows it under way at the ask's stage, then Done or
+Called off with the note it closed with. A --card with a --video about a PR of
 the main repo (the first of RIVET_REPOS) holds that PR's merge in holds.json from
 the moment it is posted until your yes on it (by hand: rivet unhold --card <id>).
 
@@ -100,7 +103,7 @@ export class DashError extends Error {}
 
 /** @param {string[]} argv */
 export function parseArgs(argv) {
-  /** @type {{ text?: string, replyTo?: string, stdin?: boolean, help?: boolean, images: string[], video?: string, file?: string, new?: boolean, title?: string, card?: boolean, tag?: string, thread?: string, ack?: string, pr?: number, repo?: string }} */
+  /** @type {{ text?: string, replyTo?: string, stdin?: boolean, help?: boolean, images: string[], video?: string, file?: string, new?: boolean, title?: string, card?: boolean, tag?: string, thread?: string, ack?: string, pr?: number, repo?: string, ask?: string }} */
   const o = { images: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -108,7 +111,11 @@ export function parseArgs(argv) {
     else if (a === "--stdin") o.stdin = true;
     else if (a === "--new") o.new = true;
     else if (a === "--card") o.card = true;
-    else if (a === "--pr" || a === "--repo") {
+    else if (a === "--ask") {
+      const value = argv[++i];
+      if (value === undefined || !/^[a-z0-9-]{1,40}$/.test(value)) throw new Error("--ask takes an ask id, as a-1");
+      o.ask = value;
+    } else if (a === "--pr" || a === "--repo") {
       const value = argv[++i];
       if (value === undefined) throw new Error(`${a} needs a value`);
       if (a === "--repo") {
@@ -163,6 +170,7 @@ export function parseArgs(argv) {
   if (o.card && o.replyTo === undefined) throw new Error("--card answers a message: give --reply-to <id>");
   if ((o.pr !== undefined || o.repo !== undefined) && !o.card) throw new Error("--pr names the PR of an outcome card: give --reply-to <id> --card");
   if (o.repo !== undefined && o.pr === undefined) throw new Error("--repo names the PR's repo: give --pr <n>");
+  if (o.ask !== undefined && !o.card) throw new Error("--ask names the ask of an outcome card: give --reply-to <id> --card");
   // An outcome (--card) takes no tag or thread, but an older call that passes them still posts it: the server drops them.
   const card = o.card || (o.replyTo === undefined && !o.new);
   if (card && o.file !== undefined && o.ack === undefined)
@@ -180,7 +188,7 @@ export function parseArgs(argv) {
  * @param {string} text
  * @param {string | undefined} replyTo
  * @param {{ role: "image" | "video" | "file", sha256: string, file?: string }[]} clips
- * @param {{ new?: boolean, title?: string, card?: boolean, tag?: string, thread?: string, schedule?: string, ack?: string, pr?: number, repo?: string }} [start] say.mjs --new [--title], --card [--pr [--repo]], --tag, --thread, --schedule, --ack
+ * @param {{ new?: boolean, title?: string, card?: boolean, tag?: string, thread?: string, schedule?: string, ack?: string, pr?: number, repo?: string, ask?: string }} [start] say.mjs --new [--title], --card [--pr [--repo]] [--ask], --tag, --thread, --schedule, --ack
  */
 export function sayBody(text, replyTo, clips, start = {}) {
   // Two paths to the same bytes are one photo.
@@ -198,6 +206,7 @@ export function sayBody(text, replyTo, clips, start = {}) {
     ...(start.new && start.title ? { title: start.title.trim() } : {}),
     ...(start.card ? { card: true } : {}),
     ...(start.card && start.pr !== undefined ? { pr: start.pr, ...(start.repo ? { repo: start.repo } : {}) } : {}),
+    ...(start.card && start.ask ? { ask: start.ask } : {}),
     ...(start.tag ? { tag: start.tag.trim() } : {}),
     ...(start.thread ? { thread: start.thread.trim() } : {}),
     ...(start.ack ? { ack: start.ack.trim() } : {}),
@@ -387,7 +396,7 @@ async function main() {
   const token = await readToken(exec, "RIVET_BOARD_TOKEN");
   await uploadClips(clips, { origin, token, fetch, log: (msg) => process.stderr.write(`say: ${msg}\n`) });
   const video = o.card ? clips.find((clip) => clip.role === "video") : undefined;
-  const { code, posted } = await postSay(sayBody(text, o.replyTo, clips, { new: o.new, title: o.title, card: o.card, pr: o.pr, repo: o.repo, tag: o.tag, thread: o.thread, ack: o.ack }), {
+  const { code, posted } = await postSay(sayBody(text, o.replyTo, clips, { new: o.new, title: o.title, card: o.card, pr: o.pr, repo: o.repo, ask: o.ask, tag: o.tag, thread: o.thread, ack: o.ack }), {
     origin,
     token,
     fetch,

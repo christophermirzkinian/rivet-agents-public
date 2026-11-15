@@ -7,7 +7,6 @@ import path from "node:path";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { CLAUDE_INTERVAL_MS, limitedUsage, parseUsage, readClaudeToken, USAGE_URL, writeUsageFile } from "../lib/ops/claude.mjs";
 import { clip, iso } from "../lib/ops/common.mjs";
 import { collectFly, emptyFlyCache, flyApps, MAX_RELEASES, parseFlyStatus, parseReleases } from "../lib/ops/fly.mjs";
 import { checksSummary, collectGithub, emptyGithubCache, MAX_PRS, parseCiRuns, parseClosed, parseJobNames, parseMerged, parsePullRequests, parseRunners, parseRuns, PR_QUERY } from "../lib/ops/github.mjs";
@@ -903,8 +902,6 @@ test("collectFly keeps each app's last good data through a failed fetch, and say
 });
 
 test("runOpsLoop PUTs each snapshot with the bridge token and backs off on 401", async () => {
-  const usageDir = fs.mkdtempSync(path.join(os.tmpdir(), "rivet-usage-"));
-  const usageFile = path.join(usageDir, "claude-usage.json");
   /** @type {{ method: string, url: string, auth: string | null, body: any }[]} */
   const seen = [];
   const stop = new AbortController();
@@ -914,11 +911,9 @@ test("runOpsLoop PUTs each snapshot with the bridge token and backs off on 401",
     const url = String(input);
     seen.push({ method: String(init?.method), url, auth: new Headers(init?.headers).get("authorization"), body: init?.body ? JSON.parse(String(init.body)) : null });
     if (url.endsWith("/ops/github")) return new Response("{}", { status: 401 });
-    if (url === USAGE_URL) return new Response(JSON.stringify(USAGE_BODY));
     return new Response("{}");
   };
   const { exec } = fakeExec((bin, args) => {
-    if (bin === "/usr/bin/security") return CREDENTIALS;
     if (bin === "/opt/flyctl") return JSON.stringify(args[0] === "status" ? FLY_STATUS : FLY_RELEASES);
     if (bin === "/bin/df") return DF;
     if (bin === "/usr/sbin/sysctl") return "50\n";
@@ -939,7 +934,6 @@ test("runOpsLoop PUTs each snapshot with the bridge token and backs off on 401",
     log: (e) => events.push(e),
     stop: stop.signal,
     now: () => NOW,
-    usageFile,
     holdsFile: null,
     sleep: async (ms) => {
       sleeps.push(ms);
@@ -950,22 +944,11 @@ test("runOpsLoop PUTs each snapshot with the bridge token and backs off on 401",
   const puts = seen.filter((s) => s.method === "PUT");
   assert.deepEqual(puts.map((s) => s.url).sort(), [
     "https://rivet.test/api/bridge/ops/backlog",
-    "https://rivet.test/api/bridge/ops/claude",
     "https://rivet.test/api/bridge/ops/fly",
     "https://rivet.test/api/bridge/ops/github",
     "https://rivet.test/api/bridge/ops/mac",
   ]);
   assert.ok(seen.filter((s) => s.url.startsWith("https://rivet.test/")).every((s) => s.auth === `Bearer ${token}`));
-  // The Claude sign-in goes to the usage endpoint only, never to the Rivet server.
-  assert.deepEqual(seen.filter((s) => s.auth === `Bearer ${CLAUDE_TOKEN}`).map((s) => s.url), [USAGE_URL]);
-  assert.ok(!seen.some((s) => JSON.stringify(s.body ?? "").includes(CLAUDE_TOKEN)));
-  assert.equal(puts.find((s) => s.url.endsWith("/claude"))?.body.limits[0].percent, 85);
-  assert.deepEqual(Object.keys(puts.find((s) => s.url.endsWith("/claude"))?.body).sort(), ["at", "limits"]);
-  const file = JSON.parse(fs.readFileSync(usageFile, "utf8"));
-  assert.deepEqual(file.session, { percent: 85, resetsAt: "2026-09-28T04:30:00.400Z" });
-  assert.equal(file.limits.length, 3);
-  fs.rmSync(usageDir, { recursive: true, force: true });
-  assert.ok(sleeps.includes(CLAUDE_INTERVAL_MS));
   assert.deepEqual(
     puts.find((s) => s.url.endsWith("/fly"))?.body.apps.map((/** @type {any} */ a) => a.app),
     ["rivet-agents"],
@@ -994,7 +977,7 @@ test("the github and Fly PUTs carry the merge commit and the release's source sh
       return new Response("{}");
     },
     log: (event) => events.push(event), stop: stop.signal, now: () => NOW,
-    usageFile: null, holdsFile: null, sleep: async () => stop.abort(),
+    holdsFile: null, sleep: async () => stop.abort(),
   });
   assert.equal(sent.get("github").merged[0].mergeSha, mergeSha);
   assert.equal(sent.get("fly").apps[0].releases[0].sha, "bf616155653b");
@@ -1022,86 +1005,11 @@ test("runOpsLoop without flyctl runs no Fly loop", async () => {
     log: (e) => events.push(e),
     stop: stop.signal,
     now: () => NOW,
-    usageFile: null,
     holdsFile: null,
     sleep: async () => stop.abort(),
   });
   assert.ok(events.includes("ops-fly-off"));
   assert.ok(!urls.some((u) => u.includes("fly")));
-});
-
-const CLAUDE_TOKEN = "sk-ant-oat01-" + "x".repeat(40);
-const CREDENTIALS = JSON.stringify({ claudeAiOauth: { accessToken: CLAUDE_TOKEN, refreshToken: "r", expiresAt: NOW.getTime() + 3600_000 } });
-const USAGE_BODY = {
-  five_hour: { utilization: 85, resets_at: "2026-09-28T04:30:00.4+00:00" },
-  limits: [
-    { kind: "session", group: "session", percent: 85, severity: "warning", resets_at: "2026-09-28T04:30:00.4+00:00", scope: null, is_active: true },
-    { kind: "weekly_all", group: "weekly", percent: 43.26, severity: "normal", resets_at: "2026-10-03T17:00:00+00:00", scope: null, is_active: false },
-    { kind: "weekly_scoped", group: "weekly", percent: 22, severity: "odd", resets_at: null, scope: { model: { display_name: "Fable\u0007" } }, is_active: false },
-    { kind: "Bad Kind", percent: 10 },
-    { kind: "session", percent: "85" },
-  ],
-};
-
-test("parseUsage redacts a scope's display name before it is cut", () => {
-  // A made-up secret shape only.
-  const [row] = parseUsage({ limits: [{ kind: "weekly_opus", percent: 10, scope: { model: { display_name: "password=not-a-real-pass-42" } } }] });
-  assert.match(row.label, /^Week \(password=\s?\[redacted\]\)$/);
-  // A kind is the row's key: one holding a made-up token shape is not sent at all.
-  assert.deepEqual(parseUsage({ limits: [{ kind: `ghp_${"fake0".repeat(7)}f`, percent: 10 }, { kind: "session", percent: 5 }] }).map((r) => r.kind), ["session"]);
-});
-
-test("parseUsage keeps the server's rows, labels and severity, and drops malformed ones", () => {
-  assert.deepEqual(parseUsage(USAGE_BODY), [
-    { kind: "session", label: "Session (5 hr)", percent: 85, severity: "warning", resetsAt: "2026-09-28T04:30:00.400Z", active: true },
-    { kind: "weekly_all", label: "Week (all models)", percent: 43.3, severity: "normal", resetsAt: "2026-10-03T17:00:00.000Z", active: false },
-    { kind: "weekly_scoped", label: "Week (Fable)", percent: 22, severity: "normal", resetsAt: null, active: false },
-  ]);
-  assert.throws(() => parseUsage({ five_hour: { utilization: 10 } }), /no limits/);
-  assert.throws(() => parseUsage(null), /no limits/);
-});
-
-test("readClaudeToken reads the Keychain item, and never puts the token in an error", async () => {
-  const { exec, calls } = fakeExec(() => CREDENTIALS);
-  assert.equal(await readClaudeToken(exec, () => NOW), CLAUDE_TOKEN);
-  assert.deepEqual(calls[0], { bin: "/usr/bin/security", args: ["find-generic-password", "-s", "Claude Code-credentials", "-w"] });
-  const expired = fakeExec(() => JSON.stringify({ claudeAiOauth: { accessToken: CLAUDE_TOKEN, expiresAt: NOW.getTime() - 1 } }));
-  await assert.rejects(readClaudeToken(expired.exec, () => NOW), (err) => /expired/.test(String(err)) && !String(err).includes(CLAUDE_TOKEN));
-  await assert.rejects(readClaudeToken(fakeExec(() => new Error("no item")).exec, () => NOW), /no Claude Code sign-in/);
-  await assert.rejects(readClaudeToken(fakeExec(() => "{}").exec, () => NOW), /no access token/);
-});
-
-test("writeUsageFile writes session and weekly shortcuts atomically", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rivet-usage-"));
-  const file = path.join(dir, "nested", "claude-usage.json");
-  const limits = parseUsage(USAGE_BODY);
-  writeUsageFile({ at: NOW.toISOString(), limits }, file);
-  const doc = JSON.parse(fs.readFileSync(file, "utf8"));
-  assert.deepEqual(doc.weekly, { percent: 43.3, resetsAt: "2026-10-03T17:00:00.000Z" });
-  assert.equal(doc.limits.length, 3);
-  assert.deepEqual(fs.readdirSync(path.dirname(file)), ["claude-usage.json"]);
-  fs.rmSync(dir, { recursive: true, force: true });
-});
-
-test("limitedUsage gives the last reading of a limited week until its reset, and nothing else", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rivet-usage-"));
-  const file = path.join(dir, "claude-usage.json");
-  const resetsAt = new Date(NOW.getTime() + 30 * 3_600_000).toISOString();
-  const at = new Date(NOW.getTime() - 3_600_000).toISOString();
-  const usage = (percent, resets = resetsAt) => writeUsageFile({ at, limits: [{ kind: "session", label: "Session (5 hr)", percent: 40, severity: "normal", resetsAt: null, active: false }, { kind: "weekly_all", label: "Week (all models)", percent, severity: "critical", resetsAt: resets, active: false }] }, file);
-  usage(100);
-  assert.deepEqual(limitedUsage({ file, now: () => NOW }), {
-    at,
-    limits: [{ kind: "weekly_all", label: "Week (all models), limited, 60 min old", percent: 100, severity: "critical", resetsAt, active: false }],
-  });
-  assert.equal(limitedUsage({ file, now: () => new Date(NOW.getTime() + 31 * 3_600_000) }), null, "past its reset the week is no longer limited");
-  usage(99);
-  assert.equal(limitedUsage({ file, now: () => NOW }), null);
-  usage(100, null);
-  assert.equal(limitedUsage({ file, now: () => NOW }), null, "no reset time, no claim");
-  assert.equal(limitedUsage({ file: path.join(dir, "missing.json"), now: () => NOW }), null);
-  assert.equal(limitedUsage({ file: null }), null);
-  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 test("iso returns null past year 9999 instead of throwing or writing a six-digit year", () => {
@@ -1196,7 +1104,7 @@ test("ops snapshot PUT retries once without the fields the server rejected", asy
       }
       return Response.json({});
     },
-    log: () => {}, stop: stop.signal, now: () => NOW, usageFile: null, holdsFile: null,
+    log: () => {}, stop: stop.signal, now: () => NOW, holdsFile: null,
     sleep: async () => { stop.abort(); },
   });
   assert.equal(github.length, 2);
@@ -1282,53 +1190,6 @@ test("a run's failed jobs are read 50 to a page, every page", async () => {
   assert.ok(read.args.some((arg) => /\/jobs\?per_page=50&/.test(arg)) && read.args.includes("--paginate"));
   assert.deepEqual(snap.runs.find((run) => run.failedJobs?.length)?.failedJobs, ["unit", "e2e"]);
   assert.throws(() => parseJobNames(""), /no jobs/);
-});
-
-async function claudePut({ security, lastUsage = null }) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rivet-usage-"));
-  if (lastUsage) writeUsageFile(lastUsage, path.join(dir, "claude-usage.json"));
-  /** @type {{ url: string, body: any }[]} */
-  const puts = [];
-  /** @type {{ event: string, fields: any }[]} */
-  const events = [];
-  const stop = new AbortController();
-  const { exec } = fakeExec((bin, args) => {
-    if (bin === "/usr/bin/security") {
-      if (security === "fail") throw new Error("no item");
-      return CREDENTIALS;
-    }
-    if (bin === "/bin/df") return DF;
-    if (bin === "/usr/sbin/sysctl") return "50\n";
-    if (bin === "/bin/launchctl") return LAUNCHCTL;
-    return ghAnswer(bin, args);
-  });
-  await runOpsLoop({
-    origin: "https://rivet.test", token: "ab".repeat(32), exec, ghBin: "gh", flyBin: null,
-    fetch: async (input, init) => {
-      const url = String(input);
-      if (init?.method === "PUT") puts.push({ url, body: JSON.parse(String(init.body)) });
-      if (url === USAGE_URL) return new Response(JSON.stringify(USAGE_BODY));
-      return new Response("{}");
-    },
-    log: (event, fields) => events.push({ event, fields }), stop: stop.signal, now: () => NOW,
-    usageFile: path.join(dir, "claude-usage.json"), holdsFile: null,
-    sleep: async () => stop.abort(),
-  });
-  return { events, claude: puts.filter((p) => p.url.endsWith("/ops/claude")), usage: path.join(dir, "claude-usage.json") };
-}
-
-test("a failed read on a limited account still PUTs its week at 100% with the reset, and leaves the usage file as it was", async () => {
-  const at = new Date(NOW.getTime() - 3_600_000).toISOString();
-  const resetsAt = new Date(NOW.getTime() + 30 * 3_600_000).toISOString();
-  const week = (percent) => ({ kind: "weekly_all", label: "Week (all models)", percent, severity: "critical", resetsAt, active: false });
-  const limited = await claudePut({ security: "fail", lastUsage: { at, limits: [week(100)] } });
-  assert.ok(limited.events.some((e) => e.event === "ops-claude-usage-failed"));
-  const body = limited.claude[0].body;
-  assert.deepEqual(body.limits.find((/** @type {any} */ l) => l.kind === "weekly_all"), { ...week(100), label: "Week (all models), limited, 60 min old" });
-  assert.equal(JSON.parse(fs.readFileSync(limited.usage, "utf8")).limits[0].label, "Week (all models)");
-  // A week with room is not carried over: a failed read of it stays no reading.
-  const room = await claudePut({ security: "fail", lastUsage: { at, limits: [week(60)] } });
-  assert.equal(room.claude[0]?.body.limits.some((/** @type {any} */ l) => l.kind === "weekly_all") ?? false, false);
 });
 
 test("the Mac always sends chatRunner, from the supervisor's job", async () => {

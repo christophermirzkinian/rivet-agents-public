@@ -4,6 +4,7 @@ import type { AnsweredResponse, Reopen } from "../../src/shared/answered.js";
 import type { AsksResponse } from "../../src/shared/asks.js";
 import type { BacklogIssueResponse, BacklogResponse, BacklogStart, IssueWriteState } from "../../src/shared/backlog.js";
 import type { BoardResponse, Decision, FileRef, FileType, PushConfigResponse, Reply, ServedNeed, StatusResponse } from "../../src/shared/board.js";
+import type { OvernightChange, OvernightSettings } from "../../src/shared/jobs.js";
 import type { OpsDismissal, OpsDismissalsResponse } from "../../src/shared/ops-dismiss.js";
 import type { OpsStatusKind, OpsStatusResponse } from "../../src/shared/ops-status.js";
 import type { OwnerHoldsResponse } from "../../src/shared/owner-holds.js";
@@ -244,6 +245,8 @@ export const searchMind = (q: string) => call<MindSearchResponse>("GET", `/api/m
 export const getTimeline = () => call<TimelineResponse>("GET", "/api/ops/timeline");
 export const getBriefing = (id?: string) => call<{ briefing: Briefing | null }>("GET", `/api/briefing${id === undefined ? "" : `?id=${encodeURIComponent(id)}`}`);
 export const searchHistory = (query: string) => call<{ results: SearchItem[] }>("GET", `/api/ops/search?q=${encodeURIComponent(query)}`);
+export const getOvernight = () => call<OvernightSettings>("GET", "/api/settings/overnight");
+export const putOvernight = (change: OvernightChange) => call<OvernightSettings>("PUT", "/api/settings/overnight", change);
 export const getModelSettings = () => call<ModelSettingsResponse>("GET", "/api/settings/models");
 /** Every job's pick, whole, over the save `base` the screen saw; the action's ack says whether the Mac wrote it. */
 export const postModels = (clientId: string, jobs: ModelPicks, base: string | null) => call<AuditEntry>("POST", "/api/actions/models", { clientId, jobs, base });

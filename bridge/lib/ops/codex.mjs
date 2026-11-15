@@ -9,7 +9,7 @@ import { iso } from "./common.mjs";
 // app-server started under CODEX_HOME (~/.codex when unset) answers `account/rateLimits/read` and `account/read`. Only
 // those replies are read; the sign-in in CODEX_HOME is never opened, logged or sent anywhere. A home's reading is kept for
 // CODEX_READ_TTL_MS, so a pass starts no app-server for a home read within it; a home that fails or hangs keeps its last
-// reading, marked stale, on its own row. Rows ride on the Claude usage PUT after the Claude rows, kinds
+// reading, marked stale, on its own row. The bridge sends the rows on the usage PUT (ops/index.mjs), kinds
 // `codex_<n>_<window>`. OpenAI sends no grading, so the bridge grades them: 90% used is a warning, 100% critical.
 
 export const CODEX_INTERVAL_MS = 5 * 60_000;

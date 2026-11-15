@@ -1,4 +1,4 @@
-import { ANSWERED_KEEP_MS, answeredDone, MAX_ANSWERED, prKey, REOPEN_NOTICE_MS, reopenAckSchema, reopenExpired, reopenSendSchema, type AnsweredResponse, type Reopen, type ReopenEvent } from "../../shared/answered.js";
+import { ANSWERED_KEEP_MS, answeredAsk, answeredDone, MAX_ANSWERED, prKey, REOPEN_NOTICE_MS, reopenAckSchema, reopenExpired, reopenSendSchema, type AnsweredResponse, type Reopen, type ReopenEvent } from "../../shared/answered.js";
 import type { BridgeChannel } from "../events.js";
 import { needRev, openBoard } from "../http.js";
 import { HttpError, json, readJson, requireBearer, requireSameOrigin } from "../httputil.js";
@@ -60,7 +60,13 @@ export function register(router: Router): void {
       merged: new Set((stored?.shipped ?? []).flatMap((row) => (row.pr === undefined ? [] : [prKey(row.repo, row.pr)]))),
       finishedCards: store.finishedAskCards(kept.map(({ card }) => card.id)),
     };
-    const cards = kept.map((entry) => (answeredDone(entry, facts) ? { ...entry, done: true as const } : entry));
+    const asks = store.cardAsks(kept.map(({ card }) => card));
+    const cards = kept.map((entry) => {
+      const ask = answeredAsk(entry.reply, asks.get(entry.card.id) ?? null);
+      // With an ask, its state alone says done, whatever merged or was answered: under way and called off are not (GitHub sweep idea 3, 15 Nov).
+      const done = ask ? ask.state === "done" : answeredDone(entry, facts);
+      return { ...entry, ...(done ? { done: true as const } : {}), ...(ask ? { ask } : {}) };
+    });
     const reopens = store.latestReopens([...openIds]);
     const reopened = open.flatMap((need) => {
       const reopen = reopens.get(need.id);

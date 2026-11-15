@@ -8,13 +8,14 @@ import { loadPushHealth, onPushChanged, pushBanner, pushChanged } from "../push-
 import { disablePush, enablePush, pushState, type PushState } from "../push.js";
 import { app, changed, sameSession, signedOut, subscribe } from "../state.js";
 import { closeModels, loadModels, modelSettings } from "./model-settings.js";
+import { loadOvernight, overnightPanel } from "./overnight.js";
 import * as patchNotes from "./patch-notes.js";
 import { openSheet } from "./sheet.js";
 import { flash } from "./toast.js";
 import { voiceSettings } from "./voice-settings.js";
 
-// The header's settings sheet: who does what (each job's model, kept on the Mac), then this phone's read-aloud voice,
-// notifications and devices.
+// The header's settings sheet: who does what (each job's model, kept on the Mac), overnight jobs (kept on the server), then
+// this phone's read-aloud voice, notifications and devices.
 
 let push: PushState | null = null;
 let pushBusy = false;
@@ -47,6 +48,7 @@ export function mount(el: HTMLElement): void {
   stopListening = onPushChanged(readPushState);
   render();
   void loadModels();
+  void loadOvernight();
   void loadPushHealth();
   // Read on every open: a resync or the phone's own settings may have changed it since.
   readPushState();
@@ -193,7 +195,7 @@ function patchNotesPanel(): HTMLElement {
 
 function renderSettings(el: HTMLElement): void {
   const scroll = el.querySelector(".set")?.scrollTop ?? 0;
-  const body = h("div", { class: "set" }, pushBanner(), modelSettings(), voiceSettings(), notifications(), device(), patchNotesPanel());
+  const body = h("div", { class: "set" }, pushBanner(), modelSettings(), overnightPanel(), voiceSettings(), notifications(), device(), patchNotesPanel());
   const refocus = keepFocus(el);
   el.replaceChildren(body);
   refocus();

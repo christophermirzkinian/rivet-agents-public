@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AnsweredCard, AnsweredResponse } from "../src/shared/answered.js";
 import type { Reply, ServedNeed } from "../src/shared/board.js";
 import { dayHeading } from "../src/shared/when.js";
-import { answeredTab, CHAT_TOLD, NO_ANSWERED, noAnsweredIn, openTab, reopenedBand, SEND_AGAIN, youAnswered, type ChatTold } from "../src/shared/words.js";
+import { answeredTab, askDone, CHAT_TOLD, NO_ANSWERED, noAnsweredIn, openTab, reopenedBand, SEND_AGAIN, UNDER_WAY, youAnswered, youSaidCalledOff, youSaidUnderWay, type ChatTold } from "../src/shared/words.js";
 import { app, changed, refresh, resetSession } from "../web/src/state.js";
 import { resetAnsweredFilters, showAnswered } from "../web/src/views/answered.js";
 import { resetFeed } from "../web/src/views/feed.js";
@@ -439,6 +439,80 @@ describe("Cards › Answered: time chips and Show done", () => {
     await signIn();
     await toAnswered();
     expect(document.querySelector(".ans-empty")?.textContent).toBe(noAnsweredIn(6, 0));
+  });
+});
+
+describe("Cards › Under way (GitHub sweep idea 3, 15 Nov)", () => {
+  const AT = "2026-10-28T00:30:00.000Z";
+  const under = () => document.querySelector<HTMLElement>(".ans-under");
+  const underRows = () => [...(under()?.querySelectorAll<HTMLElement>(".ans-row") ?? [])];
+
+  beforeEach(() => {
+    answered = answered.map((one) =>
+      one.card.id === "pear"
+        ? { ...one, ask: { state: "underWay", id: "a-2", stage: "building", stageAt: AT } }
+        : one.card.id === "banner"
+          ? { ...one, ask: { state: "done", id: "a-3", stage: "shipped", stageAt: AT, note: "deployed with PR 3990" } }
+          : { ...one, ask: { state: "calledOff", id: "a-4", stage: "parked", stageAt: AT, note: "The owner kept the old chime" } },
+    );
+  });
+
+  it("an answered card whose ask is open shows under the open card: its title, You said <answer> · <stage>, and Reopen", async () => {
+    await signIn();
+    expect(topId()).toBe("open-1");
+    expect(under()?.querySelector(".ans-day")?.textContent).toBe(UNDER_WAY);
+    expect(underRows().map((one) => one.dataset.card)).toEqual(["pear"]);
+    const pear = underRows()[0]!;
+    expect(pear.querySelector(".ans-t")?.textContent).toBe("Card pear");
+    expect(pear.querySelector(".ans-you")?.textContent).toBe(youSaidUnderWay("Change it “slower, 2 s”", "building"));
+    expect([...pear.querySelectorAll("button")].map((button) => button.textContent)).toEqual(["Reopen"]);
+  });
+
+  it("Reopen on an under-way row opens its card again", async () => {
+    await signIn();
+    await reopenRow("pear");
+    expect(againPosts).toEqual([{ id: "pear", rev: "pear-1" }]);
+    expect(topId()).toBe("pear");
+    expect(band()).not.toBeNull();
+  });
+
+  it("on Answered, under way says its stage, done says Done: <note>, and called off keeps the answer", async () => {
+    await signIn();
+    await toAnswered();
+    expect(row("pear").querySelector(".ans-you")?.textContent).toBe(youSaidUnderWay("Change it “slower, 2 s”", "building"));
+    expect(row("banner").querySelector(".ans-state")?.textContent).toBe(askDone("deployed with PR 3990"));
+    expect(row("banner").querySelector(".ans-you")?.textContent).toBe(youAnswered("Yes, keep it", answered[0]!.reply.at));
+    expect(row("billing").querySelector(".ans-you")?.textContent).toBe(youSaidCalledOff("Yes", "The owner kept the old chime"));
+    expect(askDone()).toBe("Done");
+  });
+
+  it("once its ask closes, the card leaves Under way", async () => {
+    await signIn();
+    expect(underRows()).toHaveLength(1);
+    answered = answered.map((one) => (one.card.id === "pear" ? { ...one, ask: { state: "done", id: "a-2", stage: "done", stageAt: AT } } : one));
+    await settle(61_000);
+    expect(under()).toBeNull();
+    expect(topId()).toBe("open-1");
+  });
+
+  it("with nothing open, the computer's pane keeps Under way under the line saying so", async () => {
+    vi.spyOn(window, "matchMedia").mockImplementation(
+      (query: string) => ({ matches: true, media: query, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false }) as unknown as MediaQueryList,
+    );
+    needs = [];
+    await signIn();
+    seg("needs").click();
+    await settle();
+    expect(root.querySelector(".view.decide-pane .decide-under .decide-none")).not.toBeNull();
+    expect(underRows().map((one) => one.dataset.card)).toEqual(["pear"]);
+  });
+
+  it("a card with no ask behaves as before: no Under way", async () => {
+    answered = answered.map(({ ask: _ask, ...one }) => one);
+    await signIn();
+    expect(under()).toBeNull();
+    await toAnswered();
+    expect(row("pear").querySelector(".ans-you")?.textContent).toBe(youAnswered("Change it “slower, 2 s”", answered[1]!.reply.at));
   });
 });
 

@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { answeredDone, answeredShown, cardFromReply, DONE_ASK_STAGES, prKey, type AnsweredCard, type DoneFacts } from "../src/shared/answered.js";
+import { answeredAsk, answeredDone, answeredShown, cardFromReply, DONE_ASK_STAGES, prKey, type AnsweredCard, type DoneFacts } from "../src/shared/answered.js";
+import type { Ask } from "../src/shared/asks.js";
 import type { Reply, ServedNeed } from "../src/shared/board.js";
-import { answeredChip, NO_ANSWERED, noAnsweredIn } from "../src/shared/words.js";
+import { answeredChip, askDone, NO_ANSWERED, noAnsweredIn, youSaidCalledOff, youSaidUnderWay } from "../src/shared/words.js";
 
 // Show done on Cards › Answered: which answered cards are finished, and what a chip keeps.
 
@@ -77,5 +78,46 @@ describe("Answered words", () => {
     expect(noAnsweredIn(24, 0)).toBe("No answered cards in the last 24 hours.");
     expect(noAnsweredIn(6, 1)).toBe("The one card answered in the last 6 hours is done.");
     expect(noAnsweredIn(null, 3)).toBe("All 3 cards answered in the last 30 days are done.");
+  });
+
+  it("says an answered card under way, done and called off", () => {
+    expect(youSaidUnderWay("Yes", "building")).toBe("You said Yes · Building");
+    expect(youSaidUnderWay("Change it “slower”", "review")).toBe("You said Change it “slower” · In review");
+    expect(youSaidUnderWay("Yes", "needs-you")).toBe("You said Yes · Needs you");
+    expect(askDone("deployed with PR 3990")).toBe("Done: deployed with PR 3990");
+    expect(askDone()).toBe("Done");
+    expect(youSaidCalledOff("Yes", "you kept the old chime")).toBe("You said Yes · Called off: you kept the old chime");
+    expect(youSaidCalledOff("Yes")).toBe("You said Yes · Called off");
+  });
+});
+
+describe("answeredAsk", () => {
+  const AT = "2026-11-15T01:00:00.000Z";
+  const ask = (stage: Ask["stage"], timeline: Ask["timeline"] = []): Pick<Ask, "id" | "stage" | "stageAt" | "timeline"> => ({ id: "a-1", stage, stageAt: AT, timeline });
+
+  it("is none with no ask, or for a Dismiss", () => {
+    expect(answeredAsk({ decision: "approve" }, null)).toBeNull();
+    expect(answeredAsk({ decision: "dismiss" }, ask("building"))).toBeNull();
+  });
+
+  it("is under way at the ask's stage while it is open", () => {
+    for (const stage of ["queued", "building", "push-queue", "review", "needs-you", "merging", "deploying"] as const) {
+      expect(answeredAsk({ decision: "approve" }, ask(stage))).toEqual({ state: "underWay", id: "a-1", stage, stageAt: AT });
+    }
+  });
+
+  it("is done when the ask is live or done, with the note it closed on", () => {
+    const closed = ask("done", [
+      { at: "2026-11-15T00:00:00.000Z", stage: "building", note: "on it" },
+      { at: AT, stage: "done", note: "merged in PR 8170" },
+      { at: "2026-11-15T02:00:00.000Z", note: "a later note" },
+    ]);
+    expect(answeredAsk({ decision: "approve" }, closed)).toEqual({ state: "done", id: "a-1", stage: "done", stageAt: AT, note: "merged in PR 8170" });
+    expect(answeredAsk({ decision: "choice" }, ask("shipped"))).toEqual({ state: "done", id: "a-1", stage: "shipped", stageAt: AT });
+  });
+
+  it("is called off when the ask is parked, never done", () => {
+    expect(answeredAsk({ decision: "approve" }, ask("parked", [{ at: AT, stage: "parked", note: "The owner dropped it" }]))).toEqual({ state: "calledOff", id: "a-1", stage: "parked", stageAt: AT, note: "The owner dropped it" });
+    expect(answeredAsk({ decision: "approve" }, ask("parked"))).toEqual({ state: "calledOff", id: "a-1", stage: "parked", stageAt: AT });
   });
 });

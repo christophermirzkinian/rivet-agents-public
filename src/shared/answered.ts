@@ -1,6 +1,6 @@
 import { ASK, DECISION, isGotIt, isUpdate, MERGE_READY, OUTCOME_OPTIONS, PLAN, QUESTION } from "./answers.js";
 import type { Decision, Need, Reply, ServedNeed } from "./board.js";
-import type { AskStage } from "./asks.js";
+import type { Ask, AskStage } from "./asks.js";
 import { NO_REPO } from "./board.js";
 import { z } from "zod";
 
@@ -19,6 +19,28 @@ export interface AnsweredCard {
   reply: Reply;
   /** Its work is finished (answeredDone): out of the list while Show done is off. */
   done?: true;
+  /** Where the ask that names it as its card is (`answeredAsk`); absent with no such ask. */
+  ask?: AnsweredAsk;
+}
+
+/**
+ * The ask behind an answered card (GitHub sweep idea 3, the owner's pick 15 Nov): under way at its stage until it closes, then
+ * done (live or done) or called off (parked), with the note it closed with.
+ */
+export type AnsweredAsk =
+  | { state: "underWay"; id: string; stage: AskStage; stageAt: string }
+  | { state: "done" | "calledOff"; id: string; stage: AskStage; stageAt: string; note?: string };
+
+/**
+ * The one mapping from an answer and the ask that names its card to the card's state; null for none: no ask, or a
+ * Dismiss, which asked for nothing. The close note is the note on the last event that moved the ask to its stage.
+ */
+export function answeredAsk(reply: Pick<Reply, "decision">, ask: Pick<Ask, "id" | "stage" | "stageAt" | "timeline"> | null): AnsweredAsk | null {
+  if (!ask || reply.decision === "dismiss") return null;
+  const { id, stage, stageAt } = ask;
+  if (stage !== "parked" && !(DONE_ASK_STAGES as readonly AskStage[]).includes(stage)) return { state: "underWay", id, stage, stageAt };
+  const note = [...ask.timeline].reverse().find((event) => event.stage === stage)?.note?.trim();
+  return { state: stage === "parked" ? "calledOff" : "done", id, stage, stageAt, ...(note ? { note } : {}) };
 }
 
 /** The time chips over Answered: the hours of answers each keeps; null keeps all the list holds (30 days). */

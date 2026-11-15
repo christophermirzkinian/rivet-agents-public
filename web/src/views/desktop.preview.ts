@@ -40,6 +40,7 @@ import { receiveShare, showConversation, startDraft } from "./chat.js";
 import { drawnClip, drawnStill, drawPreviewMedia, gameStill, previewMediaFile, previewMediaPage, tapPreviewThumb } from "./media.preview.js";
 import { answeredRoute } from "./answered.preview.js";
 import { mindPreview } from "./mind.preview.js";
+import { offerOvernightNotice } from "./overnight.js";
 import { mountShell } from "./shell.js";
 
 const now = new Date();
@@ -1010,6 +1011,7 @@ if (new URLSearchParams(location.search).get("long") === "1") {
 }
 const replies: Reply[] = [];
 let seq = 0;
+let overnight = { on: new URLSearchParams(location.search).get("overnight") !== "off", noticeSeen: new URLSearchParams(location.search).get("notice") !== "1" };
 // ?v4=1: the Feed's pieces: a plan card first, a late pile, and answers given today for Done.
 if (new URLSearchParams(location.search).get("v4") === "1") {
   board.needs.unshift({
@@ -1209,6 +1211,11 @@ window.fetch = async (input, init) => {
     const name = decodeURIComponent((init?.headers as Record<string, string>)["x-file-name"] ?? "file.pdf");
     return json({ sha256: (15 - (++seq % 16)).toString(16).repeat(64), name, type: "application/pdf", size: 10 }, 201);
   }
+  // ?overnight=off: the switch off; ?notice=1: the one-time set-up notice opens as on a new user's first start.
+  if (url === "/api/settings/overnight") {
+    if (init?.method === "PUT") overnight = { ...overnight, ...(JSON.parse(String(init.body)) as Partial<typeof overnight>) };
+    return json(overnight);
+  }
   if (url.startsWith("/api/workers")) return json(workers);
   if (url.startsWith("/api/asks")) return json({ asks });
   if (url === "/api/ops/status")
@@ -1332,7 +1339,9 @@ try {
 } catch {}
 
 const params = new URLSearchParams(location.search);
-const asked = params.get("tab") ?? "cards";
+// ?notice=1 starts on the home screen, as a plain start does: the notice never opens over Decide.
+const asked = params.get("tab") ?? (params.get("notice") === "1" ? "progress" : "cards");
+if (params.get("notice") === "1") void offerOvernightNotice();
 go(asked === "more" ? (params.get("page") ?? "more") : asked);
 const openId = params.get("conversation");
 if (openId) showConversation(openId);
