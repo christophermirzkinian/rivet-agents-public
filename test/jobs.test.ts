@@ -406,9 +406,17 @@ describe("JobsStore", () => {
     expect(store.setOvernight({ on: false }, SAT_7AM)).toEqual({ on: false, noticeSeen: false });
     expect(start("j-nnnnnnnn", SAT_7AM, { usage: 10 })).toEqual({ go: false, note: "Overnight jobs are off" });
     expect(store.look("j-oooooooo", { run: red.run, state: "look", usage: 10 }, SAT_7AM)).toEqual({ go: false, note: "Overnight jobs are off" });
-    // A check is no chat: it still runs. A Run now the user taps still goes.
+    // A check is no chat: it still runs. A Run now the user taps in the app still goes, once; a manual run whose action
+    // the app never sent (a board-token Run now) or that names none is held like a scheduled one.
     expect(start("j-oooooooo", SAT_7AM)?.go).toBe(true);
-    expect(start("j-nnnnnnnn", SAT_7AM, { usage: 10, manual: true, action: "act-1" })?.go).toBe(true);
+    expect(start("j-nnnnnnnn", SAT_7AM, { usage: 10, manual: true, action: "act-board" })).toEqual({ go: false, note: "Overnight jobs are off" });
+    expect(start("j-nnnnnnnn", SAT_7AM, { usage: 10, manual: true })).toEqual({ go: false, note: "Overnight jobs are off" });
+    store.ownRun("act-1", SAT_7AM);
+    expect(start("j-nnnnnnnn", SAT_7AM, { usage: 10, action: "act-1" })).toEqual({ go: false, note: "Overnight jobs are off" });
+    const own = start("j-nnnnnnnn", SAT_7AM, { usage: 10, manual: true, action: "act-1" });
+    if (!own?.go) throw new Error("did not start");
+    finish("j-nnnnnnnn", own.run, "green", SAT_7AM);
+    expect(start("j-nnnnnnnn", SAT_7AM, { usage: 10, manual: true, action: "act-1" })).toEqual({ go: false, note: "Overnight jobs are off" });
     expect(store.tasksToday(SAT_7AM)).toBe(1);
     expect(store.list(SAT_7AM).jobs.find((job) => job.id === "j-nnnnnnnn")!.runs.some((run) => run.line === "skipped: Overnight jobs are off")).toBe(true);
     // Back on, the same red run's look chat opens.

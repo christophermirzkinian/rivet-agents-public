@@ -29,12 +29,17 @@ const USAGE = `Answer you in the Rivet Agents app: a chat reply, a card you must
 Where it lands: --reply-to <id> is a chat reply (acks and talk) in the
 conversation of that message (any message of it, its first, or a card answer's
 reply id). --new starts a conversation; its id is what "sent <id>" prints, so
-follow-ups reply to it.
+follow-ups reply to it. A --reply-to id the server does not know is refused
+(404): send it again with the right id. One naming a line in the old Updates
+is refused too (409): send it again without --reply-to.
 
-Without either it is an update card, for progress and status only: the first
-line its title, the rest its text, its photos or video its media. Its thread is
---thread, else the one conversation active this week its text names by PR,
-chat, ask or card id, else Rivet. --tag says what happened ("Fixed", "CI").
+Without either it is an update card, for progress and status only, unless its
+text names the one conversation whose newest line is yours and it is not a
+question (no closing "?") and has no --tag, --thread or --schedule: then it is a
+plain line there, in Chat, quoting nothing. The first line its title, the rest
+its text, its photos or video its media. Its thread is --thread, else the one
+conversation active this week its text names by PR, chat, ask or card id, else
+Rivet. --tag says what happened ("Fixed", "CI").
 
 --reply-to <id> --card asks you to confirm something you asked for, only when
 you must (a video waiting on your OK, a report you have to judge): a decision
@@ -299,7 +304,9 @@ export async function postSay(body, { origin, token, fetch: fetchFn, file = HOLD
   if (!res.ok) {
     const doc = await res.json().catch(() => null);
     const line = `http ${res.status}${typeof doc?.error === "string" ? `: ${sanitizeLine(doc.error, 200)}` : ""}`;
-    err(`${line}${definitiveRefusal(res.status) ? drop() : kept}`);
+    // The 409 for a reply into the old Updates is written before anything is (2026-11-16): nothing landed.
+    const updates = res.status === 409 && typeof doc?.error === "string" && doc.error.includes("old Updates");
+    err(`${line}${definitiveRefusal(res.status) || updates ? drop() : kept}`);
     return { code: 1, posted: false };
   }
   const doc = await res.json().catch(() => null);

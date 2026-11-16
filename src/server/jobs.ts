@@ -74,6 +74,11 @@ CREATE TABLE IF NOT EXISTS job_looks (
   reported_at TEXT,
   PRIMARY KEY (job_id, run_id)
 );
+-- The Run now actions the owner sent from the app's session: only these count as the owner's own and pass the overnight switch.
+CREATE TABLE IF NOT EXISTS job_own_runs (
+  action TEXT PRIMARY KEY,
+  at     TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS job_settings (
   id             INTEGER PRIMARY KEY CHECK (id = 1),
   overnight      INTEGER NOT NULL,
@@ -322,14 +327,29 @@ export class JobsStore {
     this.db.prepare("UPDATE job_settings SET notice_seen_at = COALESCE(notice_seen_at, ?) WHERE id = 1").run(at.toISOString());
   }
 
+  /** A Run now the owner sent from the app's session: its action is kept, so its run counts as the owner's own. */
+  ownRun(action: string, at: Date): void {
+    this.db.prepare("INSERT OR IGNORE INTO job_own_runs (action, at) VALUES (?, ?)").run(action, at.toISOString());
+  }
+
+  /**
+   * A manual run whose action was one of the owner's own Run nows, used up here so it starts one run; a board-token Run now,
+   * or one with no action, is not the owner's own.
+   */
+  private takeOwnRun(report: RunReport): boolean {
+    if (!report.manual || report.action === undefined) return false;
+    return Number(this.db.prepare("DELETE FROM job_own_runs WHERE action = ?").run(report.action).changes) > 0;
+  }
+
   isRunning(jobId: string): boolean {
     return !!this.db.prepare("SELECT 1 FROM job_runs WHERE job_id = ? AND result = 'running'").get(jobId);
   }
 
   /**
    * A run asks to start. Over a limit it is kept as skipped with the note and never queued: a task over the day's
-   * runs, or while a reported usage is high (unknown usage holds none), or a scheduled one while overnight jobs are off (a Run now you
-   * tap still goes); a check while its last run is still going. A task's start is one
+   * runs, or while a reported usage is high (unknown usage holds none), or one while overnight jobs are off unless it is a
+   * Run now you tapped in the app (a Run now sent with the board token is held like a scheduled run); a check while its
+   * last run is still going. A task's start is one
    * chat, which job-run.mjs starts itself.
    */
   start(jobId: string, report: RunReport, now: Date): RunStart | null {
@@ -346,7 +366,7 @@ export class JobsStore {
     };
     if (running) return skip("the last run is still going");
     if (job.spec.kind === "task") {
-      if (!report.manual && !this.overnight().on) return skip(OVERNIGHT_OFF_NOTE);
+      if (!this.takeOwnRun(report) && !this.overnight().on) return skip(OVERNIGHT_OFF_NOTE);
       if (this.tasksToday(now) >= MAX_TASK_RUNS_A_DAY) return skip(`${MAX_TASK_RUNS_A_DAY} task runs today already`);
       if (report.usage != null && report.usage >= TASK_USAGE_LIMIT) return skip("usage high");
     }
@@ -432,6 +452,7 @@ export class JobsStore {
       )
       .run(kept);
     this.db.prepare("DELETE FROM job_looks WHERE at < ?").run(kept);
+    this.db.prepare("DELETE FROM job_own_runs WHERE at < ?").run(kept);
     for (const job of this.all()) {
       if (job.state !== "active") continue;
       const [newest, before] = lastRunTimes(job.spec.when, now, 2);

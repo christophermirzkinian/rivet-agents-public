@@ -145,18 +145,21 @@ function detail(id: string): ConversationDetail {
   };
 }
 
-/** As GET /api/chat?chat=1: in a thing nothing after its first card line but the owner's typed lines and answers to them. */
+/** ?collecting=1: two lines of the owner's still collecting, sent 9.5s after the page opens unless Cancel takes them back. */
+const collecting = new URLSearchParams(location.search).has("collecting");
+const sendsAt = new Date(Date.now() + 9_500).toISOString();
+let held = collecting
+  ? [
+      mine("c1", "c1", 0.2, "Can the send button be bigger on Settings?", { status: "collecting", sendsAt }),
+      mine("c2", "c1", 0.05, "and green, not orange", { status: "collecting", sendsAt }),
+    ]
+  : [];
+
+/** As GET /api/chat?chat=1: every line but the old Updates, a thing's too (2026-11-16). */
 function chatLines(): ChatMessage[] {
-  const carded = new Set<string>();
-  const typed = (id: string | undefined) => messages.some((line) => line.id === id && line.from === "owner" && !line.card);
-  return [...messages]
-    .sort((a, b) => a.at.localeCompare(b.at))
-    .filter((message) => {
-      const id = conversationOf(message);
-      if (carded.has(id)) return message.from === "owner" || typed(message.replyTo);
-      if (message.posted) carded.add(id);
-      return true;
-    });
+  const due = Date.now() >= Date.parse(sendsAt);
+  const extra = held.map((message) => (due ? { ...message, status: "sent" as const, sendsAt: undefined } : message));
+  return [...messages, ...extra].sort((a, b) => a.at.localeCompare(b.at));
 }
 
 const needs = [
@@ -197,6 +200,12 @@ window.fetch = async (input, init) => {
   if (path === "/api/status")
     return json({ board: { version: 1, updatedAt: ago(0) }, bridge: { connected: true, lastSeenAt: ago(0) } });
   if (path === "/api/chat" && (init?.method ?? "GET") === "GET") return json({ messages: chatLines(), older: null });
+  if (path === "/api/chat/cancel") {
+    if (!held.length || Date.now() >= Date.parse(sendsAt)) return json({ error: "Too late: it's on its way to Rivet." }, 409);
+    const back = { ids: held.map((message) => message.id), clientIds: [], text: held.map((message) => message.text).join("\n"), images: [], files: [] };
+    held = [];
+    return json(back);
+  }
   if (path === "/api/conversations") {
     const rows = Object.keys(titles).map(summary);
     return json({ conversations: rows, older: 0, unread: chatBadge(rows) });

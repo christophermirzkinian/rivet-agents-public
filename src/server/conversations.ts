@@ -20,7 +20,7 @@ import type { ThreadLinks } from "./threads.js";
 /** Where a Rivet message landed, and by which rule. */
 export interface Resolved {
   thread: string;
-  via: "message" | "mention" | "updates" | "new";
+  via: "message" | "mention" | "updates" | "new" | "unknown";
 }
 
 /**
@@ -28,7 +28,7 @@ export interface Resolved {
  * 1. `replyTo` is a chat message (your, your own, a conversation's first, or a card answer's, whose id is the
  *    reply's) → that message's conversation. A card answer with no message (one from before conversations) → the
  *    conversation of the latest reply to it, else a new one at this message (its root replying to the answer, so
- *    its ask still links it). Any other id → Updates.
+ *    its ask still links it). Any other id is refused (`unknown`, 2026-11-16: a reply filed in Updates showed nowhere).
  * 2. No id: the one conversation active this week its text names by PR, chat, ask or card id (`mentioned`, the
  *    title matcher, Updates left out); none or several → Updates.
  * `fresh` (say.mjs --new) starts one at `id`, the message's own.
@@ -47,7 +47,7 @@ export function resolveConversation(
   if (input.replyTo !== undefined) {
     const thread = deps.threadOf(input.replyTo);
     if (thread) return { thread, via: "message" };
-    if (!deps.isReply(input.replyTo)) return { thread: UPDATES_ID, via: "updates" };
+    if (!deps.isReply(input.replyTo)) return { thread: "", via: "unknown" };
     const earlier = deps.repliedIn(input.replyTo);
     return earlier ? { thread: earlier, via: "message" } : { thread: input.id, via: "new" };
   }

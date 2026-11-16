@@ -20,6 +20,10 @@ fi
 
 [ -f "$HA_HOME/config/configuration.yaml" ] || cp "$HERE/ha/configuration.yaml" "$HA_HOME/config/configuration.yaml"
 
+# Home Assistant's HTTP settings live in its own store, not the yaml: a fresh install gets one on 127.0.0.1 before its
+# first start, so it never listens on your network with its sign-up page open.
+"$HERE/scripts/http-store.sh" "$HA_HOME/config"
+
 sed "s#__HA_HOME__#$HA_HOME#g" "$HERE/launchd/$LABEL.plist" > "$PLIST.tmp"
 loaded() { launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1; }
 if cmp -s "$PLIST.tmp" "$PLIST" 2>/dev/null && loaded; then

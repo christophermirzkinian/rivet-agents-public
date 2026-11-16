@@ -7,6 +7,7 @@ import type { AskCreate } from "../shared/asks.js";
 import { MAX_CHAT_FILES, type FileRef, type FileType, type Need } from "../shared/board.js";
 import {
   chatImages,
+  CHAT_WINDOW_QUIET_MS,
   chatWindowText,
   FINAL_STATUSES,
   imageFields,
@@ -17,6 +18,7 @@ import {
   type ActionKind,
   type ActionStatus,
   type AuditEntry,
+  type ChatCancelled,
   type ChatFile,
   type ChatMessage,
   type ChatQuote,
@@ -34,6 +36,7 @@ import {
   UPDATES_ID,
   UPDATES_ROOT_TEXT,
   UPDATES_TITLE,
+  ownsNoCard,
 } from "../shared/conversations.js";
 import type { MediaItemType, MediaSource } from "../shared/media.js";
 import { searchNeedles } from "../shared/names.js";
@@ -150,7 +153,7 @@ ${["chat_messages", "chat_threads", "audit"]
 `;
 
 /** A chat window flushes 10 s after its last message, and never later than 30 s after its first. */
-export const BATCH_QUIET_MS = 10_000;
+export const BATCH_QUIET_MS = CHAT_WINDOW_QUIET_MS;
 export const BATCH_CAP_MS = 30_000;
 /** How much of a thread's first and last message the thread list reads: its title and one-line preview need far less. */
 const THREAD_TEXT_READ = 1000;
@@ -285,6 +288,8 @@ export interface ActionRequest {
   quote?: ChatQuote;
   /** The conversation you typed it in (null: you started a new one); its thread, once stored. */
   conversation?: string | null;
+  /** Feed's Fix it line: its record is already set investigating, so Cancel never takes it back. Never sent to the bridge. */
+  fixIt?: true;
   /** The ask this line names, made after it by its id: a retry or a bridge attach makes it when it is missing. */
   ask?: AskCreate;
   /** A GitHub write on an issue (kind "issue"): a backlog issue's Start work label or Close. */
@@ -314,11 +319,16 @@ function uniqueFiles(files: readonly FileRef[]): FileRef[] {
 }
 
 function deadline(lead: Row): number {
-  return Math.min((lead.batch_last_at as number) + BATCH_QUIET_MS, (lead.batch_first_at as number) + BATCH_CAP_MS);
+  return windowDeadline(lead.batch_first_at as number, lead.batch_last_at as number);
+}
+
+function windowDeadline(first: number, last: number): number {
+  return Math.min(last + BATCH_QUIET_MS, first + BATCH_CAP_MS);
 }
 
 function toEntry(row: Row): AuditEntry {
-  const request = JSON.parse(row.request as string) as ActionRequest;
+  // The Fix it mark is the store's own: no answer carries it.
+  const { fixIt: _fixIt, ...request } = JSON.parse(row.request as string) as ActionRequest;
   const entry: AuditEntry = {
     id: row.id as string,
     clientId: row.client_id as string,
@@ -375,6 +385,10 @@ function toMessage(row: Row): ChatMessage {
   if (typeof row.card_title === "string") message.cardTitle = row.card_title;
   const status = typeof row.status === "string" ? CHAT_STATUS[row.status as ActionStatus] : undefined;
   if (message.from === "owner" && status) message.status = status;
+  // The countdown Chat shows reads the window's own deadline, which every line added to it moves.
+  if (status === "collecting" && typeof row.window_first === "number" && typeof row.window_last === "number")
+    message.sendsAt = new Date(windowDeadline(row.window_first, row.window_last)).toISOString();
+  if (status === "collecting" && row.window_fix) message.keeps = true;
   if (typeof row.ack === "string") message.ack = JSON.parse(row.ack) as NonNullable<ChatMessage["ack"]>;
   return message;
 }
@@ -406,8 +420,9 @@ const CARD_TITLE = `CASE WHEN m.sender = 'owner' AND m.media IS NOT NULL AND jso
 
 /** A chat message with its window's status and request, its thread's project and, for a card answer, its card's title. */
 const MESSAGE_SELECT = `SELECT m.*, a.status, a.request, t.project AS thread_project, t.rivet_project AS thread_rivet_project,
+  w.batch_first_at AS window_first, w.batch_last_at AS window_last, json_extract(w.request, '$.fixIt') AS window_fix,
   ${CARD_TITLE} AS card_title FROM chat_messages m
-  LEFT JOIN audit a ON a.id = m.id LEFT JOIN chat_threads t ON t.root_id = m.thread_id`;
+  LEFT JOIN audit a ON a.id = m.id LEFT JOIN audit w ON w.id = a.batch_id LEFT JOIN chat_threads t ON t.root_id = m.thread_id`;
 
 /** One thread as the list sees it: its first and newest messages, and what Rivet set on it. */
 export interface ThreadRow {
@@ -599,6 +614,49 @@ export class CommandStore {
       )
       .all(BATCH_QUIET_MS, BATCH_CAP_MS, now) as Row[];
     return due.map((row) => this.flush(row.id as string, at)).filter((entry): entry is AuditEntry => entry !== null);
+  }
+
+  /**
+   * Cancels the window `id` is in while it still collects: every line in it is marked cancelled, never goes to the
+   * bridge, and leaves the chat (the audit keeps the record). Null once the window has gone, or for no chat line. One
+   * transaction, like the sweep's flush, so the two never both win.
+   */
+  cancelChat(id: string, at: string): { outcome: "cancelled"; back: ChatCancelled } | { outcome: "sent" | "fix-it" | "missing" } {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const lead = this.leadOf(id);
+      const all = this.db.prepare("SELECT id, client_id, status, request FROM audit WHERE kind = 'chat' AND batch_id = ? ORDER BY rowid").all(lead) as Row[];
+      const collecting = all.filter((row) => row.status === "collecting");
+      const cancelled = all.filter((row) => row.status === "cancelled");
+      const requestOf = (row: Row) => JSON.parse(row.request as string) as ActionRequest;
+      // Asked again (a lost answer, another device), a cancelled window answers as it did: the words are never lost.
+      const rows = collecting.length ? collecting : cancelled;
+      const refusal = all.length === 0 ? "missing" : rows.length === 0 ? "sent" : collecting.some((row) => requestOf(row).fixIt) ? "fix-it" : null;
+      if (refusal) {
+        this.db.exec("COMMIT");
+        return { outcome: refusal };
+      }
+      const ids = rows.map((row) => row.id as string);
+      if (collecting.length) {
+        this.db.prepare("UPDATE audit SET status = 'cancelled', updated_at = ? WHERE batch_id = ? AND status = 'collecting'").run(at, lead);
+        const remove = this.db.prepare("DELETE FROM chat_messages WHERE id = ?");
+        for (const one of ids) remove.run(one);
+      }
+      this.db.exec("COMMIT");
+      const requests = rows.map(requestOf);
+      const { replyTo, quote } = requests[0]!;
+      return { outcome: "cancelled", back: {
+        ...(replyTo ? { replyTo, ...(quote ? { quote } : {}) } : {}),
+        ids,
+        clientIds: rows.map((row) => row.client_id as string),
+        text: requests.map((request) => request.text?.trim() ?? "").filter(Boolean).join("\n"),
+        images: [...new Set(requests.flatMap(chatImages))],
+        files: uniqueFiles(requests.flatMap((request) => request.files ?? [])),
+      } };
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   /** Moves a window from collecting to queued, lead and members together. */
@@ -794,6 +852,16 @@ export class CommandStore {
       this.db.prepare("SELECT 1 FROM chat_threads WHERE root_id = ? AND (title IS NOT NULL OR project IS NOT NULL OR rivet_project IS NOT NULL)").get(id) !==
       undefined
     );
+  }
+
+  /** Your typed line (not a card answer) when it is the newest line of conversation `thread`: one still waiting on an answer. */
+  openLine(thread: string): string | null {
+    const row = this.db
+      .prepare("SELECT id, sender, media FROM chat_messages WHERE COALESCE(thread_id, id) = ? ORDER BY seq DESC LIMIT 1")
+      .get(thread) as Row | undefined;
+    if (!row || row.sender !== "owner") return null;
+    const media = typeof row.media === "string" ? (JSON.parse(row.media) as { card?: unknown }) : null;
+    return media?.card !== undefined && media?.card !== null ? null : (row.id as string);
   }
 
   /** The conversation of the latest message replying to `id`. */
@@ -1684,27 +1752,33 @@ export class CommandStore {
   /**
    * Newest first, `limit` at a time, older than the message `before`. A seed root (SEED_IDS) is a heading, not a message,
    * and the Team room's traffic is no news for the desktop strip's dot. With `chat`, the Chat tab's one conversation
-   * (2026-10-11): no Updates and no card answers, and in a thing nothing after its first card's line, which stays as
-   * the way to its page, but your typed lines and Rivet's lines and cards that answer one (2026-10-12).
+   * (2026-10-11): every line but the old Updates, a thing's too (2026-11-16).
    */
   listChat(before: string | null, limit: number, chat = false): ChatPage {
     const cursor = before === null ? null : (this.db.prepare("SELECT seq FROM chat_messages WHERE id = ?").get(before) as Row | undefined);
     if (before !== null && !cursor) return { messages: [], older: null };
-    const chatOnly = chat
-      ? ` AND COALESCE(m.thread_id, m.id) != ?
-         AND (m.sender = 'owner'
-           OR EXISTS (SELECT 1 FROM chat_messages q WHERE q.id = m.reply_to AND q.sender = 'owner'
-             AND NOT (q.media IS NOT NULL AND json_extract(q.media, '$.card') IS NOT NULL))
-           OR NOT EXISTS (SELECT 1 FROM card_conversations c JOIN chat_messages p ON p.id = c.posted
-             WHERE c.via <> 'say' AND COALESCE(p.thread_id, p.id) = COALESCE(m.thread_id, m.id) AND p.seq < m.seq))`
-      : "";
+    const chatOnly = chat ? " AND COALESCE(m.thread_id, m.id) != ?" : "";
     const rows = this.db
       .prepare(
         `${MESSAGE_SELECT} WHERE m.seq < ? AND m.id NOT IN (${SEED_IDS.map(() => "?").join(", ")}) AND COALESCE(m.thread_id, m.id) != ?${chatOnly} ORDER BY m.seq DESC LIMIT ?`,
       )
       .all(cursor ? (cursor.seq as number) : Number.MAX_SAFE_INTEGER, ...SEED_IDS, TEAM_ROOM_ID, ...(chat ? [UPDATES_ID] : []), limit + 1) as Row[];
     const messages = rows.slice(0, limit).map(toMessage).reverse();
-    return { messages, older: rows.length > limit ? messages[0]!.id : null };
+    const older = rows.length > limit ? messages[0]!.id : null;
+    if (!chat) return { messages, older };
+    const threads = [...new Set(messages.map((message) => message.threadId ?? message.id))].filter((one) => !ownsNoCard(one));
+    const filed = this.filedCards();
+    const posted = threads.length
+      ? (
+          this.db
+            .prepare(
+              `SELECT DISTINCT COALESCE(thread_id, id) AS thread FROM chat_messages WHERE sender = 'rivet' AND media IS NOT NULL
+                AND json_extract(media, '$.posted.id') IS NOT NULL AND COALESCE(thread_id, id) IN (${threads.map(() => "?").join(", ")})`,
+            )
+            .all(...threads) as Row[]
+        ).map((row) => row.thread as string)
+      : [];
+    return { messages, older, things: threads.filter((one) => filed.has(one) || posted.includes(one)) };
   }
 
   /** Rivet answered: the message it names, or every line typed so far when it names none; each with its whole window. */

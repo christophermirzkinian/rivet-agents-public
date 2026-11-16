@@ -89,8 +89,13 @@ async function request<T>(path: string, init: RequestInit, ms: number, signal?: 
   return settled.value;
 }
 
+/** The server's clock less this phone's, by the last answer's Date header (whole seconds, so taken from its middle). */
+let dateSkew: number | null = null;
+export const serverClockSkew = (): number | null => dateSkew;
+
 async function exchange<T>(path: string, init: RequestInit, ms: number, signal?: AbortSignal, seen?: (response: Response) => void): Promise<T> {
   const clock = deadline(ms, signal);
+  const askedAt = Date.now();
   const read = (init.method ?? "GET") === "GET";
   try {
     let response: Response;
@@ -101,6 +106,8 @@ async function exchange<T>(path: string, init: RequestInit, ms: number, signal?:
       throw new ApiError(0, "Can't reach the server. Check your connection.");
     }
     seen?.(response);
+    const date = Date.parse(response.headers?.get?.("date") ?? "");
+    if (Number.isFinite(date)) dateSkew = date + 500 - (askedAt + Date.now()) / 2;
     try {
       return await answer<T>(response);
     } catch (error) {

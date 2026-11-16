@@ -4,10 +4,12 @@ import "./conversations.css";
 import { isUpdate } from "../../../src/shared/answers.js";
 import type { ServedNeed } from "../../../src/shared/board.js";
 import {
+  CHAT_WINDOW_QUIET_MS,
   chatImages,
   imageFields,
   MAX_CHAT_TEXT,
   quoteText,
+  type ChatCancelled,
   type ChatQuote,
 } from "../../../src/shared/command.js";
 import {
@@ -34,7 +36,7 @@ function moodOf(text: string): Mood {
   return "clear";
 }
 import { APP_ONLY_PROJECTS, type ThreadProject } from "../../../src/shared/threads.js";
-import { ApiError } from "../api.js";
+import { ApiError, serverClockSkew } from "../api.js";
 import * as cmd from "../command-api.js";
 import type { ChatMessage } from "../command-api.js";
 import { dictation, MIC, STOP } from "../dictation.js";
@@ -100,6 +102,8 @@ const EARLIER_PAGES_MAX = 20;
 const DRAFT_KEY = "rivet.chat.draft";
 /** Changes on every draft save, so a send can tell its draft from an identical one another tab saved since. */
 const DRAFT_REV_KEY = "rivet.chat.draft.rev";
+/** Set while the draft holds words Cancel put back and it is over the limit: kept whole, uncapped, until trimmed. */
+const DRAFT_LONG_KEY = "rivet.chat.draft.long";
 /** The message the draft replies to, kept beside it so a tab switch or reload keeps the reply too. */
 const REPLY_KEY = "rivet.chat.reply";
 /** The retired Chat · Threads switch, folder, status chip and window: read for nothing, so removed. */
@@ -279,7 +283,56 @@ const STATUS_WORDS: Record<NonNullable<ChatMessage["status"]>, string> = {
   unconfirmed: "Typed, not confirmed",
   failed: "Not delivered",
   replied: "Replied",
+  cancelled: "Cancelled",
 };
+
+/**
+ * The server's clock by the answers' Date header, so the collect countdown runs to the server's own deadline whatever
+ * the phone's clock says. Never a stream line's time: one can arrive late.
+ */
+const serverNow = (): number => Date.now() + (serverClockSkew() ?? 0);
+const CANCEL_OWED_KEY = "rivet.chat.cancelOwed";
+/**
+ * A Cancel still owed its answer: lost twice, or answered after Chat closed. The next Chat open, or the next word
+ * from Rivet, asks again (a cancelled window answers as it did) or puts back the answer it holds. Its id is kept
+ * in storage too, so a reload still asks.
+ */
+let cancelOwed: { id: string; back?: ChatCancelled } | null = readCancelOwed();
+function readCancelOwed(): { id: string } | null {
+  try {
+    const id = localStorage.getItem(CANCEL_OWED_KEY);
+    return id ? { id } : null;
+  } catch {
+    return null;
+  }
+}
+function owe(next: { id: string; back?: ChatCancelled } | null): void {
+  cancelOwed = next;
+  try {
+    if (next) localStorage.setItem(CANCEL_OWED_KEY, next.id);
+    else localStorage.removeItem(CANCEL_OWED_KEY);
+  } catch {}
+}
+/** Lines cancelled here or elsewhere: a read already out, or a cached Chat, never brings them back. */
+const gone = new Set<string>();
+/** How often the collect countdown redraws: often enough that a whole second never shows late. */
+const COLLECT_TICK_MS = 250;
+
+/** Whole seconds until the latest collecting window here goes to Rivet, by the server's clock; null with none known. */
+export function collectLeft(messages: Iterable<ChatMessage>, now = serverNow()): number | null {
+  let until: number | null = null;
+  for (const message of messages) {
+    if (message.status !== "collecting" || !message.sendsAt) continue;
+    const at = Date.parse(message.sendsAt);
+    if (Number.isFinite(at) && (until === null || at > until)) until = at;
+  }
+  return until === null ? null : Math.max(0, Math.ceil((until - now) / 1000));
+}
+
+/** A collecting line's own status: its seconds left, short enough for a 320-wide screen; the banner says the rest. */
+export function collectLine(left: number | null): string {
+  return left === null ? STATUS_WORDS.collecting : left > 0 ? `${left}s` : "Sending…";
+}
 
 const POSTED_KINDS: Record<string, string> = {
   decision: "Decision",
@@ -315,7 +368,10 @@ function forgetRetired(): void {
 
 function readDraft(): string {
   try {
-    return (localStorage.getItem(DRAFT_KEY) ?? "").slice(0, MAX_CHAT_TEXT);
+    const draft = localStorage.getItem(DRAFT_KEY) ?? "";
+    // Words Cancel put back are the owner's own, whatever their length (a window's raw lines, two put-backs in a row): kept
+    // whole until the owner trims them. Any other draft keeps the message limit.
+    return localStorage.getItem(DRAFT_LONG_KEY) ? draft : draft.slice(0, MAX_CHAT_TEXT);
   } catch {
     return "";
   }
@@ -331,17 +387,23 @@ function readDraftRev(): string | null {
   }
 }
 
-function writeDraft(value: string): void {
+/** `fresh`: words no send owns (put back by Cancel), so a send still out never clears them as its own. */
+function writeDraft(value: string, fresh = false): void {
   try {
     if (value.trim()) {
-      const previous = readDraftRev();
+      const previous = fresh ? null : readDraftRev();
       const revision = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+      // Put back over a draft and over the limit together, it is kept whole while the owner trims it; any other stays capped.
+      const long = value.length > MAX_CHAT_TEXT && (fresh || localStorage.getItem(DRAFT_LONG_KEY) !== null);
       localStorage.setItem(DRAFT_KEY, value);
       localStorage.setItem(DRAFT_REV_KEY, revision);
+      if (long) localStorage.setItem(DRAFT_LONG_KEY, "1");
+      else localStorage.removeItem(DRAFT_LONG_KEY);
       draftLineage.saved(previous, revision);
     } else {
       localStorage.removeItem(DRAFT_KEY);
       localStorage.removeItem(DRAFT_REV_KEY);
+      localStorage.removeItem(DRAFT_LONG_KEY);
     }
   } catch {}
 }
@@ -431,8 +493,13 @@ function heardMessages(list: readonly ChatMessage[]): boolean {
  * newest goes out. A session's end forgets it.
  */
 let lastChat: readonly ChatMessage[] | null = null;
+/** The things Chat's pages named (ChatPage.things): their lines carry Open topic though their card line is not loaded. */
+const chatThings = new Set<string>();
 onSessionReset(() => {
   lastChat = null;
+  chatThings.clear();
+  gone.clear();
+  // Not the owed Cancel: every app start resets the session, and a reload must still ask for its words.
 });
 /** True once a conversation was read since the stream last (re)opened; until then no reply is offered to share. */
 let appOnlyHeard = false;
@@ -647,6 +714,8 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   let list: ConversationsResponse | null = null;
   /** Chat's newest page has come at least once since it last opened. */
   let chatLoaded = false;
+  /** Where Chat's held lines run unbroken from: a refresh keeps lines from before its page, past a gap (2026-11-16). */
+  let unbrokenFrom = "";
   /** The open thing's first read failed, so its empty line says so and offers Try again rather than Loading… on. */
   let loadFailed = false;
   let listTimer = 0;
@@ -746,12 +815,147 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     ),
   );
   replyBar.hidden = true;
+  // While a window collects (2026-11-16): the seconds left by the server's deadline, and Cancel, which puts it back in
+  // the box.
+  const collectWords = h("strong", { class: "chat-collecting-when" });
+  const collectBar = h("span", { class: "chat-collecting-bar", attrs: { "aria-hidden": "true" } });
+  const cancelBtn = h(
+    "button",
+    {
+      class: "chat-collecting-cancel",
+      attrs: { type: "button", "data-use": "chat.compose.cancel" },
+      on: { click: () => void cancelCollecting() },
+    },
+    "Cancel",
+  ) as HTMLButtonElement;
+  const collectMore = h("span", { class: "chat-collecting-more" }, "Cancel puts it back in the box");
   const collecting = h(
-    "p",
-    { class: "chat-collecting", attrs: { role: "status" } },
-    "Collecting for a few seconds. Anything else you send joins this message.",
+    "div",
+    { class: "chat-collecting" },
+    h("p", { class: "chat-collecting-words", attrs: { role: "status" } }, collectWords, collectMore),
+    cancelBtn,
+    collectBar,
   );
   collecting.hidden = true;
+  let cancelling = false;
+  let collectTick = 0;
+  /** The banner's words and bar and each collecting line's seconds, from the server's deadline. */
+  function paintCollect(): void {
+    const left = collectLeft(messages.values());
+    const words =
+      left === null
+        ? `Sending to ${RIVET_NAME} soon`
+        : left > 0
+          ? `Sending to ${RIVET_NAME} in\u00a0${left}s`
+          : `Sending to ${RIVET_NAME}…`;
+    if (collectWords.textContent !== words) collectWords.textContent = words;
+    collectBar.style.width = `${left === null ? 100 : Math.min(100, (left * 1000 * 100) / CHAT_WINDOW_QUIET_MS)}%`;
+    const line = ` · ${collectLine(left)}`;
+    for (const status of thread.querySelectorAll<HTMLElement>(".chat-status.collecting"))
+      if (status.textContent !== line) status.textContent = line;
+    // Not while a send is out: the window may be about to take that line too.
+    cancelBtn.disabled = cancelling || sending;
+    // A Fix it goes as it is: no Cancel is offered for it.
+    const keeps = !!newestCollecting()?.keeps;
+    cancelBtn.hidden = keeps;
+    collectMore.hidden = keeps;
+    cancelBtn.textContent = cancelling ? "Cancelling…" : "Cancel";
+  }
+  /** Runs the countdown while anything here collects, and stops once nothing does. */
+  function tickCollect(): void {
+    const any = [...messages.values()].some((message) => message.status === "collecting");
+    collecting.hidden = !any;
+    if (!any) {
+      window.clearInterval(collectTick);
+      collectTick = 0;
+      return;
+    }
+    paintCollect();
+    if (!collectTick) collectTick = window.setInterval(paintCollect, COLLECT_TICK_MS);
+  }
+  /**
+   * Cancel: the server takes the window back before it goes, the lines leave the chat, and their words, photos and
+   * files return to the box, ahead of anything typed since. Sent already, they stay and the owner is told.
+   */
+  function newestCollecting(): ChatMessage | undefined {
+    const open = [...messages.values()].filter((message) => message.status === "collecting");
+    return open[open.length - 1];
+  }
+  async function cancelCollecting(): Promise<void> {
+    const named = newestCollecting();
+    if (!named || named.keeps || cancelling || sending) return;
+    await askCancel(named.id);
+  }
+  const lostAnswer = (error: unknown): boolean => error instanceof ApiError && (error.status === 0 || error.status === 408 || error.status >= 500);
+  async function askCancel(id: string): Promise<void> {
+    cancelling = true;
+    owe({ id });
+    paintCollect();
+    try {
+      // A lost answer is asked once more: a cancelled window answers as it did, so the words still come back.
+      const back = await cmd.cancelChat(id).catch((error: unknown) => {
+        if (lostAnswer(error)) return cmd.cancelChat(id);
+        throw error;
+      });
+      // Chat closed while it was out: the next Chat open puts it back, unless a newer Chat has already asked and put it.
+      if (!alive) {
+        if (cancelOwed?.id === id) owe({ id, back });
+        return;
+      }
+      owe(null);
+      putBack(back);
+    } catch (error) {
+      // Lost twice: kept owed, asked again when the server is next heard. Any answer that says what became of it ends it.
+      if (!lostAnswer(error) && cancelOwed?.id === id) owe(null);
+      if (!alive || authFail(error)) return;
+      if (error instanceof ApiError && (error.status === 409 || error.status === 404)) {
+        hint.textContent = error.message;
+        // At once: its lines read as they are rather than counting on.
+        void loadDetail();
+      } else if (lostAnswer(error)) hint.textContent = "Cancel didn't hear back. It asks again shortly.";
+      else hint.textContent = describe(error);
+    } finally {
+      cancelling = false;
+      if (alive) tickCollect();
+    }
+  }
+  /** A Cancel owed its answer is settled once the server is heard here: put back, or asked again. */
+  function settleCancel(): void {
+    if (!cancelOwed || cancelling || sending || !alive) return;
+    const { id, back } = cancelOwed;
+    if (!back) return void askCancel(id);
+    owe(null);
+    putBack(back);
+  }
+  function putBack(back: ChatCancelled): void {
+    cmd.tookBack(back);
+    for (const id of back.ids) {
+      gone.add(id);
+      messages.delete(id);
+    }
+    if (back.text) {
+      // Words still in the box (a send whose answer was lost) are not put there twice.
+      const typed = text.value.trim();
+      text.value = !typed || typed === back.text || back.text.split("\n").includes(typed) ? back.text : `${back.text}\n${text.value}`;
+      fit();
+      writeDraft(text.value, true);
+    }
+    if (back.images.length || back.files.length) attach.put(back.images, back.files);
+    // A reply comes back as one: on the page it is put back on, or from Chat as it was picked there.
+    if (back.replyTo && back.quote) {
+      const here = shownId();
+      setReply({ id: back.replyTo, quote: back.quote, ...(here && !back.ids.includes(here) ? { conversation: here } : {}) }, false);
+    }
+    hint.textContent =
+      text.value.length > MAX_CHAT_TEXT
+        ? "Cancelled. It's back in the box, too long to send as one: trim it first."
+        : "Cancelled. It's back in the box to edit.";
+    // A page that was the cancelled line's own conversation has nothing left to show.
+    if (shown.kind === "conversation" && back.ids.includes(shown.id)) showRivet();
+    else render(false);
+    void loadList(true);
+    text.focus();
+  }
   const micBtn = h(
     "button",
     {
@@ -961,22 +1165,19 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   }
 
   /**
-   * In Chat: not in a thing past its first card, whose line stays as the way to its page; but every line the owner typed,
-   * a card answer too, and Rivet's replies and cards to a
-   * typed line, wherever it was filed.
+   * In Chat: every line of every conversation but the old Updates (2026-11-16). A thing's lines stay on its page too;
+   * in Chat each of Rivet's carries Open topic (topicOf).
    */
   function inChat(message: ChatMessage): boolean {
-    const id = message.threadId ?? message.id;
-    if (id === UPDATES_ID) return false;
-    if (message.from === "owner" || typedLine(message.replyTo)) return true;
-    if (message.posted) return !hasCard(id, message.id);
-    return !hasCard(id) && !list?.conversations.some((row) => row.id === id && row.thing);
+    return (message.threadId ?? message.id) !== UPDATES_ID;
   }
 
-  /** A line the owner typed (not a card answer), by id. */
-  function typedLine(id: string | undefined): boolean {
-    const line = id === undefined ? undefined : messages.get(id);
-    return line?.from === "owner" && !line.card;
+  /** In Chat, the thing a line of Rivet's (not a card line, which opens its page already) belongs to: its Open topic. */
+  function topicOf(message: ChatMessage): string | null {
+    if (shown.kind !== "rivet" || message.from !== "rivet" || message.posted || message.team) return null;
+    const id = message.threadId ?? message.id;
+    if (ownsNoCard(id)) return null;
+    return chatThings.has(id) || hasCard(id) || !!list?.conversations.some((row) => row.id === id && row.thing) ? id : null;
   }
 
   /** The title of an answered card: the one the server sent with the answer, else its board card, else the line that posted it. */
@@ -1124,6 +1325,9 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       message.card ? answeredTitle(message) : null,
       timeOf(message.at),
       chatImages(message).map(mediaSrc),
+      topicOf(message),
+      // Its Open topic button names the topic, which the titler or the owner may rename.
+      summaryOf(topicOf(message) ?? "")?.title,
     ]);
     const was = rows.get(message.id);
     // A card's media is one element shared with the Feed and Answered, so another view may have taken it from the row.
@@ -1136,6 +1340,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
 
   function bubble(message: ChatMessage, quoted: boolean): HTMLElement {
     const mine = message.from === "owner";
+    const topic = topicOf(message);
     const posted = message.posted;
     // Share sends text: an answer that is only photos or a video has none to send, and a card is no answer.
     const share =
@@ -1186,7 +1391,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
           ? h(
               "span",
               { class: `chat-status ${message.status}` },
-              ` · ${STATUS_WORDS[message.status]}`,
+              ` · ${message.status === "collecting" ? collectLine(collectLeft(messages.values())) : STATUS_WORDS[message.status]}`,
             )
           : null,
     ].flat();
@@ -1265,7 +1470,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
         )
       : null;
     const replyTo = message.replyTo;
-    // In Chat a thing's first card is the way to its page; the rest of it lives there.
+    // In Chat a thing's card is a way to its page; its other lines carry Open topic (2026-11-16).
     if (posted && shown.kind === "rivet") {
       const thing = message.threadId ?? message.id;
       return h(
@@ -1404,6 +1609,17 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
               message.text,
             )
           : h("p", { class: "chat-body" }, ...linkify(message.text))
+        : null,
+      topic
+        ? h(
+            "button",
+            {
+              class: "btn ghost chat-topic-link",
+              attrs: { type: "button", "aria-label": `Open topic: ${summaryOf(topic)?.title ?? "its page"}`, "data-use": "chat.msg.topic-open" },
+              on: { click: () => openConversationNow(topic) },
+            },
+            "Open topic ›",
+          )
         : null,
       h(
         "div",
@@ -1563,9 +1779,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     composeBox.hidden = readOnly() || (roomMissing && shownId() === TEAM_ROOM_ID);
     paintPlaceholder();
     earlier.hidden = !(earlierMore ?? detail?.more);
-    collecting.hidden = ![...messages.values()].some(
-      (message) => message.status === "collecting",
-    );
+    tickCollect();
     if (kind === "conversation") paintHead();
     else paintThing(null, "");
     // Taking a clip out of the page ends its full screen: the conversation redraws once he leaves it (onFullscreen).
@@ -1685,8 +1899,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   }
 
   /**
-   * Chat on screen at its newest: every conversation in it (not a thing, not Agent Chat) Rivet has replied in is
-   * marked read at once.
+   * Chat on screen at its newest: every conversation in it (a thing too, whose replies Chat now shows; not Agent Chat) Rivet has replied in is marked read at once.
    */
   function readChat(): void {
     if (
@@ -1700,7 +1913,18 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight >= 40
     )
       return;
-    const rows = list.conversations.filter((row) => countsUnread(row) && !row.thing && row.id !== TEAM_ROOM_ID);
+    // A thing is read only once Chat holds its newest line and as many of Rivet's words in it as it has unread (the
+    // server's count: no card lines), counted only where Chat's lines run unbroken, so its replies were on screen; never
+    // when the owner marked it unread: that stays until the owner opens it (2026-11-16).
+    const loaded = [...messages.values()];
+    const seen = (row: ConversationSummary) => {
+      if (!row.thing) return true;
+      if (row.markedUnread) return false;
+      const own = loaded.filter((message) => (message.threadId ?? message.id) === row.id);
+      const words = own.filter((message) => message.at >= unbrokenFrom && message.from === "rivet" && !message.posted && !message.card).length;
+      return own.some((message) => message.at >= row.lastAt) && words >= row.unread;
+    };
+    const rows = list.conversations.filter((row) => countsUnread(row) && row.id !== TEAM_ROOM_ID && seen(row));
     if (!rows.length) return;
     for (const row of rows) {
       row.unread = 0;
@@ -1833,7 +2057,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
    */
   function seedChat(): void {
     if (shown.kind !== "rivet" || chatLoaded || messages.size || !lastChat) return;
-    for (const message of lastChat) messages.set(message.id, message);
+    for (const message of lastChat) if (!gone.has(message.id)) messages.set(message.id, message);
   }
 
   /** The Rivet sheet hosts Chat's head in its own row, beside his face and Close (home.ts). */
@@ -1989,6 +2213,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       (found) => {
         seeking--;
         if (!alive) return;
+        // A hit Chat has not loaded: a thing's opens its page, which holds it, as Chat's paging back may not reach it.
         if (found?.conversation && (found.conversation.thing || ownsNoCard(found.id))) openConversationNow(found.id, id);
         else {
           leaveTopics();
@@ -2113,6 +2338,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
           }
           if (gen === appOnlyGen) appOnlyHeard = true;
           lastChat = page.messages;
+          for (const one of page.things ?? []) chatThings.add(one);
           refreshed();
           return showTimeline(page.messages, page.older, stick, focus);
         },
@@ -2163,10 +2389,17 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
    * (a line that turned out to be a thing's) goes; earlier pages loaded stay. The first page replaces the last visit's
    * copy whole: what that held from before this page would sit above a gap, with Earlier loading the other side of it.
    */
-  function showTimeline(page: readonly ChatMessage[], olderCursor: string | null, stick: boolean, focus: string | null): boolean {
+  function showTimeline(read: readonly ChatMessage[], olderCursor: string | null, stick: boolean, focus: string | null): boolean {
+    const page = read.filter((message) => !gone.has(message.id));
     const from = olderCursor === null || !chatLoaded ? "" : (page[0]?.at ?? "");
+    // Lines kept from before this page may sit above a gap, so they never prove a thing's replies were on screen.
+    unbrokenFrom = from;
     const ids = new Set(page.map((message) => message.id));
-    for (const [id, message] of messages) if (message.at >= from && !ids.has(id) && message.status !== "collecting") messages.delete(id);
+    // A line just sent may beat its own read here, so a collecting line stays until its window is due; one gone after
+    // that was cancelled elsewhere.
+    const nowServer = serverNow();
+    for (const [id, message] of messages)
+      if (message.at >= from && !ids.has(id) && !(message.status === "collecting" && (!message.sendsAt || Date.parse(message.sendsAt) > nowServer))) messages.delete(id);
     heardMessages(page);
     take(page);
     for (const message of page) messages.set(message.id, message);
@@ -2203,9 +2436,16 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     }
     detail = found;
     loadFailed = false;
-    heardMessages(found.messages);
-    take(found.messages);
-    for (const message of found.messages) messages.set(message.id, message);
+    const page = found.messages.filter((message) => !gone.has(message.id));
+    // A collecting line of this conversation that a read no longer has once its window was due was cancelled elsewhere.
+    const ids = new Set(page.map((message) => message.id));
+    const from = page[0]?.at ?? "";
+    for (const [id, message] of messages)
+      if (message.status === "collecting" && !ids.has(id) && message.at >= from && (message.threadId ?? message.id) === found.id && message.sendsAt && Date.parse(message.sendsAt) <= serverNow())
+        messages.delete(id);
+    heardMessages(page);
+    take(page);
+    for (const message of page) messages.set(message.id, message);
     const shows = render(stick && !focus);
     if (focus) {
       if (messages.has(focus)) jump(focus);
@@ -2227,14 +2467,18 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     if (!alive || !first || (id === null && shown.kind !== "rivet")) return Promise.resolve(false);
     const read =
       id === null
-        ? cmd.getChat(first, CHAT_PAGE, true).then((page) => (Array.isArray(page?.messages) ? { messages: page.messages, more: page.older !== null } : null))
+        ? cmd.getChat(first, CHAT_PAGE, true).then((page) => {
+            if (!Array.isArray(page?.messages)) return null;
+            for (const one of page.things ?? []) chatThings.add(one);
+            return { messages: page.messages, more: page.older !== null };
+          })
         : cmd.getConversationPage(id, first);
     const done = read.then(
       (page) => {
         if (!alive || messages !== into || !Array.isArray(page?.messages))
           return false;
         heardMessages(page.messages);
-        for (const message of page.messages) messages.set(message.id, message);
+        for (const message of page.messages) if (!gone.has(message.id)) messages.set(message.id, message);
         earlierMore = page.more;
         if (page.messages[0]) earliestPage = page.messages[0].id;
         const from = scroller.scrollHeight - scroller.scrollTop;
@@ -2276,6 +2520,15 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
 
   /** A message on the stream: Chat or the open thing shows it, and the badge follows. */
   function arrived(message: ChatMessage): void {
+    // Cancelled here or on another device: its lines leave the chat, and a read already out never brings them back.
+    if (message.status === "cancelled") {
+      gone.add(message.id);
+      cmd.heardCancelled([message.id]);
+      if (messages.delete(message.id)) render(false);
+      void loadList(true);
+      return;
+    }
+    if (gone.has(message.id)) return;
     heardMessages([message]);
     const conversation = message.threadId ?? message.id;
     // Only Rivet's words count: a "Card: … ›" line opens a card the Feed shows anyway.
@@ -2398,7 +2651,8 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     }
     const { images, files } = photosPayload(photos);
     if (!body && !images.length && !files.length) return text.focus();
-    if (sending) return;
+    // Not while a Cancel is out: its answer puts words back in this box.
+    if (sending || cancelling) return;
     sending = true;
     sendBtn.disabled = true;
     changed();
@@ -2451,6 +2705,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
           (entry.status === "collecting" ? "collecting" : "sent"),
         // Its stored copy, when the stream brought it first, keeps its place among the same millisecond's.
         ...(messages.get(entry.id)?.seq !== undefined ? { seq: messages.get(entry.id)!.seq } : {}),
+        ...(messages.get(entry.id)?.sendsAt ? { sendsAt: messages.get(entry.id)!.sendsAt } : {}),
         ...imageFields(images),
         ...(files.length ? { files } : {}),
         // The direct send's answer may not echo the reply: the one sent stands.
@@ -2485,15 +2740,16 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   }
 
   function startStream(): void {
+    // Chat opening or back in view: a Cancel still owed is settled first.
+    settleCancel();
     if (typeof EventSource === "undefined") return startPolling();
     const source = new EventSource("/api/chat/stream");
     stream = source;
     source.addEventListener("message", (event) => {
       streamHeard();
       try {
-        arrived(
-          JSON.parse((event as MessageEvent<string>).data) as ChatMessage,
-        );
+        const message = JSON.parse((event as MessageEvent<string>).data) as ChatMessage;
+        arrived(message);
       } catch {}
     });
     source.addEventListener("ping", streamHeard);
@@ -2576,6 +2832,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
    * error, so it is closed and opened again, and the reopen catches up on what was missed.
    */
   function streamHeard(): void {
+    settleCancel();
     window.clearTimeout(idle);
     idle = window.setTimeout(() => {
       if (!alive || !stream) return;
@@ -2591,6 +2848,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     poll = window.setInterval(() => {
       if (document.visibilityState !== "visible") return;
       // No stream to say what changed: the list and the open conversation are read again.
+      settleCancel();
       void loadList();
       void loadDetail();
     }, POLL_MS);
@@ -2710,6 +2968,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     window.clearTimeout(idle);
     if (poll) window.clearInterval(poll);
     window.clearInterval(refresher);
+    window.clearInterval(collectTick);
     voice?.stop();
     stopUnlock?.();
     stopVoice();

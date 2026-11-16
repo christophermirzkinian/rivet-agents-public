@@ -9,6 +9,8 @@ import type { SearchItem } from "../src/shared/search.js";
 import { SNAPSHOT_STALE_MS, type Worker } from "../src/shared/workers.js";
 import { call } from "../web/src/api.js";
 import * as cmd from "../web/src/command-api.js";
+import { endSession } from "../web/src/session.js";
+import { ApiError } from "../web/src/api.js";
 import { app, changed } from "../web/src/state.js";
 import { localItems } from "../web/src/views/search.js";
 import { closeSheet } from "../web/src/views/sheet.js";
@@ -33,6 +35,9 @@ let uploads: { type: string; body: unknown }[] = [];
 let uploadSignals: (AbortSignal | null | undefined)[] = [];
 /** How the fake server answers POST /api/chat; null queues it. */
 let chatAnswer: ((id: string) => Promise<Response>) | null = null;
+/** How the fake server answers POST /api/chat/cancel, and the ids it was asked to cancel. */
+let cancelAnswer: () => Promise<Response> = () => Promise.resolve(json({ error: "not found" }, 404));
+let cancels: string[] = [];
 const IMAGE = "c".repeat(64);
 const FILE_SHA = "f".repeat(64);
 let fileUploads: string[] = [];
@@ -76,6 +81,11 @@ function fakeFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Re
     return Promise.resolve(json(detailBody("c1", messages)));
   }
   if (url.startsWith("/api/conversations")) return Promise.resolve(json(EMPTY_LIST));
+  if (url === "/api/chat/cancel") {
+    expect((init.headers as Record<string, string>)["x-rivet"]).toBe("1");
+    cancels.push((JSON.parse(String(init.body)) as { id: string }).id);
+    return cancelAnswer();
+  }
   if (method !== "GET") {
     expect((init.headers as Record<string, string>)["x-rivet"]).toBe("1");
     const body = JSON.parse(String(init.body)) as Record<string, unknown>;
@@ -105,6 +115,8 @@ beforeEach(() => {
   uploads = [];
   fileUploads = [];
   chatAnswer = null;
+  cancelAnswer = () => Promise.resolve(json({ error: "not found" }, 404));
+  cancels = [];
   prepare = async () => new Blob(["jpeg bytes"], { type: "image/jpeg" });
   uploadAnswer = () => Promise.resolve(json({ image: IMAGE, type: "image/jpeg", size: 10 }, 201));
   messages = [];
@@ -112,6 +124,9 @@ beforeEach(() => {
   chatPage = null;
   vi.stubGlobal("fetch", vi.fn(fakeFetch));
   vi.stubGlobal("EventSource", undefined);
+  // Each test's lines reuse ids: a line one test cancelled is not gone for the next.
+  endSession();
+  localStorage.removeItem("rivet.chat.cancelOwed");
   root = document.createElement("main");
   document.body.replaceChildren(root);
 });
@@ -217,7 +232,7 @@ describe("chat tab", () => {
     expect(root.querySelector(".chat-msg.mine:last-child")!.textContent).toContain("Sent");
   });
 
-  it("a message waiting for follow-ups reads Collecting…, with a line above the box until the window goes", async () => {
+  it("a message waiting for follow-ups reads Collecting…, with a banner above the box until the window goes", async () => {
     chatAnswer = (id) => Promise.resolve(json(entry(id, "chat", "collecting"), 202));
     chat.mount(root);
     await settle();
@@ -233,15 +248,213 @@ describe("chat tab", () => {
     await settle();
     expect(root.querySelector(".chat-msg.mine:last-child .chat-status")!.textContent).toBe(" · Collecting…");
     expect(note.hidden).toBe(false);
-    expect(note.textContent).toBe("Collecting for a few seconds. Anything else you send joins this message.");
+    // No deadline from the server yet: no number is guessed.
+    expect(note.querySelector(".chat-collecting-when")!.textContent).toBe("Sending to Rivet soon");
+    expect(note.querySelector(".chat-collecting-more")!.textContent).toBe("Cancel puts it back in the box");
 
     messages = [
       { id: "msg-1", from: "owner", text: "ship signup flow", at: "2026-09-30T01:00:00.000Z", status: "sent" },
-      { id: "msg-2", from: "owner", text: "then panda", at: "2026-09-30T01:00:05.000Z", status: "sent" },
+      { id: "msg-2", from: "owner", text: "then the report", at: "2026-09-30T01:00:05.000Z", status: "sent" },
     ];
     await chat.refresh();
     expect([...root.querySelectorAll(".chat-msg .chat-status")].map((status) => status.textContent)).toEqual([" · Sent", " · Sent"]);
     expect(note.hidden).toBe(true);
+  });
+
+  it("counts down to the server's deadline, and Cancel takes the lines out and puts their words and photos back in the box", async () => {
+    chatAnswer = (id) => Promise.resolve(json(entry(id, "chat", "collecting"), 202));
+    chat.mount(root);
+    await settle();
+    const text = root.querySelector<HTMLTextAreaElement>(".chat-text")!;
+    text.value = "ship signup flow";
+    root.querySelector<HTMLButtonElement>(".chat-send")!.click();
+    await settle();
+    await settle();
+    const sendsAt = new Date(Date.now() + 6_500).toISOString();
+    messages = [
+      { id: "msg-1", from: "owner", text: "ship signup flow", at: new Date().toISOString(), status: "collecting", sendsAt, threadId: "c1" },
+      { id: "msg-2", from: "owner", text: "then the report", at: new Date().toISOString(), status: "collecting", sendsAt, threadId: "c1" },
+    ];
+    await chat.refresh();
+    const note = root.querySelector<HTMLElement>(".chat-collecting")!;
+    expect(note.hidden).toBe(false);
+    // The number never wraps away from its words at 320.
+    expect(note.querySelector(".chat-collecting-when")!.textContent).toBe("Sending to Rivet in\u00a07s");
+    expect([...root.querySelectorAll(".chat-msg .chat-status.collecting")].map((status) => status.textContent)).toEqual([" · 7s", " · 7s"]);
+
+    text.value = "and green";
+    cancelAnswer = () => Promise.resolve(json({ ids: ["msg-1", "msg-2"], clientIds: [], text: "ship signup flow\nthen the report", images: [IMAGE], files: [] }));
+    messages = [];
+    root.querySelector<HTMLButtonElement>(".chat-collecting-cancel")!.click();
+    await settle();
+    await settle();
+    expect(cancels).toEqual(["msg-2"]);
+    expect(root.querySelectorAll(".chat-msg.mine")).toHaveLength(0);
+    expect(note.hidden).toBe(true);
+    // Your words come back ahead of what you typed since, and the photo is back in the strip.
+    expect(text.value).toBe("ship signup flow\nthen the report\nand green");
+    expect(root.querySelectorAll(".attach-tile")).toHaveLength(1);
+    expect(root.querySelector(".chat-hint")?.textContent).toBe("Cancelled. It's back in the box to edit.");
+    // The restored words are the stored draft too; the next test starts with an empty box.
+    text.value = "";
+    text.dispatchEvent(new Event("input"));
+  });
+
+  it("the countdown is whole seconds to the latest deadline, rounded up, and never below zero", () => {
+    const now = Date.parse("2026-11-16T04:00:00.000Z");
+    const line = (sendsAt: string | undefined, status: ChatMessage["status"] = "collecting"): ChatMessage => ({ id: "x", from: "owner", text: "x", at: "2026-11-16T03:59:59.000Z", status, sendsAt });
+    expect(chat.collectLeft([], now)).toBeNull();
+    expect(chat.collectLeft([line(undefined)], now)).toBeNull();
+    expect(chat.collectLeft([line("2026-11-16T04:00:09.000Z", "sent")], now)).toBeNull();
+    expect(chat.collectLeft([line("2026-11-16T04:00:03.200Z"), line("2026-11-16T04:00:06.100Z")], now)).toBe(7);
+    expect(chat.collectLeft([line("2026-11-16T03:59:58.000Z")], now)).toBe(0);
+    expect([null, 7, 0].map((left) => chat.collectLine(left))).toEqual(["Collecting…", "7s", "Sending…"]);
+  });
+
+  it("Cancel never doubles words still in the box (a send whose answer was lost), and asks once more when its own answer is lost", async () => {
+    messages = [
+      { id: "msg-1", from: "owner", text: "ship it", at: new Date().toISOString(), status: "collecting", sendsAt: new Date(Date.now() + 5_000).toISOString(), threadId: "c1" },
+    ];
+    chat.mount(root);
+    await settle();
+    const text = root.querySelector<HTMLTextAreaElement>(".chat-text")!;
+    text.value = "ship it";
+    let tries = 0;
+    cancelAnswer = () => (++tries === 1 ? Promise.reject(new TypeError("network")) : Promise.resolve(json({ ids: ["msg-1"], clientIds: [], text: "ship it", images: [], files: [] })));
+    messages = [];
+    root.querySelector<HTMLButtonElement>(".chat-collecting-cancel")!.click();
+    await settle();
+    await settle();
+    expect(cancels).toEqual(["msg-1", "msg-1"]);
+    expect(text.value).toBe("ship it");
+    expect(root.querySelector(".chat-hint")?.textContent).toBe("Cancelled. It's back in the box to edit.");
+    text.value = "";
+    text.dispatchEvent(new Event("input"));
+  });
+
+  it("a Cancel whose answer is lost twice is asked again when Chat opens next, and its words come back", async () => {
+    messages = [
+      { id: "msg-1", from: "owner", text: "ship it", at: new Date().toISOString(), status: "collecting", sendsAt: new Date(Date.now() + 5_000).toISOString(), threadId: "c1" },
+    ];
+    chat.mount(root);
+    await settle();
+    cancelAnswer = () => Promise.reject(new TypeError("network"));
+    root.querySelector<HTMLButtonElement>(".chat-collecting-cancel")!.click();
+    await settle();
+    await settle();
+    expect(cancels).toEqual(["msg-1", "msg-1"]);
+    expect(root.querySelector(".chat-hint")?.textContent).toBe("Cancel didn't hear back. It asks again shortly.");
+    // Kept in storage too: a reload still asks.
+    expect(localStorage.getItem("rivet.chat.cancelOwed")).toBe("msg-1");
+    // The server did cancel it: the lines are gone, and the next Chat asks again and gets the words, app start and all.
+    endSession();
+    messages = [];
+    cancelAnswer = () => Promise.resolve(json({ ids: ["msg-1"], clientIds: [], text: "ship it", images: [], files: [] }));
+    chat.unmount();
+    chat.mount(root);
+    await settle();
+    await settle();
+    expect(cancels).toEqual(["msg-1", "msg-1", "msg-1"]);
+    expect(localStorage.getItem("rivet.chat.cancelOwed")).toBeNull();
+    const text = root.querySelector<HTMLTextAreaElement>(".chat-text")!;
+    expect(text.value).toBe("ship it");
+    expect(root.querySelector(".chat-hint")?.textContent).toBe("Cancelled. It's back in the box to edit.");
+    text.value = "";
+    text.dispatchEvent(new Event("input"));
+  });
+
+  it("words put back over a long draft are kept whole across a Chat reopen until the owner trims them", async () => {
+    messages = [
+      { id: "msg-1", from: "owner", text: "a".repeat(20_000), at: new Date().toISOString(), status: "collecting", sendsAt: new Date(Date.now() + 5_000).toISOString(), threadId: "c1" },
+    ];
+    chat.mount(root);
+    await settle();
+    // Past any fixed cap: a window's raw lines can pass the limit, and put-backs can stack.
+    const typed = `${"b".repeat(25_000)}TAIL`;
+    const box = root.querySelector<HTMLTextAreaElement>(".chat-text")!;
+    box.value = typed;
+    box.dispatchEvent(new Event("input"));
+    cancelAnswer = () => Promise.resolve(json({ ids: ["msg-1"], clientIds: [], text: "a".repeat(20_000), images: [], files: [] }));
+    messages = [];
+    root.querySelector<HTMLButtonElement>(".chat-collecting-cancel")!.click();
+    await settle();
+    await settle();
+    expect(root.querySelector(".chat-hint")?.textContent).toBe("Cancelled. It's back in the box, too long to send as one: trim it first.");
+    chat.unmount();
+    chat.mount(root);
+    await settle();
+    const again = root.querySelector<HTMLTextAreaElement>(".chat-text")!;
+    expect(again.value).toBe(`${"a".repeat(20_000)}\n${typed}`);
+    again.value = "";
+    again.dispatchEvent(new Event("input"));
+    expect(localStorage.getItem("rivet.chat.draft.long")).toBeNull();
+  });
+
+  it("a cancelled reply comes back as a reply from Chat too", async () => {
+    messages = [
+      { id: "msg-1", from: "owner", text: "yes", at: new Date().toISOString(), status: "collecting", sendsAt: new Date(Date.now() + 5_000).toISOString(), threadId: "c1", replyTo: "h1" } as ChatMessage,
+    ];
+    chat.mount(root);
+    await settle();
+    cancelAnswer = () => Promise.resolve(json({ ids: ["msg-1"], clientIds: [], text: "yes", images: [], files: [], replyTo: "h1", quote: { from: "rivet", text: "Ship it?" } }));
+    messages = [];
+    root.querySelector<HTMLButtonElement>(".chat-collecting-cancel")!.click();
+    await settle();
+    await settle();
+    const replying = root.querySelector<HTMLElement>(".chat-replying")!;
+    expect(replying.hidden).toBe(false);
+    expect(replying.textContent).toContain("Ship it?");
+    replying.querySelector<HTMLButtonElement>(".chat-replying-cancel")?.click();
+    const text = root.querySelector<HTMLTextAreaElement>(".chat-text")!;
+    text.value = "";
+    text.dispatchEvent(new Event("input"));
+  });
+
+  it("Cancel forgets only its own lines' sends: another lost send with the same words keeps its clientId", async () => {
+    const tried: string[] = [];
+    const lost = (clientId: string) => {
+      tried.push(clientId);
+      return Promise.reject(new ApiError(0, "Can't reach the server."));
+    };
+    await cmd.once("chat\ndeploy rivet\n", lost).catch(() => {});
+    await cmd.once("chat\ndeploy rivet\nthen report", lost).catch(() => {});
+    cmd.tookBack({ ids: ["msg-2"], clientIds: [tried[1]!] });
+    await cmd.once("chat\ndeploy rivet\n", lost).catch(() => {});
+    await cmd.once("chat\ndeploy rivet\nthen report", lost).catch(() => {});
+    expect(tried[2]).toBe(tried[0]);
+    expect(tried[3]).not.toBe(tried[1]);
+    cmd.tookBack({ ids: [], clientIds: [tried[2]!, tried[3]!] });
+  });
+
+  it("a Fix it collecting shows its countdown and offers no Cancel", async () => {
+    messages = [
+      { id: "fix-1", from: "owner", text: "Fix it: ci", at: new Date().toISOString(), status: "collecting", sendsAt: new Date(Date.now() + 4_000).toISOString(), keeps: true, threadId: "c1" },
+    ];
+    chat.mount(root);
+    await settle();
+    const note = root.querySelector<HTMLElement>(".chat-collecting")!;
+    expect(note.hidden).toBe(false);
+    expect(note.querySelector(".chat-collecting-when")!.textContent).toBe("Sending to Rivet in\u00a04s");
+    expect(note.querySelector<HTMLElement>(".chat-collecting-cancel")!.hidden).toBe(true);
+    expect(note.querySelector<HTMLElement>(".chat-collecting-more")!.hidden).toBe(true);
+  });
+
+  it("Cancel after the window has gone keeps the lines and says it was sent", async () => {
+    messages = [
+      { id: "msg-1", from: "owner", text: "ship it", at: new Date().toISOString(), status: "collecting", sendsAt: new Date(Date.now() + 2_000).toISOString(), threadId: "c1" },
+    ];
+    chat.mount(root);
+    await settle();
+    cancelAnswer = () => Promise.resolve(json({ error: "Too late: it's on its way to Rivet." }, 409));
+    messages = [{ ...messages[0]!, status: "sent", sendsAt: undefined }];
+    root.querySelector<HTMLButtonElement>(".chat-collecting-cancel")!.click();
+    await settle();
+    await settle();
+    expect(cancels).toEqual(["msg-1"]);
+    expect(root.querySelector(".chat-hint")?.textContent).toBe("Too late: it's on its way to Rivet.");
+    expect(root.querySelector(".chat-msg.mine .chat-status")!.textContent).toBe(" · Sent");
+    expect(root.querySelector<HTMLElement>(".chat-collecting")!.hidden).toBe(true);
+    expect(root.querySelector<HTMLTextAreaElement>(".chat-text")!.value).toBe("");
   });
 
   it("a second Enter while the first send is in flight sends nothing", async () => {

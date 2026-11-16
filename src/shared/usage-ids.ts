@@ -261,6 +261,7 @@ const CONTROLS: UsageId[] = [
     ["chat.compose.attach", "Attach to a message"],
     ["chat.compose.mic", "Speak a message"],
     ["chat.compose.send", "Send a message"],
+    ["chat.compose.cancel", "Cancel a collecting message", { added: "2026-11-16" }],
     ["chat.reply.cancel", "Cancel a reply"],
     ["chat.msg.tools-toggle", "Show a message's tools"],
     ["chat.msg.reply", "Reply to a message"],
@@ -284,6 +285,7 @@ const CONTROLS: UsageId[] = [
     ["attach.remove", "Remove an attachment"],
     ["chat.msg.thing-link", "Open a thing from chat"],
     ["chat.msg.answer-line", "An answer line in chat"],
+    ["chat.msg.topic-open", "Open a reply's topic from chat"],
   ]),
   ...group("control", "Menu", [
     ["menu.open", "Open the menu", { added: "2026-11-03" }],

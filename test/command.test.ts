@@ -110,6 +110,7 @@ async function connectBridge(features: string | null = "image,chat-window"): Pro
 describe("every action needs a session, CSRF and a clientId", () => {
   const actions: [string, () => Record<string, unknown>][] = [
     ["/api/chat", () => ({ clientId: clientId(), text: "hello" })],
+    ["/api/chat/cancel", () => ({ id: "no-such-line" })],
     ["/api/logs/subscribe", () => ({ repo: MS, chat: "checkout-feedback" })],
     ["/api/logs/release", () => ({ repo: MS, chat: "checkout-feedback" })],
   ];
@@ -349,8 +350,19 @@ describe("chat", () => {
     const say = async (body: object) =>
       (await (await fetch(`${server.base}/api/bridge/say`, { method: "POST", headers: bearer(BOARD_TOKEN), body: JSON.stringify(body) })).json()) as ChatMessage;
     // The old Updates conversation is read-only: a reply to its line, or a line typed in it, is refused.
-    const news = await say({ text: "Nightly: green.", replyTo: "unknown-id" });
+    // say files no line there now (2026-11-16), so the store writes one as earlier rules did.
+    const commands = new CommandStore(server.dataDir);
+    const at = clock.now().toISOString();
+    commands.ensureUpdates(at);
+    const news = commands.addChatMessage({ id: "old-update", from: "rivet", text: "Nightly: green.", at, thread: UPDATES_ID });
+    commands.close();
     expect(news.threadId).toBe(UPDATES_ID);
+    // A reply to it is refused, a card's or a file's too, so the agent sends it as what it is, not a line nobody sees.
+    for (const body of [{ text: "Nightly: still green." }, { text: "Ship it?", card: true }, { ack: "seen" }]) {
+      const again = await fetch(`${server.base}/api/bridge/say`, { method: "POST", headers: bearer(BOARD_TOKEN), body: JSON.stringify({ ...body, replyTo: news.id }) });
+      expect(again.status).toBe(409);
+      expect(((await again.json()) as { error: string }).error).toMatch(/old Updates/);
+    }
     const refused = await post("/api/chat", { clientId: clientId(), text: "hi", replyTo: news.id });
     expect(refused.status).toBe(409);
     expect(((await refused.json()) as { error: string }).error).toMatch(/Updates is read-only/);
@@ -383,11 +395,9 @@ describe("chat", () => {
       await fetch(`${server.base}/api/bridge/say`, { method: "POST", headers: bearer(BOARD_TOKEN), body: JSON.stringify({ text: "On it.", replyTo: entry.id }) })
     ).json()) as ChatMessage;
     expect(answer).toMatchObject({ replyTo: entry.id, quote: { from: "owner", text: "Send the video" } });
-    const unknown = (await (
-      await fetch(`${server.base}/api/bridge/say`, { method: "POST", headers: bearer(BOARD_TOKEN), body: JSON.stringify({ text: "Hm.", replyTo: "gone" }) })
-    ).json()) as ChatMessage;
-    expect(unknown.replyTo).toBe("gone");
-    expect(unknown).not.toHaveProperty("quote");
+    // An id it does not know answers nothing: refused, not stored without a quote (2026-11-16).
+    const unknown = await fetch(`${server.base}/api/bridge/say`, { method: "POST", headers: bearer(BOARD_TOKEN), body: JSON.stringify({ text: "Hm.", replyTo: "gone" }) });
+    expect(unknown.status).toBe(404);
     stream.abort();
   });
 
@@ -422,6 +432,55 @@ describe("chat windows", () => {
   const shas = (count: number, from = 0) => Array.from({ length: count }, (_, i) => (from + i).toString(16).padStart(64, "0"));
   const flush = (offset: number) => store.flushDue(T0 + offset, new Date(T0 + offset).toISOString());
   const statuses = (...ids: string[]) => ids.map((id) => [store.getAction(id)!.status, store.getChatMessage(id)!.status]);
+
+  it("each collecting line carries its window's deadline, which a follow-up moves; a sent line carries none", () => {
+    const lead = add(0, { text: "one" }).entry;
+    expect(store.getChatMessage(lead.id)!.sendsAt).toBe(new Date(T0 + BATCH_QUIET_MS).toISOString());
+    const second = add(4_000, { text: "two" }).entry;
+    const deadline = new Date(T0 + 4_000 + BATCH_QUIET_MS).toISOString();
+    expect([store.getChatMessage(lead.id)!.sendsAt, store.getChatMessage(second.id)!.sendsAt]).toEqual([deadline, deadline]);
+    // Never later than the cap after the first.
+    for (let at = 8_000; at < BATCH_CAP_MS; at += 8_000) add(at, { text: `more ${at}` });
+    expect(store.getChatMessage(lead.id)!.sendsAt).toBe(new Date(T0 + BATCH_CAP_MS).toISOString());
+    flush(BATCH_CAP_MS);
+    expect(store.getChatMessage(lead.id)!.status).toBe("sent");
+    expect(store.getChatMessage(lead.id)!.sendsAt).toBeUndefined();
+  });
+
+  it("Cancel takes a whole window back before it goes: its lines leave the chat and the sweep never sends it", () => {
+    const lead = add(0, { text: "one", images: shas(1) }).entry;
+    const second = add(2_000, { text: " two \n three " }).entry;
+    const back = store.cancelChat(second.id, new Date(T0 + 3_000).toISOString());
+    expect(back).toEqual({ outcome: "cancelled", back: { ids: [lead.id, second.id], clientIds: [`c-${lead.id}`, `c-${second.id}`], text: "one\ntwo \n three", images: shas(1), files: [] } });
+    expect([store.getChatMessage(lead.id), store.getChatMessage(second.id)]).toEqual([null, null]);
+    expect([store.getAction(lead.id)!.status, store.getAction(second.id)!.status]).toEqual(["cancelled", "cancelled"]);
+    expect(flush(60_000)).toEqual([]);
+    expect(store.queuedChat()).toEqual([]);
+    // Asked again (a lost answer, another device), it answers as it did and changes nothing.
+    expect(store.cancelChat(lead.id, new Date(T0 + 4_000).toISOString())).toEqual(back);
+    expect(store.cancelChat("no-such-line", new Date(T0 + 4_000).toISOString())).toEqual({ outcome: "missing" });
+    // A late ack never revives it, and the next line opens a window of its own.
+    expect(store.updateAction(lead.id, "typed", undefined, new Date(T0 + 5_000).toISOString())!.status).toBe("cancelled");
+    const next = add(6_000, { text: "four" }).entry;
+    const [sent] = flush(6_000 + BATCH_QUIET_MS);
+    expect(sent).toMatchObject({ id: next.id, text: "four" });
+  });
+
+  it("a cancelled reply comes back with what it answered", () => {
+    const reply = add(0, { text: "yes, do it", replyTo: "h1", quote: { from: "rivet", text: "Ship it?" } } as never).entry;
+    expect(store.cancelChat(reply.id, new Date(T0 + 1_000).toISOString())).toEqual({
+      outcome: "cancelled",
+      back: { ids: [reply.id], clientIds: [`c-${reply.id}`], text: "yes, do it", images: [], files: [], replyTo: "h1", quote: { from: "rivet", text: "Ship it?" } },
+    });
+  });
+
+  it("Cancel after the sweep has handed a window on takes nothing back", () => {
+    const lead = add(0, { text: "one" }).entry;
+    expect(flush(BATCH_QUIET_MS)).toHaveLength(1);
+    expect(store.cancelChat(lead.id, new Date(T0 + BATCH_QUIET_MS).toISOString())).toEqual({ outcome: "sent" });
+    expect(store.getChatMessage(lead.id)!.status).toBe("sent");
+    expect(store.getAction(lead.id)!.status).toBe("queued");
+  });
 
   it("collects follow-ups into one window that goes to the bridge as its lead, with every text", () => {
     const lead = add(0, { text: "one" }).entry;
@@ -699,6 +758,67 @@ describe("chat windows", () => {
     expect(upgraded.events().map((event) => event.id), "the unacked short one is replayed first, then the long one").toEqual([fits.id, lead.id]);
     expect(upgraded.events()[1]).toMatchObject({ event: "chat", data: { text: long } });
     upgraded.abort();
+  });
+
+  it("end to end: Cancel answers with the words for the box, drops the lines from every open app, and the bridge never hears", async () => {
+    const controller = new AbortController();
+    const app = await fetch(`${server.base}/api/chat/stream`, { headers: { cookie }, signal: controller.signal });
+    const reader = app.body!.getReader();
+    const decoder = new TextDecoder();
+    let frames = "";
+    void (async () => {
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) return;
+          frames += decoder.decode(value, { stream: true });
+        }
+      } catch {}
+    })();
+    const shown = () =>
+      frames
+        .split("\n\n")
+        .filter((block) => block.startsWith("event: message"))
+        .map((block) => JSON.parse(block.slice(block.indexOf("data: ") + 6)) as ChatMessage);
+    const stream = await connectBridge();
+    const leadKey = clientId();
+    const lead = (await (await post("/api/chat", { clientId: leadKey, text: "ship signup flow" })).json()) as AuditEntry;
+    clock.advance(2_000);
+    const memberKey = clientId();
+    const member = (await (await post("/api/chat", { clientId: memberKey, text: "then the report" })).json()) as AuditEntry;
+    const page = async () => ((await (await fetch(`${server.base}/api/chat`, { headers: { cookie } })).json()) as ChatPage).messages;
+    expect((await page()).map((message) => message.sendsAt)).toEqual(Array(2).fill(new Date(Date.parse(member.at) + BATCH_QUIET_MS).toISOString()));
+
+    const cancelled = await post("/api/chat/cancel", { id: lead.id });
+    expect(cancelled.status).toBe(200);
+    expect(await cancelled.json()).toEqual({ ids: [lead.id, member.id], clientIds: [leadKey, memberKey], text: "ship signup flow\nthen the report", images: [], files: [] });
+    expect(await page()).toEqual([]);
+    for (let i = 0; i < 100 && shown().filter((message) => message.status === "cancelled").length < 2; i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(shown().filter((message) => message.status === "cancelled").map((message) => message.id)).toEqual([lead.id, member.id]);
+
+    clock.advance(BATCH_CAP_MS);
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+    expect(stream.events()).toEqual([]);
+    // Asked again it answers as it did; a retry of a cancelled send is never told it went.
+    const again = await post("/api/chat/cancel", { id: member.id });
+    expect(again.status).toBe(200);
+    expect(((await again.json()) as { text: string }).text).toBe("ship signup flow\nthen the report");
+    const retry = await post("/api/chat", { clientId: leadKey, text: "ship signup flow" });
+    expect(retry.status).toBe(409);
+    expect(await retry.json()).toEqual({ error: "That message was cancelled." });
+    expect(stream.events()).toEqual([]);
+    const missing = await post("/api/chat/cancel", { id: "no-such-line" });
+    expect([missing.status, await missing.json()]).toEqual([404, { error: "That message is not in the chat." }]);
+    const sent = (await (await post("/api/chat", { clientId: clientId(), text: "deploy rivet" })).json()) as AuditEntry;
+    clock.advance(BATCH_CAP_MS);
+    for (let i = 0; i < 150 && stream.events().length === 0; i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+    const late = await post("/api/chat/cancel", { id: sent.id });
+    expect([late.status, await late.json()]).toEqual([409, { error: "Too late: it's on its way to Rivet." }]);
+    const ack = await fetch(`${server.base}/api/bridge/action-ack`, { method: "POST", headers: bearer(BRIDGE_TOKEN), body: JSON.stringify({ id: lead.id, status: "cancelled" }) });
+    expect(ack.status).toBe(400);
+    expect((await post("/api/chat/cancel", { id: "bad id" })).status).toBe(400);
+    stream.abort();
+    controller.abort();
   });
 
   it("end to end: shows as collecting, sends one event after the quiet, and a say to the lead marks every bubble replied", async () => {
@@ -1543,6 +1663,22 @@ describe("a merge-ready card", () => {
       headers: bearer(BRIDGE_TOKEN),
       body: JSON.stringify({ id, delivery: { target: "rivet", at: new Date().toISOString() } }),
     });
+
+  it("refuses a reply to a card answer whose reply an earlier rule filed in the old Updates, rather than file it there (2026-11-16)", async () => {
+    const answered = await answer("pr-card", { decision: "approve" });
+    expect(answered.status).toBe(201);
+    const { id } = (await answered.json()) as { id: string };
+    // Its own line gone (pruned, or from before conversations), and Rivet's reply to it filed in Updates by an old rule.
+    const commands = new CommandStore(server.dataDir);
+    (commands as unknown as { db: { prepare(sql: string): { run(...args: unknown[]): unknown } } }).db.prepare("DELETE FROM chat_messages WHERE id = ?").run(id);
+    const at = clock.now().toISOString();
+    commands.ensureUpdates(at);
+    expect(commands.addChatMessage({ id: "old-approved", from: "rivet", text: "Approved.", at, replyTo: id, thread: UPDATES_ID }).threadId).toBe(UPDATES_ID);
+    commands.close();
+    const again = await fetch(`${server.base}/api/bridge/say`, { method: "POST", headers: bearer(BOARD_TOKEN), body: JSON.stringify({ text: "Merged.", replyTo: id }) });
+    expect(again.status).toBe(409);
+    expect(((await again.json()) as { error: string }).error).toMatch(/old Updates/);
+  });
 
   it("refuses a merge-ready card with no pr or no headSha, and a headSha on any other card", async () => {
     const card = { id: "mr", kind: "merge-ready", title: "No PR", pr: 105, headSha: HEAD };

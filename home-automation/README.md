@@ -19,8 +19,10 @@ Nothing here runs, and nothing leaves your Mac, until you set it up.
 Already running Home Assistant? Skip to step 3.
 
 1. Install it on this Mac: `home-automation/scripts/install.sh`. It needs [uv](https://docs.astral.sh/uv/), never asks
-   for a password, and listens on localhost only. It lives in `~/.rivet-agents/home-assistant`; set `HA_HOME` to change
-   that. Your `configuration.yaml` there is yours: running the script again does not replace it.
+   for a password, and listens on localhost only: before Home Assistant's first start it writes its HTTP settings
+   (`.storage/http`, where Home Assistant keeps them since 2026.10) bound to `127.0.0.1:8123`, and it never replaces
+   settings that are already there. It lives in `~/.rivet-agents/home-assistant`; set `HA_HOME` to change that. Your
+   `configuration.yaml` there is yours: running the script again does not replace it.
 2. Open `http://127.0.0.1:8123`, make your account and link your devices.
 3. In Home Assistant, open your profile, then Security, and create a long-lived access token.
 4. Give the bridge the address and the token. Set `RIVET_HA_URL` in your `.env`, for example `http://127.0.0.1:8123`.

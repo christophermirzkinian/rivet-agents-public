@@ -314,6 +314,9 @@ test("say --card with a video holds its PR before the post, moves the hold to th
   const refused = await post(() => new Response(JSON.stringify({ error: "bad reply" }), { status: 400 }));
   assert.deepEqual([refused.code, refused.posted, refused.held], [1, false, []]);
   assert.deepEqual(refused.lines, ["err http 400: bad reply"]);
+  // The say route's 409 for a reply into the old Updates writes nothing first, so the hold goes too (2026-11-16).
+  const updates = await post(() => new Response(JSON.stringify({ error: "that line is in the old Updates, which shows nowhere now: send it again without --reply-to" }), { status: 409 }));
+  assert.deepEqual([updates.code, updates.posted, updates.held], [1, false, []]);
   for (const answer of [() => new Response("{}", { status: 503 }), () => new Response("{}", { status: 409 }), () => Promise.reject(new Error("socket hang up"))]) {
     const unsure = await post(answer);
     assert.equal(unsure.code, 1);

@@ -1,5 +1,5 @@
 import type { FileRef } from "../../src/shared/board.js";
-import type { AuditEntry, ChatMessage, ChatPage, LogsResponse } from "../../src/shared/command.js";
+import type { AuditEntry, ChatCancelled, ChatMessage, ChatPage, LogsResponse } from "../../src/shared/command.js";
 import { FINAL_STATUSES, imageFields } from "../../src/shared/command.js";
 import type { SearchItem } from "../../src/shared/search.js";
 import type { Worker } from "../../src/shared/workers.js";
@@ -41,6 +41,25 @@ const notesOut = new Map<string, Note>();
  * only success or a coded 4xx refusal lets it go. An answer that names no action
  * counts as lost too.
  */
+const cancelHeard = new Set<(ids: readonly string[]) => void>();
+/** Told when Cancel takes lines back here: a sheet that sent one no longer says it went. */
+export function onChatCancelled(listener: (ids: readonly string[]) => void): void {
+  cancelHeard.add(listener);
+}
+/**
+ * Cancel took this window back: a send under one of its clientIds is a new message after this, never a retry of
+ * those. Every other send keeps its own, so a retry of one still goes once.
+ */
+export function tookBack(back: Pick<ChatCancelled, "ids" | "clientIds">): void {
+  const gone = new Set(back.clientIds ?? []);
+  for (const [key, id] of [...unresolved]) if (gone.has(id)) unresolved.delete(key);
+  heardCancelled(back.ids);
+}
+/** Lines cancelled here or on another device (the stream's tombstones): every sheet that sent one hears. */
+export function heardCancelled(ids: readonly string[]): void {
+  for (const listener of cancelHeard) listener(ids);
+}
+
 export async function once<T extends { id: string }>(key: string, send: (clientId: string) => Promise<T>): Promise<T> {
   let id = unresolved.get(key);
   if (!id) {
@@ -87,6 +106,9 @@ export const sendChat = (text: string, images: readonly string[], files: readonl
       conversation,
     }),
   );
+
+/** Cancels the collecting chat window `id` is in; a 409 says it has already gone to Rivet. */
+export const cancelChat = (id: string) => call<ChatCancelled>("POST", "/api/chat/cancel", { id });
 
 /**
  * The note `key` goes as: the one still out from an unanswered try, so a retry is that

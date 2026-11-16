@@ -334,6 +334,19 @@ describe("Feed's Fix it", () => {
     expect(records[0]).toMatchObject({ kind: "ci", key: "ci_0zh2u01", state: "investigating", by: "owner-fix-it" });
   });
 
+  it("Chat's Cancel never takes a Fix it back: its record is already set, so it goes as it is", async () => {
+    const entry = (await (await fix({ clientId: "fix-tap-0101", ...ci })).json()) as { id: string; fixIt?: unknown };
+    expect(entry).not.toHaveProperty("fixIt");
+    const page = (await (await send("GET", "/api/chat", undefined, { cookie })).json()) as { messages: { id: string; keeps?: boolean }[] };
+    // The app offers no Cancel for it.
+    expect(page.messages.find((message) => message.id === entry.id)?.keeps).toBe(true);
+    const cancel = await send("POST", "/api/chat/cancel", { id: entry.id }, browser(cookie));
+    expect(cancel.status).toBe(409);
+    expect(await cancel.json()).toEqual({ error: "A Fix it goes to Rivet as it is." });
+    expect(await ownerLines()).toHaveLength(1);
+    expect((await list())[0]).toMatchObject({ state: "investigating", by: "owner-fix-it" });
+  });
+
   it("a retry sends nothing more, and a second tap on a record that changed is refused with no message", async () => {
     expect((await fix({ clientId: "fix-tap-0002", ...ci })).status).toBe(202);
     expect((await fix({ clientId: "fix-tap-0002", ...ci })).status).toBe(200);

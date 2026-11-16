@@ -86,6 +86,25 @@ const chat = z.string().regex(CHAT_PATTERN);
 
 const image = z.string().regex(MEDIA_SHA_PATTERN);
 
+/** A chat window goes to Rivet this long after its last message (and never later than 30 s after its first). */
+export const CHAT_WINDOW_QUIET_MS = 10_000;
+
+/** Cancel on a collecting chat window: any of its messages names it. */
+export const chatCancelSchema = z.object({ id: z.string().regex(ID_PATTERN) }).strict();
+
+/** What a cancelled window held, for the box: its lines' text in order, and its photos and files once each. */
+export interface ChatCancelled {
+  ids: string[];
+  /** The clientIds its lines were sent under: the app forgets exactly those sends, so a retry of another still goes once. */
+  clientIds: string[];
+  text: string;
+  images: string[];
+  files: FileRef[];
+  /** A reply leads its own window: what it answered, so the box can answer it again. */
+  replyTo?: string;
+  quote?: ChatQuote;
+}
+
 /** Text, attached images, attached files, or any mix; one image may come as `image` or `images`, never both. */
 export const chatCreateSchema = z
   .object({
@@ -213,13 +232,15 @@ export const ACTION_STATUSES = [
   "succeeded",
   "failed",
   "untracked",
+  "cancelled",
 ] as const;
 export type ActionStatus = (typeof ACTION_STATUSES)[number];
 /**
  * `untracked`: a deploy was dispatched but its run could not be told apart, so its outcome is on GitHub only.
+ * `cancelled`: a chat window you cancelled while it was collecting; the server writes it and the bridge never sees it.
  * A merge from a card ends `merged`, `refused` or `failed`.
  */
-export const FINAL_STATUSES: ReadonlySet<ActionStatus> = new Set(["replied", "previewed", "refused", "merged", "deployed", "succeeded", "failed", "untracked"]);
+export const FINAL_STATUSES: ReadonlySet<ActionStatus> = new Set(["replied", "previewed", "refused", "merged", "deployed", "succeeded", "failed", "untracked", "cancelled"]);
 
 const shortText = (max: number) => z.string().max(max);
 
@@ -260,7 +281,7 @@ export const actionDetailSchema = z
 export type ActionDetail = z.infer<typeof actionDetailSchema>;
 
 export const actionAckSchema = z
-  .object({ id: z.string().regex(ID_PATTERN), status: z.enum(ACTION_STATUSES).exclude(["collecting"]), detail: actionDetailSchema.optional() })
+  .object({ id: z.string().regex(ID_PATTERN), status: z.enum(ACTION_STATUSES).exclude(["collecting", "cancelled"]), detail: actionDetailSchema.optional() })
   .strict();
 
 /** One row of the audit log, and the status of an action in flight. */
@@ -314,8 +335,15 @@ export interface ChatMessage {
   at: string;
   /** The server's insert order, which breaks a tie in `at`: one board write stamps all its cards alike. */
   seq?: number;
-  /** Your messages: collecting follow-ups, sent, then typed into Rivet's chat, then replied. */
-  status?: "collecting" | "sent" | "typed" | "unconfirmed" | "failed" | "replied";
+  /**
+   * Your messages: collecting follow-ups, sent, then typed into Rivet's chat, then replied. `cancelled` only comes on
+   * the stream, saying a line you cancelled while it collected has left the chat.
+   */
+  status?: "collecting" | "sent" | "typed" | "unconfirmed" | "failed" | "replied" | "cancelled";
+  /** A collecting message: when its window goes to Rivet, by the server's clock (ISO). */
+  sendsAt?: string;
+  /** A collecting message whose window goes as it is (a Feed Fix it): Cancel never takes it back, so none is offered. */
+  keeps?: true;
   /** The message this one answers: the one you replied to, or the one Rivet's answer names. */
   replyTo?: string;
   /** What this message shows of `replyTo`, as it read when this one was sent. */
@@ -358,6 +386,11 @@ export interface ChatPage {
   messages: ChatMessage[];
   /** Pass as `before` for the next older page; null at the start of the thread. */
   older: string | null;
+  /**
+   * Chat's page (`chat=1`) only: the conversations of its lines that are things (a card filed or posted in them), so Chat
+   * gives their lines Open topic though the card's own line is on a page not loaded (2026-11-16).
+   */
+  things?: string[];
 }
 
 export interface LogsResponse {

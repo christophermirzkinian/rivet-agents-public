@@ -20,6 +20,7 @@ const KIND_WORDS: Record<AuditEntry["kind"], string> = {
 
 const STATUS_WORDS: Record<AuditEntry["status"], string> = {
   collecting: "Collecting",
+  cancelled: "Cancelled",
   queued: "Waiting for the Mac",
   typed: "Typed",
   unconfirmed: "Typed, not confirmed",

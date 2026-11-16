@@ -28,6 +28,17 @@ type Choice = "start" | "drop";
 const sent = new Map<string, Choice>();
 /** Choices on their way, by item: a sheet reopened meanwhile waits for the same send instead of starting another. */
 const pending = new Map<string, Choice>();
+/** The line each sent choice went as: Cancel in Chat takes it back, and the item reads as never sent. */
+const sentAs = new Map<string, string>();
+cmd.onChatCancelled((ids) => {
+  for (const [k, id] of sentAs)
+    if (ids.includes(id)) {
+      sentAs.delete(k);
+      sent.delete(k);
+      if (live?.key === k) live.status.textContent = "";
+      showState(k);
+    }
+});
 /** While a Start it is opening, the statuses load this often, so the sheet shows its chat soon after it opens. */
 const OPENING_POLL_MS = 5_000;
 /** The sheet on screen, which a send finishing after a close and reopen reports to. */
@@ -109,9 +120,10 @@ export function openComingSheet(raw: ComingItem, openChat: (name: string, repo?:
     report(choice === "start" ? "Opening…" : "Sending…");
     showState(k);
     cmd.sendChat(choiceText(item, choice, repo), [], [], undefined, null).then(
-      () => {
+      (entry) => {
         pending.delete(k);
         sent.set(k, choice);
+        sentAs.set(k, entry.id);
         report(sentLine(choice));
         showState(k);
         flash(choice === "start" ? `${RIVET_NAME} is opening a chat on it` : `${RIVET_NAME} will drop it`);

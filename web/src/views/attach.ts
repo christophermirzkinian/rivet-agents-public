@@ -119,6 +119,8 @@ export interface PhotosControl {
   add(files: File[], notices?: string[]): void;
   /** Drops these photos once they have been sent. */
   drop(photos: readonly Photo[]): void;
+  /** Puts attachments already on the server back in the strip, ahead of what is there: a cancelled message's. */
+  put(images: readonly string[], files: readonly FileRef[]): void;
 }
 
 /**
@@ -331,6 +333,19 @@ export function photosControl(state: PhotosState, options: { onChange(): void; o
     },
     drop(photos) {
       dropPhotos(state, photos);
+      update();
+    },
+    put(images, files) {
+      const kept = state.photos;
+      // One still in the strip (its send's answer was lost) is not put back twice.
+      const have = new Set(kept.flatMap((photo) => [photo.image, photo.doc?.file?.sha256]).filter(Boolean));
+      state.photos = [];
+      restorePhotos(
+        state,
+        images.filter((image) => !have.has(image)),
+        files.filter((file) => !have.has(file.sha256)),
+      );
+      state.photos.push(...kept);
       update();
     },
   };

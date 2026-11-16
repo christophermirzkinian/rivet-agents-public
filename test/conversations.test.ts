@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { BATCH_QUIET_MS } from "../src/server/commandstore.js";
+import { BATCH_QUIET_MS, CommandStore } from "../src/server/commandstore.js";
 import { MAX_CARDS } from "../src/server/http.js";
 import { conversationStage, conversationSummary, idle, isClosed, isDone, linkedPrs, resolveConversation } from "../src/server/conversations.js";
 import { rivetPayload } from "../src/server/push.js";
 import { wantsText } from "../src/shared/answers.js";
-import type { ChatMessage } from "../src/shared/command.js";
+import type { ChatMessage, ChatPage } from "../src/shared/command.js";
 import type { CardThreadsResponse } from "../src/shared/threads.js";
 import { answerText, IDLE_ARCHIVE_MS, linksChat, TEAM_ROOM_ID, UPDATES_ID, type ConversationDetail, type ConversationPage, type ConversationsResponse } from "../src/shared/conversations.js";
 import { THREAD_MESSAGES_MAX } from "../src/shared/threads.js";
@@ -34,8 +34,9 @@ describe("resolveConversation", () => {
     expect(resolveConversation({ id: "new", replyTo: "reply-1", text: "x" }, deps())).toEqual({ thread: "c2", via: "message" });
   });
 
-  it("an unknown id, no mention or two mentions go to Updates; exactly one mention files it there", () => {
-    expect(resolveConversation({ id: "new", replyTo: "gone", text: "x" }, deps(["c1"]))).toEqual({ thread: UPDATES_ID, via: "updates" });
+  it("an unknown id is refused; no mention or two mentions go to Updates; exactly one mention files it there", () => {
+    // 2026-11-16: a reply filed in Updates showed nowhere.
+    expect(resolveConversation({ id: "new", replyTo: "gone", text: "x" }, deps(["c1"]))).toEqual({ thread: "", via: "unknown" });
     // A card answer from before conversations has no message: a reply to it starts one, as it always did.
     expect(resolveConversation({ id: "new", replyTo: "old-reply", text: "x" }, deps(["c1"]))).toEqual({ thread: "new", via: "new" });
     // ...and the next reply to it joins that one.
@@ -200,6 +201,17 @@ describe("conversation routes", () => {
     return (await response.json()) as ChatMessage;
   }
 
+  /** A line in the old Updates, as earlier rules filed them: say files none there now (2026-11-16), so the store writes it. */
+  async function update(text: string): Promise<ChatMessage> {
+    const commands = new CommandStore(server.dataDir);
+    const at = clock.now().toISOString();
+    commands.ensureUpdates(at);
+    const message = commands.addChatMessage({ id: `upd-line-${++updates}`, from: "rivet", text, at, thread: UPDATES_ID });
+    commands.close();
+    return message;
+  }
+  let updates = 0;
+
   async function list(query = ""): Promise<ConversationsResponse> {
     const response = await send("GET", `/api/conversations${query}`, undefined, { cookie });
     expect(response.status).toBe(200);
@@ -244,8 +256,8 @@ describe("conversation routes", () => {
     clock.advance(60_000);
     const mine = await owner("New one", { conversation: null });
     clock.advance(60_000);
-    // Only a reply to an id the server does not know lands there now; a say replying to nothing is an update card.
-    await rivet("Nightly: 6 PRs merged, main green", { replyTo: "not-a-message" });
+    // Only a reply to one of its lines lands there now; a say replying to nothing is an update card.
+    await update("Nightly: 6 PRs merged, main green");
     clock.advance(60_000);
     await rivet("On it.", { replyTo: mine });
     let page = await list();
@@ -255,7 +267,7 @@ describe("conversation routes", () => {
     expect(older.conversations.map((row) => [row.id, row.unread])).toEqual([[UPDATES_ID, 1]]);
     // A newer message in Updates does not bring it back.
     clock.advance(60_000);
-    await rivet("The build server is back.", { replyTo: "not-a-message" });
+    await update("The build server is back.");
     page = await list();
     expect(page.conversations.map((row) => row.id)).toEqual([mine]);
     expect(page).toMatchObject({ unread: 1, older: 1 });
@@ -286,6 +298,8 @@ describe("conversation routes", () => {
   it("Rivet's message lands by the id he quotes, or Updates; one replying to nothing is a Got it card; --new starts one", async () => {
     await list();
     const batch = await owner("Night Batch results row, PR #412", { conversation: null });
+    // Rivet's line is its newest: a note naming it while your line waits answers that line instead (2026-11-16).
+    const onIt = await rivet("On it.", { replyTo: batch });
     clock.advance(BATCH_QUIET_MS);
     const card = async (text: string) => {
       const response = await send("POST", "/api/bridge/say", { text });
@@ -300,8 +314,8 @@ describe("conversation routes", () => {
     expect(notice).toMatchObject({ kind: "decision", title: "The build server is back.", options: [{ label: "Got it" }] });
     expect(notice.replyTo).toBeUndefined();
     // The card about its PR is shown in it; the one naming nothing is in none.
-    expect((await open(batch)).messages.map((message) => message.posted?.title ?? message.text)).toEqual(["Night Batch results row, PR #412", "#412 is green."]);
-    expect((await rivet("Late reply.", { replyTo: "not-a-message" })).threadId).toBe(UPDATES_ID);
+    expect((await open(batch)).messages.map((message) => message.posted?.title ?? message.text)).toEqual(["Night Batch results row, PR #412", onIt.text, "#412 is green."]);
+    expect((await update("Late reply.")).threadId).toBe(UPDATES_ID);
     const started = await rivet("Six PRs merged overnight.", { new: true, title: "Nightly report 3 Oct" });
     expect(started.threadId).toBe(started.id);
     expect((await open(started.id)).conversation).toMatchObject({ title: "Nightly report 3 Oct", lastFrom: "rivet" });
@@ -312,6 +326,36 @@ describe("conversation routes", () => {
     const flat = (await (await send("GET", "/api/chat?limit=50", undefined, { cookie })).json()) as { messages: { id: string }[] };
     expect(flat.messages.map((message) => message.id)).not.toContain(UPDATES_ID);
     expect((await open(UPDATES_ID)).messages[0]).toMatchObject({ id: UPDATES_ID, text: "Updates from Rivet" });
+  });
+
+  it("refuses a reply to an id it does not know, filing it nowhere, not even Updates (2026-11-16)", async () => {
+    await list();
+    expect((await send("POST", "/api/bridge/say", { text: "Late reply.", replyTo: "not-a-message" })).status).toBe(404);
+    expect((await send("POST", "/api/bridge/say", { text: "Late card", replyTo: "not-a-message", card: true })).status).toBe(404);
+    const flat = (await (await send("GET", "/api/chat?limit=50", undefined, { cookie })).json()) as { messages: ChatMessage[] };
+    expect(flat.messages.map((message) => message.text)).not.toContain("Late reply.");
+    expect((await list("?older=1")).conversations.find((row) => row.id === UPDATES_ID)).toMatchObject({ unread: 0 });
+    const board = (await (await send("GET", "/api/board")).json()) as { board: { needs: { title: string }[] } | null };
+    expect(board.board?.needs.map((need) => need.title) ?? []).not.toContain("Late card");
+  });
+
+  it("Chat lists a thing's every reply: Rivet's follow-up after its first card and Rivet's reply to a card answer (2026-11-16)", async () => {
+    await list();
+    const ask = await owner("Signup forms, the simple way", { conversation: null });
+    clock.advance(BATCH_QUIET_MS);
+    expect((await send("PUT", "/api/board/needs/signup-forms-4861", { kind: "decision", title: "Signup forms plan", ask: "Pick one", replyTo: ask, pr: 4861 })).status).toBe(200);
+    const posted = (await open(ask)).messages.find((message) => message.posted?.id === "signup-forms-4861")!;
+    const followUp = await rivet("Building the walkthrough now.", { replyTo: posted.id });
+    const rev = await revOf(server.base, cookie, "signup-forms-4861");
+    const answered = await send("POST", "/api/replies", { clientId: "reply-topic", itemId: "signup-forms-4861", decision: "comment", rev, text: "add a share button" }, browser(cookie));
+    expect(answered.status).toBe(201);
+    const answer = ((await answered.json()) as { id: string }).id;
+    const reply = await rivet("Share button added.", { replyTo: answer });
+    expect([followUp.threadId, reply.threadId]).toEqual([ask, ask]);
+    const page = (await open(ask)).messages.map((message) => message.id);
+    expect(page).toEqual([ask, posted.id, followUp.id, answer, reply.id]);
+    const chat = ((await (await send("GET", "/api/chat?chat=1", undefined, browser(cookie))).json()) as { messages: ChatMessage[] }).messages;
+    expect(chat.filter((message) => (message.threadId ?? message.id) === ask).map((message) => message.id)).toEqual(page);
   });
 
   it("a reply that asks you something is a question card you type into, beside one line that opens it", async () => {
@@ -552,7 +596,7 @@ describe("conversation routes", () => {
 
   it("a card's owner by what it names keeps it once answered; Updates owns none; a card answered again, a retry", async () => {
     await list();
-    expect((await rivet("#105 needs review.", { replyTo: "not-a-message" })).threadId).toBe(UPDATES_ID);
+    expect((await update("#105 needs review.")).threadId).toBe(UPDATES_ID);
     expect((await send("PUT", "/api/board", REPLY_BOARD)).status).toBe(200);
     const cardThreads = async () => ((await (await send("GET", "/api/card-threads", undefined, { cookie })).json()) as CardThreadsResponse).cards;
     expect((await cardThreads()).map((card) => card.thread)).not.toContain(UPDATES_ID);
@@ -603,7 +647,7 @@ describe("conversation routes", () => {
     clock.advance(60_000);
     await rivet("On it.", { replyTo: a });
     // Updates' news is not in the badge.
-    await rivet("Nightly: green", { replyTo: "not-a-message" });
+    await update("Nightly: green");
     let page = await list();
     expect(page.unread).toBe(1);
     expect((await patch(b, { unread: true })).status).toBe(200);
@@ -735,7 +779,7 @@ describe("conversation routes", () => {
 
   it("never archives one waiting on you beyond its status: a question card under a later line, an older ask, one from before the list", async () => {
     // Its last message comes before the first list read, so before the cutover.
-    const early = await owner("Night Batch reels", { conversation: null });
+    const early = await owner("Night Batch charts", { conversation: null });
     clock.advance(BATCH_QUIET_MS + 1000);
     await list();
     const carded = await owner("Lobby tile colours", { conversation: null });
@@ -744,10 +788,10 @@ describe("conversation routes", () => {
     await rivet("Same on the Docs Sync tile?", { replyTo: carded });
     await rivet("Build is green.", { replyTo: carded });
     // As one filed before cards were (2026-10-09): only its card line shows it in the conversation.
-    const legacy = await owner("Log Viewer reels", { conversation: null });
+    const legacy = await owner("Log Viewer charts", { conversation: null });
     clock.advance(BATCH_QUIET_MS + 1000);
-    await rivet("Same on the bonus reel?", { replyTo: legacy });
-    await rivet("Reels are in.", { replyTo: legacy });
+    await rivet("Same on the second chart?", { replyTo: legacy });
+    await rivet("Charts are in.", { replyTo: legacy });
     const { createRequire } = await import("node:module");
     const { dirname, join } = await import("node:path");
     const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as typeof import("node:sqlite");
@@ -760,7 +804,7 @@ describe("conversation routes", () => {
     expect((await send("POST", "/api/asks", { id: "a-21", words: "Data Import rates", replyId: asked, stage: "needs-you" })).status).toBe(201);
     clock.advance(1000);
     expect((await send("POST", "/api/asks", { id: "a-22", words: "Data Import copy", replyId: asked, stage: "building" })).status).toBe(201);
-    expect((await send("POST", "/api/asks", { id: "a-23", words: "Night Batch reels", replyId: early, stage: "needs-you" })).status).toBe(201);
+    expect((await send("POST", "/api/asks", { id: "a-23", words: "Night Batch charts", replyId: early, stage: "needs-you" })).status).toBe(201);
     const quiet = await owner("Kiosk names", { conversation: null });
 
     clock.advance(3 * IDLE_ARCHIVE_MS);
@@ -890,12 +934,14 @@ describe("conversation routes", () => {
     expect(detail.messages[2]).toMatchObject({ from: "rivet", text: "Card signup-forms-4861", posted: { id: "signup-forms-4861", kind: "decision", title: "Card signup-forms-4861", ask: "Pick one" } });
     // Its unanswered cards are your ball: the row waits on you.
     expect((await list()).conversations.find((row) => row.id === ask)).toMatchObject({ needsYou: true, phase: "waiting", thing: true });
-    // Chat's timeline holds the ask up to the line that put its first card there; what follows is on the thing's page.
+    // Chat's timeline holds every line of the thing, as its page does (2026-11-16).
     const timeline = (await (await send("GET", "/api/chat?chat=1", undefined, browser(cookie))).json()) as { messages: ChatMessage[] };
     expect(timeline.messages.filter((message) => message.threadId === ask || message.id === ask).map((message) => message.posted?.id ?? message.text)).toEqual([
       "Lobby packages, the Apple way",
       "On it.",
       "signup-forms-4861",
+      "signup-forms-v2-4861",
+      "signup-forms-walkthrough-4861",
     ]);
     // Rewriting the board posts nothing twice.
     expect((await card("signup-forms-v2-4861", { ask: "Pick one, again" })).status).toBe(200);
@@ -907,6 +953,10 @@ describe("conversation routes", () => {
     const reply = (await answered.json()) as { id: string };
     expect((await open(reply.id)).id).toBe(ask);
     expect((await rivet("Share button added.", { replyTo: reply.id })).threadId).toBe(ask);
+    // Chat's page names the thing though its cards are off the page, so the line still carries Open topic (2026-11-16).
+    const newest = (await (await send("GET", "/api/chat?chat=1&limit=1", undefined, browser(cookie))).json()) as ChatPage;
+    expect(newest.messages.map((message) => message.text)).toEqual(["Share button added."]);
+    expect(newest.things).toEqual([ask]);
 
     // A card nothing matches joins none (the CLI says so), and its answer starts one, as before.
     expect((await card("kids-cooking-concepts")).status).toBe(200);
@@ -942,7 +992,7 @@ describe("conversation routes", () => {
     expect((await open(other)).id).toBe(ask);
   });
 
-  it("a card filed by reply to a line you typed in a thing stays in Chat with that line (2026-10-12)", async () => {
+  it("a card filed by reply to a line you typed in a thing is in Chat with every other line of the thing (2026-11-16)", async () => {
     await list();
     const ask = await owner("Top 10 chart libraries research, PR #999", { conversation: null });
     clock.advance(BATCH_QUIET_MS);
@@ -953,20 +1003,22 @@ describe("conversation routes", () => {
     clock.advance(BATCH_QUIET_MS);
     expect((await card("settings-buttons-plan", { replyTo: typed })).status).toBe(200);
     expect((await card("chart-findings-v2")).status).toBe(200);
-    // A question or a decision answering his first line is an answer.
     expect((await card("chart-question", { kind: "question", replyTo: ask })).status).toBe(200);
     expect((await card("slot-outcome", { replyTo: ask })).status).toBe(200);
-    // Rivet's progress card naming the thing (say with no reply) is shown on its page only.
+    // Rivet's progress card naming the thing (say with no reply) is shown on its page and in Chat.
     const progress = await send("POST", "/api/bridge/say", { text: "#999 is green." });
     expect(progress.status).toBe(201);
+    const progressCard = ((await progress.json()) as { card: string }).card;
     expect((await open(ask)).messages.at(-1)?.posted?.title).toBe("#999 is green.");
     const timeline = async () =>
       ((await (await send("GET", "/api/chat?chat=1", undefined, browser(cookie))).json()) as { messages: ChatMessage[] }).messages
         .filter((message) => (message.threadId ?? message.id) === ask)
         .map((message) => message.posted?.id ?? message.text);
-    const shown = ["Top 10 chart libraries research, PR #999", "chart-findings", "Settings: bigger buttons", "settings-buttons-plan", "chart-question", "slot-outcome"];
+    const page = async () => (await open(ask)).messages.map((message) => message.posted?.id ?? message.text);
+    const shown = ["Top 10 chart libraries research, PR #999", "chart-findings", "Settings: bigger buttons", "settings-buttons-plan", "chart-findings-v2", "chart-question", "slot-outcome", progressCard];
     expect(await timeline()).toEqual(shown);
-    // A card posted before its line kept the replyTo gets it back on the board's next write.
+    expect(await page()).toEqual(shown);
+    // A card that lost the line it answered stays in Chat, and its next write changes nothing there.
     const { createRequire } = await import("node:module");
     const { dirname, join } = await import("node:path");
     const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as typeof import("node:sqlite");
@@ -974,18 +1026,15 @@ describe("conversation routes", () => {
     db.exec("PRAGMA busy_timeout = 5000");
     db.prepare("UPDATE chat_messages SET reply_to = NULL WHERE reply_to = ?").run(typed);
     db.close();
-    expect(await timeline()).toEqual(shown.filter((line) => line !== "settings-buttons-plan"));
+    expect(await timeline()).toEqual(shown);
     expect((await card("settings-buttons-plan", { replyTo: typed, ask: "Pick one, again" })).status).toBe(200);
     expect(await timeline()).toEqual(shown);
-    // A card filed by its stem that later names the line it answers joins Chat then.
-    expect((await card("chart-findings-v2", { replyTo: typed })).status).toBe(200);
-    expect(await timeline()).toEqual([...shown.slice(0, 4), "chart-findings-v2", ...shown.slice(4)]);
-    // One that moves to another line answers that one: off Chat for Rivet's note, back for your line.
+    // One that moves to Rivet's note or back to your line stays where it was.
     const note = await rivet("Noted.", { replyTo: typed });
     expect((await card("chart-findings-v2", { replyTo: note.id })).status).toBe(200);
-    expect(await timeline()).not.toContain("chart-findings-v2");
+    expect(await timeline()).toEqual([...shown, "Noted."]);
     expect((await card("chart-findings-v2", { replyTo: typed })).status).toBe(200);
-    expect(await timeline()).toContain("chart-findings-v2");
+    expect(await timeline()).toEqual(await page());
   });
 
   it("a card's filing holds against near misses: another repo's PR, a stem on another PR, an ask naming it elsewhere; posted cards are never unread", async () => {
@@ -1081,11 +1130,8 @@ describe("conversation routes", () => {
     const townAnswer = (await (await send("POST", "/api/replies", { clientId: "reply-0201", itemId: "town-status", decision: "approve", rev: trev }, browser(cookie))).json()) as { id: string };
     expect(await filed("town-status")).toBe(townAnswer.id);
 
-    // A card on a line in Updates is filed nowhere: Updates owns no card.
-    const said = await send("POST", "/api/bridge/say", { text: "Status note", replyTo: UPDATES_ID, card: true });
-    expect(said.status).toBe(201);
-    const note = ((await said.json()) as ChatMessage).card!;
-    expect(await filed(note)).not.toBe(UPDATES_ID);
+    // A card on a line in Updates is refused (2026-11-16): Updates shows nowhere and owns no card.
+    expect((await send("POST", "/api/bridge/say", { text: "Status note", replyTo: UPDATES_ID, card: true })).status).toBe(409);
 
     // One write, the follow-up before its parent: it still follows the parent in.
     const board = (await (await send("GET", "/api/board")).json()) as { board: { needs: Record<string, unknown>[] } };

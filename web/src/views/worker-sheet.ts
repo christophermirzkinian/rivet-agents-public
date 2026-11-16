@@ -316,6 +316,11 @@ function sendBox(getWorker: () => Worker, onStop: (stop: () => void) => void, ab
               status.textContent = next.detail?.reason ?? "Not delivered.";
               return;
             }
+            if (next.status === "cancelled") {
+              progress.el.hidden = true;
+              status.textContent = "Cancelled in Chat. Nothing was sent.";
+              return;
+            }
             progress.reach(next.status);
             status.textContent =
               next.status === "replied"

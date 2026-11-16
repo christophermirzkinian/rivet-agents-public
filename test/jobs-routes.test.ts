@@ -442,6 +442,28 @@ describe("the overnight-jobs switch", () => {
     expect(await started.json()).toEqual({ go: false, note: "Overnight jobs are off" });
   });
 
+  it("holds a task's Run now sent with the board token while off; the owner's own Run now from the app still goes", async () => {
+    const id = await madeJob({ name: "Nightly tidy", words: "tidy the memory notes", kind: "task", when: { every: "day", at: "03:00" }, cards: "red" });
+    await send("PUT", "/api/settings/overnight", { on: false }, browser(cookie));
+    const mac = await connectBridge();
+    const runNow = async (headers?: Record<string, string>) => {
+      const sent = await send("PATCH", `/api/jobs/${id}`, { clientId: clientId(), op: "run" }, headers);
+      expect(sent.status).toBe(202);
+      return ((await sent.json()) as AuditEntry).id;
+    };
+    const board = await runNow();
+    await mac.waitFor(1);
+    expect(await (await report(id, { run: "run-board-0001", state: "start", manual: true, usage: 10, action: board })).json()).toEqual({ go: false, note: "Overnight jobs are off" });
+    expect(await (await report(id, { run: "run-board-0002", state: "start", manual: true, usage: 10 })).json()).toEqual({ go: false, note: "Overnight jobs are off" });
+    const own = await runNow(browser(cookie));
+    await mac.waitFor(2);
+    expect(await (await report(id, { run: "run-own-00001", state: "start", manual: true, usage: 10, action: own })).json()).toMatchObject({ go: true });
+    expect((await report(id, { run: "run-own-00001", state: "green", line: "tidy" })).status).toBe(200);
+    // Its action starts one run: named again, it is held.
+    expect(await (await report(id, { run: "run-own-00002", state: "start", manual: true, usage: 10, action: own })).json()).toEqual({ go: false, note: "Overnight jobs are off" });
+    mac.abort();
+  });
+
   it("starts the owner's own app with the notice seen and the switch on", async () => {
     await server.close();
     server = await startServer({ RIVET_OVERNIGHT_NOTICE_SEEN: "1" }, { now: clock.now });

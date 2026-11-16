@@ -9,6 +9,7 @@ import { MAX_OPS_STATUSES } from "../../shared/ops-status.js";
 import { comingChatRepo, NO_REPO, ID_PATTERN, mediaShas, pdfFileName, type ComingItem, type Reply } from "../../shared/board.js";
 import {
   actionAckSchema,
+  chatCancelSchema,
   chatCreateSchema,
   chatImages,
   FIX_IT_BY,
@@ -258,7 +259,7 @@ export function register(router: Router): void {
   }
 
   function sameRequest(entry: AuditEntry, kind: ActionKind, request: ActionRequest): boolean {
-    const keys: (keyof ActionRequest)[] = ["repo", "chat", "pr", "headSha", "target", "schedule", "on", "text", "image", "images", "replyTo", "conversation", "job", "models", "base"];
+    const keys: Exclude<keyof ActionRequest, "fixIt">[] = ["repo", "chat", "pr", "headSha", "target", "schedule", "on", "text", "image", "images", "replyTo", "conversation", "job", "models", "base"];
     // Files by their bytes only: the server renames them when it stores the request, so a retry's names may differ.
     return entry.kind === kind && keys.every((key) => JSON.stringify(entry[key]) === JSON.stringify(request[key])) && sameFiles(entry.files, request.files);
   }
@@ -282,6 +283,8 @@ export function register(router: Router): void {
     const existing = commands.getActionByClientId(body.clientId);
     if (existing) {
       if (!sameRequest(existing, kind, body.request)) throw new HttpError(409, "clientId was already used for a different action");
+      // Taken back by Cancel: a retry is never told it was sent.
+      if (existing.status === "cancelled") throw new HttpError(409, "That message was cancelled.");
       // Never sent: the retry is told so again, not handed a success.
       if (existing.status === "failed" && existing.detail?.reason === OFFLINE) {
         json(response, 503, { error: OFFLINE, entry: existing, undelivered: true });
@@ -399,6 +402,27 @@ export function register(router: Router): void {
     ),
   );
 
+  // Cancel while a chat window collects: its lines never reach the bridge and leave the chat; the answer holds what they
+  // said for the box. A window the sweep has already handed on is a 409, and its lines stay; so is a Feed Fix it. Asked
+  // again, a cancelled window answers as it did.
+  router.on("POST", "/api/chat/cancel", async ({ request, response }) => {
+    requireSameOrigin(request, config.origin);
+    requireSession(request);
+    const parsed = chatCancelSchema.safeParse(await readJson(request, ACTION_BODY_MAX));
+    if (!parsed.success) throw new HttpError(400, "invalid cancel");
+    const at = now().toISOString();
+    const result = commands.cancelChat(parsed.data.id, at);
+    if (result.outcome !== "cancelled")
+      throw result.outcome === "missing"
+        ? new HttpError(404, "That message is not in the chat.")
+        : new HttpError(409, result.outcome === "sent" ? `Too late: it's on its way to ${RIVET_NAME}.` : `A Fix it goes to ${RIVET_NAME} as it is.`);
+    const cancelled = result.back;
+    for (const id of cancelled.ids) broadcast({ id, from: "owner", text: "", at, status: "cancelled" });
+    // A line that answered an ask waiting on you no longer does: its wait card comes back.
+    router.deps.refreshWaits();
+    json(response, 200, cancelled);
+  });
+
   // Feed's Fix it: one tap is your own message to Rivet, sent the chat's way, and the item's record
   // set investigating, so Rivet goes calm at once. Rivet opens the fix chat; the app never does. The phone names the
   // record version it saw: a record changed since (another tap, or Rivet already on it) sends nothing.
@@ -419,7 +443,7 @@ export function register(router: Router): void {
           // A full store would take the message and not the record: refuse before either.
           if (!stored && store.countOpsStatuses() >= MAX_OPS_STATUSES) throw new HttpError(507, `${APP_NAME} holds at most ${MAX_OPS_STATUSES} statuses`);
         }
-        return { clientId: fix.clientId, request: { text: fixText(fix), conversation: null } };
+        return { clientId: fix.clientId, request: { text: fixText(fix), conversation: null, fixIt: true } };
       },
       undefined,
       () => {
@@ -516,6 +540,10 @@ export function register(router: Router): void {
     return noticeThreads(text, recent, commands.threadMentions(needles, { pr, words: new Set(chats) }, new Date(since).toISOString()), chats);
   }
 
+  // One answer for an id the board token may not quote and one that does not exist, so neither tells the other apart.
+  const NO_SUCH_MESSAGE = "no such message: --reply-to takes the id of your message, a card answer or a line say printed";
+  const UPDATES_REPLY = "that line is in the old Updates, which shows nowhere now: send it again without --reply-to";
+
   router.on("POST", "/api/bridge/say", async ({ request, response }) => {
     requireBearer(request, config.boardTokenDigest);
     const parsed = parseRedacted(saySchema, await readJson(request, SMALL_BODY_MAX), SAY_MEDIA);
@@ -524,6 +552,18 @@ export function register(router: Router): void {
         400,
         "invalid say: text up to 4000 characters, 1 to 3 images, a video and a PDF (on a chat line, not a card) by sha256, replyTo a message id; text, an image, a video or a PDF, or an ack with replyTo alone",
       );
+    // The old Updates shows nowhere now (2026-11-16): a reply to one of its lines is refused, so it is sent again as what it
+    // is (a card, or a say replying to nothing), never filed where you cannot see it.
+    if (parsed.data.replyTo !== undefined && commands.threadOf(parsed.data.replyTo) === UPDATES_ID) throw new HttpError(409, UPDATES_REPLY);
+    // A say with no --reply-to naming the one conversation whose newest line is your typed line is a line in that
+    // conversation, so in Chat, not a Feed card (2026-11-16). It quotes nothing and marks nothing replied: the text only
+    // names the conversation, so it may not answer your line, which may not even have reached the Mac yet.
+    let inferred = false;
+    if (parsed.data.replyTo === undefined && !parsed.data.new && !parsed.data.card && parsed.data.schedule === undefined && parsed.data.tag === undefined && parsed.data.thread === undefined) {
+      const named = noticeHomes(parsed.data.text ?? "").filter((one) => !ownsNoCard(one));
+      // A question stays what it was: nothing you must answer lives only in Chat.
+      inferred = named.length === 1 && commands.openLine(named[0]!) !== null && !(parsed.data.text ?? "").trim().endsWith("?");
+    }
     const at = now().toISOString();
     const { replyTo, images, video, title } = parsed.data;
     // Only what say.mjs uploaded to the store, of the type the bubble shows it as.
@@ -539,7 +579,7 @@ export function register(router: Router): void {
     // Chats never read the Team room: a reply's quote and an ack's answer show the message replied to, so the board token
     // answers only your own room lines, which reached Rivet as your messages.
     if (replyTo !== undefined && commands.threadOf(replyTo) === TEAM_ROOM_ID && commands.getChatMessage(replyTo)?.from !== "owner")
-      throw new HttpError(404, "no such message");
+      throw new HttpError(404, NO_SUCH_MESSAGE);
     // An ack is the status line on your message: no bubble, no unread, no push.
     const { ack } = parsed.data;
     if (ack !== undefined && replyTo !== undefined) {
@@ -561,12 +601,17 @@ export function register(router: Router): void {
     const quote = replyTo === undefined ? undefined : (commands.quoteOf(replyTo) ?? undefined);
     const text = (parsed.data.text ?? "").trim();
     const id = randomUUID();
-    // The conversation it lands in (src/server/conversations.ts): by the id Rivet quotes (Updates for an id it does not
-    // know); for a card, the one its text names, else none.
+    // The conversation it lands in (src/server/conversations.ts): by the id Rivet quotes (an id it does not know is
+    // refused); for a card, the one its text names, else none.
     const { thread, via } = resolveConversation(
       { id, replyTo, text, fresh: parsed.data.new === true },
       { threadOf: (one) => commands.threadOf(one), isReply: (one) => store.getReply(one) !== null, repliedIn: (one) => commands.repliedIn(one), mentioned: noticeHomes },
     );
+    if (via === "unknown") throw new HttpError(404, NO_SUCH_MESSAGE);
+    // A reply id that leads into the old Updates (a card answer whose reply was filed there) is refused like its lines.
+    if (replyTo !== undefined && thread === UPDATES_ID) throw new HttpError(409, UPDATES_REPLY);
+    // Its line only where the conversation it named was found again; else a card as before, never a line in Updates.
+    if (inferred && via !== "mention") inferred = false;
     // A say replying to nothing is an update card, never a line in Updates. --card is what you must
     // confirm: a decision card in Needs you, Yes, keep it or Change it, beside a line opening it.
     // A reply in words that asks you something ("…?") is a question card you answer by
@@ -575,7 +620,7 @@ export function register(router: Router): void {
     // A card never lives in the Team room, nor opens from it: there it is a card like any other, with no line in the room.
     const inRoom = thread === TEAM_ROOM_ID;
     const cardHome = (via === "mention" || replyTo !== undefined) && !inRoom ? thread : null;
-    const card = isSayCard(parsed.data) ? sayCard(parsed.data, text, cardHome) : asking ? askCard(parsed.data, text, cardHome) : null;
+    const card = isSayCard(parsed.data) && !inferred ? sayCard(parsed.data, text, cardHome) : asking ? askCard(parsed.data, text, cardHome) : null;
     if (card && (replyTo === undefined || inRoom)) {
       // A card answering your room line still answers it.
       if (inRoom && !parsed.data.new) for (const one of commands.markReplied(replyTo, at)) broadcast(commands.getChatMessage(one)!);
@@ -587,8 +632,9 @@ export function register(router: Router): void {
       ? commands.addChatMessage({ id, from: "rivet", text: `Card: ${card.title} ›`, at, replyTo, quote, thread, card: card.id })
       : commands.addChatMessage({ id, from: "rivet", text, at, replyTo, quote, images, video, files, thread });
     if (title !== undefined) commands.patchThread(id, { title }, at);
-    // A new conversation answers none of your lines.
-    if (!parsed.data.new) for (const id of commands.markReplied(parsed.data.replyTo, at)) broadcast(commands.getChatMessage(id)!);
+    // A new conversation answers none of your lines, nor does a line only naming one (with no replyTo, markReplied
+    // would mark every line typed to the Mac).
+    if (!parsed.data.new && !inferred) for (const id of commands.markReplied(parsed.data.replyTo, at)) broadcast(commands.getChatMessage(id)!);
     broadcast(message);
     // The card pushed as it was added.
     if (card) {

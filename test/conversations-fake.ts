@@ -62,20 +62,9 @@ export function conversationOf(message: Pick<ChatMessage, "id" | "threadId">): s
   return message.threadId ?? message.id;
 }
 
-/**
- * As GET /api/chat?chat=1: no Updates, and in a thing nothing after its first card line but your
- * typed lines and Rivet's lines and cards that answer one.
- */
+/** As GET /api/chat?chat=1: every line but Updates' (2026-11-16). */
 export function chatOnly(messages: readonly ChatMessage[]): ChatMessage[] {
-  const carded = new Set<string>();
-  const typed = (id: string | undefined) => messages.some((line) => line.id === id && line.from === "owner" && !line.card);
-  return messages.filter((message) => {
-    const id = conversationOf(message);
-    if (id === UPDATES_ID) return false;
-    if (carded.has(id)) return message.from === "owner" || typed(message.replyTo);
-    if (message.posted) carded.add(id);
-    return true;
-  });
+  return messages.filter((message) => conversationOf(message) !== UPDATES_ID);
 }
 
 export function fakeServer(messages: ChatMessage[], conversations: Record<string, FakeConversation> = {}): FakeServer {
@@ -280,7 +269,11 @@ export function fakeServer(messages: ChatMessage[], conversations: Record<string
       if (end < 0) return json({ messages: [], older: null });
       const limit = Number(url.searchParams.get("limit") ?? 30);
       const page = all.slice(Math.max(0, end - limit), end);
-      return json({ messages: page, older: end > limit ? page[0]!.id : null });
+      const older = end > limit ? page[0]!.id : null;
+      if (url.searchParams.get("chat") !== "1") return json({ messages: page, older });
+      // As the server: the conversations of its lines with a card posted in them, loaded or not.
+      const things = [...new Set(page.map(conversationOf))].filter((id) => server.messages.some((one) => conversationOf(one) === id && one.posted));
+      return json({ messages: page, older, things });
     }
     return json({});
   }

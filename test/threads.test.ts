@@ -71,7 +71,7 @@ describe("thread store", () => {
     expect(store.threadMessages("c1", 3)).toMatchObject({ more: true, messages: [{ id: "c2" }, { id: "h1" }, { id: "c3" }] });
   });
 
-  it("Chat's timeline keeps card answers and, in a thing, leaves out everything after the line that put its first card there", () => {
+  it("Chat's timeline keeps card answers and every line of a thing after its first card, Rivet's reply to an answer too (2026-11-16)", () => {
     owner("c1", 0, "Make the results row bigger");
     rivet("h1", 1_000, "On it.", "c1");
     store.addChatMessage({ id: "p1", from: "rivet", text: "Card: Plan", at: iso(2_000), thread: "c1", posted: { id: "K", kind: "plan", title: "Plan: results row" } });
@@ -79,16 +79,22 @@ describe("thread store", () => {
     store.setCardPosted("K", "p1");
     store.addChatMessage({ id: "a1", from: "owner", text: "Yes", at: iso(3_000), card: "K" });
     rivet("h2", 4_000, "Building now.", "p1");
+    rivet("r1", 5_000, "Noted.", "a1");
     owner("c2", 3_600_000, "Separate question");
-    expect(store.listChat(null, 30).messages.map((message) => message.id)).toEqual(["c1", "h1", "p1", "a1", "h2", "c2"]);
-    expect(store.listChat(null, 30, true).messages.map((message) => message.id)).toEqual(["c1", "h1", "p1", "a1", "c2"]);
+    expect(store.listChat(null, 30).messages.map((message) => message.id)).toEqual(["c1", "h1", "p1", "a1", "h2", "r1", "c2"]);
+    expect(store.listChat(null, 30, true).messages.map((message) => message.id)).toEqual(["c1", "h1", "p1", "a1", "h2", "r1", "c2"]);
     // A card a message only mentions (say) files nothing: the conversation stays Chat's.
     store.fileCard({ card: "S", thread: "c2", via: "say", stem: null, repo: null, pr: null, chat: null, at: iso(3_601_000) });
     rivet("h3", 3_602_000, "Answered.", "c2");
-    expect(store.listChat(null, 30, true).messages.map((message) => message.id)).toEqual(["c1", "h1", "p1", "a1", "c2", "h3"]);
+    expect(store.listChat(null, 30, true).messages.map((message) => message.id)).toEqual(["c1", "h1", "p1", "a1", "h2", "r1", "c2", "h3"]);
+    // Only the old Updates stays out.
+    store.ensureUpdates(iso(3_603_000));
+    rivet("u1", 3_604_000, "Nightly: main green", UPDATES_ID);
+    expect(store.listChat(null, 30).messages.map((message) => message.id)).toContain("u1");
+    expect(store.listChat(null, 30, true).messages.map((message) => message.id)).not.toContain("u1");
   });
 
-  it("Chat keeps every line you type in a thing, and Rivet's replies and cards to those lines (2026-10-12)", () => {
+  it("Chat keeps every line of a thing: yours, Rivet's replies and cards to them, and Rivet's notes after a card is answered (2026-11-16)", () => {
     owner("c1", 0, "Top 10 chart libraries research");
     store.addChatMessage({ id: "p1", from: "rivet", text: "Card: Findings", at: iso(1_000), thread: "c1", posted: { id: "F", kind: "decision", title: "Chart research findings" } });
     store.fileCard({ card: "F", thread: "c1", via: "chat", stem: null, repo: null, pr: null, chat: null, at: iso(1_000) });
@@ -106,7 +112,7 @@ describe("thread store", () => {
     store.setCardPosted("G", "p2");
     expect(["c2", "c3", "p2"].map((id) => store.threadOf(id))).toEqual(["c1", "c1", "c1"]);
     const ids = store.listChat(null, 30, true).messages.map((message) => message.id);
-    expect(ids).toEqual(["c1", "p1", "a1", "c2", "c3", "h1", "p2"]);
+    expect(ids).toEqual(["c1", "p1", "a1", "h0", "c2", "c3", "h1", "p2"]);
   });
 
   it("reads the thread list again only once a message, a thread's settings or an action changes, whichever connection writes", () => {
@@ -195,25 +201,25 @@ describe("thread store", () => {
   });
 
   it("sets and clears a tag; the AI pass keeps its title and project apart and only fills a tag nobody set", () => {
-    owner("c1", 0, "the night batch reels look blurry on my phone");
+    owner("c1", 0, "the night batch charts look blurry on my phone");
     owner("c2", 60_000, "Threads");
     store.patchThread("c1", { tag: "Night Batch" }, iso(1_000));
     expect(store.threadRow("c1")).toMatchObject({ tag: "Night Batch", aiTitle: null, aiTitledAt: null });
-    store.setThreadAi("c1", { title: "Sharpen blurry reels", tag: "Reels", project: "work" }, iso(2_000));
-    expect(store.threadRow("c1")).toMatchObject({ title: null, tag: "Night Batch", project: null, aiProject: "work", aiTitle: "Sharpen blurry reels", aiTitledAt: iso(2_000) });
+    store.setThreadAi("c1", { title: "Sharpen blurry charts", tag: "Charts", project: "work" }, iso(2_000));
+    expect(store.threadRow("c1")).toMatchObject({ title: null, tag: "Night Batch", project: null, aiProject: "work", aiTitle: "Sharpen blurry charts", aiTitledAt: iso(2_000) });
     expect(store.getChatMessage("c1")?.project).toBeUndefined();
     // Rivet's later change leaves the AI's columns alone.
-    store.patchThread("c1", { title: "Reels", project: "rivet", tag: null }, iso(3_000));
-    expect(store.threadRow("c1")).toMatchObject({ title: "Reels", tag: null, project: "rivet", aiProject: "work", aiTitle: "Sharpen blurry reels", aiTitledAt: iso(2_000) });
+    store.patchThread("c1", { title: "Charts", project: "rivet", tag: null }, iso(3_000));
+    expect(store.threadRow("c1")).toMatchObject({ title: "Charts", tag: null, project: "rivet", aiProject: "work", aiTitle: "Sharpen blurry charts", aiTitledAt: iso(2_000) });
     // A thread with no row gets one; a given-up pass records only when it ran.
     store.setThreadAi("c2", { title: null, tag: null, project: null }, iso(4_000));
     expect(store.threadRow("c2")).toMatchObject({ title: null, tag: null, project: null, status: null, aiTitle: null, aiTitledAt: iso(4_000) });
   });
 
   it("tags a thread you moved: a Move picks only the folder, so the AI pass still fills the tag line", () => {
-    owner("c1", 0, "the night batch reels look blurry on my phone");
+    owner("c1", 0, "the night batch charts look blurry on my phone");
     store.patchThread("c1", { project: "work" }, iso(1_000), true);
-    store.setThreadAi("c1", { title: "Sharpen blurry reels", tag: "Night Batch", project: "personal" }, iso(2_000));
+    store.setThreadAi("c1", { title: "Sharpen blurry charts", tag: "Night Batch", project: "personal" }, iso(2_000));
     expect(store.threadRow("c1")).toMatchObject({ project: "work", tag: "Night Batch", aiProject: "personal" });
   });
 
@@ -586,7 +592,7 @@ describe("thread routes", () => {
   });
 
   it("leaves Rivet's lone notes out of Today and This week and their counts; Chat and the thread's link still have them", async () => {
-    const mine = await owner("Make the reels faster");
+    const mine = await owner("Make the charts faster");
     clock.advance(60_000);
     const note = await rivet("The build server is back.", undefined, { new: true });
     const question = await rivet("Shall I restart the workers?", undefined, { new: true });
@@ -608,7 +614,7 @@ describe("thread routes", () => {
   });
 
   it("files a Rivet note that answers nothing under the one thread this week naming its PR, ask, card or chat; two or none is Rivet's", async () => {
-    const older = await owner("Fix the reel blur, see #400");
+    const older = await owner("Fix the menu blur, see #400");
     clock.advance(60_000);
     const newer = await owner("And the lobby: example-org/example-repo#400");
     clock.advance(60_000);
@@ -620,10 +626,13 @@ describe("thread routes", () => {
     const stepped = await owner("Scroll speed on the page");
     const step = { kind: "pr", label: "PR #500", url: "https://github.com/example-org/example-repo/pull/500" };
     expect((await send("PATCH", `/api/threads/${stepped}`, { steps: [step] })).status).toBe(200);
+    // Each thread's newest line is Rivet's: one whose newest is your typed line gets a reply instead (2026-11-16).
+    await rivet("On it.", stepped);
     expect(await filed("#500 is open.")).toBe(stepped);
 
     clock.advance(60_000);
     const asked = await owner("Make Invoice Page a new screen");
+    await rivet("On it.", asked);
     const ask = { id: "a-77", words: "Invoice Page", replyId: asked, stage: "building", cardId: "invoice-page-v2", chat: "invoice-page", prs: [600, 601] };
     expect((await send("POST", "/api/asks", ask)).status).toBe(201);
     // The ask's chat goes on the card.
@@ -653,10 +662,11 @@ describe("thread routes", () => {
     await owner("Fix #700");
     clock.advance(60_000);
     const moved = await owner("Clean up #800");
+    await rivet("On it.", moved);
     expect((await send("PATCH", `/api/threads/${moved}`, { project: "personal" }, browser(cookie))).status).toBe(200);
     expect(await filed("#800 merged.")).toBe(moved);
     // Its card is shown in it (2026-10-09), and the thread stays where you moved it.
-    expect((await threads()).threads.find((thread) => thread.id === moved)).toMatchObject({ project: "personal", count: 2 });
+    expect((await threads()).threads.find((thread) => thread.id === moved)).toMatchObject({ project: "personal", count: 3 });
     clock.advance(7 * 86_400_000 + 1);
     expect(await filed("#700 merged.")).toBeNull();
   });
@@ -665,23 +675,75 @@ describe("thread routes", () => {
     clock.advance(-8 * 86_400_000);
     const root = await owner("Fix #900");
     clock.advance(7 * 86_400_000);
-    await owner("Any news?", root);
+    const news = await owner("Any news?", root);
+    await rivet("Not yet.", news);
     clock.advance(86_400_000);
     expect(await filed("#900 merged.")).toBe(root);
 
     clock.advance(60_000);
-    const named = await owner("Is invoice-page-2 done with the reels?");
+    const named = await owner("Is invoice-page-2 done with the charts?");
+    await rivet("Asking it.", named);
     const workers = [{ worktreeId: createHash("sha256").update("cs2").digest("hex").slice(0, 16), repo: "example-org/example-repo", chat: "invoice-page-2", connected: true, lastOutputAt: clock.now().getTime(), agent: "claude" }];
     expect((await send("PUT", "/api/bridge/workers", { workers }, bearer(BRIDGE_TOKEN))).status).toBe(200);
-    expect(await filed("invoice-page-2 finished the reels.")).toBe(named);
+    expect(await filed("invoice-page-2 finished the charts.")).toBe(named);
   });
 
   it("files a note naming 500 PRs, and by a PR its thread wrote with a leading zero", async () => {
     const root = await owner("Is example-org/example-repo#00900 green?");
+    await rivet("Checking.", root);
     clock.advance(60_000);
     expect(await filed(Array.from({ length: 500 }, (_, n) => `#${1_000 + n}`).join(" "))).toBeNull();
     clock.advance(60_000);
     expect(await filed("#900 is green.")).toBe(root);
+  });
+
+  it("a Rivet note that answers nothing, naming the one thread whose newest line you typed, is a line there in Chat, quoting and answering nothing; once Rivet's is newest it is a Got it card (2026-11-16)", async () => {
+    const asked = await owner("Fix the menu blur, see #110");
+    // Still in its batch window: the note must not mark it replied, or it would never reach the Mac.
+    const response = await send("POST", "/api/bridge/say", { text: "#110 is merged." });
+    expect(response.status).toBe(201);
+    const reply = (await response.json()) as ChatMessage;
+    expect(reply).toMatchObject({ from: "rivet", text: "#110 is merged.", threadId: asked });
+    expect(reply.replyTo).toBeUndefined();
+    expect(reply.quote).toBeUndefined();
+    expect(reply.card).toBeUndefined();
+    clock.advance(60_000);
+    const board = (await (await send("GET", "/api/board")).json()) as { board: { needs: unknown[] } | null };
+    expect(board.board?.needs ?? []).toEqual([]);
+    const chat = (await (await send("GET", "/api/chat?chat=1", undefined, { cookie })).json()) as { messages: ChatMessage[] };
+    expect(chat.messages.map((message) => message.id)).toEqual([asked, reply.id]);
+    expect(chat.messages[0]!.status).not.toBe("replied");
+    clock.advance(60_000);
+    expect(await filed("#110 is live.")).toBe(asked);
+    expect((await send("GET", `/api/threads/${asked}`, undefined, { cookie }).then((one) => one.json()) as ThreadDetail).count).toBe(3);
+  });
+
+  it("a Rivet question naming the one thread whose newest line you typed stays a card on the Feed, not a line only in Chat (2026-11-16)", async () => {
+    const asked = await owner("Fix the menu blur, see #110");
+    clock.advance(60_000);
+    const response = await send("POST", "/api/bridge/say", { text: "#110 is green: merge it now?" });
+    expect(response.status).toBe(201);
+    const said = (await response.json()) as { id: string; threadId?: string };
+    expect(said.threadId).not.toBe(asked);
+    const board = (await (await send("GET", "/api/board")).json()) as { board: { needs: { id: string }[] } | null };
+    expect(board.board?.needs.map((need) => need.id)).toContain(said.id);
+  });
+
+  it("a Rivet note naming your thread marks none of your lines replied, though they reached the Mac (2026-11-16)", async () => {
+    const asked = await owner("Fix the menu blur, see #110");
+    const other = await owner("Is the banner slow?");
+    clock.advance(60_000);
+    const commands = new CommandStore(server.dataDir);
+    for (const id of [asked, other]) expect(commands.updateAction(id, "typed", undefined, clock.now().toISOString())?.status).toBe("typed");
+    commands.close();
+    const reply = await rivet("#110 is merged.");
+    expect(reply).toMatchObject({ threadId: asked });
+    expect(reply.replyTo).toBeUndefined();
+    const chat = (await (await send("GET", "/api/chat?chat=1", undefined, { cookie })).json()) as { messages: ChatMessage[] };
+    expect(chat.messages.filter((message) => message.from === "owner").map((message) => [message.id, message.status])).toEqual([
+      [asked, "typed"],
+      [other, "typed"],
+    ]);
   });
 
   it("never files a note under a thread whose last word is Rivet's unanswered question, so it stays Needs you", async () => {
@@ -704,7 +766,7 @@ describe("thread routes", () => {
   });
 
   it("sets and clears a thread's tag, and refuses a long or two-line one", async () => {
-    const id = await owner("the night batch reels look blurry");
+    const id = await owner("the night batch charts look blurry");
     expect((await send("PATCH", `/api/threads/${id}`, { tag: "x".repeat(33) })).status).toBe(400);
     expect((await send("PATCH", `/api/threads/${id}`, { tag: "Docs\nSync" })).status).toBe(400);
     const set = await send("PATCH", `/api/threads/${id}`, { tag: " Night Batch " });
@@ -720,7 +782,7 @@ describe("thread routes", () => {
     clock.advance(-8 * 86_400_000);
     const stale = await owner("Eight days ago");
     clock.advance(8 * 86_400_000);
-    const ask = await owner(`the night batch reels look blurry on my phone\n${"x".repeat(600)}`);
+    const ask = await owner(`the night batch charts look blurry on my phone\n${"x".repeat(600)}`);
     clock.advance(60_000);
     for (let i = 0; i < 7; i++) await rivet(`reply ${i}`, ask);
     const named = await owner("Fix the enquiry form");
@@ -738,7 +800,7 @@ describe("thread routes", () => {
     expect(untitled.threads.some((thread) => thread.id === stale)).toBe(false);
 
     const ai = (id: string, body: unknown, headers = bridge) => send("POST", `/api/bridge/threads/${id}/ai`, body, headers);
-    expect((await ai(ask, { title: "Sharpen blurry reels", tag: "Night Batch", project: "work" }, bearer(BOARD_TOKEN))).status).toBe(401);
+    expect((await ai(ask, { title: "Sharpen blurry charts", tag: "Night Batch", project: "work" }, bearer(BOARD_TOKEN))).status).toBe(401);
     expect((await ai(ask, { title: "x".repeat(61), tag: null, project: null })).status).toBe(400);
     expect((await ai(ask, { title: "Two\nlines", tag: null, project: null })).status).toBe(400);
     expect((await ai(ask, { title: "Fine", tag: "x".repeat(33), project: null })).status).toBe(400);
@@ -747,13 +809,13 @@ describe("thread routes", () => {
     expect((await ai(ask, { title: "Fine", tag: null, project: null, extra: 1 })).status).toBe(400);
     expect((await ai("nope", { title: "Fine", tag: null, project: null })).status).toBe(404);
 
-    const titled = await ai(ask, { title: "Sharpen blurry reels", tag: "Night Batch", project: "work" });
+    const titled = await ai(ask, { title: "Sharpen blurry charts", tag: "Night Batch", project: "work" });
     expect(titled.status).toBe(200);
-    expect((await titled.json()) as ThreadDetail).toMatchObject({ id: ask, title: "Sharpen blurry reels", tag: "Night Batch", project: "work" });
+    expect((await titled.json()) as ThreadDetail).toMatchObject({ id: ask, title: "Sharpen blurry charts", tag: "Night Batch", project: "work" });
     expect((await ai(named, { title: "Enquiry form broken", tag: "Forms", project: "personal" })).status).toBe(200);
     const list = await threads();
     expect(list.threads.find((thread) => thread.id === named)).toMatchObject({ title: "Enquiry form", tag: "Forms", project: "personal" });
-    expect(list.threads.find((thread) => thread.id === ask)).toMatchObject({ title: "Sharpen blurry reels" });
+    expect(list.threads.find((thread) => thread.id === ask)).toMatchObject({ title: "Sharpen blurry charts" });
     expect(((await (await send("GET", "/api/bridge/threads/untitled", undefined, bridge)).json()) as { threads: unknown[] }).threads).toEqual([]);
   });
 
@@ -1024,9 +1086,9 @@ describe("thread routes", () => {
     // A Move picks a project; the tag is Rivet's and the titler's, never the Move's.
     expect((await move({ project: "work", tag: "Night Batch" })).status).toBe(400);
     expect((await move({ project: "work" })).status).toBe(200);
-    expect((await send("POST", `/api/bridge/threads/${id}/ai`, { title: "Reel speed", tag: "Docs refresh", project: "personal" }, bearer(BRIDGE_TOKEN))).status).toBe(200);
+    expect((await send("POST", `/api/bridge/threads/${id}/ai`, { title: "Chart speed", tag: "Docs refresh", project: "personal" }, bearer(BRIDGE_TOKEN))).status).toBe(200);
     let list = await threads();
-    expect(list.threads[0]).toMatchObject({ project: "work", title: "Reel speed" });
+    expect(list.threads[0]).toMatchObject({ project: "work", title: "Chart speed" });
     expect(Object.keys(list.folders).sort()).toEqual(["all", "projects"]);
     expect(list.folders.projects).toMatchObject({ work: { count: 1 }, personal: { count: 0 } });
     // An app from an older client is ignored: it gets the project's whole folder.

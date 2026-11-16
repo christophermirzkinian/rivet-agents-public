@@ -119,18 +119,20 @@ describe("a chat search hit", () => {
     expect(app.chatFocus).toBeNull();
   });
 
-  it("in a thing opens the thing's page at it, and only that thing's messages", async () => {
+  it("in a thing lights it in Chat, which shows it now (2026-11-16); its Open topic opens the thing's page, only that thing's messages", async () => {
     chat.mount(root);
     await settle();
-    // In Chat the thing is one line to its page; what came after its card is not in Chat.
     expect(root.querySelector('.chat-thing-row[data-id="b1"]')).not.toBeNull();
-    expect(shown("b2")).toBeNull();
     openTarget({ type: "message", id: "b2" });
+    await settle();
+    expect(chat.openConversation()).toBeNull();
+    expect(shown("b2")!.classList.contains("lit")).toBe(true);
+    shown("b2")!.querySelector<HTMLButtonElement>(".chat-topic-link")!.click();
     await settle();
     expect(chat.openConversation()).toBe("b");
     expect(title()).toBe("Short one");
     expect(shown("a399")).toBeNull();
-    expect(shown("b2")!.classList.contains("lit")).toBe(true);
+    expect(shown("b2")).not.toBeNull();
   });
 
   it("older than Chat's first page loads earlier pages until it is in", async () => {

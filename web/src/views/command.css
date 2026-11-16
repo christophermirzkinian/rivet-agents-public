@@ -383,10 +383,73 @@ button.chat-quote {
   color: var(--apricot);
 }
 
+/* While a window collects: seconds left by the server's deadline, a bar that drains with them, and Cancel. */
 .chat-collecting {
-  margin: 0 4px 8px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 8px;
+  padding: 10px 12px 12px;
+  overflow: hidden;
+  border: 1px solid var(--apricot);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--apricot) 12%, transparent);
   color: var(--apricot);
+}
+
+.chat-collecting-cancel[hidden],
+.chat-collecting-more[hidden],
+.chat-collecting[hidden] {
+  display: none;
+}
+
+.chat-collecting-words {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  margin: 0;
+  line-height: 1.25;
+}
+
+.chat-collecting-when {
+  font-size: var(--fs-l);
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-collecting-more {
   font-size: var(--fs-m);
+  opacity: 0.9;
+}
+
+.chat-collecting-cancel {
+  flex: none;
+  min-height: 44px;
+  padding: 0 18px;
+  border: 2px solid var(--apricot);
+  border-radius: 22px;
+  background: transparent;
+  color: var(--apricot);
+  font: inherit;
+  font-size: var(--fs-m);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.chat-collecting-cancel:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.chat-collecting-bar {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 4px;
+  background: var(--apricot);
+  transition: width 250ms linear;
 }
 
 .chat-compose {

@@ -122,7 +122,7 @@
   color: var(--no);
 }
 
-/* A thing in Chat: its first card, as one line that opens its page. */
+/* A thing's card in Chat, as one line that opens its page; its other lines carry Open topic (2026-11-16). */
 .chat-msg.chat-thing-row,
 .chat-msg.chat-answer-row {
   padding: 0;
@@ -159,6 +159,16 @@
 .chat-thing-open {
   margin-top: 4px;
   color: var(--apricot);
+  font-size: 15px;
+  font-weight: 800;
+}
+
+/* In Chat, a reply of a thing's (every reply shows in Chat, 2026-11-16): one tap opens that topic's page. */
+.chat-topic-link {
+  align-self: flex-start;
+  margin-top: 8px;
+  color: var(--apricot);
+  border-color: color-mix(in srgb, var(--apricot) 55%, transparent);
   font-size: 15px;
   font-weight: 800;
 }

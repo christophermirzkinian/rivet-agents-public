@@ -72,11 +72,12 @@ export function registerJobs(router: Router, commands: CommandStore, deps: JobRo
   const jobs = schedules.jobs;
   const upApps = deps.upApps ?? new Set(config.healthChecks.map((check) => check.name));
 
-  /** Rivet's board token, or your session from the app itself. */
-  function requireWriter(request: IncomingMessage): void {
-    if (hasBearer(request, config.boardTokenDigest)) return;
+  /** Rivet's board token, or your session from the app itself: which one it was. */
+  function requireWriter(request: IncomingMessage): "board" | "session" {
+    if (hasBearer(request, config.boardTokenDigest)) return "board";
     requireSameOrigin(request, config.origin);
     requireSession(request);
+    return "session";
   }
 
   function publish(outcome: JobOutcome | undefined): void {
@@ -166,7 +167,7 @@ export function registerJobs(router: Router, commands: CommandStore, deps: JobRo
   });
 
   router.onPrefix("PATCH", PREFIX, async ({ request, response, url }) => {
-    requireWriter(request);
+    const writer = requireWriter(request);
     const id = jobIdOf(url.pathname, PREFIX);
     const body = parse(jobChangeSchema, await readJson(request, JOB_BODY_MAX), "job change");
     const existing = replay(body.clientId, (job) => job?.id === id && (job.op === body.op || (body.op === "resume" && job.op === "create")));
@@ -189,8 +190,10 @@ export function registerJobs(router: Router, commands: CommandStore, deps: JobRo
     const sent = deps.dispatch("job", body.clientId, { job: remake ? { op: "create", id, spec: actionSpec(job.spec) } : { op: body.op, id } }, at.toISOString());
     // A pause holds here whatever the Mac does; a resume the Mac never got is undone.
     if (sent.status !== 202 && body.op === "resume") jobs.setState(id, before, at, job.note);
-    // A run changes no state, so it never stands in for the newest change whose failure undoes it.
+    // A run changes no state, so it never stands in for the newest change whose failure undoes it. Only the owner's own Run
+    // now from the app passes the overnight switch; one sent with the board token is held like a scheduled run.
     if (sent.status === 202 && body.op !== "run") jobs.sentAction(id, sent.entry.id);
+    if (sent.status === 202 && body.op === "run" && writer === "session") jobs.ownRun(sent.entry.id, at);
     json(response, sent.status, deps.sentBody(sent));
   });
 

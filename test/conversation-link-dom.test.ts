@@ -81,14 +81,31 @@ describe("a link into a conversation", () => {
     expect(server.requests).toContain("GET /api/conversations/k2");
   });
 
-  it("Chat at its newest reads its own lines, and Rivet's dot still counts each thing with an unread reply", async () => {
+  it("Chat at its newest reads its own lines and a thing's, whose replies it shows (2026-11-16), and Rivet's dot clears", async () => {
     await start("/?tab=chat");
     expect(document.querySelector(".rivet-sheet .home-chat")).not.toBeNull();
-    expect(server.posted).toContainEqual({ ids: ["g1", "k9"], action: "read" });
-    // The home screen's dock carries the Chat tab's count as Rivet's dot, its number said to a screen reader.
+    expect(server.posted).toContainEqual({ ids: ["g1", "k1", "k9"], action: "read" });
     const rivet = document.querySelector('.home-dock [data-key="rivet"]')!;
-    expect(rivet.getAttribute("aria-label")).toBe("Rivet, 1 unread");
-    expect(rivet.querySelector(".home-dot")).not.toBeNull();
+    expect(rivet.getAttribute("aria-label")).toBe("Rivet");
+    expect(rivet.querySelector(".home-dot")).toBeNull();
+  });
+
+  it("Chat scrolled up from its newest reads nothing, and Rivet's dot counts Chat once and each thing with an unread reply", async () => {
+    // Nothing in happy-dom lays out: Chat stands 1000px tall, scrolled to its top.
+    const height = vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(1000);
+    const top = vi.spyOn(HTMLElement.prototype, "scrollTop", "get").mockReturnValue(0);
+    try {
+      await start("/?tab=chat");
+      expect(document.querySelector(".rivet-sheet .home-chat")).not.toBeNull();
+      expect(server.posted.filter((body) => body.action === "read")).toEqual([]);
+      // The home screen's dock carries the Chat tab's count as Rivet's dot, its number said to a screen reader.
+      const rivet = document.querySelector('.home-dock [data-key="rivet"]')!;
+      expect(rivet.getAttribute("aria-label")).toBe("Rivet, 2 unread");
+      expect(rivet.querySelector(".home-dot")).not.toBeNull();
+    } finally {
+      height.mockRestore();
+      top.mockRestore();
+    }
   });
 
 });

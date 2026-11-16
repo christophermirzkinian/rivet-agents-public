@@ -5,9 +5,8 @@ homeassistant:
   name: Home
   unit_system: metric
 
-http:
-  server_host: 127.0.0.1
-  server_port: 8123
+# HTTP lives in Home Assistant's own store (.storage/http) since 2026.10: scripts/install.sh writes it on 127.0.0.1:8123
+# before the first start, and an http: block here is ignored.
 
 api:
 config:
