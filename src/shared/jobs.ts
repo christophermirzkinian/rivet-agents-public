@@ -40,7 +40,7 @@ export const TASK_USAGE_LIMIT = 85;
 /** The note a task chat or look chat skips with while "Run jobs while I sleep" is off. */
 export const OVERNIGHT_OFF_NOTE = "Overnight jobs are off";
 
-/** The "Run jobs while I sleep" switch (default on), and whether the one-time set-up notice about it was seen. */
+/** The "Run jobs while I sleep" switch (default on; the app no longer shows it), and whether the retired set-up notice was seen. */
 export interface OvernightSettings {
   on: boolean;
   noticeSeen: boolean;

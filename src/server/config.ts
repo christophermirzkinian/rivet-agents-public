@@ -25,7 +25,7 @@ export interface Config {
   webRoot: string;
   /** The chat a message with no Reply goes to; empty when each such message starts a new chat. */
   monitorChat: string;
-  /** RIVET_OVERNIGHT_NOTICE_SEEN=1: this app starts with the overnight-jobs notice seen. */
+  /** RIVET_OVERNIGHT_NOTICE_SEEN=1: only marks the retired overnight-jobs notice seen; the app shows nothing for it. */
   overnightNoticeSeen?: boolean;
   /** RIVET_MERGE=on: a merge-ready card's yes merges its PR. Off, the yes is a plain approve. */
   merge: boolean;

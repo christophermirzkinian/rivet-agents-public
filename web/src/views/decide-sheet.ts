@@ -4,7 +4,7 @@ import { isGotIt, isUpdate, waitsOnYou } from "../../../src/shared/answers.js";
 import { asksOfChat } from "../../../src/shared/ask-stages.js";
 import type { Ask } from "../../../src/shared/asks.js";
 import type { ServedNeed } from "../../../src/shared/board.js";
-import { chatName, RIVET_NAME } from "../../../src/shared/names.js";
+import { RIVET_NAME } from "../../../src/shared/names.js";
 import { NO_REPO } from "../../../src/shared/repos.js";
 import { allMinimised, answeredTab, NEEDS_YOU, NOTHING_NEEDS_YOU, openTab, showMinimised } from "../../../src/shared/words.js";
 import type { Worker } from "../../../src/shared/workers.js";
@@ -164,6 +164,7 @@ function decideView(first: readonly string[], look: { answered?: boolean; untilR
 
   const name = h("span", { class: "decide-name" });
   const count = h("span", { class: "decide-count" });
+  const steps = h("span", { class: "decide-steps", attrs: { "aria-hidden": "true" } });
   const skip = h("button", { class: "decide-skip", attrs: { type: "button", "data-use": "decide.skip" }, on: { click: () => move(1) } }, "Skip ›");
   const keysBtn = h("button", { class: "decide-keys", attrs: { type: "button", "aria-label": "Keyboard keys", title: "Keyboard keys", "data-use": "decide.keys" }, on: { click: openShortcuts } }, "?");
   // A chevron down, not an ×: the card's own reject × sits just under it.
@@ -368,12 +369,15 @@ function decideView(first: readonly string[], look: { answered?: boolean; untilR
       if (!next) return paintList(noneOpen(), NEEDS_YOU, "none");
       at = next;
     }
-    count.hidden = false;
+    count.hidden = steps.hidden = false;
     const need = cards.find((one) => one.id === at)!;
     const shown = order.filter((id) => open.has(id));
     const repo = need.repo ?? NO_REPO;
     name.textContent = projectName(homeOf({ repo, project: (app.workers?.workers ?? []).find((w) => w.repo === repo && w.chat === need.chat)?.project }));
-    count.textContent = `${shown.indexOf(at) + 1} of ${shown.length} · ${need.chat ? chatName(need.chat) : RIVET_NAME}`;
+    count.textContent = `Card ${shown.indexOf(at) + 1} of ${shown.length}`;
+    name.textContent = `${RIVET_NAME} asks · ${name.textContent}`;
+    // A dash a card while they fit the row; past that the words alone count them.
+    steps.replaceChildren(...(shown.length <= 5 ? shown.map((id) => h("i", { class: id === at ? "is-at" : "" })) : []));
     skip.hidden = shown.length < 2;
     // A note typed in the card's box holds the redraw, as the Feed holds its own; so does a clip in full screen.
     const typing = document.activeElement instanceof HTMLTextAreaElement && slot.contains(document.activeElement);
@@ -485,7 +489,7 @@ function decideView(first: readonly string[], look: { answered?: boolean; untilR
     current = null;
     panel?.removeAttribute("data-shows-card");
     name.textContent = title;
-    count.hidden = true;
+    count.hidden = steps.hidden = true;
     skip.hidden = true;
     if (painted === key && slot.firstElementChild?.outerHTML === list.outerHTML) return;
     if (painted !== key) slot.scrollTop = 0;
@@ -517,7 +521,7 @@ function decideView(first: readonly string[], look: { answered?: boolean; untilR
           "header",
           { class: "decide-head" },
           rivet("asking", { tone: "agent", size: 40, className: "decide-face" }),
-          h("div", { class: "decide-who" }, name, count),
+          h("div", { class: "decide-who" }, h("span", { class: "decide-at" }, count, steps), name),
           inPane ? segsRow : null,
           inPane ? keysBtn : null,
           skip,

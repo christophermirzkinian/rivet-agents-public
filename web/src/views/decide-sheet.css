@@ -214,7 +214,17 @@
    would leave the read under half the box, follow the read in the card's own flow, so the card scrolls as one piece:
    a pinned tray of four left a long ask a three-line box on a large phone-sized viewport and none at all on a small one. */
 .decide-sheet .choices {
+  gap: 8px;
   margin-top: 4px;
+}
+
+.decide-sheet .choices .btn.choice {
+  gap: 1px;
+  padding-block: 8px;
+}
+
+.decide-sheet .choices .choice-detail {
+  line-height: 1.3;
 }
 
 .decide-sheet .card.top.pin-answers .choices {
@@ -402,4 +412,137 @@
 /* An answer's Undo toast sits over the sheet, which stays open on the next card: under it, Undo could not be tapped. */
 body:has(.decide-sheet) .toasts {
   z-index: 41;
+}
+
+/* Night Desk: "Card N of M" and its dashes over Rivet's line, the card and its say-line one box, the head's
+   tools and the switch quiet so the answers lead. */
+.decide-face {
+  outline: none;
+}
+
+.decide-who:has(> .decide-at) {
+  min-width: min-content;
+}
+
+/* The dashes wrap out of the one-line row when they don't fit beside the count, never over Skip. */
+.decide-at {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px 10px;
+  max-height: 16px;
+  overflow: hidden;
+}
+
+.decide-at > .decide-count {
+  flex: none;
+  overflow: visible;
+  color: var(--accent);
+  font-size: var(--fs-s);
+  font-weight: 800;
+  line-height: 16px;
+  letter-spacing: 0.08em;
+  text-overflow: clip;
+  text-transform: uppercase;
+}
+
+.decide-steps {
+  display: flex;
+  flex: none;
+  gap: 4px;
+}
+
+.decide-steps[hidden] {
+  display: none;
+}
+
+.decide-steps > i {
+  width: 16px;
+  height: 4px;
+  border-radius: 4px;
+  background: var(--line);
+}
+
+.decide-steps > i.is-at {
+  width: 22px;
+  background: var(--accent);
+}
+
+.decide-at:has(> .decide-count:not([hidden])) + .decide-name {
+  font-size: var(--fs-body);
+}
+
+.decide-skip,
+.decide-close,
+.decide-seg {
+  border-color: transparent;
+  background: var(--bg-2);
+  color: var(--muted);
+}
+
+.decide-seg[aria-pressed="true"] {
+  border-color: var(--line);
+  background: var(--panel-2);
+  color: var(--accent);
+}
+
+.decide-sheet .answer-card {
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: var(--panel);
+}
+
+.decide-sheet .answer-card .card.top {
+  border: 0;
+  border-radius: 22px 22px 0 0;
+  background: none;
+}
+
+.decide-sheet .answer-card .actions {
+  padding: 4px 14px 14px;
+}
+
+.decide-sheet .answer-card .say-row {
+  border-style: dashed;
+  border-radius: 16px;
+  background: none;
+}
+
+.decide-card .card-head {
+  row-gap: 6px;
+  padding-top: 10px;
+}
+
+.decide-card .card-body > .card-title {
+  font-size: clamp(19px, 5vw, 21px);
+  letter-spacing: -0.01em;
+  line-height: 1.12;
+}
+
+/* On a narrow phone the head and title close up so the card's meta line clears its foot's fade. */
+@media (max-width: 360px) {
+  .decide-card .card-head {
+    padding-block: 6px 4px;
+  }
+
+  .decide-card .card-body > .card-title {
+    font-size: 18px;
+    line-height: 1.08;
+  }
+
+  .decide-card .card-body > .card-ask {
+    margin-bottom: 8px;
+  }
+}
+
+.decide-card .card-head .chip {
+  font-size: var(--fs-s);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.decide-card .card-head .head-acts :is(.btn, .decide-big) {
+  border-color: transparent;
+  background: var(--bg-2);
+  color: var(--muted);
 }

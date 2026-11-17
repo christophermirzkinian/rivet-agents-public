@@ -34,7 +34,7 @@
 /* Needs you as rows: each card its own box, one under another. */
 .feed.v4 .deck-rows {
   display: grid;
-  /* A card's one-line thread title must not size the column: it ran the cards past the owner's phone. */
+  /* A card's one-line thread title must not size the column: it ran the cards past a phone's width. */
   grid-template-columns: minmax(0, 1fr);
   gap: 12px;
 }

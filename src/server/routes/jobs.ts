@@ -94,7 +94,7 @@ export function registerJobs(router: Router, commands: CommandStore, deps: JobRo
   }
   if (config.overnightNoticeSeen) jobs.seedNotice(now());
 
-  // "Run jobs while I sleep": the app's Settings switch and the one-time set-up notice's "Got it".
+  // "Run jobs while I sleep": kept, though the app no longer calls it; the switch is hidden, default on.
   router.on("GET", "/api/settings/overnight", ({ request, response }) => {
     requireSession(request);
     json(response, 200, jobs.overnight());

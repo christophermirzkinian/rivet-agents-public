@@ -56,6 +56,10 @@
 }
 
 .home-sheet-head > .chat-head .chat-speak {
+  gap: 6px;
+  padding-inline: 10px;
+  border-color: transparent;
+  background: var(--bg-2);
   white-space: normal;
   text-align: left;
 }
@@ -111,7 +115,7 @@
   padding: 9px 13px;
   border-radius: 18px;
   background: var(--panel);
-  border: 2px solid var(--line);
+  border: 1px solid var(--line);
   /* A row off screen is skipped until it nears it: a page of 30 or more was laid out whole on each open, poll and send.
      `auto` keeps the size it last drew at, so the scroll stays put; the clip margin keeps Rivet's face beside it. */
   content-visibility: auto;
@@ -122,18 +126,56 @@
 .chat-msg.mine {
   align-self: flex-end;
   border-color: transparent;
-  background: linear-gradient(135deg, rgba(255, 194, 61, 0.26), rgba(120, 92, 255, 0.26));
+  background: var(--accent);
+  color: #2a1f05;
   border-bottom-right-radius: 8px;
+}
+
+/* On the yellow bubble the grey line and its marks take the bubble's dark ink (Night Desk). */
+.chat-msg.mine :is(.chat-meta, .chat-meta-tap, .chat-meta-more) {
+  color: #5c4708;
+}
+
+.chat-msg.mine :is(.chat-status.replied, .chat-status.typed, .chat-status.acked) {
+  color: #17663a;
+}
+
+.chat-msg.mine :is(.chat-reply, .chat-quote-who, .chat-status.acked, .chat-status.unconfirmed, .chat-status.collecting, .chat-thing-link, .chat-answer-text, .chat-thing-open, .chat-topic-link) {
+  color: #2a1f05;
+}
+
+.chat-msg.mine .chat-quote {
+  --edge: color-mix(in srgb, #2a1f05 70%, transparent);
+}
+
+.chat-msg.mine .chat-quote-text {
+  color: #2a1f05;
+}
+
+.chat-msg.mine .chat-topic-link {
+  border-color: color-mix(in srgb, #2a1f05 45%, transparent);
+}
+
+.chat-msg.mine .chat-status.failed {
+  color: #8a1020;
+}
+
+.chat-msg.mine.lit {
+  box-shadow: 0 0 0 3px var(--text);
 }
 
 .chat-msg.theirs {
   align-self: flex-start;
+  padding: 12px 16px;
+  border-color: transparent;
+  border-radius: 22px;
   border-bottom-left-radius: 8px;
+  background: var(--panel);
 }
 
 .chat-body {
   margin: 0;
-  font-size: var(--fs-body);
+  font-size: var(--fs-xl);
   line-height: 1.4;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -225,7 +267,7 @@
 .chat-meta {
   margin: 6px 0 0;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--fs-body);
 }
 
 .chat-foot {
@@ -469,12 +511,12 @@ button.chat-quote {
 .chat-text {
   flex: 1;
   min-width: 0;
-  min-height: 44px;
+  min-height: 52px;
   max-height: 180px;
   /* Room on the right for the mic that sits in the box's corner. */
-  padding: 10px 48px 10px 12px;
-  border: 2px solid var(--line);
-  border-radius: 16px;
+  padding: 14px 52px 14px 18px;
+  border: 1px solid var(--line);
+  border-radius: 26px;
   background: var(--panel);
   /* Readable-first: what the owner types reads at 16px. */
   font-size: var(--fs-xl);
@@ -488,17 +530,18 @@ button.chat-quote {
 
 .chat-compose .attach-btn {
   flex: none;
-  width: var(--tap);
-  height: 44px;
-  border-radius: 18px;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
 }
 
 .chat-send {
   flex: none;
-  width: 44px;
-  height: 44px;
+  width: 52px;
+  height: 52px;
   min-height: var(--tap);
   padding: 0;
+  border-radius: 50%;
 }
 
 /* Mac offline: the button says the message waits for it, beside the arrow. */
@@ -507,6 +550,27 @@ button.chat-quote {
   height: auto;
   gap: 6px;
   padding: 4px 12px;
+}
+
+/* A narrow phone gives the typing room back: main's padding and attach size, and a tighter waits label. */
+@media (max-width: 360px) {
+  .chat-text {
+    padding: 10px 48px 10px 12px;
+  }
+
+  .chat-compose .attach-btn {
+    width: var(--tap);
+    height: 44px;
+  }
+
+  .chat-send.waits {
+    gap: 4px;
+    padding: 4px 8px;
+  }
+
+  .chat-send.waits .chat-send-wait {
+    max-width: 5em;
+  }
 }
 
 .chat-send-wait {
@@ -526,7 +590,7 @@ button.chat-quote {
   min-height: var(--tap);
   padding: 0;
   border-color: transparent;
-  border-radius: 14px;
+  border-radius: 50%;
   background: transparent;
 }
 

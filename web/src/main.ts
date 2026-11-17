@@ -5,6 +5,7 @@ import * as api from "./api.js";
 import { dismissBoot } from "./boot.js";
 import { DESK_QUERY, isDesk } from "./desk.js";
 import { button, describe, h } from "./dom.js";
+import { watchNewBuild } from "./new-build.js";
 import { loadPushHealth, pushChanged } from "./push-health.js";
 import { registerWorker, resyncPush, watchViewing, workerRefresh } from "./push.js";
 import { showRivetWords } from "./rivet-words.js";
@@ -15,7 +16,6 @@ import { app, changed, go, navStamp, networkChanged, refresh, resetSession, sett
 import { openConversation, receiveShare, refresh as refreshChat, showConversation } from "./views/chat.js";
 import { dropLeave, leaveOverlays } from "./views/navigation.js";
 import { decideShown, showPushed } from "./views/decide-sheet.js";
-import { offerOvernightNotice } from "./views/overnight.js";
 import { closeSheet, closeTallSheet } from "./views/sheet.js";
 import { cardsSegment, flushHeld, recoverOutbox, resetFeed } from "./views/feed.js";
 import { mountShell } from "./views/shell.js";
@@ -33,6 +33,28 @@ let startConversation: string | null = null;
 let startCard: string | null = null;
 
 showRivetWords();
+
+interface GateStep {
+  title: string;
+  sub: string;
+  done?: boolean;
+}
+
+/** The sign-in steps as ticked tiles: the ones done carry a tick, the one to do now its number. */
+function gateSteps(...steps: GateStep[]): HTMLElement {
+  return h(
+    "ol",
+    { class: "gate-steps" },
+    ...steps.map((step, i) =>
+      h(
+        "li",
+        { class: `gate-step${step.done ? " is-done" : " is-now"}` },
+        h("span", { class: "gate-step-n", attrs: { "aria-hidden": "true" } }, step.done ? "✓" : String(i + 1)),
+        h("span", { class: "gate-step-words" }, h("b", { class: "gate-step-title" }, step.title), h("span", { class: "gate-step-sub" }, step.sub)),
+      ),
+    ),
+  );
+}
 
 function gate(lede: string, ...children: (Node | null)[]): void {
   signedIn = false;
@@ -63,6 +85,7 @@ function renderSignIn(message: string | null = null): void {
   const status = h("p", { class: "gate-status", attrs: { role: "status" } }, message ?? "");
   gate(
     "Your coding agents, on your phone.",
+    gateSteps({ title: "Use your passkey", sub: "No password to remember." }),
     button(
       "Sign in with passkey",
       () => {
@@ -81,6 +104,7 @@ function renderEnrol(code: string): void {
   const status = h("p", { class: "gate-status", attrs: { role: "status" } });
   gate(
     "Set up a passkey on this device.",
+    gateSteps({ title: "Set-up link opened", sub: "Its set-up code came with it.", done: true }, { title: "Create a passkey", sub: "No password to remember." }),
     button(
       "Create passkey",
       () => {
@@ -121,14 +145,13 @@ async function startApp(): Promise<void> {
   startConversation = null;
   unmountShell = mountShell(root);
   // What the Share menu sent waits through a signed-out start, and lands in the chat on the first one signed in.
-  const shared = takeShare().then((share) => {
-    if (!share) return false;
+  void takeShare().then((share) => {
+    if (!share) return;
     receiveShare(share);
     if (signedIn && app.tab !== "chat") {
       app.tab = "chat";
       changed();
     }
-    return true;
   });
   const stamp = navStamp();
   const loaded = await refresh();
@@ -143,10 +166,6 @@ async function startApp(): Promise<void> {
   // opens Decide.
   settleOpening(asked ?? "progress", stamp);
   if (loaded) recoverOutbox();
-  // The one-time overnight-jobs notice, on a plain start only: a card's link or a shared item opens what it asked for.
-  if (loaded && !front && !link) void shared.then((share) => {
-      if (!share) void offerOvernightNotice();
-    });
   stopPolling();
   polling = window.setInterval(() => {
     if (document.visibilityState === "visible") {
@@ -183,6 +202,7 @@ document.addEventListener("visibilitychange", () => {
       .finally(() => void pushChanged());
   }
 });
+watchNewBuild();
 window.addEventListener("offline", networkChanged);
 window.addEventListener("online", () => {
   networkChanged();

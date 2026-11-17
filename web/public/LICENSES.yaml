@@ -1,5 +1,5 @@
 # LICENSES.yaml: licence record for every shipped asset in web/public.
-# Everything here is first-party and released under the repository's MIT licence (see LICENSE).
+# Everything here is first-party and released under the repository's MIT licence (see LICENSE), except the rows that name another licence (Inter, OFL-1.1).
 assets:
   - file: icon.svg
     source: first-party
@@ -66,3 +66,8 @@ assets:
     origin: "Hand-written stylesheet"
     license: MIT
     notes: "First-paint styles."
+  - file: fonts/inter-latin-*-normal.woff2
+    source: stock
+    origin: "Inter by Rasmus Andersson, the latin static weights from @fontsource/inter 5.2.8 (https://www.npmjs.com/package/@fontsource/inter)"
+    license: OFL-1.1
+    notes: "The app's type face, served from the app itself; the licence text is fonts/OFL.txt."

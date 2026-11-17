@@ -226,8 +226,8 @@ describe("Decide N", () => {
     decide.click();
     await settle();
     expect(kind()).toBe("decide-sheet");
-    expect(sheet()!.querySelector(".decide-name")?.textContent).toBe("example-repo");
-    expect(sheet()!.querySelector(".decide-count")?.textContent).toMatch(/^1 of 2 · /);
+    expect(sheet()!.querySelector(".decide-name")?.textContent).toBe("Rivet asks · example-repo");
+    expect(sheet()!.querySelector(".decide-count")?.textContent).toBe("Card 1 of 2");
     expect(sheet()!.querySelector('.decide-seg[data-seg="open"]')?.textContent).toBe("Open 2");
     deal([]);
     expect(button("decide").classList.contains("has-cards")).toBe(false);
@@ -498,8 +498,8 @@ describe("old tab ids", () => {
     sheet()!.querySelector<HTMLButtonElement>(".decide-none .clear-min")!.click();
     await settle();
     expect(decideShown()).toBe("a");
-    expect(sheet()!.querySelector(".decide-name")?.textContent).toBe("example-repo");
-    expect(sheet()!.querySelector(".decide-count")?.textContent).toMatch(/^1 of 1 · /);
+    expect(sheet()!.querySelector(".decide-name")?.textContent).toBe("Rivet asks · example-repo");
+    expect(sheet()!.querySelector(".decide-count")?.textContent).toBe("Card 1 of 1");
     expect(sheet()!.querySelector('.decide-seg[data-seg="open"]')?.textContent).toBe("Open 1");
     expect(button("decide").querySelector(".home-decide-n")?.textContent).toBe("1");
   });

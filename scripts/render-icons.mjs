@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 
 const pub = join(dirname(fileURLToPath(import.meta.url)), "..", "web", "public");
-const BACKING = "#100e19";
+const BACKING = "#12111c";
 const icon = readFileSync(join(pub, "icon.svg"), "utf8");
 const badge = readFileSync(join(pub, "badge.svg"), "utf8");
 

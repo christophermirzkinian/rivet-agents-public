@@ -672,8 +672,13 @@
 }
 
 .desktop .desk-actions .btn.pick.rec {
-  border-color: var(--yes);
-  background: rgba(47, 214, 123, 0.1);
+  border-color: transparent;
+  background: linear-gradient(180deg, #ffd25c, #ffbd2e);
+  color: #2a1f05;
+}
+
+.desktop .desk-actions .btn.pick.rec :is(.pick-detail, .pick-tag) {
+  color: #5c4708;
 }
 
 .desktop .desk-actions .btn.pick .pick-label {
@@ -704,7 +709,7 @@
   text-align: center;
 }
 
-/* The recommended answer's mark: a green check (its name says Recommended); the card above carries the word. */
+/* The recommended answer's mark: a check (its name says Recommended); the card above carries the word. */
 .desktop .desk-actions .btn.pick .pick-tag {
   display: inline-flex;
   width: 18px;

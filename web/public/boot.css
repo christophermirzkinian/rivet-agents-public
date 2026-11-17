@@ -6,7 +6,7 @@
   z-index: 1000;
   display: grid;
   place-items: center;
-  background: #100e19;
+  background: #12111c;
   transition: opacity 0.25s ease-out;
   /* Gone at 6 s from launch even if the app's script never runs. */
   animation: boot-out 0.25s 6s ease-out forwards;

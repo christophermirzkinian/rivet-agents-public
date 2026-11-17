@@ -288,17 +288,17 @@ export function peekFacts(id: string): PeekFacts | null {
  */
 function agentRow(w: Worker, i: number, asks: readonly Ask[], now: number, crew: readonly Worker[], cards: readonly ServedNeed[], readings: DeskReadings, oneLine = false): HTMLElement {
   const holds = asking(w, crew, cards, asks);
-  const mood: Mood = holds ? "asking" : "working";
-  const bot = rivet(mood, { tone: "agent", size: oneLine ? 28 : isDesk() ? 48 : 36, glow: true });
-  bot.style.setProperty("--rv-delay", `${-(i * 0.47) % 2.6}s`);
   const ask = askOf(w, asks);
   const view = rowView(w, asks, now, holds, readings);
   const needs = view.stage === "needs-you";
+  const mood: Mood = holds || needs ? "asking" : "working";
+  const bot = rivet(mood, { tone: "agent", size: oneLine ? 28 : isDesk() ? 48 : 36, glow: true });
+  bot.style.setProperty("--rv-delay", `${-(i * 0.47) % 2.6}s`);
   // One line: its stage is the heading over it, so only its time; Needs you has no heading and says so itself.
   const said = oneLine && !needs ? { text: view.time?.text ?? "", tone: view.time?.tone ?? null } : oneLine ? { text: `${NEEDS_YOU} ›`, tone: "needs" } : deskBubble(w, asks, now, holds, readings);
   // Its words say Needs you while it holds a card; its ring still reads its ask's lateness.
   const late = ask ? bubbleOf(ask, now).tone === "asked" : false;
-  if (holds && !oneLine) bot.append(h("span", { class: "desk-agent-ask", attrs: { "aria-hidden": "true" } }, "?"));
+  if (mood === "asking" && !oneLine) bot.append(h("span", { class: "desk-agent-ask", attrs: { "aria-hidden": "true" } }, "?"));
   const progress = oneLine ? undefined : ask ? (ask.stage === "building" ? ask.progress : undefined) : w.progress;
   const fill = progress !== undefined ? h("span", { class: "desk-agent-fill" }) : null;
   // The page's CSP takes no style attribute, so the fill is sized through the CSSOM.
@@ -517,7 +517,11 @@ export function mountDesks(): { el: HTMLElement; paint: () => void; stop: () => 
     const from = at(slab);
     const x0 = from.x + from.w / 2;
     const y0 = from.y + from.h;
-    lines.innerHTML = [...el.querySelectorAll<HTMLElement>(".desk.is-project")]
+    const boxes = [...el.querySelectorAll<HTMLElement>(".desk.is-project")];
+    const top = boxes[0] ? at(boxes[0]).y : 0;
+    // Stacked tiles (a phone) take one line, to the top tile: the rest would run behind it.
+    lines.innerHTML = boxes
+      .filter((desk) => at(desk).y === top)
       .map((desk) => {
         const to = at(desk);
         // It lands on the part of the box showing; a box wholly off the side gets a line running off that side.
