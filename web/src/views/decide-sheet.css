@@ -93,6 +93,7 @@
 }
 
 .decide-skip,
+.decide-keys,
 .decide-close {
   display: inline-flex;
   flex: none;
@@ -153,11 +154,6 @@
   overflow: visible;
 }
 
-.sheet.decide-sheet.is-big .choices {
-  position: static;
-  box-shadow: none;
-}
-
 .decide-big[hidden] {
   display: none;
 }
@@ -213,9 +209,15 @@
   display: none;
 }
 
-/* The options stay in sight at the foot of the card as its body scrolls under them: the answer at the thumb, with no
-   scroll on a small phone-sized viewport (plan Risks). Four or more scroll in their own tray, kept under half the sheet. */
+/* One to three answers stay in sight at the foot of the card as its body scrolls under them, the answer at the thumb,
+   while they take at most half the card's box (decide-sheet.ts marks it pin-answers). Four or more, or a pinned row that
+   would leave the read under half the box, follow the read in the card's own flow, so the card scrolls as one piece:
+   a pinned tray of four left a long ask a three-line box on a large phone-sized viewport and none at all on a small one. */
 .decide-sheet .choices {
+  margin-top: 4px;
+}
+
+.decide-sheet .card.top.pin-answers .choices {
   position: sticky;
   bottom: 0;
   z-index: 1;
@@ -224,17 +226,6 @@
   border-top: 1px solid var(--line);
   background: var(--panel);
   box-shadow: 0 -10px 18px rgba(0, 0, 0, 0.35);
-}
-
-.decide-sheet .choices:has(> button:nth-of-type(4)) {
-  max-height: calc(var(--vv-h, 100dvh) * 0.4);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-
-/* Capped, the tray scrolls whole answers: a squeezed one would spill its words over the next. */
-.decide-sheet .choices > * {
-  flex-shrink: 0;
 }
 
 .decide-sheet .answer-card .more-cue,
@@ -252,8 +243,7 @@
   width: min(100%, calc(min(20vh, 180px) * var(--ratio, 1.7778)));
 }
 
-/* On a short phone the stills sit side by side, each still a picture beside the pinned answers, and
-   those answers close up a little. */
+/* On a short phone the stills sit side by side and the answers close up a little. */
 @media (max-height: 760px) {
   .sheet.is-tall {
     max-height: calc(var(--vv-h, 100dvh) - 28px);
@@ -271,7 +261,8 @@
     height: 112px;
   }
 
-  .decide-sheet .choices {
+  .decide-sheet .choices,
+  .decide-sheet .card.top.pin-answers .choices {
     gap: 6px;
     padding-block: 6px;
   }
@@ -281,9 +272,9 @@
   }
 }
 
-/* A card that still runs on past the sheet's foot fades out there rather than show half a control. A pinned options
-   tray is its own whole edge, so that card does not fade. */
-.decide-sheet .card.top.has-more:not(:has(.choices)) {
+/* A card that still runs on past the sheet's foot fades out there rather than show half a control. A pinned answer
+   row is its own whole edge, so that card does not fade. */
+.decide-sheet .card.top.has-more:not(.pin-answers) {
   mask-image: linear-gradient(to bottom, #000 calc(100% - 56px), transparent);
 }
 

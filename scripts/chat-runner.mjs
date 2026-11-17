@@ -7,7 +7,8 @@
 // A chat is keyed by its name and runs plain `claude` or `codex` on the user's own login, in an existing directory, in
 // a tmux session of the same name. Its pane runs `/usr/bin/env -i /bin/sh <spec>`: the spec, written 0600 and removed
 // by its first line, sets only an allowlisted environment and execs the agent, so the pane's pid is the agent's and
-// leads its own process group, and no argv carries an environment value. The registry has one writer at a time (a
+// leads its own process group, and no argv carries an environment value. RIVET_CHAT_NAME in that environment names
+// the chat to its agent. The registry has one writer at a time (a
 // lock dir naming its owner), is written to a temp file and renamed (0600), and a registry that cannot be parsed, or
 // is a link, refuses every write.
 import { spawnSync } from "node:child_process";
@@ -267,6 +268,9 @@ function sweepSpecs(ctx) {
 function startPane(ctx, entry, launch) {
   const env = { LANG: "en_US.UTF-8" };
   for (const name of PANE_ENV) if (ctx.env[name] !== undefined) env[name] = ctx.env[name];
+  // The chat's own name, which `rivet card add` takes for --chat when none is given, so an answer comes back to this
+  // chat. The pane has no TMUX, so tmux cannot tell its agent the name.
+  env.RIVET_CHAT_NAME = entry.name;
   env.TERM = PANE_TERM;
   const lines = ['rm -f -- "$0"'];
   for (const [name, value] of Object.entries(env)) {

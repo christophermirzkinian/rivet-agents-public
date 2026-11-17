@@ -81,7 +81,8 @@ it.each([
   expect(chat.openConversation()).toBe("direct-chat");
   send("still here");
   await settle();
-  expect(posted[0]?.conversation).toBeNull();
+  // Typed on its page, it stays in that conversation (2026-11-17).
+  expect(posted[0]?.conversation).toBe("direct-chat");
   release!();
   await settle();
 });
@@ -119,7 +120,7 @@ it("preserves Chat when an earlier sheet listener handles Back before the later-
   expect(chat.openConversation()).toBe("direct-chat");
   send("still direct");
   await settle();
-  expect(posted[0]?.conversation).toBeNull();
+  expect(posted[0]?.conversation).toBe("direct-chat");
   release!();
   await settle();
 });
@@ -138,7 +139,7 @@ it.each(["lightbox", "sheet"])("honours a history jump past the %s to another co
   expect(chat.openConversation()).toBe("conversation-a");
   send("to A");
   await settle();
-  expect(posted[0]?.conversation).toBeNull();
+  expect(posted[0]?.conversation).toBe("conversation-a");
   release!();
   await settle();
 });

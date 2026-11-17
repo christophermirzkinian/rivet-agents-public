@@ -185,6 +185,23 @@ describe("the app's frame", () => {
     expect(decideShown()).toBeNull();
   });
 
+  it("on a wide window Decide's switch and ? are in its head, ? opens the keys, and no row of keys is under the card (2026-11-17)", async () => {
+    wide(true);
+    mount();
+    deal([card("d1"), card("d2")]);
+    const { showCard } = await import("../web/src/views/feed.js");
+    showCard("d2");
+    await settle();
+    const head = document.querySelector(".decide-pane > .decide-head")!;
+    expect([...head.children].map((el) => el.classList[0])).toEqual(["rivet", "decide-who", "decide-segs", "decide-keys", "decide-skip"]);
+    expect(document.querySelector(".decide-pane > .decide-segs")).toBeNull();
+    expect(document.querySelector(".decide-pane .desk-keys")).toBeNull();
+    const keys = head.querySelector<HTMLButtonElement>(".decide-keys")!;
+    expect([keys.textContent, keys.getAttribute("aria-label"), keys.title]).toEqual(["?", "Keyboard keys", "Keyboard keys"]);
+    keys.click();
+    expect(document.querySelector(".sheet[aria-label='Keyboard shortcuts'] .shortcuts-list")).not.toBeNull();
+  });
+
   it("on a wide window Decide › Answered keeps its switch in the pane", async () => {
     wide(true);
     app.tab = "cards";

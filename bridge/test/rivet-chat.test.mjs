@@ -33,7 +33,7 @@ before(() => {
   fs.mkdirSync(home);
   fs.mkdirSync(workdir);
   const agent = path.join(root, "agent.sh");
-  fs.writeFileSync(agent, '#!/bin/sh\necho "agent up: $*"\nwhile IFS= read -r line; do echo "got:$line"; done\n', { mode: 0o755 });
+  fs.writeFileSync(agent, '#!/bin/sh\necho "agent up as $RIVET_CHAT_NAME: $*"\nwhile IFS= read -r line; do echo "got:$line"; done\n', { mode: 0o755 });
   const env = { PATH: process.env.PATH, HOME: home, TMUX_TMPDIR: root, SECRET_TOKEN: "not-for-the-pane" };
   ctx = runner.context({ env, home, socket: "rivet-chat-test", bins: { claude: agent, codex: agent } });
 });
@@ -77,9 +77,10 @@ test("new, ls, send, read and close a chat on a throwaway socket", { skip }, asy
   assert.equal(row.state, "alive");
   assert.equal(row.provider, "claude");
 
-  const started = await waitFor(() => runner.read(ctx, "first").includes("agent up: -- hello there"));
+  const started = await waitFor(() => runner.read(ctx, "first").includes("agent up as first: -- hello there"));
   assert.ok(started, runner.read(ctx, "first"));
-  // The spec file removed itself, and the pane never saw a secret from the caller's environment.
+  // The pane knows its chat's name (RIVET_CHAT_NAME, which card add takes for --chat). The spec file removed itself, and
+  // the pane never saw a secret from the caller's environment.
   assert.deepEqual(fs.readdirSync(path.join(path.dirname(ctx.registry), "launch")), []);
 
   assert.equal(await main(["send", "first", "--text", "echo $SECRET_TOKEN"], { ctx, out }), 0);

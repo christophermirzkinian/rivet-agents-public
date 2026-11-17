@@ -17,8 +17,9 @@ import { rivet } from "../rivet/rivet.js";
 import { app, boardRead, cardState, changed, countedCards, deck, frontCard, isMinimised, navigated, navStamp, readAgain, refresh, subscribe, unminimise } from "../state.js";
 import { answeredCount, answeredList, underWayList } from "./answered.js";
 import { stopCardMedia } from "./card-media.js";
-import { answerCard, answerTapsLocked, cardKey, cardOnItsWay, cardsSegment, cheerView, feedKeyUp, guardTaps, keyHints, offlineBar, releaseKeys, setCardsSegment, showCard } from "./feed.js";
+import { answerCard, answerTapsLocked, cardKey, cardOnItsWay, cardsSegment, cheerView, feedKeyUp, guardTaps, offlineBar, releaseKeys, setCardsSegment, showCard } from "./feed.js";
 import { leaveOverlays } from "./navigation.js";
+import { openShortcuts } from "./shortcuts.js";
 import { cardShown, enterScreen, leaveScreen, screenMoved, watchDepth } from "../usage.js";
 import { closeTallSheet, openTallSheet } from "./sheet.js";
 import type { View } from "./view.js";
@@ -30,7 +31,10 @@ import type { View } from "./view.js";
  */
 
 /** Marks put on a drawn card after it is drawn (its fade, its slide in): not a change to the card. */
-const RUNTIME_MARKS = ["has-more", "entering"];
+const RUNTIME_MARKS = ["has-more", "entering", "pin-answers"];
+/** A pinned answer row's padding and top border (decide-sheet.css), and the room to spare a row needs before it pins. */
+const PIN_EDGE = 21;
+const PIN_BAND = 32;
 const bare = (card: Element): string => {
   const copy = card.cloneNode(true) as Element;
   for (const one of [copy, ...copy.querySelectorAll("*")]) one.classList.remove(...RUNTIME_MARKS);
@@ -161,6 +165,7 @@ function decideView(first: readonly string[], look: { answered?: boolean; untilR
   const name = h("span", { class: "decide-name" });
   const count = h("span", { class: "decide-count" });
   const skip = h("button", { class: "decide-skip", attrs: { type: "button", "data-use": "decide.skip" }, on: { click: () => move(1) } }, "Skip ›");
+  const keysBtn = h("button", { class: "decide-keys", attrs: { type: "button", "aria-label": "Keyboard keys", title: "Keyboard keys", "data-use": "decide.keys" }, on: { click: openShortcuts } }, "?");
   // A chevron down, not an ×: the card's own reject × sits just under it.
   const closeBtn = h("button", { class: "decide-close", attrs: { type: "button", "aria-label": "Close", "data-use": "decide.close" }, on: { click: close } }, svg(ICONS.back, "btn-icon"));
   const seg = (id: typeof mode) =>
@@ -186,6 +191,8 @@ function decideView(first: readonly string[], look: { answered?: boolean; untilR
    * starts small. A wide window's pane has the full column already.
    */
   let isBig = false;
+  /** The card whose answers are pinned: a redraw of it keeps them pinned while they still fit half. */
+  let pinnedNeed: string | null = null;
   const big = h("button", { class: "decide-big", attrs: { type: "button", "aria-label": "See it big", "aria-pressed": "false", "data-use": "decide.big" }, on: { click: () => setBig(!isBig) } }, svg(ICONS.expand, "btn-icon"));
   big.hidden = true;
   /** What scrolls: the card's read, or while big the whole card with its answers. */
@@ -203,15 +210,39 @@ function decideView(first: readonly string[], look: { answered?: boolean; untilR
     const into = scroller();
     if (into) into.scrollTop = read;
     edge();
+    // Big lets the answers go at once; the next frame checks again once the sheet has its new size.
+    fits();
     requestAnimationFrame(fits);
   }
-  /** Shows See it big only while the read overflows, and Smaller while big: a mark in the card's tool row, on no line of the read. */
+  /**
+   * Pins one to three answers at the card's foot while they take at most half its box, so the read keeps the other half;
+   * four or more, or a row taller than that, scroll with the card as one piece. And shows See it big only while the read
+   * overflows, and Smaller
+   * while big: a mark in the card's tool row, on no line of the read.
+   */
   function fits(): void {
     const box = slot.querySelector<HTMLElement>(".card.top");
-    if (!box || !big.isConnected) return;
+    if (!box) return;
+    const answers = box.querySelector<HTMLElement>(".choices");
+    const count = answers?.querySelectorAll(":scope > button").length ?? 0;
+    // The answers' own span (to a trailing links line) plus the pinned row's edge: the same pinned or not, as pinning
+    // pads the row and a measure it changed would pin and unpin it every frame (review R1.1).
+    const first = answers?.querySelector<HTMLElement>(":scope > button");
+    const last = answers?.lastElementChild as HTMLElement | null | undefined;
+    const row = first && last ? last.offsetTop + last.offsetHeight - first.offsetTop + PIN_EDGE : 0;
+    // A row pins only with a band to spare and lets go once it would pass half, so a pinned row never takes more than
+    // half the card and a few pixels of resize do not flip it; the state is held per card across a redraw, and while a
+    // note is being typed (the keyboard shrinks the card) the answers stay where they are (review R2).
+    const id = box.dataset.need ?? null;
+    const was = id !== null && pinnedNeed === id;
+    const typing = was && !!document.activeElement?.closest(".say-line");
+    const on = !inPane && !isBig && count > 0 && count <= 3 && (typing || row * 2 <= box.clientHeight - (was ? 0 : PIN_BAND));
+    box.classList.toggle("pin-answers", on);
+    pinnedNeed = on ? id : null;
+    if (!big.isConnected) return;
     big.hidden = !isBig && box.scrollHeight <= box.clientHeight;
   }
-  const resized = typeof ResizeObserver === "function" && !inPane ? new ResizeObserver(() => fits()) : null;
+  const resized = typeof ResizeObserver === "function" && !inPane ? new ResizeObserver(() => (fits(), edge())) : null;
   // The sheet and the pane say when the cards shown are as of the last load; before one, the failed read says it.
   const offline = h("div", { class: "decide-offline" });
   const segsRow = h("div", { class: "decide-segs", attrs: { role: "group", "aria-label": "Decide" } }, segs.open, segs.answered);
@@ -350,17 +381,17 @@ function decideView(first: readonly string[], look: { answered?: boolean; untilR
     if (painted === at && (typing || fullScreenElement())) return showing(paintedRev === need.rev ? at : null);
     // The place the card was read to, taken before building the new one moves its clip out and shortens it.
     const read = painted === at ? (scroller()?.scrollTop ?? 0) : 0;
-    // And the answers' own tray, which scrolls on its own once four or more cap it.
-    const tray = painted === at ? (slot.querySelector<HTMLElement>(".choices")?.scrollTop ?? 0) : 0;
     // Taken before building too: the new card takes the clip, and a clip's focused button loses the keyboard with it.
     const refocus = keepFocus(slot);
     const card = answerCard(need);
-    if (inPane) card.append(keyHints(need));
     paintedData = app.dataRev;
     // A redraw that changes nothing leaves the card alone, so a clip playing in it plays on.
     const drawn = slot.firstElementChild;
     if (painted === at && drawn && bare(drawn) === bare(card)) {
       underWayBelow(drawn);
+      // Under way coming or going changes the card's box: the pin and the fade at its foot are checked again.
+      if (!inPane) fits();
+      edge();
       return showing(at);
     }
     const moved = painted !== at;
@@ -368,6 +399,8 @@ function decideView(first: readonly string[], look: { answered?: boolean; untilR
     if (!inPane) card.querySelector(".card-head .head-tools")?.prepend(big);
     slot.replaceChildren(card);
     underWayBelow(card);
+    // Pinned or in the flow from its first frame, before the read's place is put back.
+    if (!inPane) fits();
     painted = at;
     paintedRev = need.rev;
     shownNeed = need;
@@ -377,13 +410,12 @@ function decideView(first: readonly string[], look: { answered?: boolean; untilR
     const box = slot.querySelector<HTMLElement>(".card.top");
     const into = scroller();
     if (into && read) into.scrollTop = read;
-    const answers = slot.querySelector<HTMLElement>(".choices");
-    if (answers && tray) answers.scrollTop = tray;
     refocus();
     requestAnimationFrame(edge);
     if (!inPane) {
       resized?.disconnect();
       resized?.observe(slot);
+      if (box) resized?.observe(box);
       for (const part of box?.children ?? []) resized?.observe(part);
       requestAnimationFrame(fits);
     }
@@ -478,20 +510,24 @@ function decideView(first: readonly string[], look: { answered?: boolean; untilR
         for (const type of FULL_SCREEN_EVENTS) document.addEventListener(type, fullScreenEnded, true);
         unguard = guardTaps(el);
       }
+      // The computer's pane keeps its switch and the keys' ? in the head, so the card has the column; the phone's
+      // switch keeps its own row.
       const parts: HTMLElement[] = [
         h(
           "header",
           { class: "decide-head" },
           rivet("asking", { tone: "agent", size: 40, className: "decide-face" }),
           h("div", { class: "decide-who" }, name, count),
+          inPane ? segsRow : null,
+          inPane ? keysBtn : null,
           skip,
           // The pane's way back is the header's ‹ Home (shell.ts).
           inPane ? null : closeBtn,
         ),
-        segsRow,
+        inPane ? null : segsRow,
         offline,
         slot,
-      ];
+      ].filter((part) => part !== null);
       el.replaceChildren(...parts);
       // A poll that read nothing new leaves the card alone (as the Feed's does): building it again would move its clip.
       // Before the first board, every poll is news: it read the board or failed to.

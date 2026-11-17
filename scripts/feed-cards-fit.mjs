@@ -139,6 +139,31 @@ try {
       });
     }
     if (screen.phone) {
+      // A long ask, five stills and four answers (?longask=1): the card scrolls as one piece, its answers in its flow,
+      // and none of its parts scrolls on its own.
+      await view(async () => {
+        const id = "long-ask-five-stills";
+        await page.goto(`${base}preview/desktop.html?tab=cards&v4=1&longask=1&top=${id}`);
+        await page.waitForSelector(`.decide-sheet .decide-card [data-need="${id}"]`);
+        await settle(page);
+        const problems = await page.evaluate((id) => {
+          const card = document.querySelector(`.decide-sheet .decide-card [data-need="${id}"]`);
+          const answers = card.querySelector(".choices");
+          const out = [];
+          if (!answers || answers.querySelectorAll(":scope > button").length !== 4) return ["the long-ask card has no 4 answers"];
+          if (getComputedStyle(answers).position === "sticky") out.push("4 answers pinned");
+          for (const el of card.querySelectorAll("*")) {
+            const cs = getComputedStyle(el);
+            if (/auto|scroll/.test(cs.overflowY) && el.scrollHeight > el.clientHeight + 1) out.push(`${el.className} scrolls inside the card`);
+          }
+          card.scrollTop = card.scrollHeight;
+          const last = answers.lastElementChild.getBoundingClientRect();
+          const box = card.getBoundingClientRect();
+          if (last.bottom > box.bottom + 1 || last.top < box.top) out.push("the last answer is not in sight at the card's end");
+          return out;
+        }, id);
+        await check(page, `${screen.name} long ask`, problems);
+      });
       await view(async () => {
         await page.goto(`${base}preview/desktop.html?tab=cards&v4=1`);
         await page.click('.decide-seg[data-seg="answered"]');

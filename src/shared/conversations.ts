@@ -213,7 +213,7 @@ export interface MergeResponse {
 
 /**
  * POST /api/conversations/split, your session or the board token (2026-10-20): every line typed with no Reply inside a
- * conversation it did not start, moves out with what chains to it into a new
+ * conversation it did not start before 2026-11-17 (from then such a line belongs there), moves out with what chains to it into a new
  * conversation named by its id; `conversation` limits it to one. `dryRun` answers the same and changes nothing. Run
  * again it moves nothing.
  */

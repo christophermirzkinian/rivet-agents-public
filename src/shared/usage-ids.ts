@@ -181,6 +181,7 @@ const CONTROLS: UsageId[] = [
     ["decide.show-minimised", "Show minimised cards in Decide"],
     ["decide.big", "See it big in Decide"],
     ["decide.retry", "Try again when Decide could not read the cards", { added: "2026-11-10" }],
+    ["decide.keys", "Keyboard keys in Decide", { added: "2026-11-17" }],
   ]),
   ...group("control", "Cards", [
     ["cards.offline.retry", "Retry when offline"],

@@ -2917,8 +2917,6 @@ describe("the desktop layout", () => {
     const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
     needs = [{ ...need("a", "a1"), media: { kind: "before-after", before: clip("a"), after: clip("b") } }];
     await signIn();
-    const hints = [...root.querySelectorAll(".desk-keys .desk-hint")].map((hint) => hint.textContent!);
-    expect(hints.filter((text) => text.startsWith("Space") && text.endsWith("play"))).toHaveLength(1);
     await press(" ");
     expect(play).toHaveBeenCalled();
     expect(root.querySelector(".toast.undo")).toBeNull();

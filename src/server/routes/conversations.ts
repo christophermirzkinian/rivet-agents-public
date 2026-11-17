@@ -501,8 +501,9 @@ export function registerConversations(
     json(response, 200, { moved, conversation: detail(into) } satisfies MergeResponse);
   });
 
-  // Split: the lines you typed with no Reply that the page's conversation took in
-  // move out into conversations of their own, with what chains to them. `dryRun` plans it and changes nothing.
+  // Split: the lines you typed with no Reply before 2026-11-17 (later ones stay in their topic) that the page's
+  // conversation took in move out into conversations of their own, with what chains to them. `dryRun` plans it and
+  // changes nothing.
   router.on("POST", "/api/conversations/split", async ({ request, response }) => {
     const rivet = hasBearer(request, config.boardTokenDigest);
     if (!rivet) {

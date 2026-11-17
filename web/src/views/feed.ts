@@ -1322,28 +1322,6 @@ function recommendedTag(): HTMLElement {
   return tag;
 }
 
-/** Under the open card in a wide window's Decide pane: the keys it takes. */
-export function keyHints(need: ServedNeed): HTMLElement {
-  const hint = (keys: string[], label: string) => h("span", { class: "desk-hint" }, ...keys.map(kbd), label);
-  const options = need.options?.length ?? 0;
-  const todo = isTodo(need);
-  const clips = need.media?.before || need.media?.after;
-  return h(
-    "p",
-    { class: "desk-keys", attrs: { "aria-label": "Keyboard shortcuts" } },
-    hint(["J", "K"], "move"),
-    clips ? hint(["Space"], "play") : null,
-    todo ? null : options ? hint([`1–${Math.min(options, 9)}`], "choose") : wantsText(need) ? null : hint(["A"], "approve"),
-    hint(["C"], "comment"),
-    hint(["X"], "reject"),
-    hint(["L"], "minimise"),
-    hint(["Z"], "undo"),
-    hint(["/"], "search"),
-    hint(["Esc"], "close"),
-    hint(["?"], "all keys"),
-  );
-}
-
 const MOVES: Record<string, number> = { j: 1, ArrowDown: 1, k: -1, ArrowUp: -1 };
 const ANSWERS: Record<string, Action> = { a: "approve", x: "reject", l: "skip" };
 const KEY_USE: Record<Action, string> = { approve: "cards.key.approve", reject: "cards.key.reject", skip: "cards.key.later" };

@@ -1,4 +1,5 @@
 import { h } from "../dom.js";
+import { openSheet } from "./sheet.js";
 
 // The desktop's keyboard help, opened with "?".
 
@@ -35,6 +36,11 @@ const GROUPS: [string, [string[], string][]][] = [
     ],
   ],
 ];
+
+/** The keys' sheet: the "?" key's, and the ? button in the head of the computer's Decide. */
+export function openShortcuts(): void {
+  openSheet("Keyboard shortcuts", { mount, unmount }, "Close", undefined, { use: "shortcuts" });
+}
 
 export function mount(el: HTMLElement): void {
   el.replaceChildren(

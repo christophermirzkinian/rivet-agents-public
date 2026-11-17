@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { BATCH_QUIET_MS, CommandStore } from "../src/server/commandstore.js";
+import { BATCH_QUIET_MS, CommandStore, TOPIC_LINES_STAY_FROM } from "../src/server/commandstore.js";
 import { MAX_CARDS } from "../src/server/http.js";
 import { conversationStage, conversationSummary, idle, isClosed, isDone, linkedPrs, resolveConversation } from "../src/server/conversations.js";
 import { rivetPayload } from "../src/server/push.js";
@@ -484,6 +484,21 @@ describe("conversation routes", () => {
     expect(second).toMatchObject({ text: "Card: Tiles fixed ›", threadId: other });
     const after = (await (await send("GET", "/api/board")).json()) as { board: { needs: Record<string, unknown>[] } };
     expect(after.board.needs.find((need) => need.id === second.card)).toMatchObject({ kind: "decision", title: "Tiles fixed" });
+  });
+
+  it("a line you type with no Reply on a closed topic's page joins it and reopens it (2026-11-17)", async () => {
+    await list();
+    const id = await owner("Sketcher Android crash on open", { conversation: null });
+    clock.advance(BATCH_QUIET_MS);
+    await rivet("Fixed in 1.2.", { replyTo: id });
+    clock.advance(60_000);
+    expect((await patch(id, { closed: true })).status).toBe(200);
+    clock.advance(60_000);
+    const typed = await owner("still crashes on open on Android", { conversation: id });
+    expect((await open(id)).messages.map((message) => message.id)).toContain(typed);
+    const page = await list();
+    expect(page.conversations.find((row) => row.id === id)).toMatchObject({ closed: false });
+    expect(page.conversations.map((row) => row.id)).not.toContain(typed);
   });
 
   it("renames, closes and reopens on a new message; Updates cannot be closed; only your session changes them", async () => {
@@ -1277,6 +1292,21 @@ describe("conversation routes", () => {
       // A near-miss card made later follows the Log Viewer card by its stem, now into the Log Viewer chat.
       expect((await card("log-viewer-review-v2-4861")).status).toBe(200);
       expect(await filed("log-viewer-review-v2-4861")).toMatchObject({ id: viewer, via: "stem" });
+    });
+
+    it("split leaves a line typed on a topic's page from 2026-11-17 in that topic, with its cards; an older one still moves", async () => {
+      const { sketcher, viewer } = await misfiled();
+      clock.advance(TOPIC_LINES_STAY_FROM - clock.now().getTime());
+      const typed = await owner("Sam still can't open the Android test", { conversation: sketcher });
+      clock.advance(1_000);
+      const joined = await owner("and on the tablet too", { conversation: sketcher });
+      expect((await card("sketcher-open", { replyTo: typed })).status).toBe(200);
+      expect(await filed("sketcher-open")).toMatchObject({ id: sketcher });
+      const done = (await (await split()).json()) as { conversations: { id: string }[] };
+      expect(done.conversations.map((one) => one.id)).toEqual([viewer]);
+      const kept = (await open(sketcher)).messages.map((message) => message.id);
+      expect(kept).toEqual(expect.arrayContaining([typed, joined]));
+      expect(await filed("sketcher-open")).toMatchObject({ id: sketcher });
     });
 
     it("split never undoes a merge or takes a Stop it; a say card moves with its answer; a chat you moved into the app keeps what leaves it there", async () => {

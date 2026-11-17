@@ -19,7 +19,7 @@ import { menuButton, menuList } from "./menu.js";
 import { keepAsks } from "./your-asks.js";
 import * as search from "./search.js";
 import { closeSheet, openSheet } from "./sheet.js";
-import * as shortcuts from "./shortcuts.js";
+import { openShortcuts } from "./shortcuts.js";
 import { mountToasts } from "./toast.js";
 import { closeWorkerSheet } from "./worker-sheet.js";
 import type { View } from "./view.js";
@@ -141,7 +141,7 @@ export function mountShell(root: HTMLElement): () => void {
   const KEY_USE: Record<string, string> = { "/": "shell.key.search", "?": "shell.key.shortcuts", "]": "shell.key.chat-pane", "\\": "shell.key.rail", f: "shell.key.focus" };
   const PANE_KEYS: Record<string, () => void> = {
     "/": () => openSheet("Search", search, "Close", undefined, { use: "search" }),
-    "?": () => openSheet("Keyboard shortcuts", shortcuts, "Close", undefined, { use: "shortcuts" }),
+    "?": openShortcuts,
     "]": () => toggle("chat"),
     "\\": () => toggle("rail"),
     f: focus,

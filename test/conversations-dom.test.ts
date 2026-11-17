@@ -244,7 +244,7 @@ describe("Chat", () => {
     expect(root.querySelector(".thing-meta")!.textContent).toBe("PR #341 · chat results-row · size M");
     expect(shownIds()).toEqual(["k1", "kp", "ka", "k2"]);
     expect(root.querySelector<HTMLElement>(".chat-head")!.hidden).toBe(true);
-    expect(box().placeholder).toBe("New chat");
+    expect(box().placeholder).toBe("Reply here");
     expect(root.querySelector(".thing-stop")).not.toBeNull();
     root.querySelector<HTMLButtonElement>(".thing-back")!.click();
     await settle();
@@ -269,7 +269,7 @@ describe("Chat", () => {
     went.mockRestore();
   });
 
-  it("a message from Chat or from a thing's page starts a conversation of its own, unless Reply is set", async () => {
+  it("a message from Chat starts a conversation of its own; one typed on a topic's page stays in that topic, Reply or not", async () => {
     await onChat();
     const sent = () => server.posted.filter((body) => "text" in body);
     send("Add a leaderboard to the quiz app");
@@ -282,21 +282,42 @@ describe("Chat", () => {
     expect(sent().at(-1)).toMatchObject({ conversation: null });
     chat.showConversation("k1");
     await settle();
-    expect(box().placeholder).toBe("New chat");
+    expect(box().placeholder).toBe("Reply here");
+    // k1's PR is open (in review). The send waits in the delayed-send window ("Sending to Rivet in Ns": the server
+    // answers collecting) and keeps k1, and so does a second line typed while it collects.
     send("bigger still");
     await settle();
-    expect(sent().at(-1)).toMatchObject({ text: "bigger still", conversation: null });
+    expect(sent().at(-1)).toMatchObject({ text: "bigger still", conversation: "k1" });
     expect(sent().at(-1)).not.toHaveProperty("replyTo");
-    // The new conversation opens: the page is the line it started.
-    expect(chat.openConversation()).toMatch(/^c9-/);
-    chat.showConversation("k1");
+    send("and bolder");
     await settle();
+    expect(sent().at(-1)).toMatchObject({ text: "and bolder", conversation: "k1" });
+    expect(sent().at(-1)).not.toHaveProperty("replyTo");
+    // No new conversation opens: the page stays on k1 and the line shows in its thread.
+    expect(chat.openConversation()).toBe("k1");
+    expect(title()).toBe("Results row");
+    expect(shownIds()).toContain("c9-3");
+    expect(server.messages.find((one) => one.id === "c9-3")!.threadId).toBe("k1");
     root.querySelector<HTMLButtonElement>('.chat-msg[data-id="k2"] .chat-reply')!.click();
-    expect(box().placeholder).not.toBe("New chat");
+    expect(box().placeholder).not.toBe("Reply here");
     send("yes, merge it");
     await settle();
     expect(sent().at(-1)).toMatchObject({ text: "yes, merge it", replyTo: "k2", conversation: "k1" });
     expect(chat.openConversation()).toBe("k1");
+  });
+
+  it("a line typed on a closed topic's page (its chat closed, its PR closed) stays in that topic", async () => {
+    server.conversations.set("k1", { ...server.conversations.get("k1"), closed: true, stage: "closed" });
+    await onThing("k1");
+    expect(box().placeholder).toBe("Reply here");
+    send("the export still fails on the second page");
+    await settle();
+    const last = server.posted.filter((body) => "text" in body).at(-1)!;
+    expect(last).toMatchObject({ text: "the export still fails on the second page", conversation: "k1" });
+    expect(last).not.toHaveProperty("replyTo");
+    expect(chat.openConversation()).toBe("k1");
+    expect(shownIds()).toContain("c9-1");
+    expect(server.conversations.get("k1")!.closed).toBe(false);
   });
 
   it("Chat at its newest reads its own lines and a thing's unread reply, which it shows (2026-11-16)", async () => {
@@ -599,7 +620,7 @@ describe("a thing's page", () => {
     expect(shownIds().filter((id) => id?.startsWith("g"))).toEqual([]);
     send("on Results");
     await settle();
-    expect(server.posted.find((body) => "text" in body)).toMatchObject({ text: "on Results", conversation: null });
+    expect(server.posted.find((body) => "text" in body)).toMatchObject({ text: "on Results", conversation: "k1" });
   });
 
   it("names the open thing for the viewing report, and nothing on Chat or once Chat is left", async () => {

@@ -708,7 +708,7 @@ describe("chat files", () => {
     root.querySelector<HTMLButtonElement>(".chat-send")!.click();
     await settle();
     await settle();
-    expect(posts.map((post) => post.body)).toEqual([{ clientId: expect.any(String), files: [{ sha256: FILE_SHA, name: "Server report.pdf" }], conversation: null }]);
+    expect(posts.map((post) => post.body)).toEqual([{ clientId: expect.any(String), files: [{ sha256: FILE_SHA, name: "Server report.pdf" }], conversation: "c1" }]);
     const link = root.querySelector<HTMLAnchorElement>(".chat-files .chat-file")!;
     expect(link.getAttribute("href")).toBe(`/media/${FILE_SHA}?name=Server%20report.pdf`);
     expect(link.getAttribute("rel")).toBe("noopener");
@@ -898,7 +898,7 @@ describe("chat attachments", () => {
     await send("");
     expect(posts).toHaveLength(0);
     await send("just text");
-    expect(posts.map((post) => post.body)).toEqual([{ clientId: expect.any(String), text: "just text", conversation: null }]);
+    expect(posts.map((post) => post.body)).toEqual([{ clientId: expect.any(String), text: "just text", conversation: "c1" }]);
   });
 
   it("shows the server's refusal and sends nothing for the photo", async () => {
@@ -1015,7 +1015,7 @@ describe("chat attachments", () => {
       expect(revoked).toEqual(["blob:preview"]);
 
       await send("Two views");
-      expect(posts.map((post) => post.body)).toEqual([{ clientId: expect.any(String), text: "Two views", images: ["1".repeat(64), "3".repeat(64)], conversation: null }]);
+      expect(posts.map((post) => post.body)).toEqual([{ clientId: expect.any(String), text: "Two views", images: ["1".repeat(64), "3".repeat(64)], conversation: "c1" }]);
       expect(preview().hidden).toBe(true);
       const sent = root.querySelector(".chat-msg.mine:last-child")!;
       expect([...sent.querySelectorAll(".chat-images .chat-image-tile")].map((img) => [img.getAttribute("src"), img.getAttribute("alt")])).toEqual([
@@ -1068,7 +1068,7 @@ describe("chat attachments", () => {
       expect(uploads).toHaveLength(2);
       expect(note()).toBe("Photo attached");
       await send("the second one");
-      expect(posts.map((post) => post.body)).toEqual([{ clientId: expect.any(String), text: "the second one", image: "b".repeat(64), conversation: null }]);
+      expect(posts.map((post) => post.body)).toEqual([{ clientId: expect.any(String), text: "the second one", image: "b".repeat(64), conversation: "c1" }]);
     });
 
     it("takes up to 10: the rest are left out with a note, and the button still takes files", async () => {

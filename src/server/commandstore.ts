@@ -400,6 +400,12 @@ function toMessage(row: Row): ChatMessage {
 /** Stop it's line ("Stop <chat>: <title>", "Stop this: <title>"): it is about the page it was sent on, so never splits off. */
 const STOP_LINE = /^Stop [^:\n]+: /;
 
+/**
+ * From this time a line you type on a topic's page belongs there, Reply or not (2026-11-17): split only takes such a line
+ * from before it, when the 2026-10-20 rule made it a misfiled ask.
+ */
+export const TOPIC_LINES_STAY_FROM = Date.parse("2026-11-17T00:00:00.000Z");
+
 /** One conversation splitting off: its root message, the conversation it leaves, and the messages and cards that move. */
 export interface SplitGroup {
   root: string;
@@ -1030,15 +1036,15 @@ export class CommandStore {
   /**
    * What splits off (2026-10-20): in each conversation (only `only`, when given; never a server-owned one or a Find more
    * work issue's), every root, and the messages that chain to it. A root is a line you typed with no Reply and no card
-   * on the page of a conversation it did not start (sent naming that conversation: never a merged-in conversation's
-   * first line, nor a Stop it). A message chains by the line it replies to; a
+   * on the page of a conversation it did not start before 2026-11-17 (`TOPIC_LINES_STAY_FROM`; sent naming that
+   * conversation: never a merged-in conversation's first line, nor a Stop it). A message chains by the line it replies to; a
    * card answer, to its card's line; a card's line, to the line or card its card named (`cardReplyTo`, from the board).
    * Everything else stays. A root that starts its conversation is no root, so a split never plans the same move twice.
    */
   splitPlan(only: string | null, cardReplyTo: ReadonlyMap<string, string>): SplitGroup[] {
     const rows = this.db
       .prepare(
-        `SELECT m.id, m.sender, m.text, m.reply_to, COALESCE(m.thread_id, m.id) AS thread, json_extract(m.media, '$.card') AS card, json_extract(m.media, '$.posted.id') AS posted,
+        `SELECT m.id, m.sender, m.text, m.at, m.reply_to, COALESCE(m.thread_id, m.id) AS thread, json_extract(m.media, '$.card') AS card, json_extract(m.media, '$.posted.id') AS posted,
                 json_extract(a.request, '$.conversation') AS typed_in
            FROM chat_messages m LEFT JOIN audit a ON a.id = m.id
           WHERE COALESCE(m.thread_id, m.id) NOT IN (${SEED_IDS.map(() => "?").join(", ")})
@@ -1067,7 +1073,13 @@ export class CommandStore {
       };
       const isRoot = (row: Row): boolean =>
         row.id !== thread &&
-        ((row.sender === "owner" && row.card === null && row.reply_to === null && row.typed_in === thread && !STOP_LINE.test(String(row.text))));
+        row.sender === "owner" &&
+        row.card === null &&
+        row.reply_to === null &&
+        row.typed_in === thread &&
+        !STOP_LINE.test(String(row.text)) &&
+        // Typed since 2026-11-17 (or with no readable time): it stays in the topic it was typed in.
+        Date.parse(String(row.at)) < TOPIC_LINES_STAY_FROM;
       const parent = (row: Row): Row | undefined => {
         if (typeof row.reply_to === "string" && byId.has(row.reply_to)) return byId.get(row.reply_to);
         if (typeof row.card === "string" && row.sender === "owner") return cardLine(row.card);

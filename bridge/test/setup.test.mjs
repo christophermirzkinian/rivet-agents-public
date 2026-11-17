@@ -56,8 +56,61 @@ test("--keychain stores the bridge and board tokens under the rivet-agents servi
   ]);
 });
 
-test("setup refuses a bad origin or repo", () => {
+test("a port, from --port or a localhost origin, is written for the server, the bridge and the CLI; an https origin's is not", () => {
+  const settings = (...args) => {
+    const dir = fs.mkdtempSync(path.join(tmp, "port-"));
+    main(["--dir", dir, ...args], { out: () => {}, run: noKeychain });
+    return parseEnv(fs.readFileSync(path.join(dir, ".env"), "utf8"));
+  };
+  const local = settings("--origin", "http://localhost:9131");
+  assert.deepEqual([local.RIVET_ORIGIN, local.RIVET_PORT, local.RIVET_URL], ["http://localhost:9131", "9131", "http://127.0.0.1:9131"]);
+  const served = settings("--origin", "https://rivet.example.com", "--port", "9131");
+  assert.deepEqual([served.RIVET_ORIGIN, served.RIVET_PORT, served.RIVET_URL], ["https://rivet.example.com", "9131", "http://127.0.0.1:9131"]);
+  const proxied = settings("--origin", "https://rivet.example.com:8443");
+  assert.deepEqual([proxied.RIVET_PORT, proxied.RIVET_URL], [undefined, undefined]);
+  const usual = settings("--origin", "http://localhost:8130");
+  assert.deepEqual([usual.RIVET_PORT, usual.RIVET_URL], [undefined, undefined]);
+  const six = settings("--origin", "http://[::1]:9131");
+  assert.deepEqual([six.RIVET_PORT, six.RIVET_URL], ["9131", "http://127.0.0.1:9131"]);
+  const padded = settings("--origin", "https://rivet.example.com", "--port", "08130");
+  assert.deepEqual([padded.RIVET_PORT, padded.RIVET_URL], [undefined, undefined]);
+  const alone = settings("--port", "9131");
+  assert.deepEqual([alone.RIVET_ORIGIN, alone.RIVET_PORT, alone.RIVET_URL], ["http://localhost:9131", "9131", "http://127.0.0.1:9131"]);
+});
+
+test("a kept .env says which of the --origin and --port given it does not take, and nothing when none was given", () => {
+  const run = (dir, ...args) => {
+    const lines = [];
+    main(["--dir", dir, ...args], { out: (l) => lines.push(l), run: noKeychain });
+    return lines.filter((l) => l.startsWith("It keeps"));
+  };
+  const dir = path.join(tmp, "kept-port");
+  main(["--dir", dir], { out: () => {}, run: noKeychain });
+  assert.deepEqual(run(dir, "--origin", "https://rivet.example.com", "--port", "9131"), [
+    "It keeps its own settings, not the ones given here: set RIVET_ORIGIN=https://rivet.example.com, RIVET_PORT=9131, RIVET_URL=http://127.0.0.1:9131 in it (or run with --force), then npm run install-bridge again.",
+  ]);
+  assert.deepEqual(run(dir, "--port", "8130"), []);
+  assert.deepEqual(run(dir, "--origin", "http://localhost:8130"), []);
+  assert.deepEqual(run(dir, "--port", "9131"), [
+    "It keeps its own settings, not the ones given here: set RIVET_ORIGIN=http://localhost:9131, RIVET_PORT=9131, RIVET_URL=http://127.0.0.1:9131 in it (or run with --force), then npm run install-bridge again.",
+  ]);
+
+  const served = path.join(tmp, "kept-served");
+  main(["--dir", served, "--origin", "https://rivet.example.com", "--port", "9131"], { out: () => {}, run: noKeychain });
+  assert.deepEqual(run(served), []);
+  assert.deepEqual(run(served, "--repos", "example-org/example-repo"), []);
+  assert.deepEqual(run(served, "--port", "09131"), []);
+  assert.deepEqual(run(served, "--origin", "https://rivet.example.com"), []);
+  assert.deepEqual(run(served, "--origin", "https://rivet.example.com", "--repos","example-org/example-repo"), []);
+  assert.deepEqual(run(served, "--port", "9200"), [
+    "It keeps its own settings, not the ones given here: set RIVET_PORT=9200, RIVET_URL=http://127.0.0.1:9200 in it (or run with --force), then npm run install-bridge again.",
+  ]);
+});
+
+test("setup refuses a bad origin, port or repo", () => {
   assert.throws(() => main(["--dir", path.join(tmp, "bad"), "--origin", "ftp://x"], { out: () => {} }), /http/);
+  assert.throws(() => main(["--dir", path.join(tmp, "bad"), "--port", "99999"], { out: () => {} }), /not a port/);
+  assert.throws(() => main(["--dir", path.join(tmp, "bad"), "--origin", "http://localhost:8130", "--port", "9131"], { out: () => {} }), /not the port in --origin/);
   assert.throws(() => main(["--dir", path.join(tmp, "bad"), "--repos", "nope"], { out: () => {} }), /owner\/name/);
   assert.equal(fs.existsSync(path.join(tmp, "bad", ".env")), false);
 });

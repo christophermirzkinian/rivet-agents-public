@@ -367,29 +367,49 @@
   width: min(100%, 620px);
 }
 
-/* A decision where the home screen was (decide-sheet.ts pane): Decide's head and switch, then the open card at a readable
-   width, which scrolls while its answers and keys stay under it. */
+/* A decision where the home screen was (decide-sheet.ts pane): Decide's head with its switch and keys, then the open card at
+   a readable width, the column's full height with its answers and comment under it; Under way is scrolled to below. */
 .desktop .view.decide-pane {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  padding: 14px 28px 0;
+  padding: 10px 28px 0;
 }
 
 .desktop .decide-pane > .decide-head,
-.desktop .decide-pane > .decide-segs,
 .desktop .decide-pane > .decide-card {
   width: min(100%, 1120px);
   margin-inline: auto;
 }
 
+.desktop .decide-pane > .decide-head {
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.desktop .decide-head > .decide-who {
+  flex: 1 1 200px;
+}
+
+.desktop .decide-head > .decide-segs:not([hidden]) {
+  display: flex;
+  gap: 6px;
+  padding: 0;
+}
+
+.desktop .decide-head .decide-seg {
+  padding: 0 16px;
+}
+
 .desktop .decide-pane > .decide-card {
   padding: 4px 0 14px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .desktop .decide-pane .answer-card {
   display: flex;
-  flex: 1;
+  flex: 0 0 100%;
   flex-direction: column;
   gap: 12px;
   min-height: 0;
@@ -398,14 +418,92 @@
 .desktop .decide-pane .answer-card .card.top {
   position: relative;
   inset: auto;
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   height: auto;
   min-height: 0;
   max-height: none;
   overflow-y: auto;
-  overscroll-behavior: contain;
   transform: none;
   animation: none;
+}
+
+/* A card minimised to its title line keeps that line's height. */
+.desktop .decide-pane .answer-card:has(> .card.top.minimised),
+.desktop .decide-pane .answer-card > .card.top.minimised {
+  flex: none;
+}
+
+.desktop .decide-pane .desk-compose {
+  align-items: center;
+}
+
+/* One line at rest; its two rows back while it is typed in or holds a draft. */
+.desktop .decide-pane .desk-note:not(:focus, :not(:placeholder-shown)) {
+  height: 44px;
+}
+
+.desktop .decide-pane .desk-compose .dictate-mic {
+  top: 0;
+}
+
+/* The card's pictures in one row: its clips, then its stills, one height that keeps the whole card in sight. While the
+   stills have room beside the clip (card-media.ts `stills-beside`) they sit there and the clip's controls go under the
+   row; otherwise everything keeps its built order, the stills under the clip's controls. */
+.desktop .decide-pane .card-body > .card-media {
+  --pics: clamp(200px, 34vh, 420px);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0 12px;
+}
+
+.desktop .decide-pane .card-body > .card-media > * {
+  flex: 1 0 100%;
+}
+
+.desktop .decide-pane .card-body > .card-media.stills-beside > :not(.media-panes, .media-stills) {
+  order: 1;
+}
+
+.desktop .decide-pane .card-body > .card-media > .media-panes {
+  flex: none;
+  width: min(100%, calc(var(--pics) * var(--ratio, 1.7778)));
+  margin: 0;
+}
+
+.desktop .decide-pane .card-body > .card-media.pair > .media-panes {
+  width: min(100%, calc(2 * var(--pics) * var(--ratio, 1.7778) + 12px));
+}
+
+.desktop .decide-pane .card-body > .card-media .media-clip {
+  max-height: var(--pics);
+}
+
+.desktop .decide-pane .card-body > .card-media.stills-beside > .media-stills {
+  flex: 1 1 0;
+}
+
+.desktop .decide-pane .card-body > .card-media > .media-stills {
+  display: flex;
+  min-width: min(100%, 240px);
+  overflow-x: auto;
+}
+
+.desktop .decide-pane .card-body > .card-media .media-still {
+  flex: 0 1 auto;
+  width: auto;
+  min-width: 120px;
+  background: transparent;
+}
+
+/* Its width before it loads is the still's least, so a lazy still is in sight to be loaded. A still squeezed narrower
+   than its shape sits at the top of its box, level with the clip, with no black bars. */
+.desktop .decide-pane .card-body > .card-media .media-still img {
+  width: auto;
+  min-width: 100%;
+  max-width: 100%;
+  height: var(--pics);
+  object-position: center top;
 }
 
 .desktop .decide-pane .answer-card .card-body {
@@ -688,21 +786,6 @@
   min-height: 44px;
   border-width: 1px;
   font-size: var(--fs-m);
-}
-
-.desktop .desk-keys {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 16px;
-  margin: 0;
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.desktop .desk-hint {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
 }
 
 /* Centred only while it fits: overflow past the top of a scroller can never be scrolled back to. */

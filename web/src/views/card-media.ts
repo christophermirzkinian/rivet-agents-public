@@ -66,6 +66,8 @@ export const MEDIA_RESIZED = "media-resized";
 const OVERLAY_GAP = 8;
 /** The corner's two 44 px buttons stacked, with their gaps and margins: a shorter clip lays them in a row. */
 const CORNER_COLUMN = 2 * 44 + 3 * OVERLAY_GAP;
+/** The room stills need beside a clip (their 240 px least and the 12 px gap, desktop.css's Decide pane). */
+const STILLS_BESIDE = 240 + 12;
 
 function clip(ref: MediaRef, poster: MediaRef | undefined, label: string): HTMLVideoElement | HTMLImageElement {
   if (ref.type.startsWith("image/")) return h("img", { class: "media-clip", attrs: { src: url(ref), alt: label, loading: "lazy", decoding: "async", "data-use": "media.player.image" } });
@@ -194,7 +196,17 @@ function build(media: Media, title: string): HTMLElement {
   }
   if (controls.childElementCount) root.append(controls);
   if (media.clips) root.append(audioList(media.clips));
-  if (media.stills) root.append(stillStrip(media.stills, title));
+  if (media.stills) {
+    root.append(stillStrip(media.stills, title));
+    // Where the layout sets them beside the clip (the computer's Decide pane), the stills go there only while they
+    // have the room; otherwise they stay under the clip's own controls, in the order built here.
+    if (pairs.length) {
+      const beside = () => root.classList.toggle("stills-beside", root.clientWidth > 0 && root.clientWidth - panes.offsetWidth >= STILLS_BESIDE);
+      const watch = new ResizeObserver(beside);
+      watch.observe(root);
+      watch.observe(panes);
+    }
+  }
   if (media.files) {
     root.append(h("div", { class: "media-files" }, ...media.files.map((file) => fileButtons(file, controller.signal, live))));
   }

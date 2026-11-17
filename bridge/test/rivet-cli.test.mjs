@@ -431,6 +431,34 @@ test("card drop with --if-match follows the version each drop returns", async ()
   assert.match(stale.stderr, /board version is stale/);
 });
 
+test("card add inside a chat names that chat, so the answer comes back to it; --chat wins and an edit names none", async () => {
+  const server = stubServer();
+  const inChat = { env: { ...ENV, RIVET_CHAT_NAME: "chat-dac06ed5e7f8" }, fetch: server.fetch };
+  const own = await cli(["card", "add", "colours", "--title", "Pick a colour"], inChat);
+  assert.equal(own.code, 0, own.stderr);
+  assert.equal(server.state.board.needs.find((n) => n.id === "colours")?.chat, "chat-dac06ed5e7f8");
+  const named = await cli(["card", "add", "named", "--title", "t", "--chat", "myproject"], inChat);
+  assert.equal(named.code, 0, named.stderr);
+  assert.equal(server.state.board.needs.find((n) => n.id === "named")?.chat, "myproject");
+  assert.match(named.stderr, /card named names chat myproject, not this chat \(chat-dac06ed5e7f8\): its answer is typed there/);
+  assert.doesNotMatch(own.stderr, /not this chat/);
+  const edited = await cli(["card", "edit", "named", "--title", "t2"], inChat);
+  assert.equal(edited.code, 0, edited.stderr);
+  assert.equal(server.state.calls.at(-1)?.body?.chat, undefined);
+  assert.doesNotMatch(edited.stderr, /not this chat/);
+  const moved = await cli(["card", "edit", "named", "--chat", "elsewhere"], inChat);
+  assert.equal(moved.code, 0, moved.stderr);
+  assert.match(moved.stderr, /card named names chat elsewhere, not this chat/);
+  const blank = await cli(["card", "edit", "named", "--chat", ""], inChat);
+  assert.doesNotMatch(blank.stderr, /not this chat/);
+  const outside = await cli(["card", "add", "plain", "--title", "t"], { fetch: server.fetch });
+  assert.equal(outside.code, 0, outside.stderr);
+  assert.equal(server.state.board.needs.find((n) => n.id === "plain")?.chat, undefined);
+  const odd = await cli(["card", "add", "odd", "--title", "t"], { env: { ...ENV, RIVET_CHAT_NAME: "not a name" }, fetch: server.fetch });
+  assert.equal(odd.code, 0, odd.stderr);
+  assert.equal(server.state.board.needs.find((n) => n.id === "odd")?.chat, undefined);
+});
+
 test("card add --reply-to files it in your ask's conversation and says where; conversation merge moves a stray", async () => {
   const server = stubServer();
   assert.deepEqual(parseArgs(["card", "add", "page-v2-486", "--title", "t", "--reply-to", "9410d117-aaaa"]).fields, { title: "t", replyTo: "9410d117-aaaa" });

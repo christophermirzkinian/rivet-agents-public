@@ -425,6 +425,32 @@ if (new URLSearchParams(location.search).get("pictured") === "1")
     ],
   } as (typeof board.needs)[number]);
 
+// ?longask=1: a decision with a long ask, five stills and four options, first on the deck: the card that read in a
+// three-line box over its pinned answers on a phone-sized viewport.
+if (new URLSearchParams(location.search).get("longask") === "1")
+  board.needs.unshift({
+    id: "long-ask-five-stills",
+    kind: "decision",
+    title: "Weekly report: which chart goes at the top?",
+    ask: [
+      "The weekly report gets one chart above its table. It reads the same numbers as the table, week by week.",
+      "• Stacked bars: one bar a week, split by team, so each week's total reads at a glance.",
+      "• One line a team: the trend reads well, but the lines cross where two teams are close.",
+      "• The table stays under the chart either way, with the same columns in the same order.",
+      "• Stacked bars take about 2 hours to a preview for your OK.",
+      "Pictures: now | stacked bars | lines; the table; a close-up of the legend.",
+    ].join("\n"),
+    chat: "weekly-report",
+    since: ago(5),
+    media: { kind: "stills", stills: ["Now", "Stacked bars", "Lines", "Table", "Legend"].map((label, i) => ({ sha256: drawnStill(`c${i}`.repeat(32), label, 40 + i * 60, 1280, 720), type: "image/png" })) },
+    options: [
+      { label: "Stacked bars, one a week, split by team", recommended: true, detail: "About 2 hours to a preview" },
+      { label: "One line a team, the trend over the quarter", detail: "Lines cross when teams are close" },
+      { label: "Keep the table only", detail: "No chart this week, nothing to build or check" },
+      { label: "Change something", text: true },
+    ],
+  } as (typeof board.needs)[number]);
+
 // The pictured map as a normal evening's: two agents hold a decision (the pictured one and the late sign-in retry) and
 // the others' cards are news, so the ? stays a focus and not a mark on every seat.
 if (new URLSearchParams(location.search).get("pictured") === "1")

@@ -103,6 +103,7 @@ Card flags: --kind (default decision; a card is for what you must confirm or cho
   work takes no card: rivet ask close records it. Progress and status: --kind decision --option "Got it", one tap
   clears it; --kind update is a note with its --tag leading its title and its push quiet; it takes no --option,
   --reply, --risk or --step) --title --ask <text> | --ask-file <file> --chat --pr --issue --repo owner/name
+  --chat c         the chat your answer is typed into; card add from inside a chat defaults to that chat (RIVET_CHAT_NAME)
   --risk money|auth|fairness --reply text --since <iso> (default now) --push needs-you|fyi
   --ask-id a-N     the ask the card is about: your answer makes it that ask's card, so the card stays "under way"
                    until the ask closes
@@ -1236,6 +1237,14 @@ async function card(o, d) {
   }
   if (o.askFile !== undefined) o.fields.ask = fs.readFileSync(o.askFile, "utf8").trimEnd();
   const body = cardBody(o, base, d.now());
+  // A card added from inside a runner chat names that chat, so the answer is typed back into it: the runner sets
+  // RIVET_CHAT_NAME in the chat's environment. A --chat (or the --json's) still wins.
+  const own = d.env.RIVET_CHAT_NAME;
+  const inChat = typeof own === "string" && isChatName(own);
+  if (o.sub === "add" && inChat && body.chat === undefined) body.chat = own;
+  // A card from a chat that names another (a conversation id, say) has its answer typed there, or into a new chat: said
+  // once the card is up.
+  const elsewhere = inChat && typeof body.chat === "string" && body.chat !== "" && body.chat !== own ? body.chat : null;
   // A PR (--pr or the --json's) with no repo is this folder's repo's. An edit that names a PR outside any checkout
   // clears the stored card's repo, so another repo does not stay on the new PR; an edit that names no PR keeps it.
   if (typeof body.pr === "number" && body.repo === undefined) {
@@ -1324,6 +1333,8 @@ async function card(o, d) {
     }
     throw err;
   }
+  if (elsewhere !== null)
+    d.stderr(`rivet: card ${id} names chat ${sanitizeLine(elsewhere, 80)}, not this chat (${own}): its answer is typed there, or into a new chat when none by that name runs; name no chat to have it typed here\n`);
   // Placed again and re-stamped once the write lands: a yes the bridge took during the write (to a video before this
   // one, which a before-only video cannot tell apart, or after another writer's) never leaves this video unheld. Marked
   // as this write's, so a same-id writer's refusal leaves it; skipped when a later write's version is recorded.

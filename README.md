@@ -28,7 +28,7 @@ serves) and the **bridge** on your Mac, which runs your chats in tmux and types 
 
 ## What you need
 
-- A Mac with [Node 22+](https://nodejs.org) and tmux (`brew install tmux`). On Node 22 the redactor hides some plain sentences as well as secrets; Node 23 or later keeps them.
+- A Mac with [Node 24+](https://nodejs.org) and tmux (`brew install tmux`).
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) signed in (a Claude Pro or Max plan, or an
   Anthropic API key). Codex is optional.
 - A free [Tailscale](https://tailscale.com) account, so your phone can reach the Mac over HTTPS (passkeys need
@@ -62,7 +62,8 @@ serves) and the **bridge** on your Mac, which runs your chats in tmux and types 
    ```
 
    This writes `.env` (mode 0600) with fresh random tokens and web-push keys, and prints your one-time sign-in
-   link. Add `--keychain` to keep the tokens in the macOS Keychain as well, and
+   link. If you served another port than 8130 in step 2, add `--port <that port>`. Add `--keychain` to keep the
+   tokens in the macOS Keychain as well, and
    `--repos you/your-repo,you/other-repo` to let the bridge comment on those GitHub repos.
 
 4. **Start it.**
@@ -93,13 +94,15 @@ Any script or agent on the Mac can post a card with the CLI. Tell your agents ab
 
 ```sh
 npm run --silent rivet -- card add colours \
-  --chat myproject \
   --title "Pick a colour for the header" \
   --ask "The header is grey today. Which colour should it be?" \
   --option "Blue" --recommended --option "Green" --option "Keep it as it is"
 ```
 
-Your answer is typed into the chat named by `--chat`. `npm run rivet -- --help` lists every command: cards
+Your answer is typed back into the chat that posted the card: every chat Rivet starts, from the Mac or from the
+phone, knows its own name (`RIVET_CHAT_NAME`), and `card add` uses it. A script outside a chat names one with
+`--chat <name>` (`npm run chat -- ls` lists them). A chat started before you updated Rivet does not know its name
+yet: start it again, or pass `--chat`. `npm run rivet -- --help` lists every command: cards
 with pictures and videos (`--media`), your asks, threads and the board.
 
 ## Optional features

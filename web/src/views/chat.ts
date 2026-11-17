@@ -1207,18 +1207,24 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     return shown.kind === "conversation" ? shown.id : null;
   }
 
-  /** A line sent from a page with no Reply starts a chat of its own; the Agent Chat room is the one exception. */
-  function startsNewChat(): boolean {
-    return shown.kind === "conversation" && shown.id !== TEAM_ROOM_ID && !replyingTo;
+  /**
+   * A server-owned room other than the Agent Chat room: a line typed there with no Reply starts a chat of its own, since
+   * the room files no card. A topic's page keeps its lines (2026-11-17).
+   */
+  function roomStartsChat(id: string): boolean {
+    return ownsNoCard(id) && id !== TEAM_ROOM_ID;
   }
 
   function paintPlaceholder(): void {
+    const id = shownId();
     text.placeholder =
-      shownId() === TEAM_ROOM_ID
+      id === TEAM_ROOM_ID
         ? `Message ${RIVET_NAME} about a chat`
-        : startsNewChat()
+        : id !== null && !replyingTo
           ? // Short enough for one line beside the mic at 320 (the box is about 100px of text there).
-            "New chat"
+            roomStartsChat(id)
+            ? "New chat"
+            : "Reply here"
           : thingPage()
             ? "Say something to this thing…"
             : "Message";
@@ -2657,9 +2663,9 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     sendBtn.disabled = true;
     changed();
     const target = replyingTo;
-    // A message starts a server conversation of its own, from Chat or from a page; a reply joins the one it answers
-    // (the Agent Chat room's lines stay in the room).
-    const conversation = screen.kind === "conversation" && (target || screen.id === TEAM_ROOM_ID) ? screen.id : null;
+    // Typed on a topic's page (the Agent Chat room too), with or without Reply, it joins that topic, whatever its stage or
+    // a closed chat (2026-11-17). Chat's own box, and a server-owned room's with no Reply, start a conversation of their own.
+    const conversation = screen.kind === "conversation" && (target || !roomStartsChat(screen.id)) ? screen.id : null;
     const sentBox = draftBox;
     const sentRev = readDraft().trim() === body ? readDraftRev() : null;
     const sentDraft = draftLineage.begin(sentRev);
@@ -2717,7 +2723,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
           : {}),
         threadId: id,
       };
-      // Sent from a page with no Reply: that chat is new, so it opens to show where Rivet's answer lands.
+      // Sent from a server-owned room with no Reply: that chat is new, so it opens to show where Rivet's answer lands.
       if (alive && screen.kind === "conversation" && conversation === null && shown === screen) openConversationNow(id);
       if (alive) arrived(sent);
     } catch (error) {
