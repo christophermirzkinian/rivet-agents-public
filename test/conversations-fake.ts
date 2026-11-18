@@ -170,8 +170,9 @@ export function fakeServer(messages: ChatMessage[], conversations: Record<string
       const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
       server.posted.push(body);
       const answer = server.answer(body);
-      // As the server does: the message lands in its conversation, a new one when null, and reopens a closed one.
-      const conversation = typeof body.conversation === "string" ? body.conversation : String(answer.id);
+      // As the server does: the message lands in its conversation, or the replied line's, else a new one, and reopens a closed one.
+      const replied = server.messages.find((message) => message.id === body.replyTo);
+      const conversation = typeof body.conversation === "string" ? body.conversation : replied ? conversationOf(replied) : String(answer.id);
       server.messages.push({ id: String(answer.id), from: "owner", text: String(body.text ?? ""), at: String(answer.at), status: "sent", threadId: conversation });
       const fields = server.conversations.get(conversation);
       if (fields?.closed) fields.closed = false;

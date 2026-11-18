@@ -304,8 +304,6 @@ export interface UsageAsks {
   report(device: UsageDevice, now?: Date): UsageReport;
   /** Retire? or Rework? tapped on the page: the card's id, or why there is none. */
   ask(id: string, ask: UsageAsk, device: UsageDevice): { card: string } | { status: number; error: string };
-  /** The Monday line's count: ids never used in 30 days, or null before 30 full days of recording. */
-  neverCount(now: Date): number | null;
   /** The Monday pass: up to 3 Retire? cards a week, from Mon 30 Nov; safe to call every minute. */
   weekly(): number;
   /** Your answer on any card: an ask's is kept, so Keep holds the id off Retire?. */
@@ -348,9 +346,6 @@ export function createUsageAsks(deps: UsageAsksDeps): UsageAsks {
       if (row.asked) return { status: 409, error: "a card already asked about it" };
       const card = send(entry, ask, false, now, { device, ...(row.rework ? { rework: row.rework } : {}) });
       return card ? { card } : { status: 503, error: "the card could not be added" };
-    },
-    neverCount(now) {
-      return report("phone", now).never?.length ?? null;
     },
     weekly() {
       const now = deps.now();

@@ -94,9 +94,12 @@ export const patchConversation = (id: string, patch: ConversationPatch) => call<
 /** One action on several conversations at once: Chat marks its lines read this way. */
 export const batchConversations = (ids: readonly string[], action: ConversationAction) => call<BatchResponse>("POST", "/api/conversations/batch", { ids, action });
 export const searchChat = (query: string) => call<{ results: SearchItem[] }>("GET", `/api/chat/search?q=${encodeURIComponent(query)}`);
-/** `conversation`: the open conversation it is typed in, or null to start a new one; every caller picks. */
-export const sendChat = (text: string, images: readonly string[], files: readonly FileRef[], replyTo: string | undefined, conversation: string | null) =>
-  once(`chat\n${text}\n${images.join(",")}\n${files.map((file) => file.sha256).join(",")}\n${replyTo ?? ""}\n${String(conversation)}`, (clientId) =>
+/**
+ * `conversation`: the open conversation it is typed in, or null to start a new one; every caller picks. `typed`: he
+ * typed it in a message box, rather than a tap sending it for him.
+ */
+export const sendChat = (text: string, images: readonly string[], files: readonly FileRef[], replyTo: string | undefined, conversation: string | null, typed = false) =>
+  once(`chat\n${text}\n${images.join(",")}\n${files.map((file) => file.sha256).join(",")}\n${replyTo ?? ""}\n${String(conversation)}\n${typed}`, (clientId) =>
     call<AuditEntry>("POST", "/api/chat", {
       clientId,
       ...(text ? { text } : {}),
@@ -104,8 +107,12 @@ export const sendChat = (text: string, images: readonly string[], files: readonl
       ...(files.length ? { files } : {}),
       ...(replyTo ? { replyTo } : {}),
       conversation,
+      ...(typed ? { typed } : {}),
     }),
   );
+
+/** Asks Rivet again the question Rivet's line `id` did not answer; the same answer asked twice gets its first back. */
+export const notAnswer = (id: string) => call<AuditEntry>("POST", `/api/chat/${encodeURIComponent(id)}/not-answer`);
 
 /** Cancels the collecting chat window `id` is in; a 409 says it has already gone to Rivet. */
 export const cancelChat = (id: string) => call<ChatCancelled>("POST", "/api/chat/cancel", { id });

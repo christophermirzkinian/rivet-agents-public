@@ -66,7 +66,8 @@ describe("the app's keyframes", () => {
     expect(read("styles.css")).not.toMatch(/main\.view \*/);
     expect(read("views/sheet.ts")).toMatch(/getAnimations\(\{ subtree: true \}\)[\s\S]*animation\.pause\(\)/);
     expect(read("views/command.css")).toMatch(
-      /\.chat-msg\.has-rivet:not\(:nth-last-child\(1 of \.has-rivet\)\) \.chat-rivet \*\s*\{\s*animation: none;/,
+      // Within a topic card the newest Rivet moves; every card but the last is still, its working dots too.
+      /\.chat-msg\.has-rivet:not\(:nth-last-child\(1 of \.has-rivet\)\) \.chat-rivet \*,\s*\.chat-ex:not\(:last-child\) \.chat-rivet,\s*\.chat-ex:not\(:last-child\) \.chat-rivet \*,\s*\.chat-ex:not\(:last-child\) \.chat-ex-dots i\s*\{\s*animation: none;/,
     );
   });
 });

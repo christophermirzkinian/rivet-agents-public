@@ -24,7 +24,7 @@ export interface AnsweredCard {
 }
 
 /**
- * The ask behind an answered card (GitHub sweep idea 3, the owner's pick 15 Nov): under way at its stage until it closes, then
+ * The ask behind an answered card (GitHub sweep idea 3): under way at its stage until it closes, then
  * done (live or done) or called off (parked), with the note it closed with.
  */
 export type AnsweredAsk =
@@ -81,10 +81,21 @@ export function answeredDone({ card, reply }: Pick<AnsweredCard, "card" | "reply
   return facts.finishedCards.has(card.id);
 }
 
-/** The answered rows a chip and Show done keep at `now`: answered inside the chip's hours, and not done unless Show done is on. */
-export function answeredShown<T extends Pick<AnsweredCard, "reply" | "done">>(cards: readonly T[], window: AnsweredWindow, showDone: boolean, now: number): T[] {
+/**
+ * An answered card whose ask is under way stays on Answered whatever the chip, until its ask closes: Under way left the
+ * cards sheet for Answered.
+ */
+export function keptPastWindow(entry: Pick<AnsweredCard, "ask">): boolean {
+  return entry.ask?.state === "underWay";
+}
+
+/**
+ * The answered rows a chip and Show done keep at `now`: answered inside the chip's hours, or under way (`keptPastWindow`),
+ * and not done unless Show done is on.
+ */
+export function answeredShown<T extends Pick<AnsweredCard, "reply" | "done" | "ask">>(cards: readonly T[], window: AnsweredWindow, showDone: boolean, now: number): T[] {
   const since = window === null ? -Infinity : now - window * 3600_000;
-  return cards.filter((entry) => Date.parse(entry.reply.at) >= since && (showDone || !entry.done));
+  return cards.filter((entry) => (keptPastWindow(entry) || Date.parse(entry.reply.at) >= since) && (showDone || !entry.done));
 }
 
 /**

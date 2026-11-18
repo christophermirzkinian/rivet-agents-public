@@ -3,7 +3,7 @@ import "./feed.css";
 import { RIVET_NAME, chatName } from "../../../src/shared/names.js";
 import { MAX_SHORT, type Decision, type Reply, type ServedNeed } from "../../../src/shared/board.js";
 import { chatImages, imageFields } from "../../../src/shared/command.js";
-import { canApprove, isPlan, isTodo, isUpdate, MERGE_READY, optionNeedsText, stepsOf, threadKey, wantsText } from "../../../src/shared/answers.js";
+import { canApprove, isGotIt, isPlan, isTodo, isUpdate, MERGE_READY, optionNeedsText, stepsOf, threadKey, wantsText } from "../../../src/shared/answers.js";
 import { isToday, maybeWhen, when } from "../../../src/shared/when.js";
 import { NOTHING_NEEDS_YOU } from "../../../src/shared/words.js";
 import * as api from "../api.js";
@@ -52,7 +52,7 @@ import { dropPhotos, photosControl, photosHold, photosPayload, restorePhotos } f
 import { reopenBand } from "./answered.js";
 import { cardAnswered, useTap } from "../usage.js";
 import { sending } from "./mac-wait.js";
-import { cardMedia, stopCardMedia } from "./card-media.js";
+import { cardMedia, cardStage, stopCardMedia } from "./card-media.js";
 import { cardShareButton } from "./card-share.js";
 import { openThingFor, showConversation } from "./chat.js";
 import { rivet } from "../rivet/rivet.js";
@@ -196,7 +196,7 @@ function choiceLinks(detail: string | undefined): HTMLElement | null {
  * The open card. Its option boxes are the answer buttons, one list (no second row of the same
  * answers under the card); its head keeps the risk tag and the conversation link, not the kind word or the count left.
  */
-function topCard(need: ServedNeed, minimisable = false): HTMLElement {
+function topCard(need: ServedNeed, minimisable = false, sheet = false): HTMLElement {
   const card = cardState(need.id);
   if (card.confirm && card.confirm.rev !== need.rev) {
     card.confirm = null;
@@ -214,49 +214,63 @@ function topCard(need: ServedNeed, minimisable = false): HTMLElement {
   const meta = need.chat ? chatName(need.chat) : "";
   const since = maybeWhen(need.since);
   const thread = app.cardThreads.get(need.id);
-  const askText = ask ? h("p", { class: todo ? "card-ask todo-ask" : "card-ask" }, ...linkify(ask)) : null;
   const rec = (option: (typeof options)[number]) => !!option.recommended;
-  // On the phone the answers are the card's last thing, over the say-line: Message, Share and the one "−" head it.
-  const phone = !isDesk();
-  const share = keyed(cardShareButton(need, "card-share-top"), `share-${need.id}`);
+  // In the phone's Decide sheet the card fills it: its tools are in the sheet's ⋯ menu (cardMenu), its grey line leads,
+  // its media is a stage, and its answers are the card's last thing over the say-line.
+  const phone = sheet;
+  const points = phone && !todo && ask ? askPoints(ask) : null;
+  const askText = points ?? (ask ? h("p", { class: todo ? "card-ask todo-ask" : "card-ask" }, ...linkify(ask)) : null);
+  const metaLine = meta || since ? h("p", { class: "card-meta" }, meta, meta && since ? " · " : null, since ? h("span", { attrs: { "data-age": need.since! } }, since) : null) : null;
+  const kindChip = isPlan(need) ? h("span", { class: "card-kind plan" }, need.chat ? `Plan · ${chatName(need.chat).replace(/-/g, " ")}` : "Plan") : null;
+  const riskChip = need.risk ? h("span", { class: "chip risk" }, `${need.risk} change`) : null;
+  const others = options.filter((option) => !yellowAnswer(need, option));
+  // Short answers with no detail line sit two to a row under the yellow one; any longer one stacks them all, as does a
+  // links line under any answer (it would take a cell of the pairs).
+  const paired =
+    phone &&
+    others.length >= 2 &&
+    others.every((option) => !option.detail && option.label.length <= PAIR_LABEL) &&
+    !options.some((option) => option.detail && linksIn(option.detail).length);
+  const wide = paired && others.length % 2 ? others.at(-1) : undefined;
   const element = h(
     "article",
     {
       class: `card box top ${kindClass(need.kind)}${need.risk ? " risky" : ""}${shownCards.has(need.id) ? "" : " entering"}`,
       attrs: { "data-need": need.id, "data-rev": need.rev, "aria-label": need.title },
     },
-    h(
-      "div",
-      { class: "card-head" },
-      // Every card is Rivet asking you something: his ? face heads it.
-      rivet("asking", { size: 30, className: "card-rivet" }),
-      isPlan(need) ? h("span", { class: "card-kind plan" }, need.chat ? `Plan · ${chatName(need.chat).replace(/-/g, " ")}` : "Plan") : null,
-      need.risk ? h("span", { class: "chip risk" }, `${need.risk} change`) : null,
-      thread
-        ? h(
-            "button",
-            {
-              class: "card-thread",
-              attrs: { type: "button", "aria-label": `Round ${thread.round} of the conversation ${thread.title}. Open the conversation.`, "data-use": "cards.thread.open" },
-              on: { click: () => openConversation(thread.thread) },
-            },
-            `Round ${thread.round} · ${thread.title}`,
-          )
-        : null,
-      phone
-        ? h("div", { class: "head-acts" }, messageButton(need, "Message"), share, h("div", { class: "head-tools" }, minimisable ? minimiseButton(need, "top") : null, rejectButton(need)))
-        : h("div", { class: "head-tools" }, minimisable ? minimiseButton(need, "top") : null, rejectButton(need)),
-    ),
+    phone
+      ? null
+      : h(
+          "div",
+          { class: "card-head" },
+          // Every card is Rivet asking you something: his ? face heads it.
+          rivet("asking", { size: 30, className: "card-rivet" }),
+          kindChip,
+          riskChip,
+          thread
+            ? h(
+                "button",
+                {
+                  class: "card-thread",
+                  attrs: { type: "button", "aria-label": `Round ${thread.round} of the conversation ${thread.title}. Open the conversation.`, "data-use": "cards.thread.open" },
+                  on: { click: () => openConversation(thread.thread) },
+                },
+                `Round ${thread.round} · ${thread.title}`,
+              )
+            : null,
+          h("div", { class: "head-tools" }, minimisable ? minimiseButton(need, "top") : null, rejectButton(need)),
+        ),
     h(
       "div",
       { class: need.media ? "card-body with-media" : "card-body" },
-      // The owner reads what a card is about, and what it asks, before who sent it or its photos or clip.
       reopenBand(need),
+      phone && (kindChip || riskChip) ? h("p", { class: "card-tags" }, kindChip, riskChip) : null,
+      // The owner reads what a card is about, and what it asks, before who sent it or its photos or clip.
       h("h2", { class: "card-title" }, need.title),
       askText,
       ...planPoints(need),
-      meta || since ? h("p", { class: "card-meta" }, meta, meta && since ? " · " : null, since ? h("span", { attrs: { "data-age": need.since! } }, since) : null) : null,
-      need.media ? cardMedia(need.id, need.media, need.title) : null,
+      metaLine,
+      ...(need.media ? (phone ? cardStage(need.id, need.media, need.title) : [cardMedia(need.id, need.media, need.title)]) : []),
       todo && steps.length ? h("ol", { class: "todo-steps" }, ...steps.map((step) => h("li", {}, ...linkify(step)))) : null,
       proofBlock(need),
       links.length
@@ -266,7 +280,7 @@ function topCard(need: ServedNeed, minimisable = false): HTMLElement {
             ...links.map(cardLink),
           )
         : null,
-      listed
+      listed && !phone
         ? h(
             "p",
             { class: "choices-cap" },
@@ -277,19 +291,24 @@ function topCard(need: ServedNeed, minimisable = false): HTMLElement {
       listed
         ? h(
             "div",
-            { class: "choices" },
+            { class: paired ? "choices paired" : "choices" },
             ...options.flatMap((option, index) => [
               // The answer names the button, so a redraw keeps the keyboard on this answer (dom.ts keepFocus).
               keyed(
                 sending(button(
-                [
-                  isDesk() && index < 9 ? h("kbd", { class: "key choice-key" }, String(index + 1)) : null,
-                  rec(option) ? h("span", { class: "choice-top" }, h("span", { class: "choice-rec" }, "Recommended")) : null,
-                  h("span", { class: "choice-label" }, option.label),
-                  option.detail ? h("span", { class: "choice-detail" }, option.detail) : null,
-                ],
+                phone
+                  ? [
+                      h("span", { class: "choice-text" }, h("span", { class: "choice-label" }, rec(option) ? option.label.replace(SAID_RECOMMENDED, "") : option.label), option.detail ? h("span", { class: "choice-detail" }, option.detail) : null),
+                      rec(option) ? h("span", { class: "choice-rec choice-tag" }, "Recommended") : null,
+                    ]
+                  : [
+                      isDesk() && index < 9 ? h("kbd", { class: "key choice-key" }, String(index + 1)) : null,
+                      rec(option) ? h("span", { class: "choice-top" }, h("span", { class: "choice-rec" }, "Recommended")) : null,
+                      h("span", { class: "choice-label" }, option.label),
+                      option.detail ? h("span", { class: "choice-detail" }, option.detail) : null,
+                    ],
                 () => decide(need, "choice", option.label),
-                rec(option) ? "choice rec" : "choice",
+                `${yellowAnswer(need, option) ? "choice rec" : "choice"}${option === wide ? " wide" : ""}`,
                 false,
                 "cards.answer.choice",
                 index + 1,
@@ -301,7 +320,7 @@ function topCard(need: ServedNeed, minimisable = false): HTMLElement {
           )
         : null,
       card.error ? h("p", { class: "card-error box", attrs: { role: "alert" } }, card.error) : null,
-      phone ? null : h("div", { class: "card-tools" }, messageButton(need, `Message ${RIVET_NAME}`), share, minimisable ? minimiseButton(need, "bottom") : null),
+      phone ? null : h("div", { class: "card-tools" }, messageButton(need, `Message ${RIVET_NAME}`), keyed(cardShareButton(need, "card-share-top"), `share-${need.id}`), minimisable ? minimiseButton(need, "bottom") : null),
     ),
     h("div", { class: "more-cue", attrs: { "aria-hidden": "true" } }, "More ↓"),
     card.confirm ? confirmOverlay(need, card) : null,
@@ -342,27 +361,53 @@ function messageButton(need: ServedNeed, word: string): HTMLElement | null {
   return message;
 }
 
-function minimiseButton(need: ServedNeed, where: "top" | "bottom"): HTMLElement {
-  // A recording in the say-line is written down first: closing its box would drop the words (dictation.ts).
-  // A "−" alone, no word; its name and tooltip still say Minimise.
-  const minimise = keyed(
-    button(
-      "−",
-      () =>
-        afterVoice(() => {
-          cardAnswered(need, "minimise");
-          setMinimised(need.id, need.rev, true);
-        }),
-      `min-btn ${where}`,
-      false,
-      "cards.minimise",
-    ),
-    `min-${where}-${need.id}`,
-  );
-  minimise.setAttribute("aria-label", `Minimise ${need.title}`);
-  minimise.title = "Minimise";
-  return minimise;
+/** A recording in the say-line is written down first: closing its box would drop the words (dictation.ts). */
+function minimise(need: ServedNeed): void {
+  afterVoice(() => {
+    cardAnswered(need, "minimise");
+    setMinimised(need.id, need.rev, true);
+  });
 }
+
+function minimiseButton(need: ServedNeed, where: "top" | "bottom"): HTMLElement {
+  // A "−" alone, no word; its name and tooltip still say Minimise.
+  const small = keyed(button("−", () => minimise(need), `min-btn ${where}`, false, "cards.minimise"), `min-${where}-${need.id}`);
+  small.setAttribute("aria-label", `Minimise ${need.title}`);
+  small.title = "Minimise";
+  return small;
+}
+
+/** The phone Decide sheet's ⋯ menu rows for the open card: the tools its head held, each doing what that tool did. */
+export function cardMenu(need: ServedNeed): HTMLElement[] {
+  const thread = app.cardThreads.get(need.id);
+  const row = (icon: string, word: string, then: () => void, use: string, variant = "", aside?: string) =>
+    button([svg(icon, "menu-icon"), h("span", { class: "menu-word" }, word), aside ? h("small", { class: "menu-aside" }, aside) : null], then, `decide-menu-row ${variant}`.trim(), false, use);
+  const message = messageButton(need, `Message ${RIVET_NAME}`);
+  message?.classList.add("decide-menu-row");
+  return [
+    message,
+    cardShareButton(need, "decide-menu-row"),
+    thread ? row(ICONS.list, "Conversation", () => openConversation(thread.thread), "cards.thread.open", "menu-thread", `Round ${thread.round}`) : null,
+    // The next card slides in under the menu's foot, where its answers sit: a second tap is held, as after an answer.
+    row(MINUS, "Put it aside", () => (lockTaps(), minimise(need)), "cards.minimise", "menu-aside-card"),
+    row(ICONS.no, "Reject, and say why", () => act(need, "reject"), "cards.reject", "menu-reject"),
+  ].filter((one) => one !== null);
+}
+
+const MINUS = '<svg viewBox="0 0 24 24"><path d="M6 12h12" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>';
+
+/** A phone card's ask written as "- " lines is its points, one to a line. */
+const POINT = /^\s*[-•*]\s+/;
+function askPoints(ask: string): HTMLElement | null {
+  const lines = ask.split("\n").filter((line) => line.trim());
+  if (!lines.length || !lines.every((line) => POINT.test(line))) return null;
+  return h("ul", { class: "card-ask ask-points" }, ...lines.map((line) => h("li", {}, ...linkify(line.replace(POINT, "")))));
+}
+
+/** The longest answer label that still pairs two to a row on a narrow phone screen. */
+const PAIR_LABEL = 14;
+/** A label's own "(Recommended)", which the phone's yellow answer says once in its tag. */
+const SAID_RECOMMENDED = /\s*\(recommended\)\s*$/i;
 
 /** The X at a card's top right rejects it, always asking why first. */
 function rejectButton(need: ServedNeed): HTMLElement {
@@ -1313,6 +1358,13 @@ function deskActions(need: ServedNeed): HTMLElement {
   );
 }
 
+/**
+ * The yellow answer: Rivet's recommended pick, and a Got it card's one button, which carries no Recommended tag.
+ */
+function yellowAnswer(need: ServedNeed, option: NonNullable<ServedNeed["options"]>[number]): boolean {
+  return !!option.recommended || isGotIt(need);
+}
+
 /** The recommended answer's mark in the desktop bar; the card above says the word. */
 function recommendedTag(): HTMLElement {
   const tag = svg(ICONS.yes, "pick-tag");
@@ -1395,11 +1447,11 @@ export function cardKey(event: KeyboardEvent, top: ServedNeed | null, host: HTML
 /**
  * A waiting card with its answers as the open card shows them, for an Agents ticket: the Feed's own controls, so the answer goes the one way.
  */
-export function answerCard(need: ServedNeed): HTMLElement {
+export function answerCard(need: ServedNeed, sheet = false): HTMLElement {
   // The "−" is Later here too: minimised, the card is its title line.
   const card = isMinimised(need.id, need.rev)
     ? h("div", { class: "answer-card" }, minimisedCard(need))
-    : h("div", { class: "answer-card" }, topCard(need, true), isDesk() ? deskActions(need) : actionBar(need));
+    : h("div", { class: "answer-card" }, topCard(need, true, sheet), isDesk() ? deskActions(need) : actionBar(need));
   // A ticket repaints without the Feed's render: its card slides in once, not on every repaint.
   shownCards.add(need.id);
   return card;

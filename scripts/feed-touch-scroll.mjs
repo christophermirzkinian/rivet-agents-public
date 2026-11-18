@@ -60,7 +60,9 @@ try {
       await page.waitForSelector(`.decide-sheet .decide-card .card.top[data-need="${TALL}"] .card-body`);
     } else {
       await page.goto(`${base}preview/desktop.html?tab=cards`);
-      await page.click('.decide-seg[data-seg="answered"]');
+      // A phone's Answered N is in the card's ⋯ menu.
+      await page.click(".decide-sheet .decide-more");
+      await page.click('.decide-menu .decide-seg[data-seg="answered"]');
       // Every answer the preview has: all hours, and the done ones too.
       await page.click('.decide-card [data-window="all"]');
       if ((await page.getAttribute(".decide-card .ans-done", "aria-checked")) !== "true") await page.click(".decide-card .ans-done");
@@ -68,6 +70,23 @@ try {
     }
     await page.evaluate(() => document.fonts.ready);
     await page.waitForTimeout(800);
+    if (phone.leg === "card") {
+      // The full-screen card holds even the tallest preview card on the phone, so its ask is run long, once
+      // the sheet has settled, until the card runs past the sheet: the finger must still reach the answers under a long
+      // read. "Not set up to test" below still fails a card with nothing to swipe.
+      await page.evaluate((tall) => {
+        const card = document.querySelector(`.decide-sheet .card.top[data-need="${tall}"]`);
+        const body = card?.querySelector(".card-body");
+        // Before the answers when the card lists them, else at the foot of its words.
+        const choices = body?.querySelector(":scope > .choices");
+        for (let i = 0; card && body && card.scrollHeight <= card.clientHeight + 200 && i < 40; i++) {
+          const line = Object.assign(document.createElement("p"), { textContent: "A longer ask than fits on the sheet: the finger must still reach the answers under it." });
+          if (choices) choices.before(line);
+          else body.append(line);
+        }
+        return Boolean(choices);
+      }, TALL);
+    }
     const cdp = await context.newCDPSession(page);
     const label = phone.name;
     const scroller = phone.leg === "card" ? ".decide-sheet .decide-card .card.top" : ".decide-sheet .decide-card.is-list";

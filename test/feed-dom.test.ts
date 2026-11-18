@@ -260,14 +260,26 @@ function rejectWhy(text = "Not this"): void {
   document.querySelector<HTMLButtonElement>(".reject-sheet .reject-send")!.click();
 }
 
-/** The Decide pane's switch, by Cards' old segment names: "needs" is its Open, "done" its Answered. */
+/** The Decide switch, by Cards' old segment names: "needs" is its Open, "done" its Answered. */
 function segment(): string | undefined {
-  const on = root.querySelector('.decide-segs .decide-seg[aria-pressed="true"]')?.getAttribute("data-seg");
-  return on === "open" ? "needs" : on === "answered" ? "done" : undefined;
+  const open = root.querySelector('.decide-seg[data-seg="open"]');
+  return open ? (open.getAttribute("aria-pressed") === "true" ? "needs" : "done") : undefined;
 }
 
+/** The pane's switch, or on a phone Answered N in ⋯ and Open N, the way back, in the sheet's top row. */
 function toSegment(name: "needs" | "done"): void {
-  root.querySelector<HTMLButtonElement>(`.decide-segs .decide-seg[data-seg="${name === "done" ? "answered" : "open"}"]`)!.click();
+  if (name === "needs") return root.querySelector<HTMLButtonElement>('.decide-seg[data-seg="open"]')!.click();
+  const pane = root.querySelector<HTMLButtonElement>('.decide-segs .decide-seg[data-seg="answered"]');
+  if (pane) return pane.click();
+  menuRow("decide.seg.answered").click();
+}
+
+/** Opens the phone Decide sheet's ⋯ and finds its row. */
+function menuRow(use: string): HTMLButtonElement {
+  document.querySelector<HTMLButtonElement>(".decide-more")!.click();
+  const row = document.querySelector<HTMLButtonElement>(`.decide-menu [data-use="${use}"]`);
+  if (!row) throw new Error(`no ${use} in ⋯`);
+  return row;
 }
 
 function topId(): string | undefined {
@@ -536,6 +548,14 @@ describe("writing on a card, the next cards, and risky cards", () => {
     await settle(0);
     expect(root.querySelector(".card.top .confirm")).not.toBeNull();
     expect(posts).toHaveLength(0);
+  });
+
+  it("a Got it card's one button is the yellow answer, with no Recommended tag", async () => {
+    needs = [{ ...need("g", "g1"), kind: "decision", options: [{ label: "Got it" }] }];
+    await signIn();
+    const buttons = [...root.querySelectorAll<HTMLElement>(".card.top .btn.choice")];
+    expect(buttons.map((box) => [box.dataset.key, box.classList.contains("rec")])).toEqual([["Got it", true]]);
+    expect(root.querySelector(".card.top .choice-rec")).toBeNull();
   });
 
   it("every card reads title, ask, then who sent it", async () => {
@@ -1876,11 +1896,14 @@ describe("the crew on the feed", () => {
   it("a card with a chat has a Message button that opens that chat's send box", async () => {
     workers = [worker("chat-a", "working")];
     needs = [{ ...need("a", "a1"), chat: "chat-a" }, need("b", "b1")];
-    await signIn();
-    // On the phone it sits in the card's top row, so the answers stay last above the message box.
-    const message = root.querySelector<HTMLButtonElement>(".card.top .card-head .head-acts .card-message")!;
-    expect([message.textContent, message.getAttribute("aria-label")]).toEqual(["Message", "Message Rivet"]);
+    await signIn(true);
+    await settle(500);
+    // On the phone it is a row in the Decide sheet's ⋯, so the answers stay last above the message box.
+    expect(document.querySelector(".decide-sheet .card.top .card-message")).toBeNull();
+    const message = menuRow("cards.message-rivet");
+    expect([message.textContent, message.getAttribute("aria-label")]).toEqual(["Message Rivet", "Message Rivet"]);
     message.click();
+    expect(document.querySelector(".decide-menu")).toBeNull();
     const sheet = document.querySelector<HTMLElement>(".cmd-worker-sheet")!;
     expect(sheet.getAttribute("aria-label")).toBe("chat-a");
     expect(sheet.querySelector(".cmd-send .cmd-h")!.textContent).toBe("Message Rivet about chat-a");
@@ -1892,7 +1915,7 @@ describe("the crew on the feed", () => {
     flushHeld();
     await settle(0);
     expect(posts).toHaveLength(0);
-    expect(topId()).toBe("a");
+    expect(document.querySelector<HTMLElement>(".decide-sheet .card.top")?.dataset.need).toBe("a");
     signOut();
     expect(document.querySelector(".cmd-worker-sheet")).toBeNull();
   });
@@ -1920,10 +1943,11 @@ function say(text: string): void {
 
 function actionButton(text: string): HTMLButtonElement {
   // The bar's buttons, then the card's own answer boxes (an option card's answers are its boxes).
-  // Reject is the X at the card's top right, named by its title.
+  // Reject is the X at the card's top right, named by its title, or on a phone a row in ⋯.
   const found = [...root.querySelectorAll<HTMLButtonElement>(".actions .btn, .card.top .btn.choice, .card.top .x-btn")].find(
     (element) => element.textContent?.includes(text) || element.title === text,
   );
+  if (!found && text === "Reject" && document.querySelector(".decide-more")) return menuRow("cards.reject");
   if (!found) throw new Error(`no ${text} button`);
   return found;
 }
@@ -2605,7 +2629,7 @@ describe("the desktop layout", () => {
     [...document.querySelectorAll<HTMLButtonElement>(".decide-sheet .actions .btn")].find((one) => one.textContent?.includes("Approve"))!.click();
     await settle(500);
     expect(top()).not.toBe(first);
-    document.querySelector<HTMLButtonElement>('.decide-sheet [data-seg="answered"]')!.click();
+    menuRow("decide.seg.answered").click();
     await settle(0);
     document.querySelector<HTMLButtonElement>(".decide-sheet .decide-close")!.click();
     await settle(500);
@@ -2802,6 +2826,14 @@ describe("the desktop layout", () => {
     expect(root.querySelector(".desk-picks .pick.rec .pick-tag")?.getAttribute("aria-label")).toBe("Recommended");
   });
 
+  it("the bar's Got it is the yellow answer with no Recommended check, as on the phone", async () => {
+    needs = [{ ...need("g", "g1"), kind: "decision", options: [{ label: "Got it" }] }];
+    await signIn();
+    const picks = [...root.querySelectorAll<HTMLElement>(".desk-picks .btn.pick")];
+    expect(picks.map((pick) => [pick.querySelector(".pick-label")?.textContent, pick.classList.contains("rec")])).toEqual([["Got it", true]]);
+    expect(root.querySelector(".desk-picks .pick-tag")).toBeNull();
+  });
+
   it("shows one answer set: the bar's picks, details as a second line, when they hold every answer whole, else the card's list with the bar pointing to it", async () => {
     needs = [
       { ...need("m", "m1"), kind: "decision", options: [{ label: "Yes", detail: "Ship it to everyone tonight" }, { label: "No" }] },
@@ -2877,7 +2909,7 @@ describe("the desktop layout", () => {
     expect(side.hidden).toBe(false);
     expect(side.querySelector(".chat")).not.toBeNull();
     // The menu, Chat being the pane beside it, then the Chat tool.
-    expect([...root.querySelectorAll(".tabs .menu-name")].map((name) => name.textContent)).toEqual(["Home", "Usage", "Code", "Machines", "Rivet's mind", "What you used", "Home Assistant", "Media", "Settings"]);
+    expect([...root.querySelectorAll(".tabs .menu-name")].map((name) => name.textContent)).toEqual(["Home", "Usage", "Code", "Machines", "Rivet's mind", "Home Assistant", "Media", "Settings"]);
     expect([...root.querySelectorAll(".tabs .rail-tool")].map((one) => one.getAttribute("data-key"))).toEqual(["Chat"]);
     // The icon rail hides the names, so each row is named by its title, never only by its badge.
     for (const row of root.querySelectorAll<HTMLElement>(".tabs .menu-row")) {
@@ -3837,20 +3869,26 @@ describe("X rejects, always asking why", () => {
 describe("Minimise on Feed cards", () => {
   const long = (): ServedNeed => ({ ...need("a", "a1", "A long ask. ".repeat(40)), options: [{ label: "Yes" }, { label: "No" }] });
 
-  it("a Needs you card on the phone has its one Minimise in its top row beside Message and Share, none under its answers; minimising it moves on to the next card, open with its answers", async () => {
-    needs = [long(), need("b", "b1")];
-    await signIn();
-    const card = root.querySelector<HTMLElement>(".card.top")!;
-    // One group at the head's end, so on a narrow card it wraps whole: Message, Share, then the "−" and the X.
-    const acts = card.querySelector(".card-head")!.lastElementChild!;
-    expect(acts.matches(".head-acts")).toBe(true);
-    expect([...acts.lastElementChild!.children].map((child) => child.textContent || child.getAttribute("title"))).toEqual(["−", "Reject"]);
-    expect(card.querySelector(".card-tools")).toBeNull();
-    expect(card.querySelector(".min-btn.bottom")).toBeNull();
-    card.querySelector<HTMLButtonElement>(".card-head .min-btn")!.click();
+  it("a Needs you card on the phone has its one Minimise, Put it aside, in the Decide sheet's ⋯ beside Message and Share, none on the card; minimising it moves on to the next card, open with its answers", async () => {
+    needs = [{ ...long(), chat: "chat-a" }, need("b", "b1")];
+    await signIn(true);
+    await settle(500);
+    const card = document.querySelector<HTMLElement>(".decide-sheet .card.top")!;
+    expect(card.querySelector(".card-head, .card-tools, .min-btn, .x-btn")).toBeNull();
+    const aside = menuRow("cards.minimise");
+    expect([...document.querySelectorAll(".decide-menu .decide-menu-row")].map((row) => row.querySelector(".menu-word, .card-message-word, .card-share-label")?.textContent)).toEqual([
+      "Message Rivet",
+      "Share",
+      "Put it aside",
+      "Reject, and say why",
+      answeredTab(0),
+    ]);
+    aside.click();
     // The next card, with its answers.
-    expect([topId(), root.querySelector(".card.top.minimised"), root.querySelector(".card.top .card-ask") !== null, actionButton("Approve").isConnected]).toEqual(["b", null, true, true]);
-    expect(root.querySelector('.decide-seg[data-seg="open"]')?.textContent).toBe(openTab(1));
+    const top = document.querySelector<HTMLElement>(".decide-sheet .card.top")!;
+    expect([top.dataset.need, top.classList.contains("minimised"), top.querySelector(".card-ask") !== null]).toEqual(["b", false, true]);
+    expect(document.querySelector(".decide-sheet .decide-count")?.textContent).toBe("1 of 1");
+    expect(document.querySelector('.decide-sheet .decide-seg[data-seg="open"]')?.textContent).toBe(openTab(1));
   });
 
   it("with every card minimised, the heading says they wait, and Show them › is a button that opens the first", async () => {

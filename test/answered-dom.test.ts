@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AnsweredCard, AnsweredResponse } from "../src/shared/answered.js";
 import type { Reply, ServedNeed } from "../src/shared/board.js";
 import { dayHeading } from "../src/shared/when.js";
-import { answeredTab, askDone, CHAT_TOLD, NO_ANSWERED, noAnsweredIn, openTab, reopenedBand, SEND_AGAIN, UNDER_WAY, youAnswered, youSaidCalledOff, youSaidUnderWay, type ChatTold } from "../src/shared/words.js";
+import { answeredTab, askDone, CHAT_TOLD, NO_ANSWERED, noAnsweredIn, openTab, reopenedBand, SEND_AGAIN, youAnswered, youSaidCalledOff, youSaidUnderWay, type ChatTold } from "../src/shared/words.js";
 import { app, changed, refresh, resetSession } from "../web/src/state.js";
 import { resetAnsweredFilters, showAnswered } from "../web/src/views/answered.js";
 import { resetFeed } from "../web/src/views/feed.js";
@@ -119,9 +119,20 @@ async function signIn(): Promise<void> {
   await settle();
 }
 
-const seg = (name: "needs" | "done") => document.querySelector<HTMLButtonElement>(`.decide-segs .decide-seg[data-seg="${name === "needs" ? "open" : "answered"}"]`)!;
+/**
+ * The switch: the pane's Open N | Answered N. On a phone Open N is the Decide sheet's way back from Answered, and
+ * Answered N a row in its ⋯ on Open and Answered's title once there.
+ */
+const seg = (name: "needs" | "done") => (name === "needs" ? document.querySelector<HTMLButtonElement>('.decide-seg[data-seg="open"]')! : answeredSeg());
+function answeredSeg(): HTMLElement {
+  const pane = document.querySelector<HTMLButtonElement>('.decide-segs .decide-seg[data-seg="answered"]');
+  if (pane) return pane;
+  if (side() === "done") return document.querySelector<HTMLElement>(".decide-sheet .decide-name")!;
+  document.querySelector<HTMLButtonElement>(".decide-sheet .decide-more")!.click();
+  return document.querySelector<HTMLButtonElement>('.decide-menu .decide-seg[data-seg="answered"]')!;
+}
 /** The switch's side on screen. */
-const side = () => (seg("done").getAttribute("aria-pressed") === "true" ? "done" : "needs");
+const side = () => (document.querySelector('.decide-seg[data-seg="open"]')!.getAttribute("aria-pressed") === "true" ? "needs" : "done");
 const rows = () => [...document.querySelectorAll<HTMLElement>(".ans-row")];
 const row = (id: string) => document.querySelector<HTMLElement>(`.ans-row[data-card="${id}"]`)!;
 const topCard = () => document.querySelector<HTMLElement>(".decide-card [data-need]");
@@ -442,10 +453,11 @@ describe("Cards › Answered: time chips and Show done", () => {
   });
 });
 
-describe("Cards › Under way (GitHub sweep idea 3, 15 Nov)", () => {
+// An answered card whose ask is open reads its stage in Answered only: Under way left the open card's sheet.
+describe("Cards › an answered card whose ask is open", () => {
   const AT = "2026-10-28T00:30:00.000Z";
   const under = () => document.querySelector<HTMLElement>(".ans-under");
-  const underRows = () => [...(under()?.querySelectorAll<HTMLElement>(".ans-row") ?? [])];
+  const openRows = () => [...document.querySelectorAll<HTMLElement>(".decide-card .ans-row")];
 
   beforeEach(() => {
     answered = answered.map((one) =>
@@ -457,23 +469,33 @@ describe("Cards › Under way (GitHub sweep idea 3, 15 Nov)", () => {
     );
   });
 
-  it("an answered card whose ask is open shows under the open card: its title, You said <answer> · <stage>, and Reopen", async () => {
+  it("is not listed under the open card: the open card has the sheet", async () => {
     await signIn();
     expect(topId()).toBe("open-1");
-    expect(under()?.querySelector(".ans-day")?.textContent).toBe(UNDER_WAY);
-    expect(underRows().map((one) => one.dataset.card)).toEqual(["pear"]);
-    const pear = underRows()[0]!;
-    expect(pear.querySelector(".ans-t")?.textContent).toBe("Card pear");
-    expect(pear.querySelector(".ans-you")?.textContent).toBe(youSaidUnderWay("Change it “slower, 2 s”", "building"));
-    expect([...pear.querySelectorAll("button")].map((button) => button.textContent)).toEqual(["Reopen"]);
+    expect(under()).toBeNull();
+    expect(openRows()).toEqual([]);
   });
 
-  it("Reopen on an under-way row opens its card again", async () => {
+  it("Reopen on its Answered row opens its card again", async () => {
     await signIn();
+    await toAnswered();
     await reopenRow("pear");
     expect(againPosts).toEqual([{ id: "pear", rev: "pear-1" }]);
     expect(topId()).toBe("pear");
     expect(band()).not.toBeNull();
+  });
+
+  it("answered days ago, it stays on Answered's default chip with Reopen while its ask is under way, and sets no redraw loop", async () => {
+    const OLD = new Date(Date.now() - 72 * 3600_000).toISOString();
+    answered = answered.map((one) => (one.card.id === "pear" ? { ...one, reply: { ...one.reply, at: OLD } } : one));
+    await signIn();
+    await toAnswered();
+    expect(row("pear").querySelector(".ans-you")?.textContent).toBe(youSaidUnderWay("Change it “slower, 2 s”", "building"));
+    // An expiry already past would redraw at once and again: fake timers abort after 10,000 of them.
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(row("pear")).not.toBeNull();
+    await reopenRow("pear");
+    expect(againPosts).toEqual([{ id: "pear", rev: "pear-1" }]);
   });
 
   it("on Answered, under way says its stage, done says Done: <note>, and called off keeps the answer", async () => {
@@ -486,16 +508,7 @@ describe("Cards › Under way (GitHub sweep idea 3, 15 Nov)", () => {
     expect(askDone()).toBe("Done");
   });
 
-  it("once its ask closes, the card leaves Under way", async () => {
-    await signIn();
-    expect(underRows()).toHaveLength(1);
-    answered = answered.map((one) => (one.card.id === "pear" ? { ...one, ask: { state: "done", id: "a-2", stage: "done", stageAt: AT } } : one));
-    await settle(61_000);
-    expect(under()).toBeNull();
-    expect(topId()).toBe("open-1");
-  });
-
-  it("with nothing open, the computer's pane keeps Under way under the line saying so", async () => {
+  it("with nothing open, the computer's pane shows the line saying so and no list under it", async () => {
     vi.spyOn(window, "matchMedia").mockImplementation(
       (query: string) => ({ matches: true, media: query, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false }) as unknown as MediaQueryList,
     );
@@ -503,14 +516,14 @@ describe("Cards › Under way (GitHub sweep idea 3, 15 Nov)", () => {
     await signIn();
     seg("needs").click();
     await settle();
-    expect(root.querySelector(".view.decide-pane .decide-under .decide-none")).not.toBeNull();
-    expect(underRows().map((one) => one.dataset.card)).toEqual(["pear"]);
+    expect(root.querySelector(".view.decide-pane .decide-card > .decide-none")).not.toBeNull();
+    expect(under()).toBeNull();
+    expect(openRows()).toEqual([]);
   });
 
-  it("a card with no ask behaves as before: no Under way", async () => {
+  it("a card with no ask reads You: <answer> on Answered, as before", async () => {
     answered = answered.map(({ ask: _ask, ...one }) => one);
     await signIn();
-    expect(under()).toBeNull();
     await toAnswered();
     expect(row("pear").querySelector(".ans-you")?.textContent).toBe(youAnswered("Change it “slower, 2 s”", answered[1]!.reply.at));
   });

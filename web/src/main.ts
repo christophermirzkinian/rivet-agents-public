@@ -20,6 +20,7 @@ import { decideShown, showPushed } from "./views/decide-sheet.js";
 import { closeSheet, closeTallSheet } from "./views/sheet.js";
 import { cardsSegment, flushHeld, recoverOutbox, resetFeed } from "./views/feed.js";
 import { mountShell } from "./views/shell.js";
+import { catchStrayDrops } from "./views/attach.js";
 
 watchInput();
 
@@ -206,6 +207,8 @@ document.addEventListener("visibilitychange", () => {
   }
 });
 watchNewBuild();
+// A photo dragged in from the desktop and dropped beside the chat never opens in place of the app.
+catchStrayDrops();
 window.addEventListener("offline", networkChanged);
 window.addEventListener("online", () => {
   networkChanged();

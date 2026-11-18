@@ -62,4 +62,14 @@ describe("the reading frame", () => {
     expect(busy.querySelector<HTMLButtonElement>(".reading-foot .reading-btn")!.textContent).toBe("Refreshing…");
     expect(busy.querySelector<HTMLButtonElement>(".reading-foot .reading-btn")!.disabled).toBe(true);
   });
+
+  it("puts Updated and Refresh on the top row, then the stale line, a page's own switch, the figures; no Refresh when the page has its own", () => {
+    const lead = h("div", { class: "switch" });
+    const el = readingFrame({ page: "Usage", has: true, failed: true, busy: false, at: AT, shape: [100], retry: () => {} }, () => [h("p", { class: "figure" }, "1")], lead);
+    expect([...el.children].map((child) => child.className)).toEqual(["reading-foot", "reading-stale", "switch", "reading-figures"]);
+    expect(el.querySelector(".reading-foot")!.lastElementChild!.textContent).toBe("Refresh");
+    const own = frame({ button: false });
+    expect(own.querySelector(".reading-foot .reading-at")).not.toBeNull();
+    expect(own.querySelector(".reading-btn")).toBeNull();
+  });
 });

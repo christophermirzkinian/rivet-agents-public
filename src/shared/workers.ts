@@ -57,8 +57,38 @@ export const pushQueueRowSchema = z
   })
   .strict();
 
+export const MAX_REVIEWS = 120;
+/** A review lens id as the review lane writes it ("correctness", "class-sweep"). */
+export const LENS_PATTERN = /^[a-z0-9][a-z0-9-]{0,39}$/;
+export const REVIEW_STATES = ["queued", "reviewing", "done", "backup", "stopped"] as const;
+const epochMs = z.number().int().nonnegative().max(8_640_000_000_000_000);
+const laneMinutes = z.number().nonnegative().max(24 * 60);
+
+/**
+ * One review lens of a PR's newest round, as the bridge reads the review lanes' events: `backup` is a lane run that
+ * handed the lens to the reviewer agent, so it carries no count; `stopped` started and never reported back.
+ */
+export const reviewRowSchema = z
+  .object({
+    repo: z.string().regex(REPO_RE),
+    pr: z.number().int().positive().max(9_999_999_999),
+    round: z.number().int().positive().max(999),
+    lens: z.string().regex(LENS_PATTERN),
+    state: z.enum(REVIEW_STATES),
+    findings: z.number().int().nonnegative().max(999).optional(),
+    material: z.number().int().nonnegative().max(999).optional(),
+    startedAt: epochMs.optional(),
+    minutes: laneMinutes.optional(),
+    typicalMinutes: laneMinutes.optional(),
+  })
+  .strict();
+
 export const workerSnapshotSchema = z
-  .object({ workers: z.array(snapshotWorkerSchema).max(MAX_WORKERS), pushQueue: z.array(pushQueueRowSchema).max(MAX_PUSH_QUEUE).optional() })
+  .object({
+    workers: z.array(snapshotWorkerSchema).max(MAX_WORKERS),
+    pushQueue: z.array(pushQueueRowSchema).max(MAX_PUSH_QUEUE).optional(),
+    reviews: z.array(reviewRowSchema).max(MAX_REVIEWS).optional(),
+  })
   .strict()
   .superRefine((snapshot, ctx) => {
     const seen = new Set<string>();
@@ -73,6 +103,7 @@ export const workerSnapshotSchema = z
 export type SnapshotWorker = z.infer<typeof snapshotWorkerSchema>;
 export type WorkerSnapshot = z.infer<typeof workerSnapshotSchema>;
 export type PushQueueRow = z.infer<typeof pushQueueRowSchema>;
+export type ReviewRow = z.infer<typeof reviewRowSchema>;
 
 export type WorkerState = "working" | "waiting" | "blocked" | "idle";
 export type BoxFrom = "set" | "pr" | "folder";
@@ -141,4 +172,6 @@ export interface WorkersResponse {
   workers: Worker[];
   /** The push queue at that snapshot, in release order; absent while it is empty. */
   pushQueue?: PushQueueRow[];
+  /** The review lenses of each PR in review, its newest round only; absent while there are none. */
+  reviews?: ReviewRow[];
 }

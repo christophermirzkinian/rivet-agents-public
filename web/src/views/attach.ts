@@ -366,6 +366,138 @@ export function photosControl(state: PhotosState, options: { onChange(): void; o
   };
 }
 
+/**
+ * A drag that began inside the app (a photo in a bubble or on a card) carries this type: Chrome lists such a drag as
+ * Files too, but it is no upload. The mark rides on that drag's own data, so nothing is left over when it ends however
+ * it ends.
+ */
+export const PAGE_DRAG = "application/x-rivet-page-drag";
+const marking = new WeakSet<Document>();
+/** Marks every drag that starts in `doc`; called before any drag can start (boot, and each drop zone). */
+export function markPageDrags(doc: Document = document): void {
+  if (marking.has(doc)) return;
+  marking.add(doc);
+  // Only a drag already listing Files (Chrome's image drag): Safari writes a drag's own data only when the page wrote
+  // none, so marking a text or link drag would empty it.
+  doc.addEventListener("dragstart", (event) => void (hasFiles(event.dataTransfer) && event.dataTransfer!.setData(PAGE_DRAG, "1")), true);
+}
+
+/** Whether a drag lists files at all, an app photo's included. */
+function hasFiles(data: DataTransfer | null): boolean {
+  return Array.from(data?.types ?? []).includes("Files");
+}
+
+/** Whether a drag brings files from outside the page (Finder, the desktop, another app), not text, a link or an app photo. */
+export function carriesFiles(data: DataTransfer | null): boolean {
+  return hasFiles(data) && !Array.from(data!.types).includes(PAGE_DRAG);
+}
+
+/**
+ * The files a paste brings when it brings no words: a screenshot or a copied image. A paste that also carries text
+ * (cells from a spreadsheet, a copied page) pastes its text as it always did, and attaches nothing.
+ */
+export function pastedFiles(data: DataTransfer | null): File[] {
+  if (!data || Array.from(data.types ?? []).includes("text/plain")) return [];
+  return Array.from(data.files ?? []);
+}
+
+/**
+ * A browser sends dragover to the element under a held drag every 350 ms or so, and on every move: this long without
+ * one, the drag has most likely gone (Escape, out of the window, over a node redrawn under the pointer whose dragleave
+ * never reached the zone), and the highlight goes out. The next dragover lights it again.
+ */
+export const DROP_IDLE_MS = 2500;
+
+/**
+ * Files dragged anywhere over `zone` light it with `drop-on`, and dropped there go to `take`. While `open()` is false
+ * the drop is still caught, so a missed drop never leaves the app for the file, but nothing lights and nothing is taken.
+ * Returns what removes it.
+ */
+export function dropZone(zone: HTMLElement, take: (files: File[]) => void, open: () => boolean = () => true): () => void {
+  // dragenter and dragleave fire for every child crossed: the nodes entered and not yet left say when the drag has really
+  // left. A node redrawn under the pointer sends its leave nowhere, so one no longer on the page is dropped from them, and
+  // the idle timer dims what is left when no dragover comes.
+  markPageDrags(zone.ownerDocument);
+  const inside = new Set<Node>();
+  let idle = 0;
+  // Dark until the next dragover; the nodes stand, so crossing a child mid-drag does not flicker it.
+  const dim = () => {
+    window.clearTimeout(idle);
+    zone.classList.remove("drop-on");
+  };
+  // The drag is over: a drop, here or anywhere.
+  const off = () => {
+    inside.clear();
+    dim();
+  };
+  const prune = () => inside.forEach((node) => (node.isConnected && zone.contains(node)) || inside.delete(node));
+  const lit = () => {
+    zone.classList.toggle("drop-on", open());
+    window.clearTimeout(idle);
+    idle = window.setTimeout(dim, DROP_IDLE_MS);
+  };
+  const enter = (event: DragEvent) => {
+    if (!carriesFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    prune();
+    if (event.target instanceof Node) inside.add(event.target);
+    lit();
+  };
+  const over = (event: DragEvent) => {
+    if (!carriesFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    event.dataTransfer!.dropEffect = open() ? "copy" : "none";
+    lit();
+  };
+  const leave = (event: DragEvent) => {
+    if (!carriesFiles(event.dataTransfer)) return;
+    if (event.target instanceof Node) inside.delete(event.target);
+    prune();
+    if (!inside.size) off();
+  };
+  const drop = (event: DragEvent) => {
+    if (!carriesFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    off();
+    const files = Array.from(event.dataTransfer!.files ?? []);
+    if (files.length && open()) take(files);
+  };
+  zone.addEventListener("dragenter", enter);
+  zone.addEventListener("dragover", over);
+  zone.addEventListener("dragleave", leave);
+  zone.addEventListener("drop", drop);
+  // A drop anywhere else ends the drag too.
+  window.addEventListener("drop", off);
+  return () => {
+    zone.removeEventListener("dragenter", enter);
+    zone.removeEventListener("dragover", over);
+    zone.removeEventListener("dragleave", leave);
+    zone.removeEventListener("drop", drop);
+    window.removeEventListener("drop", off);
+    off();
+  };
+}
+
+/**
+ * A file dropped where nothing takes it (the card column beside the chat, the rail) is caught, so the browser never opens
+ * it in place of the app. An app photo is caught too: one dragged in from another Rivet window would open in place of
+ * this one. A drop zone's own handling runs first and is left alone. Returns what removes it.
+ */
+export function catchStrayDrops(target: Window = window): () => void {
+  markPageDrags(target.document);
+  const stray = (event: DragEvent) => {
+    if (event.defaultPrevented || !hasFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    if (event.type === "dragover") event.dataTransfer!.dropEffect = "none";
+  };
+  target.addEventListener("dragover", stray);
+  target.addEventListener("drop", stray);
+  return () => {
+    target.removeEventListener("dragover", stray);
+    target.removeEventListener("drop", stray);
+  };
+}
+
 /** Why these attachments cannot be sent yet, or null. */
 export function photosHold(photos: readonly Photo[]): string | null {
   const docs = photos.filter((photo) => photo.doc).length;

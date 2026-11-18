@@ -60,6 +60,8 @@ const settle = async () => {
   for (let i = 0; i < 6; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
 };
 const bubble = (id: string) => root.querySelector<HTMLElement>(`.chat-msg[data-id="${id}"]`)!;
+/** The one Reply under the topic card holding message `id`: it answers the card's last line. */
+const replyUnder = (id: string) => bubble(id).closest(".chat-ex")!.querySelector<HTMLButtonElement>(":scope > .chat-ex-foot .chat-reply")!;
 const bar = () => root.querySelector<HTMLElement>(".chat-replying")!;
 const box = () => root.querySelector<HTMLTextAreaElement>(".chat-text")!;
 
@@ -120,7 +122,7 @@ describe("a refresh redraws only what changed", () => {
     await settle();
     let answer!: () => void;
     postHeld = new Promise((resolve) => (answer = resolve));
-    bubble("h2").querySelector<HTMLButtonElement>(".chat-reply")!.click();
+    replyUnder("h2").click();
     box().value = "Send it";
     root.querySelector<HTMLButtonElement>(".chat-send")!.click();
     await settle();
@@ -249,18 +251,21 @@ describe("Chat's first page replaces the last visit's copy", () => {
 });
 
 describe("reply in chat", () => {
-  it("puts Reply on every message, your and Rivet's", async () => {
+  it("puts one Reply under his question and Rivet's answer, none on a bubble", async () => {
     chat.mount(root);
     await settle();
-    expect(bubble("c1").querySelector(".chat-reply")).not.toBeNull();
-    expect(bubble("h2").querySelector(".chat-reply")).not.toBeNull();
+    const card = bubble("c1").closest(".chat-ex")!;
+    expect(bubble("h2").closest(".chat-ex")).toBe(card);
+    expect(card.querySelectorAll(".chat-reply")).toHaveLength(1);
+    expect(replyUnder("h2")).not.toBeNull();
+    expect(root.querySelector(".chat-msg .chat-reply")).toBeNull();
     expect(bar().hidden).toBe(true);
   });
 
   it("Reply shows who and the first line above the box, focuses it, and × takes it back", async () => {
     chat.mount(root);
     await settle();
-    bubble("h2").querySelector<HTMLButtonElement>(".chat-reply")!.click();
+    replyUnder("h2").click();
     expect(bar().hidden).toBe(false);
     expect(bar().querySelector(".chat-quote-who")!.textContent).toBe("Rivet");
     const line = bar().querySelector(".chat-quote-text")!.textContent!;
@@ -280,17 +285,18 @@ describe("reply in chat", () => {
   });
 
   it("a reply to his own message says You", async () => {
+    history.push({ id: "c3", from: "owner", text: "And the pear?", at: "2030-01-01T00:00:03.000Z", status: "replied" });
     chat.mount(root);
     await settle();
-    bubble("c1").querySelector<HTMLButtonElement>(".chat-reply")!.click();
+    replyUnder("c3").click();
     expect(bar().querySelector(".chat-quote-who")!.textContent).toBe("You");
-    expect(bar().querySelector(".chat-quote-text")!.textContent).toBe("What's live?");
+    expect(bar().querySelector(".chat-quote-text")!.textContent).toBe("And the pear?");
   });
 
   it("the sent message carries the id it answers and shows the quote in its bubble; the bar closes", async () => {
     chat.mount(root);
     await settle();
-    bubble("h2").querySelector<HTMLButtonElement>(".chat-reply")!.click();
+    replyUnder("h2").click();
     box().value = "Send it";
     root.querySelector<HTMLButtonElement>(".chat-send")!.click();
     await settle();
@@ -304,7 +310,7 @@ describe("reply in chat", () => {
   it("a tab switch keeps the reply with the draft, and a send clears both", async () => {
     chat.mount(root);
     await settle();
-    bubble("h2").querySelector<HTMLButtonElement>(".chat-reply")!.click();
+    replyUnder("h2").click();
     box().value = "Send it";
     box().dispatchEvent(new Event("input"));
     chat.unmount();
@@ -335,7 +341,7 @@ describe("reply in chat", () => {
     );
     chat.mount(root);
     await settle();
-    bubble("h2").querySelector<HTMLButtonElement>(".chat-reply")!.click();
+    replyUnder("h2").click();
     box().value = "Send it";
     root.querySelector<HTMLButtonElement>(".chat-send")!.click();
     await settle();

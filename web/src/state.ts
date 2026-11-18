@@ -430,7 +430,7 @@ let shownSignature = "";
 
 // A worker's output clock ticks on every bridge snapshot while its terminal runs; the Feed shows its state, not that clock.
 function feedSignature(): string {
-  return JSON.stringify([app.board, [...app.replies.values()], [...app.cardThreads.values()], app.status?.bridge.connected ?? null, app.chatUnread, app.summary, app.workers?.workers.map(({ lastOutputAt: _output, ...shown }) => shown) ?? null, app.workers?.pushQueue ?? null]);
+  return JSON.stringify([app.board, [...app.replies.values()], [...app.cardThreads.values()], app.status?.bridge.connected ?? null, app.chatUnread, app.summary, app.workers?.workers.map(({ lastOutputAt: _output, ...shown }) => shown) ?? null, app.workers?.pushQueue ?? null, app.workers?.reviews ?? null]);
 }
 
 /** No answer at all, a timeout or a server error: the Feed says it cannot reach the server. */

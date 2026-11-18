@@ -67,13 +67,13 @@ describe("the What you used report", () => {
 
   it("leaves an id out until 30 days after it was added, recording's start counting as the first", () => {
     const events = [tap("2026-11-27T01:00:00.000Z", "cards.answer.choice", "decide")];
-    // used.retire was added 30 Oct (29 Oct 13:00Z): listed from 28 Nov 13:00Z, not before.
-    expect(ids(report(events, "2026-11-28T12:59:00.000Z").never)).not.toContain("used.retire");
-    expect(ids(report(events, "2026-11-28T13:00:00.000Z").never)).toContain("used.retire");
+    // desks.backlog was added 2 Nov (1 Nov 13:00Z): listed from 1 Dec 13:00Z, not before (used.retire, the old example, is removed).
+    expect(ids(report(events, "2026-12-01T12:59:00.000Z").never)).not.toContain("desks.backlog");
+    expect(ids(report(events, "2026-12-01T13:00:00.000Z").never)).toContain("desks.backlog");
     // An id added before recording began waits 30 days from recording's start, so the page lists nothing before then.
     expect(report(events, "2026-11-26T12:59:00.000Z").never).toBeNull();
     expect(ids(report(events, "2026-11-26T13:00:00.000Z").never)).toContain("toast.undo");
-    expect(ids(report(events, "2026-11-26T13:00:00.000Z").never)).not.toContain("used.retire");
+    expect(ids(report(events, "2026-11-26T13:00:00.000Z").never)).not.toContain("desks.backlog");
   });
 
   it("reads a young or empty recording as it is, never as 30 days", () => {

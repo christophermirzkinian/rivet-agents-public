@@ -1,10 +1,10 @@
 import "./answered.css";
 
-import { ANSWERED_WINDOWS, answeredShown, cardFromReply, DEFAULT_ANSWERED_WINDOW, type AnsweredCard, type AnsweredResponse, type AnsweredWindow } from "../../../src/shared/answered.js";
+import { ANSWERED_WINDOWS, answeredShown, cardFromReply, DEFAULT_ANSWERED_WINDOW, keptPastWindow, type AnsweredCard, type AnsweredResponse, type AnsweredWindow } from "../../../src/shared/answered.js";
 import type { Decision, Reply, ServedNeed } from "../../../src/shared/board.js";
 import { dayHeading } from "../../../src/shared/when.js";
 import { localDay } from "../day.js";
-import { answeredChip, askDone, CHAT_TOLD, noAnsweredIn, REOPEN, reopenedBand, SEND_AGAIN, SHOW_DONE, UNDER_WAY, YES, youAnswered, youSaidCalledOff, youSaidUnderWay, type ChatTold } from "../../../src/shared/words.js";
+import { answeredChip, askDone, CHAT_TOLD, noAnsweredIn, REOPEN, reopenedBand, SEND_AGAIN, SHOW_DONE, YES, youAnswered, youSaidCalledOff, youSaidUnderWay, type ChatTold } from "../../../src/shared/words.js";
 import * as api from "../api.js";
 import { answerState } from "../answer-state.js";
 import { button, h } from "../dom.js";
@@ -268,33 +268,6 @@ function row(entry: AnsweredCard, reopens: boolean): HTMLElement {
   );
 }
 
-/**
- * Under way, below the open cards (GitHub sweep idea 3, the owner's pick 15 Nov): each answered card whose ask has not closed,
- * newest answer first, as `You said <answer> · <stage>` with Reopen and no answers; null with none, or before a read.
- */
-export function underWayList(): HTMLElement | null {
-  readIfStale();
-  const rows = (data?.cards ?? []).filter((entry) => entry.ask?.state === "underWay");
-  if (!rows.length) return null;
-  return h(
-    "section",
-    { class: "ans ans-under", attrs: { "aria-label": UNDER_WAY } },
-    h("h2", { class: "ans-day" }, UNDER_WAY),
-    h(
-      "ol",
-      { class: "ans-list" },
-      ...rows.map((entry) =>
-        h(
-          "li",
-          { class: "ans-row box", attrs: { "data-card": entry.card.id, "data-reply": entry.reply.id, "data-ask": "underWay" } },
-          h("div", { class: "ans-text" }, h("span", { class: "ans-t" }, entry.card.title), h("span", { class: "ans-you" }, ...withAnswer(youSaidUnderWay(answerText(entry.reply), entry.ask!.stage), entry.reply))),
-          reopenButton(entry, "ans-reopen"),
-        ),
-      ),
-    ),
-  );
-}
-
 /** The list's answers the chip and Show done keep, with a search hit's answer in its place by time whatever they keep. */
 function entries(): AnsweredCard[] {
   const now = Date.now();
@@ -309,12 +282,16 @@ function entries(): AnsweredCard[] {
   return at < 0 ? [...cards, extra] : [...cards.slice(0, at), extra, ...cards.slice(at)];
 }
 
-/** Redraws once the oldest of the chip's rows is older than its hours, so the list, its count and the empty line drop it unprompted. */
+/**
+ * Redraws once the oldest of the chip's rows is older than its hours, so the list, its count and the empty line drop it
+ * unprompted. An under-way row never ages out (`keptPastWindow`), so it sets no timer: an expiry already past would redraw at once, again and again.
+ */
 function redrawAtExpiry(cards: readonly AnsweredCard[], window: AnsweredWindow, now: number): void {
   if (expiryTimer) clearTimeout(expiryTimer);
   expiryTimer = null;
-  if (window === null || !cards.length) return;
-  const ends = Math.min(...cards.map((entry) => Date.parse(entry.reply.at))) + window * 3600_000;
+  const ageing = cards.filter((entry) => !keptPastWindow(entry));
+  if (window === null || !ageing.length) return;
+  const ends = Math.min(...ageing.map((entry) => Date.parse(entry.reply.at))) + window * 3600_000;
   expiryTimer = setTimeout(() => ((expiryTimer = null), changed()), Math.max(ends - now + 1, 0));
 }
 

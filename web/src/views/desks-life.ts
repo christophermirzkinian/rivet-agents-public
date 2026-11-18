@@ -10,7 +10,9 @@ import { MOOD_WORDS, setMood, type Mood } from "../rivet/rivet.js";
 /**
  * The desks come alive: now and then an
  * agent flies to Rivet's desk or another desk and back, and one or two speech bubbles at a time say what an agent is
- * doing, in its ask row's words, never a time. A PR merging while the floor is open makes Rivet cheer.
+ * doing, in its ask row's words, never a time. A PR merging while the floor is open makes Rivet cheer. A review lens
+ * that finishes while the floor is open flies its little purple up to its chat and says what it found, as the chats
+ * tell Rivet.
  * With reduced motion nobody flies and the bubbles stand still.
  */
 
@@ -25,6 +27,8 @@ const SAY_MS = 4_200;
 const GAP_MS = 2_600;
 const CHEER_MS = 4_500;
 const MAX_BUBBLE_W = 260;
+/** A finished lens's news is told within this long, or not at all. */
+const REPORT_MS = 2 * 60_000;
 
 /** Words cut to `max` at a word, without a trailing PR number. */
 export function short(text: string, max = SAY_MAX): string {
@@ -182,6 +186,26 @@ interface Speaker {
   worker?: Worker;
 }
 
+/** How a bubble reads: a lens's news is green when clean and amber with findings; `mine` is a row it may cover. */
+interface SayHow {
+  tone?: "clean" | "found" | null;
+  mine?: Element;
+}
+
+/** A lens that finished while the floor was open, and what it tells its chat: its row's own words ("Exploit: 2 findings"). */
+interface Report {
+  key: string;
+  words: string;
+  tone: "clean" | "found" | null;
+  at: number;
+}
+
+/** A lens across rebuilds: its PR, its round and its id. */
+const lensKey = (lens: HTMLElement): string => {
+  const block = lens.closest<HTMLElement>(".desk-review");
+  return `${block?.dataset.review ?? ""}|${block?.dataset.round ?? ""}|${lens.dataset.lens ?? ""}`;
+};
+
 export interface DeskLife {
   /** The bubbles' layer: the floor appends it after its desks. */
   layer: HTMLElement;
@@ -218,6 +242,10 @@ export function deskLife(
   let seen: Set<string> | null = null;
   /** Puts Rivet back as he was before a cheer still running. */
   let unCheer: (() => void) | null = null;
+  /** Every lens on the floor at the last rebuild, done or not; null before the first. */
+  let lenses: Map<string, boolean> | null = null;
+  /** Finished lenses still to tell their chat. */
+  let reports: Report[] = [];
 
   const showing = () => {
     if (document.visibilityState === "hidden" || !floor.isConnected || !floor.clientWidth) return false;
@@ -257,9 +285,9 @@ export function deskLife(
   }
 
   /** Measures a bubble beside `by` (the speaker where it is, or will be) and where it would stand; null when it fits nowhere. */
-  function fit(who: Speaker, words: string, by: Box): { bubble: HTMLElement; spot: NonNullable<ReturnType<typeof placeBubble>> } | null {
+  function fit(who: Speaker, words: string, by: Box, how: SayHow = {}): { bubble: HTMLElement; spot: NonNullable<ReturnType<typeof placeBubble>> } | null {
     const news = /^(Merged|Shipped): /.test(words);
-    const bubble = h("div", { class: `desks-say${who.key === "rivet" ? " is-rivet" : ""}${news ? " is-news" : ""}` }, words);
+    const bubble = h("div", { class: `desks-say${who.key === "rivet" ? " is-rivet" : ""}${news ? " is-news" : ""}${how.tone ? ` is-${how.tone}` : ""}` }, words);
     layer.append(bubble);
     const base = floor.getBoundingClientRect();
     const top = floor.scrollTop + (floor.scrollTop > 0 ? parseFloat(getComputedStyle(floor).paddingTop) || 0 : 8);
@@ -269,9 +297,10 @@ export function deskLife(
     const room = { x: 8, y: top, w: floor.clientWidth - 16, h: Math.min(floor.scrollTop + floor.clientHeight, shown) - 8 - top };
     // Every agent's row stays clear, but standing still a bubble may cover its own row's status line, which it says.
     const own = who.bot.closest(".desk-agent");
-    const rows = [...floor.querySelectorAll<HTMLElement>(".desk-agent-tip")].filter((tip) => !still() || !own?.contains(tip));
+    // A lens telling its chat may stand its news over that chat's row, which it is telling.
+    const rows = [...floor.querySelectorAll<HTMLElement>(".desk-agent-tip")].filter((tip) => (!still() || !own?.contains(tip)) && !how.mine?.contains(tip));
     const keep = [
-      ...[...floor.querySelectorAll(".desk-name, .desk-head, .desk-agent-what, .desks-more, .desk.is-rivet .rivet")].map((node) => boxOf(node, base)),
+      ...[...floor.querySelectorAll(".desk-name, .desk-head, .desk-agent-what, .desks-more, .desk.is-rivet .rivet")].filter((node) => !how.mine?.contains(node)).map((node) => boxOf(node, base)),
       ...rows.map((node) => boxOf(node, base)),
       ...bubbles.map((one) => one.box),
     ];
@@ -297,8 +326,8 @@ export function deskLife(
   }
 
   /** A bubble beside `by`; false when it fits nowhere, and nothing is shown. */
-  function say(who: Speaker, words: string, by: Box = layoutBox(floor, who.bot)): boolean {
-    const fitted = fit(who, words, by);
+  function say(who: Speaker, words: string, by: Box = layoutBox(floor, who.bot), how: SayHow = {}): boolean {
+    const fitted = fit(who, words, by, how);
     if (!fitted) return false;
     const { bubble, spot } = fitted;
     bubble.style.left = `${spot.x}px`;
@@ -331,18 +360,22 @@ export function deskLife(
     return ys.flatMap((y) => sides.map((x) => at(x, y)));
   }
 
-  /** Flies an agent to `spot`, says its line there, and brings it home. */
-  function trip(who: Speaker, spot: Box, words: string, glance: "l" | "r" | null): void {
+  /**
+   * Flies an agent to `spot`, says its line there, and brings it home; `look` is who glances at it when it lands (Rivet,
+   * or a lens's chat), and `spoke` runs once it has said it there, so a rebuild on the way home never says it twice.
+   */
+  function trip(who: Speaker, spot: Box, words: string, look: { bot: HTMLElement | null; side: "l" | "r" } | null, how: SayHow = {}, spoke?: () => void): void {
     const home = layoutBox(floor, who.bot);
     const dx = spot.x - home.x;
     const dy = spot.y - home.y;
     const ms = Math.round(Math.min(2_200, 900 + Math.hypot(dx, dy) * 2));
     const bot = who.bot;
-    const rivetBot = floor.querySelector<HTMLElement>(".desk.is-rivet .rivet");
     away = bot;
     // The boxes' row clips what leaves it, so a copy flies on the floor's own layer while the agent's seat holds its ghost.
     const flyer = bot.cloneNode(true) as HTMLElement;
     flyer.classList.add("desks-flyer", "is-away");
+    // A reviewer's copy keeps its purple off its lens's row.
+    if (bot.closest(".desk-review")) flyer.classList.add("is-reviewer");
     flyer.style.left = `${home.x}px`;
     flyer.style.top = `${home.y}px`;
     flyer.style.width = `${home.w}px`;
@@ -357,10 +390,11 @@ export function deskLife(
     });
     later(ms, () => {
       if (!bot.isConnected) return;
-      if (glance) rivetBot?.classList.add(`is-glance-${glance}`);
-      say(who, words, spot);
+      look?.bot?.classList.add(`is-glance-${look.side}`);
+      say(who, words, spot, how);
+      spoke?.();
       later(SAY_MS, () => {
-        rivetBot?.classList.remove("is-glance-l", "is-glance-r");
+        look?.bot?.classList.remove("is-glance-l", "is-glance-r");
         flyer.style.transform = "";
         later(ms, () => {
           flyer.remove();
@@ -373,9 +407,82 @@ export function deskLife(
     });
   }
 
+  /** After a rebuild: a lens at work at the last one and done now has news for its chat. The first rebuild only reads. */
+  function readLenses(): void {
+    const now = Date.now();
+    const all = [...floor.querySelectorAll<HTMLElement>(".desk-review[data-review] .desk-review-lens[data-lens]")];
+    const next = new Map(all.map((lens) => [lensKey(lens), lens.classList.contains("is-done")]));
+    for (const lens of lenses ? all : []) {
+      const key = lensKey(lens);
+      if (!next.get(key) || lenses!.get(key) !== false || reports.some((one) => one.key === key)) continue;
+      const tone = lens.classList.contains("tone-good") ? "clean" : lens.classList.contains("tone-found") ? "found" : null;
+      reports.push({ key, words: lens.getAttribute("aria-label") ?? "", tone, at: now });
+    }
+    lenses = next;
+    reports = reports.filter((one) => one.words && now - one.at < REPORT_MS && next.has(one.key));
+  }
+
+  /** A finished lens on the floor now, with its little purple and its chat's green above its block. */
+  function reporter(report: Report): { who: Speaker; green: HTMLElement; row: HTMLElement } | null {
+    const lens = [...floor.querySelectorAll<HTMLElement>(".desk-review-lens[data-lens]")].find((one) => lensKey(one) === report.key);
+    const bot = lens?.querySelector<HTMLElement>(".rivet");
+    const row = lens?.closest(".desk-review")?.previousElementSibling;
+    const green = row instanceof HTMLElement && row.classList.contains("desk-agent") ? row.querySelector<HTMLElement>(".rivet") : null;
+    if (!bot || !green || !row) return null;
+    // A box scrolled off the side tells nothing until it is back.
+    const box = bot.getBoundingClientRect();
+    const shown = floor.getBoundingClientRect();
+    if (box.right > shown.right || box.left < shown.left) return null;
+    return { who: { key: `lens:${report.key}`, bot, lines: [report.words] }, green, row: row as HTMLElement };
+  }
+
+  /**
+   * Where a lens may hover to tell its chat: on its green's shoulder, clear of the row's words, else beside the green,
+   * else just over it.
+   */
+  function reportSpots(bot: HTMLElement, green: HTMLElement): Box[] {
+    const to = layoutBox(floor, green);
+    const size = layoutBox(floor, bot).w;
+    const at = (x: number, y: number): Box => ({ x: clamp(x, 8, floor.clientWidth - size - 8), y, w: size, h: size });
+    const level = to.y + (to.h - size) / 2;
+    return [at(to.x + to.w - size * 0.45, to.y - size * 0.6), at(to.x + to.w + 6, level), at(to.x - size - 6, level), at(to.x + (to.w - size) / 2, to.y - size - 6)];
+  }
+
+  /** The next finished lens flies up to its chat and tells it; else says it where it sits. False when none could. */
+  function tellLens(): boolean {
+    if (away) return false;
+    // A tab back from hidden has not rebuilt: old news is dropped here too.
+    reports = reports.filter((one) => Date.now() - one.at < REPORT_MS);
+    for (const one of reports) {
+      const found = reporter(one);
+      if (!found) continue;
+      const { who, green, row } = found;
+      const how: SayHow = { tone: one.tone, mine: row };
+      const spot = still()
+        ? undefined
+        : reportSpots(who.bot, green).find((at) => {
+            const fitted = fit(who, one.words, at, how);
+            fitted?.bubble.remove();
+            return fitted;
+          });
+      const told = () => (reports = reports.filter((other) => other !== one));
+      if (spot) {
+        trip(who, spot, one.words, { bot: green, side: spot.x < layoutBox(floor, green).x ? "l" : "r" }, how, told);
+        return true;
+      }
+      if (say(who, one.words, undefined, how)) {
+        told();
+        return true;
+      }
+    }
+    return false;
+  }
+
   function tick(): void {
     if (!running) return;
     if (!showing() || bubbles.length >= 2) return later(1_500, tick);
+    // A lens's news goes before anyone's turn.
+    if (tellLens()) return later(GAP_MS + 1_500, tick);
     const list = speakers().filter((one) => one.bot !== away && !bubbles.some((bubble) => bubble.who === one.key));
     if (!list.length) return later(1_500, tick);
     const who = list[turn++ % list.length]!;
@@ -392,7 +499,8 @@ export function deskLife(
       });
       if (!spot) return false;
       const rivetSlab = floor.querySelector<HTMLElement>(".desk.is-rivet .desk-slab");
-      trip(who, spot, words, rivetSlab ? (spot.x < layoutBox(floor, rivetSlab).x ? "l" : "r") : null);
+      const rivetBot = floor.querySelector<HTMLElement>(".desk.is-rivet .rivet");
+      trip(who, spot, words, rivetSlab ? { bot: rivetBot, side: spot.x < layoutBox(floor, rivetSlab).x ? "l" : "r" } : null);
       later(GAP_MS + 1_500, tick);
       return true;
     };
@@ -407,10 +515,11 @@ export function deskLife(
     later(700, tick);
   }
 
-  /** Reduced motion: the first two speakers' lines, standing still at their desks until the floor changes. */
+  /** Reduced motion: any lens's news, then the first speakers' lines, two at most, standing still until the floor changes. */
   function standStill(): void {
     if (!running) return;
     if (!showing()) return later(1_500, standStill);
+    while (bubbles.length < 2 && tellLens());
     for (const who of speakers()) {
       if (bubbles.length >= 2) break;
       if (!bubbles.some((bubble) => bubble.who === who.key)) say(who, who.lines[0]!);
@@ -499,6 +608,7 @@ export function deskLife(
     layer,
     reset() {
       halt();
+      readLenses();
       start();
       update();
     },

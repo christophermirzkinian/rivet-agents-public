@@ -79,12 +79,18 @@
   font-weight: 700;
 }
 
+/* "Updated 2:02pm" and Refresh: the page's top row, Refresh at the right. */
 .reading-foot {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 4px 4px 8px;
+  padding: 0 4px;
+}
+
+.reading-foot .reading-btn {
+  min-height: 44px;
+  font-size: 16px;
 }
 
 .reading-at {

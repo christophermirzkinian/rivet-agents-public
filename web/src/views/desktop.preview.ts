@@ -643,6 +643,26 @@ if (UNDER_WAY === "under-way" || UNDER_WAY === "under-way-few") {
       ["rivet-handles-by-itself", REPO],
     ] as const
   ).flatMap(([chat, repo, pr], i) => (!few || chat === "multi-select" ? [{ chat, repo, position: i + 1, at: now.getTime() - 60_000 * (40 - i), ...(pr ? { pr } : {}) }] : []));
+  workers.reviews = [
+    { repo: REPO, pr: 318, round: 2, lens: "correctness", state: "done", findings: 0, material: 0, startedAt: now.getTime() - 14 * 60_000, minutes: 11, typicalMinutes: 12 },
+    { repo: REPO, pr: 318, round: 2, lens: "class-sweep", state: "reviewing", startedAt: now.getTime() - 7 * 60_000, typicalMinutes: 12 },
+    { repo: REPO, pr: 318, round: 2, lens: "exploit", state: "done", findings: 2, material: 1, startedAt: now.getTime() - 14 * 60_000, minutes: 13, typicalMinutes: 14 },
+    { repo: REPO, pr: 318, round: 2, lens: "visual", state: "queued" },
+  ];
+  // &finish=1: the sweep finishes clean 3.5 s in and the visual lens with a finding 11 s in, so each little purple flies
+  // up to its chat with its news. &finish=<ms> moves the first.
+  const finish = new URLSearchParams(location.search).get("finish");
+  if (finish) {
+    const first = Number(finish) > 1 ? Number(finish) : 3_500;
+    const done = (lens: string, findings: number, at: number) =>
+      setTimeout(() => {
+        const row = workers.reviews?.find((one) => one.lens === lens);
+        if (row) Object.assign(row, { state: "done", findings, material: findings, startedAt: row.startedAt ?? Date.now() - 9 * 60_000, minutes: 9 });
+        void import("../state.js").then(({ refresh }) => refresh());
+      }, at);
+    done("class-sweep", 0, first);
+    done("visual", 1, first + 7_500);
+  }
   if (!few) workers.workers.push({ id: "wt::dependency-prs", name: "dependency-prs", repo: REPO, chat: "dependency-prs", state: "idle", lastOutputAt: now.getTime() - 300_000, what: "Dependency PRs run their own" });
   underWayGithub = {
     at: now.toISOString(),
@@ -1334,14 +1354,16 @@ window.fetch = async (input, init) => {
   }
   if (url.startsWith("/api/chat") && method === "GET") return json({ messages: [...messages].sort((x, y) => x.at.localeCompare(y.at)).slice(-30), older: null });
   if (url.startsWith("/api/chat")) {
-    const body = JSON.parse(String(init?.body)) as { clientId: string; text?: string; conversation?: string | null };
+    const body = JSON.parse(String(init?.body)) as { clientId: string; text?: string; conversation?: string | null; image?: string; images?: string[]; files?: ChatMessage["files"] };
     const id = `c-${++seq}`;
     const conversation = body.conversation ? (conversationOf(body.conversation) ?? id) : id;
     if (!conversationFields[conversation]) conversationFields[conversation] = { title: (body.text ?? "").split("\n")[0]!.slice(0, 60) || "New conversation" };
     // A new message opens a closed one again, as on the server.
     conversationFields[conversation]!.closed = false;
     // Stamped now, not when the page loaded: the idle rule reads the clock.
-    const sent = mine(id, conversation, body.text ?? "", 0, { status: "sent", at: new Date().toISOString() });
+    // What was attached goes with it, so a sent photo shows in its bubble.
+    const attached = { ...(body.image ? { image: body.image } : {}), ...(body.images ? { images: body.images } : {}), ...(body.files ? { files: body.files } : {}) };
+    const sent = mine(id, conversation, body.text ?? "", 0, { status: "sent", at: new Date().toISOString(), ...attached });
     messages.push(sent);
     setTimeout(() => messages.push(say(`h-${++seq}`, conversation, "On it. I'll tell its chat now.", 0, { at: new Date().toISOString() })), 1500);
     return json({ id, clientId: body.clientId, at: sent.at, status: "done", conversation: body.conversation === null ? null : conversation }, 201);

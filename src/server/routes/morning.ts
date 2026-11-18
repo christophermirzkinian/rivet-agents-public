@@ -16,9 +16,8 @@ export function runMorningJob(): void {
 }
 
 export function register(router: Router): void {
-  const { config, store, addUpdate, prs, now, logger, push } = router.deps;
+  const { store, addUpdate, prs, now, logger, push } = router.deps;
   const usage = createUsageAsks({ store, addUpdate, now, logger });
-  const usageUrl = new URL("/?tab=what-you-used", config.origin);
   const morning = createMorning({
     now,
     addUpdate,
@@ -26,9 +25,6 @@ export function register(router: Router): void {
     needs: () => summaryNow(router.deps).needsYou,
     board: () => store.getBoard()?.board ?? null,
     answered: (id) => store.listReplies({ items: [id], limit: 1 }).length > 0,
-    neverUsed: (at) => usage.neverCount(at),
-    // A card link must be https: a local http server's Morning card goes without it.
-    ...(usageUrl.protocol === "https:" ? { usageUrl: usageUrl.href } : {}),
     logger,
   });
 

@@ -122,5 +122,10 @@ export function deriveWorkers(stored: StoredWorkers | null, board: Board | null,
       a.name.localeCompare(b.name) ||
       a.chat.localeCompare(b.chat),
   );
-  return { at: stored.at, workers, ...(stored.snapshot.pushQueue?.length ? { pushQueue: stored.snapshot.pushQueue } : {}) };
+  return {
+    at: stored.at,
+    workers,
+    ...(stored.snapshot.pushQueue?.length ? { pushQueue: stored.snapshot.pushQueue } : {}),
+    ...(stored.snapshot.reviews?.length ? { reviews: stored.snapshot.reviews } : {}),
+  };
 }

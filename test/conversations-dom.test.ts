@@ -79,6 +79,12 @@ const settle = async () => {
   for (let i = 0; i < 12; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
 };
 const shownIds = () => [...root.querySelectorAll<HTMLElement>(".chat-msg")].map((el) => el.dataset.id);
+/** The one Reply under the topic card whose last line is `id`. */
+const replyUnder = (id: string) => {
+  const card = root.querySelector<HTMLElement>(`.chat-msg[data-id="${id}"]`)!.closest<HTMLElement>(".chat-ex")!;
+  expect([...card.querySelectorAll<HTMLElement>(".chat-msg")].at(-1)!.dataset.id).toBe(id);
+  return card.querySelector<HTMLButtonElement>(":scope > .chat-ex-foot .chat-reply");
+};
 const title = () => root.querySelector(".thing-title")?.textContent;
 const box = () => root.querySelector<HTMLTextAreaElement>(".chat-text")!;
 const sheet = () => document.querySelector<HTMLElement>(".sheet");
@@ -139,8 +145,9 @@ describe("Chat", () => {
   it("is one conversation with Rivet: Chat's lines in time order, no list, and a thing as one line to its page", async () => {
     await onChat();
     expect(chat.openConversation()).toBeNull();
-    // Updates' news is the Feed's; every other line shows, a thing's after its card too (2026-11-16).
-    expect(shownIds()).toEqual(["w1", "w2", "k1", "kp", "ka", "g1", "g2", "k2", "g3"]);
+    // Updates' news is the Feed's; every other line shows, a thing's after its card too (2026-11-16), each topic in one
+    // card in time order and the cards by their newest line.
+    expect(shownIds()).toEqual(["w1", "w2", "k1", "kp", "ka", "k2", "g1", "g2", "g3"]);
     expect(root.querySelector(".conv-row, .conv-read-all, .conv-select, .conv-menu, .conv-new")).toBeNull();
     const link = root.querySelector<HTMLButtonElement>('.chat-thing-row[data-id="kp"] .chat-thing-link')!;
     expect(link.textContent).toContain("Plan: results row");
@@ -210,7 +217,7 @@ describe("Chat", () => {
     // A reload reads the same lines from the server.
     chat.unmount();
     await onChat();
-    expect(shownIds()).toEqual(["w1", "w2", "k1", "kp", "ka", "kr", "kb", "g1", "g2", "k2", "g3"]);
+    expect(shownIds()).toEqual(["w1", "w2", "k1", "kp", "ka", "kr", "kb", "k2", "g1", "g2", "g3"]);
   });
 
   it("in Chat a thing's reply carries Open topic ›, which opens its page; Chat's own replies, card lines and the owner's lines have none (2026-11-16)", async () => {
@@ -298,7 +305,7 @@ describe("Chat", () => {
     expect(title()).toBe("Results row");
     expect(shownIds()).toContain("c9-3");
     expect(server.messages.find((one) => one.id === "c9-3")!.threadId).toBe("k1");
-    root.querySelector<HTMLButtonElement>('.chat-msg[data-id="k2"] .chat-reply')!.click();
+    replyUnder("k2")!.click();
     expect(box().placeholder).not.toBe("Reply here");
     send("yes, merge it");
     await settle();
@@ -437,12 +444,13 @@ describe("Chat", () => {
     // A reload reads the same lines from the server.
     chat.unmount();
     await onChat();
-    expect(shownIds()).toEqual(["w1", "w2", "k1", "kp", "ka", "g1", "g2", "k2", "g3", "k8", "k9", "kq", "k10"]);
+    // Its topic's card now has the newest line, so it comes last.
+    expect(shownIds()).toEqual(["w1", "w2", "g1", "g2", "g3", "k1", "kp", "ka", "k2", "k8", "k9", "kq", "k10"]);
   });
 
-  it("searches every conversation's messages from inside More topics, and only there", async () => {
+  it("searches every conversation's messages from Chat and inside More topics, never on a topic's page", async () => {
     await onChat();
-    expect(root.querySelector<HTMLElement>(".chat-search")!.hidden).toBe(true);
+    expect(root.querySelector<HTMLElement>(".chat-search")!.hidden).toBe(false);
     root.querySelector<HTMLButtonElement>(".chat-topics-open")!.click();
     await settle();
     expect(root.querySelector<HTMLElement>(".chat-search")!.hidden).toBe(false);
@@ -477,7 +485,7 @@ describe("Chat", () => {
     await settle();
     expect(section.classList.contains("topics")).toBe(false);
     expect(root.querySelector(".chat-topics-open")).not.toBeNull();
-    expect(shownIds()).toEqual(["w1", "w2", "k1", "kp", "ka", "g1", "g2", "k2", "g3"]);
+    expect(shownIds()).toEqual(["w1", "w2", "k1", "kp", "ka", "k2", "g1", "g2", "g3"]);
   });
 
   it("a saved More topics entry lands back on the topics; Archived loads the older ones on a tap, never Updates; a thing's new reply shows on the row", async () => {
@@ -569,7 +577,8 @@ describe("a thing's page", () => {
     speak.click();
     expect(said).toEqual(["PR #341 is up\nstills attached"]);
     expect(speak.textContent).toBe("Reading aloud");
-    expect(root.querySelector(".chat-head .chat-speak")!.getAttribute("aria-pressed")).toBe("true");
+    // Chat's options menu has the same setting as a switch.
+    expect(root.querySelector(".chat-head .chat-menu .chat-speak")!.getAttribute("aria-checked")).toBe("true");
     speak.click();
   });
 
@@ -642,7 +651,7 @@ describe("a thing's page", () => {
     expect(root.querySelector<HTMLElement>(".chat-compose-box")!.hidden).toBe(true);
     expect(root.querySelector(`.chat-msg[data-id="${UPDATES_ID}"]`)).toBeNull();
     expect(root.querySelector<HTMLElement>(".thing-foot")!.hidden).toBe(true);
-    expect(root.querySelector<HTMLElement>('.chat-msg[data-id="u1"] .chat-reply')!.hidden).toBe(true);
+    expect(replyUnder("u1")).toBeNull();
     chat.showConversation("g1");
     await settle();
     expect(root.querySelector<HTMLElement>(".chat-compose-box")!.hidden).toBe(false);
@@ -652,7 +661,7 @@ describe("a thing's page", () => {
     server.conversations.get("g1")!.closed = true;
     await onThing("g1");
     expect(root.querySelector(".thing-quiet")).not.toBeNull();
-    root.querySelector<HTMLButtonElement>('.chat-msg[data-id="g3"] .chat-reply')!.click();
+    replyUnder("g3")!.click();
     send("one more thing");
     await settle();
     expect(server.posted.find((body) => "text" in body)).toMatchObject({ replyTo: "g3", conversation: "g1" });

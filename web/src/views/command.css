@@ -32,8 +32,130 @@
 }
 
 .chat-tools {
+  position: relative;
   display: flex;
   gap: 8px;
+}
+
+/* Chat's one options button: Collapse all, Expand all, Mark all read and Read aloud under it. */
+.chat-options {
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+.chat-options[aria-expanded="true"] {
+  background: #3b3566;
+  box-shadow: 0 0 0 2px var(--apricot);
+}
+
+.chat-options svg {
+  width: 20px;
+  height: 20px;
+}
+
+.chat-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  /* It hangs from the options button, which sits about 64px in from the screen's right in Rivet's sheet: on a narrow
+     phone it keeps 8px from the left edge. */
+  width: min(262px, calc(100vw - 80px));
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--panel);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+}
+
+.chat-menu[hidden],
+.chat-menu-item[hidden] {
+  display: none;
+}
+
+.chat-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 12px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-menu-item:hover,
+.chat-menu-item:focus-visible {
+  background: var(--panel-2);
+}
+
+.chat-menu-item:disabled {
+  color: var(--dim);
+  cursor: default;
+}
+
+.chat-menu-item svg {
+  flex: none;
+  width: 19px;
+  height: 19px;
+}
+
+.chat-menu-grow {
+  flex: 1;
+}
+
+.chat-menu-count {
+  color: var(--apricot);
+  font-size: var(--fs-m);
+  font-weight: 700;
+}
+
+.chat-menu-item.chat-speak {
+  margin-top: 4px;
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 12px 12px;
+}
+
+.chat-switch {
+  position: relative;
+  flex: none;
+  width: 44px;
+  height: 26px;
+  border-radius: 999px;
+  background: #4a4666;
+  transition: background 0.15s;
+}
+
+.chat-switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  transition: left 0.15s;
+}
+
+.chat-speak[aria-checked="true"] .chat-switch {
+  background: #3ecf8e;
+}
+
+.chat-speak[aria-checked="true"] .chat-switch::after {
+  left: 21px;
 }
 
 .chat-tools .btn {
@@ -55,7 +177,7 @@
   margin-bottom: 0;
 }
 
-.home-sheet-head > .chat-head .chat-speak {
+.home-sheet-head > .chat-head .chat-speak:not(.chat-menu-item) {
   gap: 6px;
   padding-inline: 10px;
   border-color: transparent;
@@ -126,9 +248,9 @@
 .chat-msg.mine {
   align-self: flex-end;
   border-color: transparent;
-  /* Your bubble is a dark wash with light text, never a yellow fill (The owner, 2026-11-18). */
-  background: linear-gradient(135deg, rgba(255, 194, 61, 0.26), rgba(120, 92, 255, 0.26));
-  border-bottom-right-radius: 8px;
+  /* Your bubble is a dark purple with light text, never a yellow fill. */
+  background: #3b3566;
+  border-bottom-right-radius: 6px;
 }
 
 .chat-msg.theirs {
@@ -140,9 +262,10 @@
   background: var(--panel);
 }
 
+/* One text size for every chat bubble: a card answer's line (.chat-answer-text) is this size too. */
 .chat-body {
   margin: 0;
-  font-size: var(--fs-xl);
+  font-size: var(--fs-body);
   line-height: 1.4;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -256,7 +379,6 @@
   margin-left: auto;
 }
 
-.chat-share,
 .chat-reply,
 .chat-thread-open {
   min-width: var(--tap);
@@ -269,22 +391,347 @@
   display: none;
 }
 
-/* The name and time line: a tap on it, or on the message, shows Reply and Share. */
-.chat-meta-tap {
-  min-height: var(--tap);
-  padding: 0 8px 0 0;
-  border: 0;
-  background: none;
-  font: inherit;
-  font-size: var(--fs-body);
-  color: var(--muted);
-  text-align: left;
-  cursor: pointer;
-  touch-action: manipulation;
+/* In Rivet's sheet the topic cards run 8px from the phone's edges, so they are not cramped. */
+.home-chat {
+  margin-inline: -6px;
 }
 
-.chat-share {
-  color: var(--wa);
+.home-chat > .chat {
+  padding-inline: 0;
+}
+
+/* A topic card: his lines on the right, Rivet's on the left, one heading, one More and one Reply. */
+.chat-ex {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 6px 4px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.chat-ex.minimised {
+  padding: 0;
+}
+
+.chat-ex-turns {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chat-ex-turns[hidden] {
+  display: none;
+}
+
+.chat-ex .chat-msg {
+  max-width: 88%;
+  padding: 9px 12px;
+}
+
+.chat-ex .chat-msg.theirs {
+  border-radius: 20px 20px 20px 6px;
+  background: var(--panel-2);
+}
+
+.chat-ex .chat-msg.mine {
+  border-radius: 20px 20px 6px 20px;
+}
+
+.chat-ex .chat-msg > .chat-meta {
+  margin: 0 0 3px;
+  color: var(--dim);
+  font-size: var(--fs-s);
+  font-weight: 700;
+}
+
+.chat-ex .chat-msg.mine > .chat-meta {
+  color: var(--muted);
+}
+
+.chat-ex-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  margin: -6px -6px 2px;
+  padding: 2px 2px 2px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 18px 18px 0 0;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.chat-ex-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--apricot);
+  opacity: 0.8;
+}
+
+.chat-ex-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--fs-body);
+  font-weight: 700;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.chat-ex-chev {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.chat-ex-chev-icon,
+.chat-ex-chev-icon svg {
+  display: block;
+  width: 20px;
+  height: 20px;
+}
+
+.chat-ex-head .chat-ex-chev-icon {
+  transform: rotate(180deg);
+}
+
+.chat-ex-min {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 62px;
+  padding: 4px 10px 4px 12px;
+  border: 0;
+  border-radius: 18px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-ex-min .chat-ex-dot {
+  width: 8px;
+  height: 8px;
+  background: #4a4666;
+  opacity: 1;
+}
+
+.chat-ex-min .chat-ex-dot.new {
+  background: var(--apricot);
+  box-shadow: 0 0 0 4px rgba(255, 197, 61, 0.18);
+}
+
+.chat-ex-min-words {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.chat-ex-min .chat-ex-title {
+  color: var(--text);
+  font-size: var(--fs-l);
+}
+
+.chat-ex-min-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 3px;
+}
+
+.chat-ex-min-line {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--fs-m);
+  font-weight: 500;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.chat-ex-min-line.working {
+  color: var(--apricot);
+  font-weight: 700;
+}
+
+.chat-away {
+  align-self: center;
+  width: fit-content;
+  max-width: 100%;
+  margin: 4px auto;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: var(--apricot);
+  color: #1b1a2b;
+  font-size: var(--fs-s);
+  font-weight: 800;
+  text-align: center;
+  list-style: none;
+}
+
+.chat-ex-new {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--apricot);
+  color: #1b1a2b;
+  font-size: var(--fs-s);
+  font-weight: 800;
+}
+
+.chat-ex-time {
+  flex: none;
+  color: var(--dim);
+  font-size: var(--fs-s);
+  font-weight: 700;
+}
+
+.chat-ex-wait {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 2px 4px;
+  color: var(--apricot);
+  font-size: var(--fs-body);
+  font-weight: 700;
+}
+
+.chat-ex-dots {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.chat-ex-dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: chat-ex-dot 1.2s infinite ease-in-out;
+}
+
+.chat-ex-dots i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.chat-ex-dots i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes chat-ex-dot {
+  0%,
+  80%,
+  100% {
+    opacity: 0.3;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+
+.chat-ex-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 -2px 0 2px;
+}
+
+.chat-ex-foot .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 10px;
+  border-color: transparent;
+  color: var(--muted);
+  font-size: var(--fs-body);
+  font-weight: 700;
+}
+
+.chat-ex-foot .chat-reply {
+  margin-left: auto;
+}
+
+/* An exchange's More sheet: Listen, Read all and Share. */
+.chat-more-sheet .sheet-title {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--fs-body);
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.chat-more-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 60px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 12px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-more-row:hover,
+.chat-more-row:focus-visible {
+  background: var(--panel-2);
+}
+
+.chat-more-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: var(--panel-2);
+}
+
+.chat-more-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.chat-more-words {
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-more-words strong {
+  font-size: var(--fs-xl);
+}
+
+.chat-more-words small {
+  margin-top: 2px;
+  color: var(--dim);
+  font-size: var(--fs-m);
+  font-weight: 600;
 }
 
 .chat-reply {
@@ -457,8 +904,12 @@ button.chat-quote {
   left: 0;
   bottom: 0;
   height: 4px;
+  width: 100%;
   background: var(--apricot);
-  transition: width 250ms linear;
+  /* chat.ts scales it to the time left, every frame, or each tick under reduced motion. Never a transition: reduced
+     motion's 0.01ms one (styles.css) is restarted by each redraw and holds the bar at its first length. */
+  transform-origin: left;
+  transition: none;
 }
 
 .chat-compose {
@@ -530,6 +981,26 @@ button.chat-quote {
 
 .chat .attach-preview {
   margin-top: 8px;
+}
+
+/* Files dragged over the chat: the whole chat dims under a dashed apricot frame that says where they go. */
+.drop-on > .chat {
+  position: relative;
+}
+.drop-on > .chat::after {
+  content: "Drop to attach";
+  position: absolute;
+  inset: 6px;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  border: 3px dashed var(--accent);
+  border-radius: var(--radius);
+  background: rgb(20, 16, 40);
+  color: var(--accent);
+  font-size: var(--fs-6xl);
+  font-weight: 900;
+  pointer-events: none;
 }
 
 .chat-compose .attach-btn {
@@ -1578,18 +2049,21 @@ button.chat-quote {
 /* Rivet beside what he says, his mood on his face. */
 .chat-msg.theirs.has-rivet {
   position: relative;
-  margin-left: 44px;
-  max-width: calc(86% - 44px);
+  margin-left: 32px;
+  max-width: calc(88% - 32px);
 }
 
 .chat-msg .chat-rivet {
   position: absolute;
-  left: -44px;
+  left: -32px;
   bottom: 0;
 }
 
 /* Only his newest message's Rivet moves; the earlier ones sit still, so a long thread costs no more than a short one. */
 .chat-msg.has-rivet:not(:nth-last-child(1 of .has-rivet)) .chat-rivet,
-.chat-msg.has-rivet:not(:nth-last-child(1 of .has-rivet)) .chat-rivet * {
+.chat-msg.has-rivet:not(:nth-last-child(1 of .has-rivet)) .chat-rivet *,
+.chat-ex:not(:last-child) .chat-rivet,
+.chat-ex:not(:last-child) .chat-rivet *,
+.chat-ex:not(:last-child) .chat-ex-dots i {
   animation: none;
 }

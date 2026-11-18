@@ -1,5 +1,5 @@
 import { fileHolds } from "./holds-file.mjs";
-import { currentTexts, holdLines, labelKey } from "./pr-holds.mjs";
+import { labelKey } from "./pr-holds.mjs";
 
 export const HOLD_LABELS = ["do-not-merge", "do not merge", "dnm", "wip", "blocked"];
 
@@ -91,9 +91,9 @@ async function closingHolds({ repo, pr, view, closes, gh, shown }) {
   return { closing, squashTitle };
 }
 
-/** Read every hold surface. Any incomplete API response refuses automatic action. A comment's or review's hold line
- * is in force until a later trusted release supersedes it (`currentTexts`).
- * `shown` gives a text as its hold line may be shown: the bridge passes its redactor here, as this file does not import it. For an open PR, `closing` lists the refusals for the other open pull requests a closing keyword in
+/** Read every hold surface: the PR's hold labels and its holds.json entries; its body, comments and reviews are read
+ * for the callers, never as holds. Any incomplete API response refuses automatic action.
+ * `shown` gives a text as a closing keyword in it may be shown: the bridge passes its redactor here, as this file does not import it. For an open PR, `closing` lists the refusals for the other open pull requests a closing keyword in
  * its squash text names (closingHolds; `closes` lists the ones whose close is meant), apart from the holds: they stop
  * the merge only, and change when another PR does. `squashTitle` is the title the merge request must set; null unless
  * the PR is open. `forMerge: false` skips that merge-only read, for a caller that only wants the holds. `ignoreCard`
@@ -122,19 +122,9 @@ export async function readMergeHolds({ repo, pr, gh, holdsFile, now, shown, clos
   const reviewCommentRows = await pages(`pulls/${pr}/comments`);
   const comments = commentRows.map((r) => r.body ?? "");
   const texts = [view.body ?? "", ...comments, ...reviewRows.map((r) => r.body ?? ""), ...reviewCommentRows.map((r) => r.body ?? "")];
-  const note = (/** @type {any} */ r, /** @type {unknown} */ posted, /** @type {unknown} */ changed) => ({ body: r.body, posted: typeof posted === "string" ? posted : null, changed: typeof changed === "string" ? changed : null, association: typeof r.author_association === "string" ? r.author_association : null });
-  const notes = [
-    ...commentRows.map((r) => note(r, r.created_at, r.updated_at)),
-    // A review's summary can be edited and GitHub gives no time for it, so a review is never superseded.
-    ...reviewRows.map((r) => note(r, r.submitted_at, null)),
-    ...reviewCommentRows.map((r) => note(r, r.created_at, r.updated_at)),
-  ];
-  const live = currentTexts({ body: view.body, notes });
+  // Only a hold label and holds.json hold a merge: words in the body, a comment or a review hold nothing. The texts are still read whole, for
+  // the callers' visual-approval and closing-keyword reads.
   const holds = view.labels.filter((/** @type {any} */ l) => isMergeHoldLabel(l.name)).map((/** @type {any} */ l) => `label ${l.name}`);
-  const line = holdLines(live);
-  // Found in the texts as written, so a hold always holds; shown from the texts as `shown` gives them whole, as a line
-  // taken out first loses what marks a secret around it (a block's header, a continued line).
-  if (line !== null) holds.push(`PR text: ${shown ? (holdLines(live.map((text) => shown(String(text ?? "")))) ?? "[redacted]") : line}`);
   const { closing, squashTitle } = view.state === "open" && forMerge ? await closingHolds({ repo, pr, view, closes, gh, shown }) : { closing: [], squashTitle: null };
   // Read after the last await, so a hold written during the lookups still holds the merge.
   holds.push(...fileHolds(pr, { file: holdsFile, now: now ?? Date.now(), ignoreCard }));

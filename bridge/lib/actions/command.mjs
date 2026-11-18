@@ -88,7 +88,7 @@ const isPr = (v) => typeof v === "number" && Number.isSafeInteger(v) && v > 0;
 /**
  * @param {string} event
  * @param {unknown} raw
- * @returns {{ ok: true, value: { id: string, pr?: number, headSha?: string, schedule?: string, on?: boolean, job?: import("../jobs.mjs").JobAction, issue?: number, op?: "comment" | "close" | "label", text?: string, image?: string, images?: string[], files?: import("../validate.mjs").FileRef[], replyTo?: string, quote?: import("../command-templates.mjs").Quote, conversation?: import("../command-templates.mjs").Conversation, repo?: string, chat?: string, models?: unknown, base?: unknown } }
+ * @returns {{ ok: true, value: { id: string, pr?: number, headSha?: string, schedule?: string, on?: boolean, job?: import("../jobs.mjs").JobAction, issue?: number, op?: "comment" | "close" | "label", text?: string, image?: string, images?: string[], files?: import("../validate.mjs").FileRef[], replyTo?: string, quote?: import("../command-templates.mjs").Quote, notAnswer?: true, conversation?: import("../command-templates.mjs").Conversation, repo?: string, chat?: string, models?: unknown, base?: unknown } }
  *   | { ok: false, id: string, reason: string }}
  */
 export function validateCommand(event, raw) {
@@ -104,7 +104,7 @@ export function validateCommand(event, raw) {
     if (typeof r.headSha !== "string" || !/^[0-9a-f]{40}$/.test(r.headSha)) return bad("bad-head");
     return { ok: true, value: { id, repo: r.repo, pr: /** @type {number} */ (r.pr), headSha: r.headSha } };
   }
-  /** @type {{ id: string, schedule?: string, on?: boolean, job?: import("../jobs.mjs").JobAction, issue?: number, op?: "comment" | "close" | "label", text?: string, image?: string, images?: string[], files?: import("../validate.mjs").FileRef[], replyTo?: string, quote?: import("../command-templates.mjs").Quote, conversation?: import("../command-templates.mjs").Conversation, repo?: string, chat?: string, models?: unknown, base?: unknown }} */
+  /** @type {{ id: string, schedule?: string, on?: boolean, job?: import("../jobs.mjs").JobAction, issue?: number, op?: "comment" | "close" | "label", text?: string, image?: string, images?: string[], files?: import("../validate.mjs").FileRef[], replyTo?: string, quote?: import("../command-templates.mjs").Quote, notAnswer?: true, conversation?: import("../command-templates.mjs").Conversation, repo?: string, chat?: string, models?: unknown, base?: unknown }} */
   const value = { id };
   if (event === "chat" && r.image !== undefined) {
     if (!isImageId(r.image)) return bad("bad-image");
@@ -142,6 +142,10 @@ export function validateCommand(event, raw) {
       q.text.length <= 4 * MAX_QUOTE_TEXT;
     if (!valid) return bad("bad-quote");
     value.quote = { from: /** @type {"owner" | "rivet"} */ (q.from), text: /** @type {string} */ (q.text) };
+  }
+  if (event === "chat" && r.notAnswer !== undefined) {
+    if (r.notAnswer !== true || value.replyTo === undefined) return bad("bad-not-answer");
+    value.notAnswer = true;
   }
   if (event === "chat" && r.conversation !== undefined) {
     const c = r.conversation;
@@ -417,7 +421,7 @@ export function createCommandFamily(options = {}) {
    * set and running, else a new chat the runner starts with it as the first message. A failed list or send ends the connection, so
    * the server replays it.
    * @param {ActionContext} ctx
-   * @param {{ id: string, repo?: string, chat?: string, text?: string, image?: string, images?: string[], files?: import("../validate.mjs").FileRef[], replyTo?: string, quote?: import("../command-templates.mjs").Quote, conversation?: import("../command-templates.mjs").Conversation }} v
+   * @param {{ id: string, repo?: string, chat?: string, text?: string, image?: string, images?: string[], files?: import("../validate.mjs").FileRef[], replyTo?: string, quote?: import("../command-templates.mjs").Quote, notAnswer?: true, conversation?: import("../command-templates.mjs").Conversation }} v
    * @returns {Promise<ActionResult>}
    */
   async function chat(ctx, v) {
@@ -442,7 +446,7 @@ export function createCommandFamily(options = {}) {
       if ("unavailable" in attachment) log("image-unavailable", { id: key, reason: attachment.unavailable });
       attachments.push(attachment);
     }
-    const line = appChatLine(v.id, v.text, attachments, v.files, v.replyTo ? { replyTo: v.replyTo, quote: v.quote } : undefined, v.conversation);
+    const line = appChatLine(v.id, v.text, attachments, v.files, v.replyTo ? { replyTo: v.replyTo, quote: v.quote, notAnswer: v.notAnswer } : undefined, v.conversation);
     /** @type {{ target: "chat" | "rivet" | "new", chat: string }} */
     let route;
     let handle = null;

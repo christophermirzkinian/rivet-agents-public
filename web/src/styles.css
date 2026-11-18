@@ -2478,8 +2478,8 @@ html:has(> #rivet-cap) :is(.sheet-backdrop, .scene-sheet-backdrop) {
 #rivet-cap {
   flex: none;
   padding: max(12px, env(safe-area-inset-top)) 16px 12px 14px;
-  border-bottom: 2px solid var(--apricot);
-  border-left: 6px solid var(--apricot);
+  /* No thick coloured edge on a box. */
+  border-bottom: 1px solid var(--line);
   background: var(--panel-2);
   color: var(--text);
   font-size: var(--fs-3xl);

@@ -20,10 +20,6 @@ export interface MorningDeps {
   board(): Board | null;
   /** You already answered (saw) this card: one seen and gone from the board is not filed again. */
   answered(id: string): boolean;
-  /** What you used's count of ids never used in 30 days, or null before 30 full days of recording. */
-  neverUsed?(now: Date): number | null;
-  /** The app's What you used page, an https link. */
-  usageUrl?: string;
   logger: Pick<Console, "error">;
 }
 
@@ -31,8 +27,6 @@ export interface MorningFacts {
   day: string;
   merged: number;
   needs: number;
-  /** Mondays only, after 30 full days of recording: the never-used count, and the page it opens. */
-  whatYouUsed?: { never: number; url: string };
 }
 
 /** The local day of the week at `at`: 0 Sunday to 6 Saturday. */
@@ -62,20 +56,8 @@ export function morningFacts(deps: Pick<MorningDeps, "now" | "merged" | "needs">
   return { day, merged, needs: deps.needs() };
 }
 
-/** Monday's What you used line, read only when the card is filed: nothing before 30 full days of recording. */
-export function whatYouUsedFact(deps: Pick<MorningDeps, "neverUsed" | "usageUrl">, now: Date): Pick<MorningFacts, "whatYouUsed"> {
-  if (localWeekday(now) !== 1 || !deps.usageUrl) return {};
-  const never = deps.neverUsed?.(now) ?? null;
-  return never === null ? {} : { whatYouUsed: { never, url: deps.usageUrl } };
-}
-
-/** Monday's one What you used line, a link that opens the page (the card's own line stays overnightLine). */
-export function whatYouUsedLine(never: number): string {
-  return `What you used: ${never} never used in 30 days ›`;
-}
-
+// Monday's What you used link is gone with the page's menu row: the card is its one line every day.
 export function morningCard(facts: MorningFacts): { id: string } & Record<string, unknown> {
-  const used = facts.whatYouUsed;
   return {
     id: morningId(facts.day),
     title: "Good morning",
@@ -84,7 +66,6 @@ export function morningCard(facts: MorningFacts): { id: string } & Record<string
     kind: DECISION,
     options: [{ label: GOT_IT }],
     push: "fyi",
-    ...(used ? { links: [{ label: whatYouUsedLine(used.never), url: used.url }] } : {}),
   };
 }
 
@@ -129,7 +110,7 @@ export function createMorning(deps: MorningDeps): Morning {
         filed = day;
         return "there";
       }
-      const result = deps.addUpdate(morningCard({ ...morningFacts(deps, now), ...whatYouUsedFact(deps, now) }));
+      const result = deps.addUpdate(morningCard(morningFacts(deps, now)));
       if (result.status === 200 || result.status === 409) {
         filed = day;
         lastError = null;

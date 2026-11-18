@@ -42,6 +42,8 @@ export interface Reading extends ReadingInput {
   /** The placeholder's blocks in px, about the height the page lands at. */
   shape: readonly number[];
   retry: () => void;
+  /** False on a page whose own Refresh already sits top right: the row keeps only its time. */
+  button?: boolean;
 }
 
 function frameButton(words: string, busy: boolean, retry: () => void, primary: boolean): HTMLElement {
@@ -56,14 +58,22 @@ function frameButton(words: string, busy: boolean, retry: () => void, primary: b
   );
 }
 
-/** The stale line when a refresh failed, then "Updated 2:02pm" with Refresh: for a page that lays out its own figures. */
-export function readingNotes(reading: Reading): HTMLElement[] {
-  const foot = h("div", { class: "reading-foot" }, h("span", { class: "reading-at" }, updatedWords(reading.at)), frameButton("Refresh", reading.busy, reading.retry, false));
-  return readingView(reading).stale ? [h("p", { class: "reading-stale", attrs: { role: "status" } }, STALE_WORDS), foot] : [foot];
+/** "Updated 2:02pm" with Refresh at the right, the page's top row. */
+function readingHead(reading: Reading): HTMLElement {
+  return h("div", { class: "reading-foot" }, h("span", { class: "reading-at" }, updatedWords(reading.at)), reading.button === false ? null : frameButton("Refresh", reading.busy, reading.retry, false));
 }
 
-/** The page in its frame; `figures` is only built once there is something to show. */
-export function readingFrame(reading: Reading, figures: () => Child[]): HTMLElement {
+/** "Updated 2:02pm" with Refresh, then the stale line when a refresh failed, as the frame orders them: for a page that lays out its own figures. */
+export function readingNotes(reading: Reading): HTMLElement[] {
+  const head = readingHead(reading);
+  return readingView(reading).stale ? [head, h("p", { class: "reading-stale", attrs: { role: "status" } }, STALE_WORDS)] : [head];
+}
+
+/**
+ * The page in its frame; `figures` is only built once there is something to show. `lead` (a page's own switch) sits
+ * under the top row, undimmed; the caller shows it above the frame while there are no figures yet.
+ */
+export function readingFrame(reading: Reading, figures: () => Child[], lead: Child = null): HTMLElement {
   const view = readingView(reading);
   if (view.body === "pending")
     return h(
@@ -81,13 +91,13 @@ export function readingFrame(reading: Reading, figures: () => Child[]): HTMLElem
       { class: "reading is-failed" },
       h("div", { class: "reading-failed", attrs: { role: "status" } }, rivet("wrong", { size: 56, className: "reading-face" }), h("p", { class: "reading-failed-words" }, failedWords(reading.page)), frameButton("Try again", false, reading.retry, true)),
     );
-  const notes = readingNotes(reading);
   return h(
     "div",
     { class: `reading${view.dim ? " is-busy" : ""}`, attrs: { "aria-busy": String(view.dim) } },
-    ...notes.slice(0, -1),
+    readingHead(reading),
+    view.stale ? h("p", { class: "reading-stale", attrs: { role: "status" } }, STALE_WORDS) : null,
+    lead,
     h("div", { class: "reading-figures" }, ...figures()),
-    notes.at(-1),
   );
 }
 

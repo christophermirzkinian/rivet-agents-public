@@ -15,7 +15,7 @@ import { shortDate } from "../../../src/shared/when.js";
 import { ApiError, askUsage, getUsageReport } from "../api.js";
 import { h } from "../dom.js";
 import { sameSession } from "../session.js";
-import { readingFrame } from "./reading.js";
+import { readingFrame, readingView } from "./reading.js";
 
 // More › What you used: what you tapped and opened in the last 30 days, phone first, counted by the server when the
 // page asks. Retire? and Rework? only send a card; nothing is removed from here. Every feature sits in its area's fold,
@@ -332,6 +332,8 @@ function paint(): void {
   };
   const reading = { page: "What you used", has: !!report, failed, busy, at: readAt, shape: [64, 52, 360], retry: () => void refresh() };
   const focused = document.activeElement?.classList.contains("used-search") ?? false;
-  root.replaceChildren(h("div", { class: "used" }, switcher, readingFrame(reading, () => body(report!)), h("p", { class: "used-foot" }, "Each Retire? comes to you as a card first. Nothing is removed by itself.")));
+  // With figures the switch sits under the frame's top row, so Refresh is top right as on every page.
+  const figures = readingView(reading).body === "figures";
+  root.replaceChildren(h("div", { class: "used" }, figures ? null : switcher, readingFrame(reading, () => body(report!), figures ? switcher : null), h("p",{ class: "used-foot" }, "Each Retire? comes to you as a card first. Nothing is removed by itself.")));
   if (focused) root.querySelector<HTMLInputElement>(".used-search")?.focus();
 }

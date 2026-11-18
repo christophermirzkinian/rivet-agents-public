@@ -38,7 +38,6 @@ export const READINGS: PageRow[] = [
 /** The menu's second group, after its rule. Rivet's mind goes first here. */
 export const YOURS: PageRow[] = [
   { page: "mind", icon: ICONS.mind },
-  { page: "what-you-used", icon: ICONS.list },
   { page: "home", icon: HOME_ICON },
   { page: "media", icon: ICONS.photo },
   { page: "settings", icon: ICONS.settings },

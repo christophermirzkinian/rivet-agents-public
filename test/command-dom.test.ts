@@ -18,7 +18,7 @@ import { closeSheet } from "../web/src/views/sheet.js";
 import { mountToasts } from "../web/src/views/toast.js";
 import { closeWorkerSheet, openChatSheet, openWorkerSheet } from "../web/src/views/worker-sheet.js";
 import * as chat from "../web/src/views/chat.js";
-import { ACCEPT, FILE_REFUSED, PHOTO_FAILED, sortPick } from "../web/src/views/attach.js";
+import { ACCEPT, catchStrayDrops, DROP_IDLE_MS, FILE_REFUSED, PAGE_DRAG, PHOTO_FAILED, sortPick } from "../web/src/views/attach.js";
 import { cardMedia } from "../web/src/views/card-media.js";
 import { detailBody, EMPTY_LIST } from "./conversations-fake.js";
 
@@ -301,6 +301,71 @@ describe("chat tab", () => {
     text.dispatchEvent(new Event("input"));
   });
 
+  it("the bar drains every frame while a window collects, one loop only, resting when it is empty, nothing collects or Chat closes, and steps with the tick under reduced motion", async () => {
+    const frames = new Map<number, FrameRequestCallback>();
+    let next = 0;
+    const raf = vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => (frames.set(++next, callback), next));
+    const caf = vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => void frames.delete(id));
+    const runFrame = () => {
+      const [id, callback] = [...frames][0]!;
+      frames.delete(id);
+      callback(0);
+    };
+    const scale = () => Number(/scaleX\(([\d.]+)\)/.exec(root.querySelector<HTMLElement>(".chat-collecting-bar")!.style.transform)?.[1]);
+    const collectingFor = (ms: number): ChatMessage[] => [
+      { id: "msg-1", from: "owner", text: "ship signup flow", at: new Date().toISOString(), status: "collecting", sendsAt: new Date(Date.now() + ms).toISOString(), threadId: "c1" },
+    ];
+    try {
+      chatAnswer = (id) => Promise.resolve(json(entry(id, "chat", "collecting"), 202));
+      chat.mount(root);
+      await settle();
+      root.querySelector<HTMLTextAreaElement>(".chat-text")!.value = "ship signup flow";
+      root.querySelector<HTMLButtonElement>(".chat-send")!.click();
+      await settle();
+      await settle();
+      messages = collectingFor(6_500);
+      await chat.refresh();
+      expect(frames.size).toBe(1);
+      // By the exact time left: 6.5s of a 10s window, not a whole 7s.
+      expect(scale()).toBeGreaterThan(0.6);
+      expect(scale()).toBeLessThan(0.651);
+      runFrame();
+      expect(frames.size).toBe(1);
+      // A redraw of the thread never starts a second loop.
+      await chat.refresh();
+      expect(frames.size).toBe(1);
+      // Sent while it drains: nothing collects, nothing is left running.
+      messages = [{ id: "msg-1", from: "owner", text: "ship signup flow", at: new Date().toISOString(), status: "sent", threadId: "c1" }];
+      await chat.refresh();
+      expect(frames.size).toBe(0);
+      // Its deadline passed, the line not yet sent: empty, and the loop rests.
+      messages = collectingFor(-1_000);
+      await chat.refresh();
+      if (frames.size) runFrame();
+      expect(scale()).toBe(0);
+      expect(frames.size).toBe(0);
+      // Collecting again, then Chat closes: its frame goes with it.
+      messages = collectingFor(6_500);
+      await chat.refresh();
+      expect(frames.size).toBe(1);
+      chat.unmount();
+      expect(frames.size).toBe(0);
+
+      // Reduced motion: no frame loop; the bar takes the exact time left on the countdown's tick.
+      vi.stubGlobal("matchMedia", (query: string) => ({ matches: query.includes("reduce") }));
+      chat.mount(root);
+      await settle();
+      await chat.refresh();
+      expect(root.querySelector<HTMLElement>(".chat-collecting")!.hidden).toBe(false);
+      expect(frames.size).toBe(0);
+      expect(scale()).toBeGreaterThan(0.6);
+      expect(scale()).toBeLessThan(0.651);
+    } finally {
+      raf.mockRestore();
+      caf.mockRestore();
+    }
+  });
+
   it("the countdown is whole seconds to the latest deadline, rounded up, and never below zero", () => {
     const now = Date.parse("2026-11-16T04:00:00.000Z");
     const line = (sendsAt: string | undefined, status: ChatMessage["status"] = "collecting"): ChatMessage => ({ id: "x", from: "owner", text: "x", at: "2026-11-16T03:59:59.000Z", status, sendsAt });
@@ -310,6 +375,18 @@ describe("chat tab", () => {
     expect(chat.collectLeft([line("2026-11-16T04:00:03.200Z"), line("2026-11-16T04:00:06.100Z")], now)).toBe(7);
     expect(chat.collectLeft([line("2026-11-16T03:59:58.000Z")], now)).toBe(0);
     expect([null, 7, 0].map((left) => chat.collectLine(left))).toEqual(["Collecting…", "7s", "Sending…"]);
+  });
+
+  it("the countdown bar drains by the exact time left, not whole seconds, and is full with no deadline", () => {
+    const now = Date.parse("2026-11-16T04:00:00.000Z");
+    const line = (sendsAt: string | undefined, status: ChatMessage["status"] = "collecting"): ChatMessage => ({ id: "x", from: "owner", text: "x", at: "2026-11-16T03:59:59.000Z", status, sendsAt });
+    expect(chat.collectBarWidth([], now)).toBe(100);
+    expect(chat.collectBarWidth([line(undefined)], now)).toBe(100);
+    // 6.1s and 6.4s left read the same whole seconds but different widths.
+    expect(chat.collectBarWidth([line("2026-11-16T04:00:03.200Z"), line("2026-11-16T04:00:06.100Z")], now)).toBeCloseTo(61);
+    expect(chat.collectBarWidth([line("2026-11-16T04:00:06.400Z")], now)).toBeCloseTo(64);
+    expect(chat.collectBarWidth([line("2026-11-16T04:00:30.000Z")], now)).toBe(100);
+    expect(chat.collectBarWidth([line("2026-11-16T03:59:58.000Z")], now)).toBe(0);
   });
 
   it("Cancel never doubles words still in the box (a send whose answer was lost), and asks once more when its own answer is lost", async () => {
@@ -709,7 +786,7 @@ describe("chat files", () => {
     root.querySelector<HTMLButtonElement>(".chat-send")!.click();
     await settle();
     await settle();
-    expect(posts.map((post) => post.body)).toEqual([{ clientId: expect.any(String), files: [{ sha256: FILE_SHA, name: "Server report.pdf" }], conversation: "c1" }]);
+    expect(posts.map((post) => post.body)).toEqual([{ clientId: expect.any(String), files: [{ sha256: FILE_SHA, name: "Server report.pdf" }], conversation: "c1", typed: true }]);
     const link = root.querySelector<HTMLAnchorElement>(".chat-files .chat-file")!;
     expect(link.getAttribute("href")).toBe(`/media/${FILE_SHA}?name=Server%20report.pdf`);
     expect(link.getAttribute("rel")).toBe("noopener");
@@ -756,6 +833,221 @@ describe("chat files", () => {
     expect(preview.querySelectorAll(".attach-tile.attach-doc")).toHaveLength(2);
     expect(preview.querySelector(".attach-thumb")).toBeNull();
     expect(preview.textContent).not.toContain("Couldn't read that image");
+  });
+});
+
+describe("dragging and pasting into the chat", () => {
+  /** A drag or clipboard as the browser hands it over: `types` says Files when files come with it. */
+  const carrier = (files: File[], extra: string[] = []) => ({ types: [...(files.length ? ["Files"] : []), ...extra], files, dropEffect: "none" });
+  const fire = (target: EventTarget, type: string, data: unknown, key: "dataTransfer" | "clipboardData" = "dataTransfer") => {
+    const event = new Event(type, { bubbles: true, cancelable: true });
+    Object.defineProperty(event, key, { value: data });
+    target.dispatchEvent(event);
+    return event;
+  };
+  const png = () => new File(["png bytes"], "Screenshot 2026-11-18.png", { type: "image/png" });
+  const lit = () => root.classList.contains("drop-on");
+
+  it("lights the whole chat while files are over it, through its children, and goes dark when they leave", async () => {
+    chat.mount(root);
+    await settle();
+    const data = carrier([png()]);
+    const field = root.querySelector(".chat-text")!;
+    expect(fire(root, "dragenter", data).defaultPrevented).toBe(true);
+    fire(field, "dragenter", data);
+    fire(root, "dragleave", data);
+    expect(lit()).toBe(true);
+    const over = fire(field, "dragover", data);
+    expect(over.defaultPrevented).toBe(true);
+    expect(data.dropEffect).toBe("copy");
+    fire(field, "dragleave", data);
+    expect(lit()).toBe(false);
+  });
+
+  it("attaches dropped photos and files as the clip's picker does, and sends them", async () => {
+    chat.mount(root);
+    await settle();
+    const data = carrier([png(), new File(["%PDF-1.7"], "report.pdf", { type: "application/pdf" })]);
+    fire(root, "dragenter", data);
+    expect(fire(root.querySelector(".chat-scroll") ?? root, "drop", data).defaultPrevented).toBe(true);
+    expect(lit()).toBe(false);
+    for (let i = 0; i < 4; i += 1) await settle();
+    expect(uploads).toHaveLength(1);
+    expect(fileUploads).toEqual(["report.pdf"]);
+    const preview = root.querySelector<HTMLElement>(".attach-preview")!;
+    expect(preview.querySelector(".attach-thumb")).not.toBeNull();
+    expect(preview.querySelector(".attach-note")!.textContent).toBe("1 photo and 1 file attached");
+
+    root.querySelector<HTMLTextAreaElement>(".chat-text")!.value = "";
+    root.querySelector<HTMLButtonElement>(".chat-send")!.click();
+    await settle();
+    await settle();
+    expect(posts.map((post) => post.body)).toEqual([expect.objectContaining({ image: IMAGE, files: [{ sha256: FILE_SHA, name: "Server report.pdf" }] })]);
+  });
+
+  it("says so when a dropped file can't be sent, and leaves a dragged link or text alone", async () => {
+    chat.mount(root);
+    await settle();
+    fire(root, "drop", carrier([new File(["MZ"], "setup.exe", { type: "application/octet-stream" })]));
+    expect(root.querySelector(".attach-notice")!.textContent).toBe(FILE_REFUSED);
+    expect(uploads).toHaveLength(0);
+    expect(fileUploads).toHaveLength(0);
+    const link = carrier([], ["text/uri-list", "text/plain"]);
+    expect(fire(root, "dragenter", link).defaultPrevented).toBe(false);
+    expect(lit()).toBe(false);
+    expect(fire(root, "drop", link).defaultPrevented).toBe(false);
+  });
+
+  it("attaches a pasted screenshot, and pastes copied text that comes with a picture as text", async () => {
+    chat.mount(root);
+    await settle();
+    const field = root.querySelector(".chat-text")!;
+    expect(fire(field, "paste", carrier([png()]), "clipboardData").defaultPrevented).toBe(true);
+    for (let i = 0; i < 3; i += 1) await settle();
+    expect(uploads).toHaveLength(1);
+    expect(fire(field, "paste", carrier([png()], ["text/plain", "text/html"]), "clipboardData").defaultPrevented).toBe(false);
+    expect(fire(field, "paste", carrier([], ["text/plain"]), "clipboardData").defaultPrevented).toBe(false);
+    for (let i = 0; i < 3; i += 1) await settle();
+    expect(uploads).toHaveLength(1);
+  });
+
+  it("catches a file dropped beside the chat so it never opens in place of the app, and leaves the chat's drop and text alone", async () => {
+    const stop = catchStrayDrops();
+    try {
+      chat.mount(root);
+      await settle();
+      const beside = document.createElement("div");
+      document.body.append(beside);
+      const over = carrier([png()]);
+      expect(fire(beside, "dragover", over).defaultPrevented).toBe(true);
+      expect(over.dropEffect).toBe("none");
+      expect(fire(beside, "drop", carrier([png()])).defaultPrevented).toBe(true);
+      expect(fire(beside, "drop", carrier([], ["text/plain"])).defaultPrevented).toBe(false);
+      const into = carrier([png()]);
+      fire(root, "dragover", into);
+      expect(into.dropEffect).toBe("copy");
+      fire(root, "drop", carrier([png()]));
+      for (let i = 0; i < 3; i += 1) await settle();
+      expect(uploads).toHaveLength(1);
+    } finally {
+      stop();
+    }
+  });
+
+  it("goes dark when the drag goes without a leave reaching the chat: no dragover for a while, or a drop elsewhere", async () => {
+    chat.mount(root);
+    await settle();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const data = carrier([png()]);
+      fire(root, "dragenter", data);
+      fire(root.querySelector(".chat-text")!, "dragenter", data);
+      vi.advanceTimersByTime(DROP_IDLE_MS - 100);
+      fire(root, "dragover", data);
+      vi.advanceTimersByTime(DROP_IDLE_MS - 100);
+      expect(lit()).toBe(true);
+      vi.advanceTimersByTime(200);
+      expect(lit()).toBe(false);
+      // Still held over a child: the next dragover lights it again, and leaving that child keeps it lit.
+      fire(root, "dragover", data);
+      expect(lit()).toBe(true);
+      fire(root.querySelector(".chat-text")!, "dragleave", data);
+      expect(lit()).toBe(true);
+      fire(document.body, "drop", data);
+      expect(lit()).toBe(false);
+      fire(root, "dragenter", data);
+      fire(root, "dragleave", data);
+      expect(lit()).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("leaves a photo dragged from inside the app alone, and the next file from outside is taken", async () => {
+    const stop = catchStrayDrops();
+    const img = document.createElement("img");
+    try {
+      chat.mount(root);
+      await settle();
+      const marked = <T extends { types: string[] }>(data: T) => ({ ...data, setData(type: string) { this.types = [...this.types, type]; } });
+      // Chrome lists an in-app image drag as Files; the drag's start marks its own data.
+      const inApp = marked(carrier([png()]));
+      document.body.append(img);
+      fire(img, "dragstart", inApp);
+      expect(inApp.types).toContain(PAGE_DRAG);
+      expect(fire(root, "dragenter", inApp).defaultPrevented).toBe(false);
+      expect(lit()).toBe(false);
+      // Not taken, but caught: one from another Rivet window never opens in place of this one.
+      expect(fire(root, "drop", inApp).defaultPrevented).toBe(true);
+      for (let i = 0; i < 3; i += 1) await settle();
+      expect(uploads).toHaveLength(0);
+      // A text or link drag is left unmarked (Safari would drop its own data otherwise).
+      const words = marked(carrier([], ["text/plain"]));
+      fire(img, "dragstart", words);
+      expect(words.types).toEqual(["text/plain"]);
+      // Its dragend never came (the bubble was redrawn): a Finder file after it is still taken, never opened in place.
+      const outside = carrier([png()]);
+      expect(fire(root, "dragenter", outside).defaultPrevented).toBe(true);
+      expect(lit()).toBe(true);
+      expect(fire(document.body, "drop", carrier([png()])).defaultPrevented).toBe(true);
+    } finally {
+      img.remove();
+      stop();
+    }
+  });
+
+  it("a child redrawn under the drag does not keep the chat lit after the drag leaves", async () => {
+    chat.mount(root);
+    await settle();
+    const data = carrier([png()]);
+    const child = document.createElement("div");
+    root.querySelector(".chat")!.append(child);
+    fire(root, "dragenter", data);
+    fire(child, "dragenter", data);
+    // Redrawn: its leave goes to a node no longer on the page, and never reaches the chat.
+    child.remove();
+    fire(root, "dragleave", data);
+    expect(lit()).toBe(false);
+  });
+
+  it("lights nothing and takes nothing while the composer is off screen: Rivet asleep, More topics or a search", async () => {
+    chat.mount(root);
+    await settle();
+    const section = root.querySelector<HTMLElement>(".chat")!;
+    const refused = () => {
+      const data = carrier([png()]);
+      fire(root, "dragenter", data);
+      fire(root, "dragover", data);
+      const wasLit = lit();
+      const effect = data.dropEffect;
+      const dropped = fire(root, "drop", data).defaultPrevented;
+      const pasted = fire(root.querySelector(".chat-text")!, "paste", carrier([png()]), "clipboardData").defaultPrevented;
+      return { wasLit, effect, dropped, pasted };
+    };
+    for (const name of ["topics", "searching"]) {
+      section.classList.add(name);
+      expect(refused()).toEqual({ wasLit: false, effect: "none", dropped: true, pasted: false });
+      section.classList.remove(name);
+    }
+    heardAnswer(new Response("capped", { status: 503, headers: { "x-rivet-asleep": "1", "x-rivet-capped-until": String(Date.UTC(2026, 11, 1)) } }));
+    try {
+      expect(refused()).toEqual({ wasLit: false, effect: "none", dropped: true, pasted: false });
+    } finally {
+      resetSleep();
+    }
+    for (let i = 0; i < 3; i += 1) await settle();
+    expect(uploads).toHaveLength(0);
+    expect(root.querySelector(".attach-thumb")).toBeNull();
+  });
+
+  it("takes nothing once the chat has gone", async () => {
+    chat.mount(root);
+    await settle();
+    chat.unmount();
+    const data = carrier([png()]);
+    expect(fire(root, "dragenter", data).defaultPrevented).toBe(false);
+    expect(fire(root, "drop", data).defaultPrevented).toBe(false);
+    expect(lit()).toBe(false);
   });
 });
 
@@ -899,7 +1191,7 @@ describe("chat attachments", () => {
     await send("");
     expect(posts).toHaveLength(0);
     await send("just text");
-    expect(posts.map((post) => post.body)).toEqual([{ clientId: expect.any(String), text: "just text", conversation: "c1" }]);
+    expect(posts.map((post) => post.body)).toEqual([{ clientId: expect.any(String), text: "just text", conversation: "c1", typed: true }]);
   });
 
   it("while Rivet Cloud's cap holds, removing a photo leaves the composer off, and when it lifts the mic is as it was", async () => {
@@ -1055,7 +1347,7 @@ describe("chat attachments", () => {
       expect(revoked).toEqual(["blob:preview"]);
 
       await send("Two views");
-      expect(posts.map((post) => post.body)).toEqual([{ clientId: expect.any(String), text: "Two views", images: ["1".repeat(64), "3".repeat(64)], conversation: "c1" }]);
+      expect(posts.map((post) => post.body)).toEqual([{ clientId: expect.any(String), text: "Two views", images: ["1".repeat(64), "3".repeat(64)], conversation: "c1", typed: true }]);
       expect(preview().hidden).toBe(true);
       const sent = root.querySelector(".chat-msg.mine:last-child")!;
       expect([...sent.querySelectorAll(".chat-images .chat-image-tile")].map((img) => [img.getAttribute("src"), img.getAttribute("alt")])).toEqual([
@@ -1108,7 +1400,7 @@ describe("chat attachments", () => {
       expect(uploads).toHaveLength(2);
       expect(note()).toBe("Photo attached");
       await send("the second one");
-      expect(posts.map((post) => post.body)).toEqual([{ clientId: expect.any(String), text: "the second one", image: "b".repeat(64), conversation: "c1" }]);
+      expect(posts.map((post) => post.body)).toEqual([{ clientId: expect.any(String), text: "the second one", image: "b".repeat(64), conversation: "c1", typed: true }]);
     });
 
     it("takes up to 10: the rest are left out with a note, and the button still takes files", async () => {

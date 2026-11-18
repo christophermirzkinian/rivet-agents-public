@@ -126,7 +126,7 @@ describe("Answered and Reopen", () => {
     expect(Object.fromEntries(after.cards.map((entry) => [entry.card.id, entry.done ?? false]))).toEqual({ "plan-6586": true, "q-other": false, "plan-later": true, "plan-stopped": false });
   });
 
-  it("an answer to a card naming its ask makes it that ask's card, and Answered says it under way, done or called off (GitHub sweep idea 3, the owner's pick 15 Nov)", async () => {
+  it("an answer to a card naming its ask makes it that ask's card, and Answered says it under way, done or called off (GitHub sweep idea 3)", async () => {
     const asks = (method: string, path: string, body?: unknown) => fetch(`${server.base}/api/asks${path}`, { method, headers: bearer(BOARD_TOKEN), ...(body ? { body: JSON.stringify(body) } : {}) });
     const card = (id: string, askId: string, pr?: number) => ({ id, kind: "decision", title: `Plan ${id}`, ask: "Go?", chat: "cards-progress-4", askId, ...(pr ? { pr } : {}) });
     expect((await asks("POST", "", { id: "a-under", words: "Under plan", stage: "building" })).status).toBe(201);

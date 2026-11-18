@@ -53,6 +53,17 @@ test("an old server's rejected root push queue is stripped and the workers still
   assert.equal(snapshot.pushQueue.length, 1);
 });
 
+test("an old server's rejected root review rows are stripped and the workers still go", async () => {
+  const sent = [];
+  const put = async (body) => {
+    sent.push(body);
+    return "reviews" in body ? Response.json({ issues: [issue([], ["reviews"])] }, { status: 400 }) : Response.json({ ok: true });
+  };
+  const response = await putSnapshot(put, { workers: [{ chat: "chat" }], reviews: [{ repo: "r", pr: 1, round: 1, lens: "correctness", state: "queued" }] });
+  assert.equal(response.status, 200);
+  assert.deepEqual(sent.at(-1), { workers: [{ chat: "chat" }] });
+});
+
 test("detailed invalid payloads do not use the legacy fallback", async () => {
   for (const issues of [[], [{ code: "invalid_type", path: [] }], null]) {
     let sends = 0;

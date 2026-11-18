@@ -58,7 +58,7 @@ export interface ScheduleFacts {
 
 /**
  * The items that may become cards: records with work still to do, and each open PR you hold yourself (`ownerHolds`, as
- * rivet hold records them). A hold read from the PR's text, a hold label or holds.json binds the merge guard and never
+ * rivet hold records them). A hold label or holds.json binds the merge guard (a hold read from the PR's text binds nothing) and never
  * becomes a card: an agent's checkpoint line or a quoted example would ask you to release holds you never placed. A schedule record is left out only while its schedule is `handled`; its name and
  * what it does count toward the money test with the record's own words.
  */

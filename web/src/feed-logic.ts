@@ -223,7 +223,7 @@ export interface ProofLine {
 }
 
 const CI_WORDS = { green: ["Tests green", "ok"], red: ["Tests red", "bad"], running: ["Tests running", "wait"] } as const;
-const REVIEW_WORDS = { clean: ["Review clean", "ok"], findings: ["Review: findings open", "bad"], running: ["Review running", "wait"] } as const;
+const REVIEW_WORDS = { clean: ["Review clean", "ok"], findings: ["Review: findings open", "warn"], running: ["Review running", "wait"] } as const;
 
 const withNote = (text: string, note?: string) => (note ? `${text} · ${note}` : text);
 

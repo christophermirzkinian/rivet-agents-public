@@ -25,6 +25,7 @@ vi.mock("../web/src/views/pdf-pages.js", () => ({
 }));
 
 const chat = await import("../web/src/views/chat.js");
+const { closeSheet } = await import("../web/src/views/sheet.js");
 const { SHARE_WAIT_MS } = await import("../web/src/within.js");
 
 const REPLY = "The demo is ready.\nNext: the launch video 🐸 & #236";
@@ -60,10 +61,23 @@ const area = () => sheet()!.querySelector<HTMLTextAreaElement>("textarea")!;
 const lightboxNote = () => document.querySelector<HTMLElement>(".lightbox .lightbox-note")?.textContent;
 const sheetButton = (label: string) => [...sheet()!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === label)!;
 
+/** The More under the topic card holding message `id`: Share is in its sheet. */
+const moreUnder = (id: string) => root.querySelector<HTMLElement>(`.chat-msg[data-id="${id}"]`)!.closest(".chat-ex")!.querySelector<HTMLButtonElement>(":scope > .chat-ex-foot .chat-ex-more")!;
+const moreShare = () => document.querySelector<HTMLButtonElement>(".chat-more-sheet .chat-more-share");
+
+/** Whether the card's More offers Share now; the sheet is closed again. An open share sheet closes with it. */
+function offersShare(id = "h2"): boolean {
+  moreUnder(id).click();
+  const offered = moreShare() !== null;
+  closeSheet();
+  return offered;
+}
+
 async function openReplyShare(): Promise<void> {
   chat.mount(root);
   await settle();
-  root.querySelector<HTMLButtonElement>('.chat-msg[data-id="h2"] .chat-share')!.click();
+  moreUnder("h2").click();
+  moreShare()!.click();
 }
 
 function useShare(impl: (data: ShareData) => Promise<void>): void {
@@ -115,15 +129,15 @@ describe("share a reply", () => {
     useShare(() => Promise.resolve());
     await openReplyShare();
     for (const fn of listeners.error ?? []) fn();
-    expect(root.querySelector(".chat-share")).toBeNull();
     sheetButton("Send").click();
     expect(flashed).toEqual(["Checking where this conversation belongs. Try again in a moment."]);
     expect(share).not.toHaveBeenCalled();
+    expect(offersShare()).toBe(false);
     await settle();
-    expect(root.querySelector(".chat-share")).toBeNull();
+    expect(offersShare()).toBe(false);
     await chat.refresh();
     await settle();
-    expect(root.querySelector('.chat-msg[data-id="h2"] .chat-share')).not.toBeNull();
+    expect(offersShare()).toBe(true);
   });
 
   it("hidden, and back before the reopened stream reads again, Send says it is still checking, even after a read that landed hidden", async () => {
@@ -145,7 +159,7 @@ describe("share a reply", () => {
       // The fresh stream opens and reads again: Share is back.
       for (const fn of listeners.open ?? []) fn();
       await settle();
-      expect(root.querySelector('.chat-msg[data-id="h2"] .chat-share')).not.toBeNull();
+      expect(offersShare()).toBe(true);
     } finally {
       Reflect.deleteProperty(document, "visibilityState");
     }
@@ -159,20 +173,20 @@ describe("share a reply", () => {
     for (const fn of listeners.ping ?? []) fn();
     vi.advanceTimersByTime(chat.STREAM_IDLE_MS);
     vi.useRealTimers();
-    expect(root.querySelector(".chat-share")).toBeNull();
     sheetButton("Send").click();
     expect(flashed).toEqual(["Checking where this conversation belongs. Try again in a moment."]);
     expect(share).not.toHaveBeenCalled();
+    expect(offersShare()).toBe(false);
     await chat.refresh();
     await settle();
-    expect(root.querySelector('.chat-msg[data-id="h2"] .chat-share')).not.toBeNull();
+    expect(offersShare()).toBe(true);
   });
 
   it("a read superseded by a newer one never brings Share back, even when the newer one fails", async () => {
     chat.mount(root);
     await settle();
     for (const fn of listeners.error ?? []) fn();
-    expect(root.querySelector(".chat-share")).toBeNull();
+    expect(offersShare()).toBe(false);
     // Read A is held; read B, sent after it, fails; then A lands. Only the newest read may say Share is safe again.
     let release: (() => void) | null = null;
     let lists = 0;
@@ -195,7 +209,7 @@ describe("share a reply", () => {
     expect(lists).toBe(2);
     release!();
     await settle();
-    expect(root.querySelector(".chat-share")).toBeNull();
+    expect(offersShare()).toBe(false);
   });
 
   it("a Send in a conversation known to be personal says it stays in the app, and shares nothing", async () => {
@@ -305,46 +319,35 @@ describe("share a reply", () => {
     serverAppOnly = false;
     for (const fn of listeners.thread ?? []) fn({ data: JSON.stringify({ id: "c1", project: null }) });
     // Shareable again only once a read of it lands: the reply's Share coming back says so.
-    await vi.waitFor(() => expect(root.querySelector('.chat-msg[data-id="h2"] .chat-share')).not.toBeNull(), { timeout: 15_000 });
+    await vi.waitFor(() => expect(offersShare()).toBe(true), { timeout: 15_000 });
     release();
     await vi.waitFor(() => expect(lightboxNote()).toMatch(/^Could not show the PDF\./), { timeout: 15_000 });
     expect(lightboxNote()).toBe("Could not show the PDF. Download it to open it elsewhere.");
     closeLightbox();
   });
 
-  it("puts Share on Rivet's replies only", async () => {
+  it("offers Share for Rivet's answer only: a card of his line alone has none", async () => {
+    history.push({ id: "c3", from: "owner", text: "And the pear?", at: "2030-01-01T00:00:03.000Z", status: "replied" });
     chat.mount(root);
     await settle();
-    expect(root.querySelector('.chat-msg[data-id="h2"] .chat-share')).not.toBeNull();
-    expect(root.querySelector('.chat-msg[data-id="c1"] .chat-share')).toBeNull();
+    expect(offersShare("h2")).toBe(true);
+    expect(offersShare("c3")).toBe(false);
+    expect(root.querySelector(".chat-msg .chat-share")).toBeNull();
   });
 
-  it("shows no Reply under a bubble until it is tapped, and keeps it open through a redraw", async () => {
+  it("puts Reply and More once under the card, never on a bubble, and a tap on a bubble shows nothing", async () => {
     chat.mount(root);
     await settle();
-    const reply = () => root.querySelector<HTMLElement>('.chat-msg[data-id="h2"] .chat-reply')!;
-    const share = () => root.querySelector<HTMLElement>('.chat-msg[data-id="h2"] .chat-share')!;
-    const meta = () => root.querySelector<HTMLButtonElement>('.chat-msg[data-id="h2"] .chat-meta-tap')!;
-    expect(reply().hidden).toBe(true);
-    expect(share().hidden).toBe(true);
-    expect(meta().getAttribute("aria-expanded")).toBe("false");
-
-    meta().click();
-    expect(reply().hidden).toBe(false);
-    expect(share().hidden).toBe(false);
-    expect(meta().getAttribute("aria-expanded")).toBe("true");
+    const card = root.querySelector<HTMLElement>('.chat-msg[data-id="h2"]')!.closest(".chat-ex")!;
+    const foot = card.querySelector<HTMLElement>(":scope > .chat-ex-foot")!;
+    expect([...foot.querySelectorAll("button")].map((one) => one.textContent)).toEqual(["More", "Reply"]);
+    expect(root.querySelector(".chat-meta-tap")).toBeNull();
+    const before = card.innerHTML;
+    root.querySelector<HTMLElement>('.chat-msg[data-id="h2"] .chat-body')!.click();
+    expect(card.innerHTML).toBe(before);
     for (const fn of listeners.thread ?? []) fn({ data: JSON.stringify({ id: "c1", project: null }) });
     await settle();
-    expect(share().hidden).toBe(false);
-
-    meta().click();
-    expect(share().hidden).toBe(true);
-
-    // A tap anywhere on the message opens them too; a tap on a link in it does not.
-    root.querySelector<HTMLElement>('.chat-msg[data-id="h2"] .chat-body')!.click();
-    expect(reply().hidden).toBe(false);
-    root.querySelector<HTMLElement>('.chat-msg[data-id="h2"] .chat-body')!.click();
-    expect(reply().hidden).toBe(true);
+    expect(card.querySelector(":scope > .chat-ex-foot")).toBe(foot);
   });
 
   it("shares exactly the edited, trimmed text", async () => {
@@ -404,7 +407,9 @@ describe("share a reply", () => {
     for (const fn of listeners.message ?? []) fn({ data: JSON.stringify(next) });
     expect(root.querySelector('.chat-msg[data-id="h3"] .chat-body')?.textContent).toBe("Still here");
     useShare(() => Promise.resolve());
-    root.querySelector<HTMLButtonElement>('.chat-msg[data-id="h3"] .chat-share')!.click();
+    // Rivet's newest answer in the card is the one its More shares.
+    moreUnder("h3").click();
+    moreShare()!.click();
     sheetButton("Send").click();
     expect(share).toHaveBeenCalledWith({ text: "Still here" });
   });

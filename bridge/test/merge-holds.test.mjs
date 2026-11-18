@@ -42,16 +42,19 @@ test("a hold line is shown from the text redacted whole, and still holds when re
       const { options } = fixture(t, { [surface]: surface === "pulls/7" ? { number: 7, body, labels: [] } : [{ user: { login: "sam" }, body }] });
       const { holds } = await readMergeHolds({ ...options, shown: redactKeepingLines });
       const said = holds.join(" ");
-      assert.ok(holds.length === 1 && !said.includes("hunter2") && !said.includes(TOKEN.slice(0, 4)) && !showsToken(said), said);
+      assert.ok(holds.length === 0 && !said.includes("hunter2") && !said.includes(TOKEN.slice(0, 4)) && !showsToken(said), said);
     }
   }
 });
 
-test("every surface, every author; a later release from outside the owner login never cancels a hold", async (t) => {
+test("a hold line on any surface, from any author, holds nothing and is still read into the texts", async (t) => {
   for (const surface of ["pulls/7", "issues/7/comments?per_page=100&page=1", "pulls/7/reviews?per_page=100&page=1", "pulls/7/comments?per_page=100&page=1"]) {
     const value = surface === "pulls/7" ? { number: 7, body: "Owner hold: wait", labels: [] } : [{ user: { login: "stranger" }, body: "Owner hold: wait" }, { body: "Hold released: ship" }];
-    const { options } = fixture(t, { [surface]: value });
-    assert.match((await readMergeHolds(options)).holds.join(" "), /Owner hold: wait/);
+    const { options, calls } = fixture(t, { [surface]: value });
+    const read = await readMergeHolds(options);
+    assert.deepEqual(read.holds, []);
+    assert.ok(read.texts.includes("Owner hold: wait"));
+    assert.ok(calls.every((a) => !a[1].includes("/timeline")));
   }
 });
 
@@ -67,7 +70,7 @@ test("all pages are read, issue comment order and texts order are preserved", as
   const read = await readMergeHolds(options);
   assert.deepEqual(read.comments, [...comments.map((c) => c.body), "Hold: page two"]);
   assert.deepEqual(read.texts, ["body", ...read.comments, "review", "inline"]);
-  assert.equal(read.holds.length, 1);
+  assert.deepEqual(read.holds, []);
 });
 
 test("API errors and malformed responses fail closed on every surface", async (t) => {
@@ -110,7 +113,7 @@ test("The decision records and the note after them hold nothing; a label, holds.
   fs.writeFileSync(options.holdsFile, JSON.stringify([{ pr: 7, reason: "owner review" }]));
   assert.match((await readMergeHolds(options)).holds.join(" "), /owner review/);
   const later = fixture(t, { "issues/7/comments?per_page=100&page=1": [...settled, { user: { login: "sam" }, body: "Hold until the owner signs off." }] });
-  assert.deepEqual((await readMergeHolds(later.options)).holds, ["PR text: Hold until the owner signs off."]);
+  assert.deepEqual((await readMergeHolds(later.options)).holds, []);
 });
 
 // #505: GitHub closes what a closing keyword in the squash text names, an open pull request included.
@@ -188,47 +191,4 @@ test("a closing refusal is kept apart from the holds, and its phrase is shown as
     "repos/o/hunter2/issues/9": { number: 9, state: "open", pull_request: {} } });
   assert.equal((await readMergeHolds({ ...cased.options, shown: redactKeepingLines })).closing.length, 1);
   assert.ok(!cased.calls.some((a) => a[1].includes("Hunter2")), "the hidden spelling is never read");
-});
-
-// #602, #598: a stale checkpoint hold, then the owner's yes; only an owner "Hold released:" ends it.
-test("an owner's yes releases no comment hold and the timeline is never read; an owner release comment does", async (t) => {
-  const yes = "**Owner decision (via Rivet): CHOSE: Yes, put it on the site**\nItem: `x` — ship it?\n<!-- rivet-reply:abc decision=choice -->";
-  const comments = [
-    { body: "- **Owner holds:** draft and HELD.", created_at: "2026-10-20T04:14:00Z", updated_at: "2026-10-20T04:20:00Z", author_association: "OWNER" },
-    { body: yes, created_at: "2026-10-20T04:56:34Z", updated_at: "2026-10-20T04:56:34Z", author_association: "OWNER" },
-  ];
-  const base = { "pulls/7": { number: 7, body: "", labels: [], draft: false }, "issues/7/comments?per_page=100&page=1": comments };
-  const ready = fixture(t, base);
-  assert.equal((await readMergeHolds(ready.options)).holds.length, 1);
-  assert.ok(ready.calls.every((a) => !a[1].includes("/timeline")));
-  const released = { ...base, "issues/7/comments?per_page=100&page=1": [comments[0], { body: "Hold released: the owner chose Ship it.", created_at: "2026-10-20T05:00:00Z", author_association: "OWNER" }] };
-  const release = fixture(t, released);
-  assert.deepEqual((await readMergeHolds(release.options)).holds, []);
-  // A review's summary can be edited after the release with no edit time to show it, so a review hold is never released.
-  const review = fixture(t, { ...released, "pulls/7/reviews?per_page=100&page=1": [{ body: "Owner hold: wait for the owner.", submitted_at: "2026-10-20T04:00:00Z", author_association: "OWNER" }] });
-  assert.equal((await readMergeHolds(review.options)).holds.length, 1);
-  // The body's hold line is never released by a comment.
-  const body = fixture(t, { ...released, "pulls/7": { number: 7, body: "Owner hold: wait for the owner.", labels: [], draft: false } });
-  assert.match((await readMergeHolds(body.options)).holds.join(" "), /Owner hold: wait for the owner/);
-});
-
-// The monitor's rule (2026-10-21): a yes releases only if it is tied to this PR's hold; it cannot be (#610 review round
-// 5), so "Hold released:" is the one release by comment.
-test("a yes on this PR or another, relayed, quoted or from before the hold keeps the hold", async (t) => {
-  const yes = "**Owner decision (via Rivet): APPROVED**\nItem: `x` — ship it?\n<!-- rivet-reply:abc decision=approve -->";
-  const hold = { body: "- **Owner holds:** draft and HELD.", created_at: "2026-10-20T04:14:00Z", updated_at: "2026-10-20T04:14:00Z", author_association: "OWNER" };
-  const at = (body, time) => ({ body, created_at: time, updated_at: time, author_association: "OWNER" });
-  const read = async (comments, other = []) => (await readMergeHolds(fixture(t, {
-    "pulls/7": { number: 7, body: "", labels: [], draft: false },
-    "issues/7/comments?per_page=100&page=1": comments,
-    "issues/8/comments?per_page=100&page=1": other,
-  }).options)).holds;
-  assert.equal((await read([hold, at(yes, "2026-10-20T05:00:00Z")])).length, 1, "a yes on this PR's card after the hold");
-  assert.equal((await read([hold], [at(yes, "2026-10-20T05:00:00Z")])).length, 1, "a yes on PR 8's card");
-  assert.equal((await read([hold, at("The owner OKed #8; marking this ready.", "2026-10-20T05:00:00Z")])).length, 1, "another PR's OK");
-  assert.equal((await read([hold, at(`The owner said yes on #8:\n${yes}`, "2026-10-20T05:00:00Z")])).length, 1, "a relayed yes");
-  assert.equal((await read([hold, at(yes.split("\n").map((l) => `> ${l}`).join("\n"), "2026-10-20T05:00:00Z")])).length, 1, "a quoted yes");
-  assert.equal((await read([at(yes, "2026-10-20T04:00:00Z"), hold])).length, 1, "a yes from before the hold");
-  assert.deepEqual(await read([hold, at("Hold released: the owner said yes on the card.", "2026-10-20T05:00:00Z")]), [], "an owner release");
-  assert.equal((await read([hold, at("Hold released: the owner said yes on #8.", "2026-10-20T04:00:00Z")])).length, 1, "a release from before the hold");
 });

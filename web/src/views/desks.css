@@ -364,6 +364,22 @@ button.desk.is-rivet:focus-visible {
   border-radius: 30%;
 }
 
+/* A lens's place under its chat while its little purple is up telling it. */
+.desk-review-lens.has-away {
+  position: relative;
+}
+
+.desk-review-lens.has-away::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 0;
+  width: var(--ghost);
+  height: var(--ghost);
+  border: 2px dashed rgba(205, 180, 255, 0.35);
+  border-radius: 30%;
+}
+
 /* A cheer: Rivet, and the agent whose PR merged, hop. */
 .desk.is-rivet.is-cheer .rivet,
 .desk-agent .rivet.is-cheer {
@@ -374,18 +390,22 @@ button.desk.is-rivet:focus-visible {
   color: #ffd25c;
 }
 
-/* Rivet glances at an agent come to his desk. */
+/* Rivet glances at an agent come to his desk, and a chat at its lens come to tell it. */
 .desk.is-rivet .rivet.is-glance-l .rv-look,
-.desk.is-rivet .rivet.is-glance-r .rv-look {
+.desk.is-rivet .rivet.is-glance-r .rv-look,
+.desk-agent .rivet.is-glance-l .rv-look,
+.desk-agent .rivet.is-glance-r .rv-look {
   animation: none;
   transition: translate 0.4s ease;
 }
 
-.desk.is-rivet .rivet.is-glance-l .rv-look {
+.desk.is-rivet .rivet.is-glance-l .rv-look,
+.desk-agent .rivet.is-glance-l .rv-look {
   translate: -5% 1%;
 }
 
-.desk.is-rivet .rivet.is-glance-r .rv-look {
+.desk.is-rivet .rivet.is-glance-r .rv-look,
+.desk-agent .rivet.is-glance-r .rv-look {
   translate: 5% 1%;
 }
 
@@ -457,6 +477,17 @@ button.desk.is-rivet:focus-visible {
 
 .desks-say.is-news {
   background: #ffd25c;
+  color: #3a2a0f;
+}
+
+/* A lens's news to its chat, in the review colours: green when clean, amber with findings. */
+.desks-say.is-clean {
+  background: var(--review-good);
+  color: #10301c;
+}
+
+.desks-say.is-found {
+  background: var(--review-going);
   color: #3a2a0f;
 }
 
@@ -585,6 +616,150 @@ button.desk.is-rivet:focus-visible {
   height: 100%;
   border-radius: 9px;
   background: var(--mint);
+}
+
+/*
+ * A row in review's reviewers. The reviewers are purple and the rail theirs; the state words and
+ * bars go by how the lens is going. Every colour is one of these, so a new pick is new values here.
+ * The amber stays softer and lighter than Needs you's #ffc23d at 700.
+ */
+:root {
+  --reviewer-body: #cdb4ff;
+  --reviewer-edge: #9466f0;
+  --reviewer-face: #2a1650;
+  --reviewer-eyes: #e8dcff;
+  --review-good: #86dba6;
+  --review-going: #e3b56a;
+  --review-bad: #f08a8a;
+  --review-track: #3a3360;
+}
+
+.desk-review {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: -4px 0 6px calc(var(--desk-bot, 36px) / 2 - 1px);
+  /* No rail down its edge: the indent alone ties the thread to its desk. */
+  padding: 2px 0 4px calc(var(--desk-bot, 36px) / 2 + 10px);
+}
+
+.desk-review-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin-bottom: 2px;
+}
+
+.desk-review-round {
+  padding: 2px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: var(--fs-m);
+  font-weight: 700;
+  color: var(--text);
+}
+
+.desk-review-sum {
+  font-size: var(--fs-m);
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.desk-review-lens {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 3px 0;
+}
+
+/* Above rivet.css's .rivet.is-agent.is-wrong and .is-asking whichever bundle loads last. */
+.desk-review .desk-review-lens .rivet.is-agent.is-agent {
+  --rv-body-a: var(--reviewer-body);
+  --rv-body-b: var(--reviewer-edge);
+  --rv-ink: var(--reviewer-face);
+  --rv-eye: var(--reviewer-eyes);
+}
+
+/* A lens's copy flying up to its chat (desks-life.ts) keeps its purple off the lens's row. */
+.desks-talk .desks-flyer.is-reviewer.rivet.is-agent.is-agent {
+  --rv-body-a: var(--reviewer-body);
+  --rv-body-b: var(--reviewer-edge);
+  --rv-ink: var(--reviewer-face);
+  --rv-eye: var(--reviewer-eyes);
+}
+
+.desk-review-lens.is-queued .rivet {
+  opacity: 0.55;
+}
+
+.desk-review-name {
+  font-size: var(--fs-body);
+  font-weight: 700;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.desk-review-state {
+  justify-self: end;
+  font-size: var(--fs-m);
+  font-weight: 700;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+.desk-review-lens.tone-good .desk-review-state {
+  color: var(--review-good);
+}
+
+.desk-review-lens.tone-going .desk-review-state {
+  color: var(--review-going);
+  font-weight: 600;
+}
+
+.desk-review-lens.tone-found .desk-review-state {
+  color: var(--review-going);
+}
+
+.desk-review-lens.tone-bad .desk-review-state {
+  color: var(--review-bad);
+}
+
+.desk-review-bar {
+  grid-column: 2 / -1;
+  display: block;
+  height: 4px;
+  border-radius: 9px;
+  background: var(--review-track);
+  overflow: hidden;
+}
+
+.desk-review-bar.is-queued {
+  height: 0;
+  border-top: 2px dotted var(--review-going);
+  border-radius: 0;
+  background: none;
+}
+
+.desk-review-fill {
+  display: block;
+  height: 100%;
+  border-radius: 9px;
+  background: var(--muted);
+}
+
+.desk-review-lens.tone-good .desk-review-fill {
+  background: var(--review-good);
+}
+
+.desk-review-lens.tone-going .desk-review-fill,
+.desk-review-lens.tone-found .desk-review-fill {
+  background: var(--review-going);
+}
+
+.desk-review-lens.tone-bad .desk-review-fill {
+  background: var(--review-bad);
 }
 
 /* A crowded map's last row: one plain row at the grid's width, never a strip of chips. */

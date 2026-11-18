@@ -290,6 +290,12 @@ export interface ActionRequest {
   conversation?: string | null;
   /** Feed's Fix it line: its record is already set investigating, so Cancel never takes it back. Never sent to the bridge. */
   fixIt?: true;
+  /** Your question asked again by "Not an answer" on the Rivet line it replies to. */
+  notAnswer?: true;
+  /** That re-ask's question: the lead of the chat window Rivet's answer replied to. */
+  notAnswerFor?: string;
+  /** A chat line you typed in a message box, not one a tap sent. */
+  typed?: true;
   /** The ask this line names, made after it by its id: a retry or a bridge attach makes it when it is missing. */
   ask?: AskCreate;
   /** A GitHub write on an issue (kind "issue"): a backlog issue's Start work label or Close. */
@@ -369,6 +375,9 @@ function toMessage(row: Row): ChatMessage {
   if (typeof row.request === "string") {
     const request = JSON.parse(row.request) as ActionRequest;
     Object.assign(message, imageFields(chatImages(request)), request.files ? { files: request.files } : {});
+    if (request.typed) message.typed = true;
+    if (request.notAnswerFor) message.notAnswerFor = request.notAnswerFor;
+    if (typeof row.batch_id === "string" && row.batch_id !== message.id) message.windowLead = row.batch_id;
   }
   if (typeof row.media === "string") {
     const media = JSON.parse(row.media) as { images?: string[]; video?: string; files?: ChatFile[]; card?: string; posted?: PostedCard; team?: { from: string; to: string } };
@@ -425,7 +434,7 @@ const CARD_TITLE = `CASE WHEN m.sender = 'owner' AND m.media IS NOT NULL AND jso
   ) END`;
 
 /** A chat message with its window's status and request, its thread's project and, for a card answer, its card's title. */
-const MESSAGE_SELECT = `SELECT m.*, a.status, a.request, t.project AS thread_project, t.rivet_project AS thread_rivet_project,
+const MESSAGE_SELECT = `SELECT m.*, a.status, a.request, a.batch_id, t.project AS thread_project, t.rivet_project AS thread_rivet_project,
   w.batch_first_at AS window_first, w.batch_last_at AS window_last, json_extract(w.request, '$.fixIt') AS window_fix,
   ${CARD_TITLE} AS card_title FROM chat_messages m
   LEFT JOIN audit a ON a.id = m.id LEFT JOIN audit w ON w.id = a.batch_id LEFT JOIN chat_threads t ON t.root_id = m.thread_id`;
@@ -666,7 +675,7 @@ export class CommandStore {
   }
 
   /** Moves a window from collecting to queued, lead and members together. */
-  private flush(lead: string, at: string): AuditEntry | null {
+  flush(lead: string, at: string): AuditEntry | null {
     const result = this.db.prepare("UPDATE audit SET status = 'queued', updated_at = ? WHERE batch_id = ? AND status = 'collecting'").run(at, lead);
     return Number(result.changes) > 0 ? this.combined(this.getAction(lead)!) : null;
   }
@@ -1308,6 +1317,13 @@ export class CommandStore {
       .prepare(`${MESSAGE_SELECT} WHERE COALESCE(m.thread_id, m.id) = ? AND m.seq < ? ORDER BY m.seq DESC LIMIT ?`)
       .all(id, anchor.seq as number, limit + 1) as Row[];
     return { messages: rows.slice(0, limit).map(toMessage).reverse(), more: rows.length > limit };
+  }
+
+  /** A thread's messages newer than its message `after`, oldest first; null when `after` is not in it. */
+  threadMessagesAfter(id: string, after: string): ChatMessage[] | null {
+    const anchor = this.db.prepare("SELECT seq FROM chat_messages WHERE id = ? AND COALESCE(thread_id, id) = ?").get(after, id) as Row | undefined;
+    if (!anchor) return null;
+    return (this.db.prepare(`${MESSAGE_SELECT} WHERE COALESCE(m.thread_id, m.id) = ? AND m.seq > ? ORDER BY m.seq`).all(id, anchor.seq as number) as Row[]).map(toMessage);
   }
 
   /** Rivet's steps on a thread, in the order set. */

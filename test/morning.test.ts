@@ -44,29 +44,13 @@ function fake(start: string) {
   };
 }
 
-describe("the Morning card's What you used line", () => {
-  const URL = "https://rivet.example/?tab=what-you-used";
-  const filed = (at: string, never: number | null) => {
-    const morning = fake(at);
-    expect(createMorning({ ...morning.deps, neverUsed: () => never, usageUrl: URL }).tick()).toBe("filed");
-    return morning.added[0]!;
-  };
-
-  it("goes on Mondays only, as one link that opens the page", () => {
+describe("the Morning card with What you used hidden", () => {
+  it("carries no What you used link on a Monday either", () => {
     // Mon 30 Nov 2026, 7am local.
-    const monday = filed("2026-11-29T20:00:00Z", 41);
-    expect(monday.links).toEqual([{ label: "What you used: 41 never used in 30 days ›", url: URL }]);
-    expect(monday.ask).not.toContain("What you used");
-    // Tue 1 Dec and Sun 6 Dec carry none.
-    expect(filed("2026-11-30T20:00:00Z", 41).links).toBeUndefined();
-    expect(filed("2026-12-05T20:00:00Z", 41).links).toBeUndefined();
-  });
-
-  it("is left out before 30 full days of recording, or with no https page to open", () => {
-    expect(filed("2026-11-22T20:00:00Z", null).links).toBeUndefined();
     const morning = fake("2026-11-29T20:00:00Z");
-    expect(createMorning({ ...morning.deps, neverUsed: () => 41 }).tick()).toBe("filed");
+    expect(createMorning(morning.deps).tick()).toBe("filed");
     expect(morning.added[0]!.links).toBeUndefined();
+    expect(JSON.stringify(morning.added[0])).not.toContain("What you used");
   });
 });
 

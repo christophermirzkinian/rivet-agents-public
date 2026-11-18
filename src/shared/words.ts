@@ -128,10 +128,7 @@ export function youAnswered(answer: string, at: At, now: At = Date.now()): strin
   return `You: ${answer} · ${when(at, now)}`;
 }
 
-// An answered card whose ask is still open (GitHub sweep idea 3, the owner's pick 15 Nov): answered.ts answeredAsk's states.
-
-/** The list under the open cards of the answered cards whose ask has not closed. */
-export const UNDER_WAY = "Under way";
+// An answered card whose ask is still open (GitHub sweep idea 3): answered.ts answeredAsk's states.
 
 /** An answered card under way: `You said Yes · Building`. */
 export function youSaidUnderWay(answer: string, stage: Stage): string {

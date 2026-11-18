@@ -286,7 +286,7 @@ describe("proofOf", () => {
     } as ServedNeed;
     expect(texts(proofOf(card))).toEqual([
       "ok:Tests green · gate clean on abc1234",
-      "bad:Review: findings open · 1 open",
+      "warn:Review: findings open · 1 open",
       "ok:Why you: It changes the Feed",
       "warn:Held: owner video",
     ]);

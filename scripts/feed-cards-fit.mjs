@@ -166,7 +166,9 @@ try {
       });
       await view(async () => {
         await page.goto(`${base}preview/desktop.html?tab=cards&v4=1`);
-        await page.click('.decide-seg[data-seg="answered"]');
+        // A phone's Answered N is in the card's ⋯ menu.
+        await page.click(".decide-sheet .decide-more");
+        await page.click('.decide-menu .decide-seg[data-seg="answered"]');
         await page.waitForSelector(".decide-sheet .decide-card.is-list .ans-row");
         await settle(page);
         await check(page, `${screen.name} answered`);

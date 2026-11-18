@@ -85,7 +85,29 @@ const unseen = (el: HTMLElement) => {
   if (gone) top = 0;
   return gone;
 };
-const height = () => (perMessage ? document.querySelectorAll(".chat-thread .chat-msg").length * perMessage : tall);
+/** Where the scroller's top is on the page, and how tall a card's foot (More, Reply) stands, with perMessage set. */
+const HEAD = 60;
+let foot = 0;
+/** Each card and shown line in the thread, from its top to its bottom. */
+function laidOut(): Map<Element, [number, number]> {
+  const at = new Map<Element, [number, number]>();
+  let y = 0;
+  for (const card of document.querySelectorAll(".chat-thread .chat-ex")) {
+    const from = y;
+    if (card.classList.contains("minimised")) y += perMessage;
+    else {
+      for (const line of card.querySelectorAll(".chat-msg")) at.set(line, [y, (y += perMessage)]);
+      y += foot;
+    }
+    at.set(card, [from, y]);
+  }
+  return at;
+}
+const height = () => {
+  if (!perMessage) return tall;
+  const cards = [...laidOut().entries()].filter(([el]) => el.classList.contains("chat-ex"));
+  return cards.at(-1)?.[1][1] ?? 0;
+};
 
 /** A scroller as a browser keeps it: as tall as what is in it, its scroll held between the top and the foot. */
 function layOut(): void {
@@ -101,12 +123,23 @@ function layOut(): void {
   const write = vi.spyOn(HTMLElement.prototype, "scrollTop", "set").mockImplementation(function (this: HTMLElement, value: number) {
     if (scrolls(this) && !unseen(this)) top = Math.max(0, Math.min(value, height() - SHOWN));
   });
-  restore = [() => scrollHeight.mockRestore(), () => client.mockRestore(), () => read.mockRestore(), () => write.mockRestore()];
+  // With perMessage set, the scroller sits HEAD px down the page and each line at its place in the thread, less the
+  // scroll; a card spans its lines and its foot, a minimised one is one line tall, and a line in it, unlaid, reads 0.
+  const rect = vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+    const span = (from: number, to: number) => DOMRect.fromRect({ x: 0, y: from, width: 300, height: to - from });
+    if (perMessage && scrolls(this as HTMLElement)) return span(HEAD, HEAD + SHOWN);
+    const at = perMessage && this.closest(".chat-thread") ? laidOut().get(this) : undefined;
+    return at ? span(HEAD + at[0] - top, HEAD + at[1] - top) : span(0, 0);
+  });
+  restore = [() => scrollHeight.mockRestore(), () => client.mockRestore(), () => read.mockRestore(), () => write.mockRestore(), () => rect.mockRestore()];
 }
 
 const scroller = () => root.querySelector<HTMLElement>(".chat-scroll")!;
 const thread = () => root.querySelector<HTMLElement>(".chat-thread")!;
 const gap = () => height() - top - SHOWN;
+const line = (id: string) => root.querySelector<HTMLElement>(`.chat-msg[data-id="${id}"]`)!;
+/** How far below the scroller's top it stands. */
+const shownTop = (el: HTMLElement) => el.getBoundingClientRect().top - scroller().getBoundingClientRect().top;
 /** The owner scrolls to `to`: the browser moves it, then tells the page. */
 const scrollTo = (box: HTMLElement, to: number) => {
   top = to;
@@ -132,6 +165,7 @@ beforeEach(() => {
   localStorage.clear();
   tall = 3910;
   perMessage = 0;
+  foot = 0;
   hidden = false;
   top = 0;
   layOut();
@@ -336,6 +370,91 @@ describe("the chat opens on its newest message when the thread grows after it sc
     expect(top).toBe(100 * 50);
     FakeResizeObserver.grew(thread());
     expect(top).toBe(100 * 50);
+  });
+
+  it("scrolled up on Chat, a topic card moving to the end leaves the line being read where it was", async () => {
+    perMessage = 50;
+    const lines = Array.from({ length: 20 }, (_, i) => message(i < 10 ? `a${i}` : `b${i - 10}`, i < 10 ? "a" : "b", i));
+    const server = fakeServer(lines);
+    vi.stubGlobal("fetch", vi.fn(server.fetch));
+    chat.mount(root);
+    await settle();
+    root.querySelector<HTMLButtonElement>(".thing-back")?.click();
+    await settle();
+    scrollTo(scroller(), 100);
+    expect(shownTop(line("a2"))).toBe(0);
+    server.messages.push(message("a10", "a", 30));
+    await chat.refresh();
+    await settle();
+    expect(root.querySelector<HTMLElement>(".chat-ex:last-child")!.dataset.thread).toBe("a");
+    expect(shownTop(line("a2"))).toBe(0);
+  });
+
+  it("on a topic's page, a line landing leaves the card whose foot he is on where it was, its cards sharing one thread", async () => {
+    perMessage = 50;
+    foot = 40;
+    // Four cards of his question and three answers: each 240 px, its foot the last 40.
+    const lines = Array.from({ length: 16 }, (_, i) => ({ ...message(`t${i}`, "t", i), from: i % 4 ? ("rivet" as const) : ("owner" as const) }));
+    const server = fakeServer(lines, { t: { title: "Four rounds" } });
+    vi.stubGlobal("fetch", vi.fn(server.fetch));
+    chat.showConversation("t");
+    chat.mount(root);
+    await settle();
+    expect(root.querySelectorAll(".chat-ex")).toHaveLength(4);
+    const second = root.querySelectorAll<HTMLElement>(".chat-ex")[1]!;
+    scrollTo(scroller(), 450);
+    expect(shownTop(second)).toBe(-210);
+    server.messages.push({ ...message("t16", "t", 17), from: "rivet" });
+    await chat.refresh();
+    await settle();
+    expect(root.querySelectorAll(".chat-msg")).toHaveLength(17);
+    expect(top).toBe(450);
+    expect(shownTop(second)).toBe(-210);
+  });
+
+  it("scrolled up on Chat at a topic card's foot, Earlier messages bringing an older line of it keeps the card where it was", async () => {
+    perMessage = 50;
+    foot = 40;
+    // Chat's first page is the newest 50: a1-a10 and b0-b39. Earlier brings z0, an older topic's card, and a0.
+    const lines = [
+      message("z0", "z", 0),
+      message("a0", "a", 1),
+      ...Array.from({ length: 10 }, (_, i) => message(`a${i + 1}`, "a", 2 + i)),
+      ...Array.from({ length: 40 }, (_, i) => message(`b${i}`, "b", 12 + i)),
+    ];
+    vi.stubGlobal("fetch", vi.fn(fakeServer(lines).fetch));
+    chat.mount(root);
+    await settle();
+    root.querySelector<HTMLButtonElement>(".thing-back")?.click();
+    await settle();
+    const card = () => root.querySelector<HTMLElement>('.chat-ex[data-thread="a"]')!;
+    expect(root.querySelector('.chat-msg[data-id="a0"]')).toBeNull();
+    scrollTo(scroller(), 510);
+    expect(shownTop(card())).toBe(-510);
+    root.querySelector<HTMLButtonElement>(".conv-earlier")!.click();
+    await settle();
+    expect(root.querySelector('.chat-msg[data-id="z0"]')).not.toBeNull();
+    expect(card().querySelector<HTMLElement>(".chat-msg")!.dataset.id).toBe("a0");
+    expect(shownTop(card())).toBe(-510);
+  });
+
+  it("scrolled up on Chat, minimising the card he is reading keeps it where it was", async () => {
+    perMessage = 50;
+    foot = 40;
+    const lines = ["a", "b", "c"].flatMap((thread, t) => Array.from({ length: 10 }, (_, i) => message(`${thread}${i}`, thread, t * 10 + i)));
+    vi.stubGlobal("fetch", vi.fn(fakeServer(lines).fetch));
+    chat.mount(root);
+    await settle();
+    root.querySelector<HTMLButtonElement>(".thing-back")?.click();
+    await settle();
+    const card = () => root.querySelector<HTMLElement>('.chat-ex[data-thread="b"]')!;
+    scrollTo(scroller(), 540);
+    expect(shownTop(card())).toBe(0);
+    card().querySelector<HTMLButtonElement>(".chat-ex-chev")!.click();
+    await settle();
+    expect(card().classList.contains("minimised")).toBe(true);
+    expect(top).toBe(540);
+    expect(shownTop(card())).toBe(0);
   });
 
   it("closed, the chat holds nothing: its thread growing moves nothing", async () => {

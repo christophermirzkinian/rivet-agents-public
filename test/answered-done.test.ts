@@ -69,6 +69,14 @@ describe("answeredShown", () => {
     expect(ids(6, false)).toEqual(["new"]);
     expect(ids(null, false)).toEqual(["new", "day", "two", "old"]);
   });
+
+  it("keeps a card whose ask is under way whatever the chip, until its ask closes", () => {
+    const ask = { id: "a-1", stage: "building" as const, stageAt: "2026-10-26T07:00:00.000Z" };
+    const building: AnsweredCard = { ...entry("building", {}, {}, 72), ask: { state: "underWay", ...ask } };
+    const closed: AnsweredCard = { ...entry("closed", {}, {}, 72), ask: { state: "done", ...ask, stage: "shipped" } };
+    expect(answeredShown([...list, building, closed], 24, true, NOW).map((one) => one.card.id)).toEqual(["new", "done", "day", "building"]);
+    expect(answeredShown([building], 6, false, NOW)).toEqual([building]);
+  });
 });
 
 describe("Answered words", () => {

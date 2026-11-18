@@ -62,7 +62,7 @@
   border-top: 1px solid var(--line);
 }
 
-/* The drawer's head: Usage, with its reading's tone as a bar along its foot. */
+/* The drawer's head: Usage, with its reading's tone as a dot by its name, never a bar along an edge. */
 .menu-tile {
   position: relative;
   display: flex;
@@ -71,7 +71,7 @@
   width: calc(100% - 12px);
   min-height: 64px;
   margin: 0 6px 10px;
-  padding: 8px 8px 14px 10px;
+  padding: 8px 24px 8px 10px;
   border: 1px solid var(--line);
   border-radius: 14px;
   background: var(--panel);
@@ -101,11 +101,11 @@
 
 .menu-tile::after {
   position: absolute;
+  top: 12px;
   right: 10px;
-  bottom: 6px;
-  left: 10px;
-  height: 3px;
-  border-radius: 2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
   content: "";
 }
 

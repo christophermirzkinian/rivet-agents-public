@@ -67,6 +67,7 @@ const SCREENS = group("screen", "Screens", [
   ["decide", "Decide sheet", { scroll: true }],
   ["decide.via-push", "Decide opened from a push"],
   ["decide.via-link", "Decide opened from a link"],
+  ["decide.menu", "Decide's ⋯ menu", { added: "2026-11-18" }],
   ["tab.via-link", "A tab opened from a link"],
   ["answered", "Answered", { scroll: true }],
   ["updates.thread", "An update's thread"],
@@ -82,7 +83,7 @@ const SCREENS = group("screen", "Screens", [
   ["more.home", "Home Assistant"],
   ["more.media", "Media"],
   ["more.settings", "Settings"],
-  ["more.what-you-used", "What you used"],
+  ["more.what-you-used", "What you used", { removed: "2026-11-18" }],
   ["ops.code", "Code"],
   ["ops.timeline", "Timeline", { scroll: true }],
   ["worker", "Worker sheet"],
@@ -90,6 +91,7 @@ const SCREENS = group("screen", "Screens", [
   ["ticket", "Agent ticket", { removed: "2026-11-02" }],
   ["reject", "Reject sheet"],
   ["share", "Share sheet"],
+  ["chat.more", "A topic's More sheet", { added: "2026-11-19" }],
   ["patch-notes", "Patch notes"],
   ["overnight-notice", "Overnight jobs notice", { added: "2026-11-15", removed: "2026-11-17" }],
   ["stop-confirm", "Stop confirm", { setup: true }],
@@ -179,7 +181,8 @@ const CONTROLS: UsageId[] = [
     ["decide.escape", "Escape out of Decide"],
     ["decide.back", "Back out of Decide"],
     ["decide.show-minimised", "Show minimised cards in Decide"],
-    ["decide.big", "See it big in Decide"],
+    ["decide.big", "See it big in Decide", { removed: "2026-11-18" }],
+    ["decide.more", "Open Decide's ⋯ menu", { added: "2026-11-18" }],
     ["decide.retry", "Try again when Decide could not read the cards", { added: "2026-11-10" }],
     ["decide.keys", "Keyboard keys in Decide", { added: "2026-11-17" }],
   ]),
@@ -264,9 +267,19 @@ const CONTROLS: UsageId[] = [
     ["chat.compose.send", "Send a message"],
     ["chat.compose.cancel", "Cancel a collecting message", { added: "2026-11-16" }],
     ["chat.reply.cancel", "Cancel a reply"],
-    ["chat.msg.tools-toggle", "Show a message's tools"],
+    ["chat.msg.tools-toggle", "Show a message's tools", { removed: "2026-11-19" }],
     ["chat.msg.reply", "Reply to a message"],
-    ["chat.msg.share", "Share a message"],
+    ["chat.msg.share", "Share a message", { removed: "2026-11-19" }],
+    ["chat.ex.more", "A topic's More", { added: "2026-11-19" }],
+    ["chat.ex.minimise", "Minimise a topic", { added: "2026-11-19" }],
+    ["chat.ex.open", "Open a minimised topic", { added: "2026-11-19" }],
+    ["chat.more.listen", "Listen to an answer", { added: "2026-11-19" }],
+    ["chat.more.read-all", "Read all of a topic", { added: "2026-11-19" }],
+    ["chat.more.share", "Share an answer", { added: "2026-11-19" }],
+    ["chat.options", "Chat options", { added: "2026-11-19" }],
+    ["chat.options.collapse-all", "Collapse all topics", { added: "2026-11-19" }],
+    ["chat.options.expand-all", "Expand all topics", { added: "2026-11-19" }],
+    ["chat.options.mark-read", "Mark all topics read", { added: "2026-11-19" }],
     ["chat.msg.open-card", "Open a message's card"],
     ["chat.msg.card-line", "A card line in chat"],
     ["chat.msg.quote-jump", "Jump to a quote"],
@@ -297,7 +310,7 @@ const CONTROLS: UsageId[] = [
     ["menu.row.code", "Menu: Code", { added: "2026-11-12" }],
     ["menu.row.machines", "Menu: Machines", { added: "2026-11-03" }],
     ["menu.row.mind", "Menu: Rivet's mind", { added: "2026-11-03" }],
-    ["menu.row.what-you-used", "Menu: What you used", { added: "2026-11-03" }],
+    ["menu.row.what-you-used", "Menu: What you used", { added: "2026-11-03", removed: "2026-11-18" }],
     ["menu.row.home", "Menu: Home Assistant", { added: "2026-11-03" }],
     ["menu.row.media", "Menu: Media", { added: "2026-11-03" }],
     ["menu.row.settings", "Menu: Settings", { added: "2026-11-03" }],
@@ -334,14 +347,14 @@ const CONTROLS: UsageId[] = [
     ["mind.row", "Open a row of Rivet's mind", { added: "2026-11-04" }],
   ]),
   ...group("control", "What you used", [
-    ["used.device.phone", "What you used: phone", { added: "2026-10-30" }],
-    ["used.device.desktop", "What you used: computer", { added: "2026-10-30" }],
-    ["used.retire", "Retire? on What you used", { added: "2026-10-30" }],
-    ["used.rework", "Rework? on What you used", { added: "2026-10-30" }],
+    ["used.device.phone", "What you used: phone", { added: "2026-10-30", removed: "2026-11-18" }],
+    ["used.device.desktop", "What you used: computer", { added: "2026-10-30", removed: "2026-11-18" }],
+    ["used.retire", "Retire? on What you used", { added: "2026-10-30", removed: "2026-11-18" }],
+    ["used.rework", "Rework? on What you used", { added: "2026-10-30", removed: "2026-11-18" }],
     ["used.show-all", "Show all on What you used", { added: "2026-10-30", removed: "2026-11-03" }],
-    ["used.fold", "Open or close an area on What you used", { family: true, added: "2026-11-03" }],
-    ["used.expand-all", "Expand or collapse all on What you used", { added: "2026-11-03" }],
-    ["used.search", "Search What you used", { added: "2026-11-03" }],
+    ["used.fold", "Open or close an area on What you used", { family: true, added: "2026-11-03", removed: "2026-11-18" }],
+    ["used.expand-all", "Expand or collapse all on What you used", { added: "2026-11-03", removed: "2026-11-18" }],
+    ["used.search", "Search What you used", { added: "2026-11-03", removed: "2026-11-18" }],
   ]),
   ...group("control", "Settings", [
     ["settings.overnight.toggle", "Overnight jobs on or off", { added: "2026-11-15", removed: "2026-11-17" }],
@@ -381,7 +394,7 @@ const CONTROLS: UsageId[] = [
   ...group("control", "Ops", [
     ["ops.refresh", "Refresh Ops"],
     ["ops.section.fold", "Fold an Ops section", { family: true }],
-    ["ops.page.more", "Ops: more"],
+    ["ops.page.more", "Ops: more", { removed: "2026-11-18" }],
     ["ops.system-jobs.fold", "Fold system jobs", { removed: "2026-11-03" }],
     ["ops.prs.show-fetched", "Show fetched PRs"],
     ["ops.costs.open", "Open costs from Ops", { removed: "2026-11-03" }],
@@ -431,6 +444,9 @@ const CONTROLS: UsageId[] = [
     ["media.more", "More media"],
     ["media.open", "Open media"],
     ["media.thumb", "A media thumbnail"],
+    ["media.thumb.clip", "A card's clip thumb, full screen", { added: "2026-11-18" }],
+    ["media.thumb.picture", "A card's picture thumb, full screen", { added: "2026-11-18" }],
+    ["media.thumb.stills", "A card's stills thumb, full screen", { added: "2026-11-18" }],
   ]),
   ...group("control", "Desks and Agents", [
     ["desks.worker.open-card", "Open a worker's card"],
@@ -604,7 +620,8 @@ export interface UsageSummary {
   counts: UsageCount[];
 }
 
-// What you used: the page, the Monday line in the Morning card (phone shown first), and at most 3 Retire? cards a week.
+// What you used: the page and the Retire? cards (phone shown first, at most 3 Retire? cards a week). Hidden: the page
+// is on no menu and the Morning card has no Monday line; taps still record.
 
 /** The window the page reads, and the days of recording before anything is called never used. */
 export const USAGE_WINDOW_DAYS = 30;
@@ -695,7 +712,6 @@ export const USAGE_AREAS = [
   "Cards",
   "Chat",
   "Search",
-  "More",
   "Settings",
   "Ops",
   "Plan and Coming",
@@ -714,19 +730,19 @@ export type UsageArea = (typeof USAGE_AREAS)[number];
  * longer shows (`removed`) goes to Removed whatever its area was (usage-areas.test.ts: every id lands in exactly one).
  */
 export const AREA_TABLE: Record<Exclude<UsageArea, "Removed">, { where: readonly string[]; screens: readonly string[] }> = {
-  Floor: { where: ["Floor", "Menu"], screens: ["floor", "floor.list", "floor.page", "menu", "floor.rivet", "readings", "progress", "tab.via-link", "briefing.past"] },
-  Decide: { where: ["Decide sheet", "Answered"], screens: ["decide", "decide.via-push", "decide.via-link", "answered"] },
+  // More's ids (the old list, its rows, What you used) are all removed, so the menu's area holds them.
+  Floor: { where: ["Floor", "Menu", "More", "What you used"], screens: ["floor", "floor.list", "floor.page", "menu", "floor.rivet", "readings", "progress", "tab.via-link", "briefing.past", "more", "more.what-you-used"] },
+  Decide: { where: ["Decide sheet", "Answered"], screens: ["decide", "decide.via-push", "decide.via-link", "decide.menu", "answered"] },
   Cards: { where: ["Cards", "Updates"], screens: ["cards", "updates.thread", "reject"] },
   Chat: { where: ["Chat"], screens: ["chat", "chat.thing"] },
   Search: { where: ["Search"], screens: ["search"] },
-  More: { where: ["More", "What you used"], screens: ["more", "more.what-you-used"] },
   Settings: { where: ["Settings", "Sign-in"], screens: ["more.settings", "patch-notes", "gate", "overnight-notice"] },
   Ops: { where: ["Ops", "Rivet's mind"], screens: ["more.usage", "more.costs", "more.mind", "more.machines", "ops.code", "ops.timeline", "ops.status"] },
   "Plan and Coming": { where: ["Plan and Coming"], screens: ["coming.sheet"] },
   Scheduled: { where: ["Scheduled"], screens: ["more.scheduled", "scheduled.ask", "jobs.red"] },
   "Home and Media": { where: ["Home and Media"], screens: ["more.home", "more.media"] },
   "Desks and Agents": { where: ["Desks and Agents"], screens: ["desks.rest", "desks.chat", "desks.backlog"] },
-  Sheets: { where: ["Sheets"], screens: ["worker", "share", "stop-confirm", "rivet-summary", "findwork", "ticket"] },
+  Sheets: { where: ["Sheets"], screens: ["worker", "share", "chat.more", "stop-confirm", "rivet-summary", "findwork", "ticket"] },
   "Computer shell": { where: ["Computer shell"], screens: ["shortcuts"] },
   Anywhere: { where: ["Anywhere"], screens: ["unknown"] },
 };

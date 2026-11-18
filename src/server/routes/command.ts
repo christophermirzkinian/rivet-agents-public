@@ -6,12 +6,13 @@ import { z } from "zod";
 import { DECISION, OUTCOME_OPTIONS, QUESTION } from "../../shared/answers.js";
 import { MAX_ASKS } from "../../shared/asks.js";
 import { MAX_OPS_STATUSES } from "../../shared/ops-status.js";
-import { comingChatRepo, NO_REPO, ID_PATTERN, mediaShas, pdfFileName, type ComingItem, type Reply } from "../../shared/board.js";
+import { comingChatRepo, NO_REPO, ID_PATTERN, MAX_CHAT_FILES, mediaShas, pdfFileName, type ComingItem, type Reply } from "../../shared/board.js";
 import {
   actionAckSchema,
   chatCancelSchema,
   chatCreateSchema,
   chatImages,
+  chatWindowText,
   FIX_IT_BY,
   FIX_IT_NOTE,
   fixCreateSchema,
@@ -28,6 +29,7 @@ import {
   MAX_QUOTE_TEXT,
   MAX_WORKER_TEXT,
   modelsCreateSchema,
+  notAnswerOf,
   quoteText,
   saySchema,
   scheduleCreateSchema,
@@ -246,20 +248,20 @@ export function register(router: Router): void {
   }
 
   function bridgePayload(entry: AuditEntry): Record<string, unknown> {
-    const { id, at, repo, chat, pr, headSha, target, schedule, on, text, image, images, files, replyTo, quote, job, models, base } = entry;
+    const { id, at, repo, chat, pr, headSha, target, schedule, on, text, image, images, files, replyTo, quote, notAnswer, job, models, base } = entry;
     // A chat window names the conversation it was typed in, so Rivet has the context without looking it up.
     const thread = entry.kind === "chat" ? commands.threadOf(id) : null;
     const title = thread ? commands.conversationTitle(thread) : null;
     const conversation = thread && title !== null ? { id: thread, title } : undefined;
     return Object.fromEntries(
-      Object.entries({ id, at, repo, chat, pr, headSha, target, schedule, on, text, image, images, files, replyTo, quote, conversation, job, models, base }).filter(
+      Object.entries({ id, at, repo, chat, pr, headSha, target, schedule, on, text, image, images, files, replyTo, quote, notAnswer, conversation, job, models, base }).filter(
         ([, value]) => value !== undefined,
       ),
     );
   }
 
   function sameRequest(entry: AuditEntry, kind: ActionKind, request: ActionRequest): boolean {
-    const keys: Exclude<keyof ActionRequest, "fixIt">[] = ["repo", "chat", "pr", "headSha", "target", "schedule", "on", "text", "image", "images", "replyTo", "conversation", "job", "models", "base"];
+    const keys: Exclude<keyof ActionRequest, "fixIt" | "typed">[] =["repo", "chat", "pr", "headSha", "target", "schedule", "on", "text", "image", "images", "replyTo", "conversation", "job", "models", "base"];
     // Files by their bytes only: the server renames them when it stores the request, so a retry's names may differ.
     return entry.kind === kind && keys.every((key) => JSON.stringify(entry[key]) === JSON.stringify(request[key])) && sameFiles(entry.files, request.files);
   }
@@ -293,18 +295,7 @@ export function register(router: Router): void {
       json(response, 200, existing);
       return;
     }
-    const images = chatImages(body.request);
-    if (!images.every((sha) => store.hasImage(sha))) throw new HttpError(400, "that image is no longer on the server; attach it again");
-    if (commands.imageBytes(images) > MAX_CHAT_IMAGE_BYTES) throw new HttpError(413, "Those photos come to more than 40 MB together. Send some of them in another message.");
-    const photoRefusal = images.length ? bridge.photoRefusal() : null;
-    if (photoRefusal) throw new HttpError(424, photoRefusal);
-    const textRefusal = kind === "chat" ? bridge.chatTextRefusal(body.request.text) : null;
-    if (textRefusal) throw new HttpError(424, textRefusal);
-    if (body.request.files) {
-      body.request.files = storedFiles(body.request.files, (sha) => store.fileType(sha));
-      const fileRefusal = bridge.fileRefusal();
-      if (fileRefusal) throw new HttpError(424, fileRefusal);
-    }
+    checkNew(kind, body.request);
     const time = now();
     const at = time.toISOString();
     if (kind === "chat") {
@@ -325,6 +316,22 @@ export function register(router: Router): void {
     }
     const sent = dispatch(kind, body.clientId, body.request, at, check);
     json(response, sent.status, sentBody(sent));
+  }
+
+  /** A new action's photos and documents are still here and within bounds, and the bridge takes them; its documents get their stored names. */
+  function checkNew(kind: ActionKind, request: ActionRequest): void {
+    const images = chatImages(request);
+    if (!images.every((sha) => store.hasImage(sha))) throw new HttpError(400, "that image is no longer on the server; attach it again");
+    if (commands.imageBytes(images) > MAX_CHAT_IMAGE_BYTES) throw new HttpError(413, "Those photos come to more than 40 MB together. Send some of them in another message.");
+    const photoRefusal = images.length ? bridge.photoRefusal() : null;
+    if (photoRefusal) throw new HttpError(424, photoRefusal);
+    const textRefusal = kind === "chat" ? bridge.chatTextRefusal(request.text) : null;
+    if (textRefusal) throw new HttpError(424, textRefusal);
+    if (request.files) {
+      request.files = storedFiles(request.files, (sha) => store.fileType(sha));
+      const fileRefusal = bridge.fileRefusal();
+      if (fileRefusal) throw new HttpError(424, fileRefusal);
+    }
   }
 
   /** A 503 for an action the offline bridge never got says `undelivered`: the app may then let its clientId go. */
@@ -396,6 +403,7 @@ export function register(router: Router): void {
           ...(body.files ? { files: body.files } : {}),
           ...replying(body.replyTo),
           ...typedIn(body.conversation),
+          ...(body.typed ? { typed: true as const } : {}),
         }),
         "chat message",
       ),
@@ -421,6 +429,73 @@ export function register(router: Router): void {
     // A line that answered an ask waiting on you no longer does: its wait card comes back.
     router.deps.refreshWaits();
     json(response, 200, cancelled);
+  });
+
+  // Not an answer: your question goes to Rivet again as a reply to the Rivet line, flagged, on the chat path.
+  // One going re-ask per question; its clientId is the answer's, which no phone can send (clientId's pattern has no
+  // colon), numbered after the ones before it.
+  router.onPrefix("POST", "/api/chat/", async ({ request, response, url }) => {
+    const rest = url.pathname.slice("/api/chat/".length);
+    if (!rest.endsWith("/not-answer")) throw new HttpError(404, "not found");
+    requireSameOrigin(request, config.origin);
+    requireSession(request);
+    const id = rest.slice(0, -"/not-answer".length);
+    const answer = ID_PATTERN.test(id) ? commands.getChatMessage(id) : null;
+    if (!answer) throw new HttpError(404, "That message is not in the chat.");
+    const notAnswer = `That line is not ${RIVET_NAME}'s answer to a question you typed.`;
+    const replied = answer.replyTo ? commands.getChatMessage(answer.replyTo) : null;
+    const question = replied?.from === "owner" && replied.notAnswerFor ? commands.getChatMessage(replied.notAnswerFor) : replied;
+    const opener = question?.windowLead ? commands.getChatMessage(question.windowLead) : question;
+    const thread = opener ? commands.threadOf(opener.id) : null;
+    if (!opener || !thread || thread === TEAM_ROOM_ID || commands.threadOf(answer.id) !== thread) throw new HttpError(400, notAnswer);
+    // From the question's window to the newest line, however old the exchange.
+    const lines = [opener, ...(commands.threadMessagesAfter(thread, opener.id) ?? [])];
+    const asked = notAnswerOf(lines, answer, (line) => commands.getChatMessage(line));
+    if (!asked) throw new HttpError(400, notAnswer);
+    // Asked again already from another of Rivet's answers to it (another phone): that re-ask is the one.
+    const pending = asked.open.map((reAsk) => commands.getAction(reAsk.id)).find((entry) => entry && entry.status !== "failed" && entry.status !== "refused" && entry.status !== "cancelled");
+    if (pending) {
+      json(response, 200, pending);
+      return;
+    }
+    if (!asked.last) throw new HttpError(400, `${RIVET_NAME} has answered that question again since.`);
+    const said = asked.window.map((line) => ({ line, entry: commands.getAction(line.id) }));
+    const text = chatWindowText(said.map(({ line, entry }) => entry?.text ?? line.text));
+    const images = [...new Set(said.flatMap(({ line, entry }) => chatImages(entry ?? line)))];
+    const files = said.flatMap(({ entry }) => entry?.files ?? []).filter((file, at, all) => all.findIndex((one) => one.sha256 === file.sha256) === at);
+    if (images.length > bridge.chatWindowImages()) throw new HttpError(400, `That question has more photos than ${RIVET_NAME} takes in one message.`);
+    if (files.length > MAX_CHAT_FILES) throw new HttpError(400, `That question has more documents than ${RIVET_NAME} takes in one message.`);
+    const reAsk: ActionRequest = {
+      ...(text ? { text } : {}),
+      ...imageFields(images),
+      ...(files.length ? { files } : {}),
+      ...replying(id),
+      ...typedIn(id),
+      notAnswer: true,
+      notAnswerFor: asked.lead,
+    };
+    checkNew("chat", reAsk);
+    let tries = 1;
+    while (commands.getActionByClientId(tries === 1 ? `not-answer:${id}` : `not-answer:${id}:${tries}`)) tries += 1;
+    const time = now();
+    const at = time.toISOString();
+    const { entry, closed } = commands.addChat(
+      {
+        id: randomUUID(),
+        clientId: tries === 1 ? `not-answer:${id}` : `not-answer:${id}:${tries}`,
+        request: reAsk,
+        at,
+      },
+      time.getTime(),
+      bridge.chatWindowMax(),
+      bridge.photoRefusal() ? 0 : bridge.chatWindowImages(),
+    );
+    if (closed) sendBatch(closed);
+    // You typed nothing to add to it: a reply leads its own window, which goes to Rivet at once.
+    const lead = commands.flush(entry.id, at);
+    if (lead) sendBatch(lead);
+    router.deps.refreshWaits();
+    json(response, 202, commands.getAction(entry.id));
   });
 
   // Feed's Fix it: one tap is your own message to Rivet, sent the chat's way, and the item's record
@@ -702,7 +777,7 @@ export function register(router: Router): void {
     const added = addUpdate(
       {
         id,
-        ...(kind ? { kind } : outcome ? { kind: DECISION, options: [...OUTCOME_OPTIONS.map((option) => ({ ...option }))] } : {}),
+        ...(kind ? { kind } : outcome ? { kind: DECISION, options: OUTCOME_OPTIONS.map((option) => ({ ...option })) } : {}),
         title,
         ...(ask ? { ask } : {}),
         ...(pr !== undefined ? { pr } : {}),

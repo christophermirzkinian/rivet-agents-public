@@ -4,7 +4,7 @@ import type { AudioClip, CardFile, Media, MediaRef } from "../../../src/shared/b
 import { FULL_SCREEN_EVENTS, fullScreenElement, h, svg } from "../dom.js";
 import { autoplay, unwatch, type AutoPlayer } from "./autoplay.js";
 import { fetchDocument, fileSize, openDocument, previewKind } from "./documents.js";
-import { openImages } from "./lightbox.js";
+import { openImages, openVideo } from "./lightbox.js";
 
 // Before/after clips on a feed card: side by side on a wide screen, one at a time
 // with a Before/After toggle on a phone. A clip is as wide as the card, in its own
@@ -484,6 +484,70 @@ export function cardMedia(needId: string, media: Media | undefined, title = ""):
     cache.set(key, element);
   }
   return element;
+}
+
+/**
+ * A phone Decide card's media: a stage, edge to edge, that takes the room the read leaves (decide-sheet.css), the clip
+ * playing in place as on every card and each still a further slide, counted "1 / N"; and, shown in its place on a
+ * short screen, two big thumbs, the clip and the stills, each opening full screen. A card with sound clips, files or a
+ * before/after pair keeps its block as every card shows it, as neither a slide nor a thumb holds those.
+ */
+export function cardStage(needId: string, media: Media, title: string): HTMLElement[] {
+  const block = cardMedia(needId, media, title)!;
+  const stills = media.stills ?? [];
+  const lead = media.after ?? media.before;
+  if (media.clips?.length || media.files?.length || (!lead && !stills.length)) return [block];
+  const slides = (lead ? 1 : 0) + stills.length;
+  const at = () => `${Math.min(slides, Math.round(block.scrollLeft / Math.max(1, block.clientWidth)) + 1)} / ${slides}`;
+  const pager = h("span", { class: "stage-pager", attrs: { "aria-hidden": "true" } }, at());
+  pager.hidden = slides < 2;
+  const stage = h("div", { class: "card-stage" }, block, pager);
+  const back = media.poster ?? (lead?.type.startsWith("image/") ? lead : undefined) ?? stills[0];
+  if (back) stage.style.setProperty("--stage-back", `url("${url(back)}")`);
+  stage.addEventListener("scroll", () => (pager.textContent = at()), true);
+  if (media.before && media.after) return [stage];
+  return [stage, thumbs(media, lead, stills, title)];
+}
+
+/** Clip lengths read once, so a card drawn again says the same as the one it replaces. */
+const lengths = new Map<string, number>();
+
+function thumbs(media: Media, lead: MediaRef | undefined, stills: MediaRef[], title: string): HTMLElement {
+  const row = h("div", { class: "card-thumbs" });
+  const thumb = (face: HTMLElement, word: HTMLElement, label: string, use: string, open: () => void, play: boolean) =>
+    h(
+      "button",
+      { class: "card-thumb", attrs: { type: "button", "aria-label": label, "data-use": use }, on: { click: open } },
+      face,
+      play ? svg(PLAY, "thumb-play") : null,
+      h("span", { class: "thumb-cap" }, word, svg(FULL, "thumb-full")),
+    );
+  if (lead) {
+    const part = media.after ? "After" : "Before";
+    const share = (signal: AbortSignal) => getMedia(lead, mediaName(title, part, lead), signal)();
+    if (lead.type.startsWith("video/")) {
+      const said = () => (lengths.has(lead.sha256) ? `Clip · ${clock(lengths.get(lead.sha256)!)}` : "Clip");
+      const word = h("span", { class: "thumb-word" }, said());
+      const face = h("video", { class: "thumb-face", attrs: { src: url(lead), preload: "metadata", muted: "", playsinline: "", ...(media.poster ? { poster: url(media.poster) } : {}) } });
+      face.muted = true;
+      face.addEventListener("loadedmetadata", () => {
+        if (!Number.isFinite(face.duration)) return;
+        lengths.set(lead.sha256, face.duration);
+        word.textContent = said();
+      });
+      row.append(thumb(face, word, "Play the clip full screen", "media.thumb.clip", () => openVideo(url(lead), media.poster ? url(media.poster) : undefined, title || part, share), true));
+    } else {
+      const face = h("img", { class: "thumb-face", attrs: { src: url(lead), alt: "", loading: "lazy", decoding: "async" } });
+      row.append(thumb(face, h("span", { class: "thumb-word" }, "Picture"), "See the picture full screen", "media.thumb.picture", () => openImages([url(lead)], 0, part, (_, signal) => share(signal)), false));
+    }
+  }
+  if (stills.length) {
+    const face = h("img", { class: "thumb-face", attrs: { src: url(stills[0]!), alt: "", loading: "lazy", decoding: "async" } });
+    const word = h("span", { class: "thumb-word" }, `${stills.length} still${stills.length === 1 ? "" : "s"}`);
+    const open = () => openImages(stills.map(url), 0, undefined, (n, signal) => getMedia(stills[n]!, mediaName(title, `screenshot-${n + 1}`, stills[n]!), signal)());
+    row.append(thumb(face, word, `See the ${stills.length === 1 ? "screenshot" : `${stills.length} screenshots`} full screen`, "media.thumb.stills", open, false));
+  }
+  return row;
 }
 
 /**
