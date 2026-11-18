@@ -15,6 +15,7 @@ function formatters(timeZone: string | undefined) {
     OFFSET: zone({ timeZoneName: "longOffset" }),
     YEAR: zone({ year: "numeric" }),
     MONTH: zone({ month: "long" }),
+    DAY_MONTH: zone({ day: "numeric", month: "long" }),
     MONTH_SHORT: zone({ month: "short" }),
     HOUR: zone({ hour: "numeric", hour12: true }),
     MINUTE: zone({ hour: "2-digit", minute: "2-digit", hourCycle: "h23" }),
@@ -178,6 +179,12 @@ export function dayHeading(at: At, now: At = Date.now()): string {
 export function dayDate(at: At, now?: At): string {
   const t = ms(at);
   return Number.isFinite(t) ? `${F.WEEKDAY.format(t)} ${shortDate(t, now)}` : "";
+}
+
+/** `1 December`: the day and long month. "" for a time that does not parse. */
+export function dayMonth(at: At): string {
+  const t = ms(at);
+  return Number.isFinite(t) ? F.DAY_MONTH.format(t) : "";
 }
 
 /** `October`, or `Oct` short: the month. "" for a time that does not parse. */

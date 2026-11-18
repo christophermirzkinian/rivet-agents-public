@@ -121,6 +121,11 @@ export interface PhotosControl {
   drop(photos: readonly Photo[]): void;
   /** Puts attachments already on the server back in the strip, ahead of what is there: a cancelled message's. */
   put(images: readonly string[], files: readonly FileRef[]): void;
+  /**
+   * Keeps the button off whatever the strip holds, and takes no new file (true), or back to its own limits (false). A
+   * put still lands: it uploads nothing, and refused it would lose a message put back.
+   */
+  lock(on: boolean): void;
 }
 
 /**
@@ -129,6 +134,7 @@ export interface PhotosControl {
  * never decodes ten at once. `label` gives the button words beside its clip.
  */
 export function photosControl(state: PhotosState, options: { onChange(): void; onSignedOut(): void; label?: string; use?: string }): PhotosControl {
+  let locked = false;
   const input = h("input", { class: "attach-input", attrs: { type: "file", accept: ACCEPT, multiple: "", tabindex: "-1", "aria-hidden": "true" } });
   const pickButton = options.label
     ? button([svg(CLIP, "btn-icon"), options.label], () => input.click(), "attach-btn", false, options.use ?? "attach")
@@ -160,6 +166,11 @@ export function photosControl(state: PhotosState, options: { onChange(): void; o
   const count = (docs: boolean) => state.photos.filter((photo) => (photo.doc !== undefined) === docs).length;
 
   function pick(files: File[], extra: readonly string[] = []): void {
+    if (locked) {
+      state.notice = [...extra, "Nothing can be attached while your Rivet is asleep."].join(" ");
+      update();
+      return;
+    }
     let photoRoom = Math.max(MAX_CHAT_IMAGES - count(false), 0);
     let fileRoom = Math.max(MAX_CHAT_FILES - count(true), 0);
     let photosLeft = 0;
@@ -307,7 +318,7 @@ export function photosControl(state: PhotosState, options: { onChange(): void; o
   }
 
   function render(): void {
-    pickButton.disabled = count(false) >= MAX_CHAT_IMAGES && count(true) >= MAX_CHAT_FILES;
+    pickButton.disabled = locked || (count(false) >= MAX_CHAT_IMAGES && count(true) >= MAX_CHAT_FILES);
     preview.hidden = state.photos.length === 0 && state.notice === null;
     const refocus = [keepFocus(strip), keepFocus(docs)];
     const tiles = state.photos.map((photo, index) => ({ photo, tile: tile(photo, index) }));
@@ -347,6 +358,10 @@ export function photosControl(state: PhotosState, options: { onChange(): void; o
       );
       state.photos.push(...kept);
       update();
+    },
+    lock(on) {
+      locked = on;
+      render();
     },
   };
 }

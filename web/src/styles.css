@@ -2447,3 +2447,46 @@ a {
     border-style: dotted;
   }
 }
+
+/* Rivet Cloud's month of hours used up (rivet-sleep.ts): a band above the body that takes its own room, never over the
+   app. Layout containment makes the body the box its fixed layers (sheets, toasts, the lightbox) sit in, so they start
+   below the band too; a sheet's full height is the body's, not the screen's. */
+html:has(> #rivet-cap) {
+  display: flex;
+  flex-direction: column;
+}
+
+html:has(> #rivet-cap) > body {
+  flex: 1 1 0;
+  min-height: 0;
+  height: auto;
+  contain: layout;
+}
+
+html:has(> #rivet-cap) .app.signed-in {
+  height: 100%;
+}
+
+/* Over fitAboveKeyboard's inline screen-sized top, height and --vv-h (sheet.ts); nothing can be typed while capped. */
+html:has(> #rivet-cap) :is(.sheet-backdrop, .scene-sheet-backdrop) {
+  top: 0 !important;
+  bottom: 0 !important;
+  height: auto !important;
+  --vv-h: 100% !important;
+}
+
+#rivet-cap {
+  flex: none;
+  padding: max(12px, env(safe-area-inset-top)) 16px 12px 14px;
+  border-bottom: 2px solid var(--apricot);
+  border-left: 6px solid var(--apricot);
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: var(--fs-3xl);
+  line-height: 1.4;
+}
+
+#rivet-cap strong {
+  display: block;
+  color: var(--apricot);
+}

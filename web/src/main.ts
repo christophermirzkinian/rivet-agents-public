@@ -8,6 +8,7 @@ import { button, describe, h } from "./dom.js";
 import { watchNewBuild } from "./new-build.js";
 import { loadPushHealth, pushChanged } from "./push-health.js";
 import { registerWorker, resyncPush, watchViewing, workerRefresh } from "./push.js";
+import { watchInput } from "./rivet-sleep.js";
 import { showRivetWords } from "./rivet-words.js";
 import { endSession } from "./session.js";
 import { takeShare } from "./share-target.js";
@@ -19,6 +20,8 @@ import { decideShown, showPushed } from "./views/decide-sheet.js";
 import { closeSheet, closeTallSheet } from "./views/sheet.js";
 import { cardsSegment, flushHeld, recoverOutbox, resetFeed } from "./views/feed.js";
 import { mountShell } from "./views/shell.js";
+
+watchInput();
 
 const POLL_MS = 15_000;
 const root = document.getElementById("app")!;

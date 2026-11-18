@@ -16,6 +16,7 @@ import type { AuditEntry, ChatMessage } from "../../src/shared/command.js";
 import type { ModelPicks, ModelSettingsResponse } from "../../src/shared/models.js";
 import type { UsageAsk, UsageDevice, UsageReport } from "../../src/shared/usage-ids.js";
 import type { WorkersResponse } from "../../src/shared/workers.js";
+import { heardAnswer, isAsleep, isBackground } from "./rivet-sleep.js";
 import { sameSession, StaleSession } from "./session.js";
 
 export class ApiError extends Error {
@@ -96,14 +97,18 @@ async function exchange<T>(path: string, init: RequestInit, ms: number, signal?:
   const clock = deadline(ms, signal);
   const askedAt = Date.now();
   const read = (init.method ?? "GET") === "GET";
+  const background = isBackground();
   try {
+    if (background && isAsleep()) throw new ApiError(0, "Can't reach the server. Check your connection.");
     let response: Response;
     try {
-      response = await fetch(path, { ...init, credentials: "same-origin", signal: clock.signal });
+      const headers = background ? { ...(init.headers as Record<string, string> | undefined), "x-rivet-background": "1" } : init.headers;
+      response = await fetch(path, { ...init, headers, credentials: "same-origin", signal: clock.signal });
     } catch {
       if (clock.timedOut()) throw lateError(read);
       throw new ApiError(0, "Can't reach the server. Check your connection.");
     }
+    heardAnswer(response);
     seen?.(response);
     const date = Date.parse(response.headers?.get?.("date") ?? "");
     if (Number.isFinite(date)) dateSkew = date + 500 - (askedAt + Date.now()) / 2;

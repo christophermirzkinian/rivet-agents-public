@@ -126,42 +126,9 @@
 .chat-msg.mine {
   align-self: flex-end;
   border-color: transparent;
-  background: var(--accent);
-  color: #2a1f05;
+  /* Your bubble is a dark wash with light text, never a yellow fill (The owner, 2026-11-18). */
+  background: linear-gradient(135deg, rgba(255, 194, 61, 0.26), rgba(120, 92, 255, 0.26));
   border-bottom-right-radius: 8px;
-}
-
-/* On the yellow bubble the grey line and its marks take the bubble's dark ink (Night Desk). */
-.chat-msg.mine :is(.chat-meta, .chat-meta-tap, .chat-meta-more) {
-  color: #5c4708;
-}
-
-.chat-msg.mine :is(.chat-status.replied, .chat-status.typed, .chat-status.acked) {
-  color: #17663a;
-}
-
-.chat-msg.mine :is(.chat-reply, .chat-quote-who, .chat-status.acked, .chat-status.unconfirmed, .chat-status.collecting, .chat-thing-link, .chat-answer-text, .chat-thing-open, .chat-topic-link) {
-  color: #2a1f05;
-}
-
-.chat-msg.mine .chat-quote {
-  --edge: color-mix(in srgb, #2a1f05 70%, transparent);
-}
-
-.chat-msg.mine .chat-quote-text {
-  color: #2a1f05;
-}
-
-.chat-msg.mine .chat-topic-link {
-  border-color: color-mix(in srgb, #2a1f05 45%, transparent);
-}
-
-.chat-msg.mine .chat-status.failed {
-  color: #8a1020;
-}
-
-.chat-msg.mine.lit {
-  box-shadow: 0 0 0 3px var(--text);
 }
 
 .chat-msg.theirs {
@@ -499,6 +466,43 @@ button.chat-quote {
   align-items: flex-end;
   gap: 8px;
   padding-top: 8px;
+}
+
+/* Rivet Cloud's month of hours used up: nothing here works until it wakes (rivet-sleep.ts). */
+.chat-compose-box.capped .chat-compose {
+  pointer-events: none;
+}
+
+.chat-compose-box.capped :is(.attach-btn, .chat-mic, .chat-send) {
+  opacity: 0.4;
+}
+
+.chat-compose-box.capped .chat-send {
+  background: var(--panel-2);
+  color: var(--muted);
+}
+
+/* Beside the reason's full-strength words, the mic needs more than the buttons' 0.4 to read as off. */
+.chat-compose-box.capped .chat-mic {
+  color: var(--muted);
+  opacity: 0.25;
+}
+
+.chat-compose-box.capped .chat-text {
+  border-style: dashed;
+  background: transparent;
+}
+
+/* Where one line would not hold why ("Asleep until 1 December"), the field gives it two. */
+@media (max-width: 380px) {
+  .chat-compose-box.capped .chat-text {
+    min-height: calc(2.6em + 24px);
+  }
+}
+
+.chat-compose-box.capped .chat-text::placeholder {
+  color: var(--muted);
+  opacity: 1;
 }
 
 .chat-field {

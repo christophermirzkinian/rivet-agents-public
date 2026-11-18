@@ -63,14 +63,21 @@
 }
 
 .desks-grid {
-  /* On a phone the project tiles stack down the home (Night Desk); a computer keeps them in a row. */
+  /* One row of project boxes: more than fit side-scroll, the next box's edge showing. A phone stacks them (below). */
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 10px;
+  align-items: flex-start;
+  justify-content: safe center;
+  gap: 14px;
   align-self: stretch;
   flex: none;
-  margin-top: 6px;
+  margin: 10px -14px 0;
+  padding: 0 14px 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  scroll-padding: 0 14px;
+  scrollbar-width: none;
 }
 
 .desks-grid::-webkit-scrollbar {
@@ -78,7 +85,33 @@
 }
 
 .desks-grid > .desk.is-project {
-  flex: none;
+  flex: 0 0 min(82vw, 340px);
+  scroll-snap-align: center;
+}
+
+/* On a phone the project tiles stack down the home (Night Desk; the owner kept it, 2026-11-18): a tile is a list, not a
+   desk, so the slab is Rivet's alone. A touch screen under the computer layout's 1080 stacks too (a phone turned
+   sideways, a small tablet); a laptop window 700px and wider, or anything with the computer layout, keeps the row. */
+@media (max-width: 699.98px), (hover: none) and (pointer: coarse) and (max-width: 1079.98px) {
+  .desks-grid {
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: 10px;
+    margin: 6px 0 0;
+    padding: 0;
+    overflow: visible;
+    scroll-snap-type: none;
+  }
+
+  .desks-grid > .desk.is-project {
+    flex: none;
+    scroll-snap-align: none;
+  }
+
+  .desk.is-project .desk-slab {
+    display: none;
+  }
 }
 
 .desk {
@@ -227,13 +260,7 @@ button.desk.is-rivet:focus-visible {
   border: 1px solid var(--line);
 }
 
-/* On a phone a project tile is a list, not a desk: the slab is Rivet's alone. A computer keeps each project's slab. */
 .desk.is-project .desk-slab {
-  display: none;
-}
-
-.desktop .desk.is-project .desk-slab {
-  display: flex;
   width: 100%;
   height: 30px;
 }
@@ -827,13 +854,6 @@ button.desk.is-rivet:focus-visible {
 }
 
 .desktop .desks-grid {
-  flex-direction: row;
-  align-items: flex-start;
-  justify-content: safe center;
-  overflow-x: auto;
-  overflow-y: hidden;
-  overscroll-behavior-x: contain;
-  scroll-snap-type: x proximity;
   gap: 28px;
   margin: 0 -32px;
   padding: 0 32px 10px;
@@ -843,7 +863,6 @@ button.desk.is-rivet:focus-visible {
 
 .desktop .desks-grid > .desk.is-project {
   flex: 0 0 380px;
-  scroll-snap-align: center;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -11,6 +11,7 @@ import { call } from "../web/src/api.js";
 import * as cmd from "../web/src/command-api.js";
 import { endSession } from "../web/src/session.js";
 import { ApiError } from "../web/src/api.js";
+import { heardAnswer, resetSleep } from "../web/src/rivet-sleep.js";
 import { app, changed } from "../web/src/state.js";
 import { localItems } from "../web/src/views/search.js";
 import { closeSheet } from "../web/src/views/sheet.js";
@@ -899,6 +900,45 @@ describe("chat attachments", () => {
     expect(posts).toHaveLength(0);
     await send("just text");
     expect(posts.map((post) => post.body)).toEqual([{ clientId: expect.any(String), text: "just text", conversation: "c1" }]);
+  });
+
+  it("while Rivet Cloud's cap holds, removing a photo leaves the composer off, and when it lifts the mic is as it was", async () => {
+    const upload = deferred();
+    uploadAnswer = () => upload.promise;
+    chat.mount(root);
+    await settle();
+    const mic = root.querySelector<HTMLButtonElement>(".chat-mic")!;
+    const clip = root.querySelector<HTMLButtonElement>(".attach-btn")!;
+    const off = () => [clip, mic, root.querySelector<HTMLTextAreaElement>(".chat-text")!, root.querySelector<HTMLButtonElement>(".chat-send")!].map((el) => el.disabled);
+    // Off for its own reason (no dictation here), before the cap.
+    mic.disabled = true;
+    pickPhoto(root);
+    await settle();
+    heardAnswer(new Response("capped", { status: 503, headers: { "x-rivet-asleep": "1", "x-rivet-capped-until": String(Date.UTC(2026, 11, 1)) } }));
+    expect(off()).toEqual([true, true, true, true]);
+    preview().querySelector<HTMLButtonElement>(".attach-remove")!.click();
+    expect(off()).toEqual([true, true, true, true]);
+    heardAnswer(new Response("{}", { status: 200 }));
+    expect(off()).toEqual([false, true, false, false]);
+    resetSleep();
+  });
+
+  it("while Rivet Cloud's cap holds, a picked or shared file is not taken and nothing uploads, and a send's end leaves Send off", async () => {
+    let uploads = 0;
+    uploadAnswer = () => ((uploads += 1), Promise.resolve(json({ image: IMAGE, type: "image/jpeg", size: 10 }, 201)));
+    const capped = () => new Response("capped", { status: 503, headers: { "x-rivet-asleep": "1", "x-rivet-capped-until": String(Date.UTC(2026, 11, 1)) } });
+    chatAnswer = () => Promise.resolve(capped());
+    chat.mount(root);
+    await settle();
+    await send("Are you there?");
+    expect(posts).toHaveLength(1);
+    expect(root.querySelector<HTMLButtonElement>(".chat-send")!.disabled).toBe(true);
+    pickPhoto(root);
+    await settle();
+    expect(uploads).toBe(0);
+    expect(preview().querySelector(".attach-thumb")).toBeNull();
+    expect(preview().querySelector(".attach-notice")!.textContent).toBe("Nothing can be attached while your Rivet is asleep.");
+    resetSleep();
   });
 
   it("shows the server's refusal and sends nothing for the photo", async () => {

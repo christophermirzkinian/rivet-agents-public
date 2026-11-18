@@ -9,6 +9,7 @@ import type { Worker } from "../../../src/shared/workers.js";
 import { h, ICONS, svg } from "../dom.js";
 import { rivet } from "../rivet/rivet.js";
 import { app, crewLapsed, macOffline, subscribe } from "../state.js";
+import { holdFoot } from "./hold-foot.js";
 import { prHref } from "./queue-cards.js";
 import { closeTallSheet, openTallSheet } from "./sheet.js";
 import { liveLog } from "./worker-sheet.js";
@@ -91,6 +92,7 @@ export function openChatPeek(w: Worker, read: () => PeekFacts | null): void {
   );
 
   let shown = "";
+  const foot = holdFoot(box, 40);
   // Why its screen has not come, once it has waited LOG_SLOW_MS: never an endless "Waiting".
   let slowWhy: string | null = null;
   let latest: LogsResponse | null = null;
@@ -107,7 +109,7 @@ export function openChatPeek(w: Worker, read: () => PeekFacts | null): void {
     const items = logs.screen ?? [];
     if (items.length) box.replaceChildren(...items.map(itemView));
     else box.textContent = logs.lines.length ? "Nothing to read on its screen yet." : (slowWhy ?? "Waiting for its screen…");
-    if (atFoot) box.scrollTop = box.scrollHeight;
+    foot.place(atFoot);
     // Its last words as the box reads them; a tool under way (`⏺ Reading the notes`) is not something it said.
     const last = [...items].reverse().find((item) => item.kind === "said");
     saidBlock.hidden = !last;
@@ -189,6 +191,7 @@ export function openChatPeek(w: Worker, read: () => PeekFacts | null): void {
           unwatchAsks();
           log?.stop();
           log = null;
+          foot.stop();
         };
         paint();
       },

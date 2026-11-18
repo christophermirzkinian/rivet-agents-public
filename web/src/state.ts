@@ -7,6 +7,7 @@ import * as api from "./api.js";
 import { getConversations } from "./command-api.js";
 import { deckOrder, doneToday, laterOrder, updateOrder, type DeckInput } from "./feed-logic.js";
 import { describe } from "./dom.js";
+import { isAsleep } from "./rivet-sleep.js";
 import { emptyPhotos, type PhotosState } from "./views/attach.js";
 import { closeAnswered } from "./push.js";
 import { endSession, sameSession } from "./session.js";
@@ -572,6 +573,8 @@ export async function refresh(): Promise<boolean> {
       signedOut("Your session ended. Sign in again.");
       return false;
     }
+    // Rivet Cloud's machine is asleep, or capped (rivet-sleep.ts shows that): no failure, and none at every poll.
+    if (isAsleep()) return false;
     if (read < readApplied) return false;
     readApplied = read;
     app.notice = describe(error);

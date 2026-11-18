@@ -73,6 +73,7 @@ import {
 import { cardMedia } from "./card-media.js";
 import { cardShareButton } from "./card-share.js";
 import { showCard } from "./feed.js";
+import { holdFoot } from "./hold-foot.js";
 import { closeLightbox } from "./lightbox.js";
 import { overlayTraversal } from "../overlay-history.js";
 import { createDraftLineage } from "../draft-lineage.js";
@@ -82,6 +83,7 @@ import { closeSheet, openSheet } from "./sheet.js";
 import { flash } from "./toast.js";
 import { onShowThing, showThing, stopText, thingButtons, thingFacts, thingHead } from "./thing.js";
 import { enterScreen, leaveScreen, useTap, watchDepth } from "../usage.js";
+import { fellAsleep, onCap, onWake } from "../rivet-sleep.js";
 
 // The Chat tab: one conversation with Rivet, like messaging one
 // person, and each piece of work's conversation as its thing page (thing.ts). Every send from Chat starts a server
@@ -734,6 +736,8 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   let poll = 0;
   let idle = 0;
   let sending = false;
+  /** Rivet Cloud's month of hours used up: "until 1 December" while nothing can be sent (rivet-sleep.ts), else null. */
+  let cappedWake: string | null = null;
   let alive = true;
   /** The message the next send replies to; × drops it. */
   let replyingTo: ReplyTarget | null = null;
@@ -779,6 +783,11 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   const thingFoot = h("div", { class: "thing-foot" });
   const scroller = h("div", { class: "chat-scroll" }, earlier, thread);
   watchDepth(scroller, () => "chat");
+  const foot = holdFoot(scroller, 40);
+  /** Where Chat was when More topics or search covered it, to put back when they go. */
+  let covered: { held: boolean; top: number } | null = null;
+  /** What the last render drew: More topics opened from a conversation's page has no place of Chat's to keep. */
+  let drawn: Screen["kind"] | null = null;
   let thingOnTop = false;
   const text = h("textarea", {
     class: "chat-text",
@@ -994,7 +1003,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   // being too far from the thumb.
   let sendWaits: boolean | null = null;
   const paintSend = () => {
-    sendBtn.disabled = sending;
+    sendBtn.disabled = sending || cappedWake !== null;
     const waits = macOffline();
     if (waits === sendWaits) return;
     sendWaits = waits;
@@ -1218,7 +1227,9 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   function paintPlaceholder(): void {
     const id = shownId();
     text.placeholder =
-      id === TEAM_ROOM_ID
+      cappedWake !== null
+        ? `Asleep ${cappedWake}`
+        : id === TEAM_ROOM_ID
         ? `Message ${RIVET_NAME} about a chat`
         : id !== null && !replyingTo
           ? // Short enough for one line beside the mic at 320 (the box is about 100px of text there).
@@ -1258,6 +1269,8 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     thread.querySelector(".chat-msg.lit")?.classList.remove("lit");
     lit = id;
     target.classList.add("lit");
+    // Setting the scroll ends a smooth one: the thread growing under it must not take it back to the foot.
+    foot.place(false);
     target.scrollIntoView?.({
       block: "center",
       behavior: matchMedia("(prefers-reduced-motion: reduce)").matches
@@ -1765,6 +1778,11 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     search.el.dataset.view = kind;
     // Under More topics; a wide window's pane keeps it on top (conversations.css).
     search.el.hidden = !topics;
+    // Both hide the scroller, which then reads 0 everywhere: where Chat was is taken before, not measured after.
+    const covers = topics || (search.active() && kind === "rivet");
+    const wasCovered = section.classList.contains("topics") || section.classList.contains("searching");
+    if (covers && !wasCovered && drawn === "rivet" && scroller.clientHeight > 0)
+      covered = { held: foot.held(), top: scroller.scrollTop };
     // Results stand in for Chat's messages while a search is typed.
     section.classList.toggle("searching", search.active() && kind === "rivet");
     section.classList.toggle("topics", topics);
@@ -1798,8 +1816,12 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       heldStick ||= stick;
       return false;
     }
+    drawn = kind;
+    // Nothing kept, as Chat had drawn nothing when they covered it: a hold taken under them still holds.
+    const back = covers || kind !== "rivet" ? null : (covered ?? (wasCovered && foot.held() ? { held: true, top: 0 } : null));
+    if (!covers) covered = null;
     const atBottom =
-      scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 40;
+      !!back?.held || scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 40;
     // Updates' seed bubble ("Updates from Rivet") went with the conversation.
     const sorted = [...messages.values()]
       .filter((message) => !SEED_IDS.includes(message.id))
@@ -1844,7 +1866,9 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     placeChildren(thread, bubbles.length ? bubbles : [empty]);
     refocus();
     if (retryHeld && !thread.contains(document.activeElement)) handFocus();
-    if (stick || atBottom) scroller.scrollTop = scroller.scrollHeight;
+    // Under More topics or search the scroller is hidden and measures 0 everywhere: the hold stays as the reader left it.
+    if (back && !atBottom) scroller.scrollTop = back.top;
+    if (stick || scroller.clientHeight > 0) foot.place(stick || atBottom);
     // Under search results nothing in the conversation is on screen, whatever the hidden scroller measures.
     const showsNewest = (stick || atBottom) && !section.classList.contains("searching") && !topics;
     if (showsNewest) markRead();
@@ -2658,7 +2682,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     const { images, files } = photosPayload(photos);
     if (!body && !images.length && !files.length) return text.focus();
     // Not while a Cancel is out: its answer puts words back in this box.
-    if (sending || cancelling) return;
+    if (sending || cancelling || cappedWake !== null) return;
     sending = true;
     sendBtn.disabled = true;
     changed();
@@ -2734,7 +2758,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     } finally {
       sentDraft.finish();
       sending = false;
-      sendBtn.disabled = false;
+      paintSend();
       changed();
     }
   }
@@ -2759,6 +2783,13 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       } catch {}
     });
     source.addEventListener("ping", streamHeard);
+    // Rivet Cloud's machine is going to sleep: no reconnect to wake it until the next tap (rivet-sleep.ts).
+    source.addEventListener("asleep", () => {
+      fellAsleep();
+      window.clearTimeout(idle);
+      source.close();
+      if (stream === source) stream = null;
+    });
     // the owner's rename, Close or read marker, from this device or another.
     source.addEventListener("conversation", (event) => {
       streamHeard();
@@ -2913,6 +2944,28 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     void loadList();
     void loadDetail();
   }, LIST_REFRESH_MS);
+  const unwake = onWake(() => {
+    if (alive && !stream && !poll && document.visibilityState !== "hidden") startStream();
+  });
+  // The mic's own disabled state is kept to give back when the cap lifts.
+  let micWasDisabled = micBtn.disabled;
+  const uncap = onCap((wake) => {
+    const was = cappedWake;
+    cappedWake = wake;
+    if (wake !== null && was === null) micWasDisabled = micBtn.disabled;
+    // The band above the app takes or gives back height: the thread keeps what was at its foot there. One within 160 px
+    // of its end goes to the end, so the newest message shows whole with its time on a short screen.
+    const left = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
+    const fromBottom = left <= 160 ? 0 : left;
+    attach.lock(wake !== null);
+    if (wake !== null) voice?.stop();
+    text.disabled = wake !== null;
+    micBtn.disabled = wake !== null || micWasDisabled;
+    composeBox.classList.toggle("capped", wake !== null);
+    paintSend();
+    paintPlaceholder();
+    if ((wake === null) !== (was === null)) requestAnimationFrame(() => (scroller.scrollTop = scroller.scrollHeight - scroller.clientHeight - fromBottom));
+  });
   const onVisible = () => {
     markRead();
     // Hidden, the stream's pings would keep the phone's radio waking; back in front, a fresh one catches up as it opens.
@@ -2966,6 +3019,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     document.removeEventListener("visibilitychange", onVisible);
     window.removeEventListener(AUTO_SPEAK_EVENT, renderSpeak);
     coverage.disconnect();
+    foot.stop();
     if (draftBox === box) draftBox = null;
     putShare = null;
     reload = null;
@@ -2974,6 +3028,8 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     window.clearTimeout(idle);
     if (poll) window.clearInterval(poll);
     window.clearInterval(refresher);
+    unwake();
+    uncap();
     window.clearInterval(collectTick);
     voice?.stop();
     stopUnlock?.();

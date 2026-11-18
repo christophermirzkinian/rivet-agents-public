@@ -14,6 +14,7 @@ import { enterScreen, leaveScreen } from "../usage.js";
 import { STATE_WORDS } from "../crew-words.js";
 import { app, MAC_WAITS, crewLapsed, macOffline, signedOut, subscribe } from "../state.js";
 import { discussButton, discussPrefix, tooLong } from "./discuss.js";
+import { holdFoot } from "./hold-foot.js";
 import { fitAboveKeyboard, leaveSheet } from "./sheet.js";
 import { RIVET_NAME, chatName } from "../../../src/shared/names.js";
 
@@ -173,6 +174,7 @@ function workerLog(worker: Worker, box: HTMLElement, note: HTMLElement, raw: () 
   // Why it has no lines yet, once it has waited LOG_SLOW_MS: never an endless "Waiting".
   let why: string | null = null;
   let shown = "";
+  const foot = holdFoot(box, 30);
   const paint = () => {
     if (!logs && !why) return;
     const asRaw = raw();
@@ -185,14 +187,17 @@ function workerLog(worker: Worker, box: HTMLElement, note: HTMLElement, raw: () 
     box.classList.toggle("is-raw", asRaw);
     if (asRaw) {
       const atBottom = fresh || box.scrollHeight - box.scrollTop - box.clientHeight < 30;
-      box.textContent = lines.length ? lines.join("\n") : waiting;
-      if (atBottom) box.scrollTop = box.scrollHeight;
+      // In an element of their own: the hold sees the lines grow, where a bare text node reports no size.
+      box.replaceChildren(h("div", { class: "cmd-log-text" }, lines.length ? lines.join("\n") : waiting));
+      foot.place(atBottom);
       return;
     }
     // Newest first: a reader at the top sees each new entry arrive; one scrolled down keeps their place.
     // Joined and redacted again by the server (redactFeed): the lines alone are masked one by one.
     const feed = logs?.feed ?? [];
     const top = box.scrollTop;
+    // Newest first, its foot is the oldest: nothing to hold there.
+    foot.stop();
     if (!feed.length) box.textContent = lines.length ? "Nothing said yet. Show raw has the full log." : waiting;
     else box.replaceChildren(h("ol", { class: "cmd-feed" }, ...feed.map(feedRow)));
     box.scrollTop = fresh ? 0 : top;
@@ -213,7 +218,13 @@ function workerLog(worker: Worker, box: HTMLElement, note: HTMLElement, raw: () 
       paint();
     },
   );
-  return { stop: log.stop, repaint: paint };
+  return {
+    stop() {
+      log.stop();
+      foot.stop();
+    },
+    repaint: paint,
+  };
 }
 
 /** Where a message is on its way to Rivet. */
