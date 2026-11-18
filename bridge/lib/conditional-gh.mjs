@@ -23,12 +23,14 @@ export function splitResponse(stdout) {
 
 /**
  * A GET of `path` (with `jq` applied, when given) through `gh api -i`. Resolves the body, from GitHub or, on a 304, the
- * one kept, and the response headers, which carry the x-ratelimit-* counts on a 304 too.
+ * one kept, and the response headers, which carry the x-ratelimit-* counts on a 304 too. With `onePage`, an answer
+ * GitHub says has a next page is never kept. `max` is how many answers the store keeps, MAX_ETAGS unless given.
  * @param {(args: string[]) => Promise<string>} gh resolves stdout; on a non-zero exit rejects with the error's `stdout`
  * @param {EtagStore} store
+ * @param {{ onePage?: boolean, max?: number }} [options]
  * @returns {(path: string, jq?: string) => Promise<{ body: string, head: string, cached: boolean }>}
  */
-export function conditionalGet(gh, store) {
+export function conditionalGet(gh, store, { onePage = false, max = MAX_ETAGS } = {}) {
   return async (path, jq) => {
     const key = jq === undefined ? path : `${path}\n${jq}`;
     const known = store.get(key);
@@ -48,10 +50,24 @@ export function conditionalGet(gh, store) {
     if (!answer) return { body: stdout, head: "", cached: false };
     const etag = /^etag:[ \t]*(.+?)[ \t]*$/im.exec(answer.head)?.[1] ?? "";
     store.delete(key);
-    if (answer.status === 200 && ETAG_RE.test(etag)) {
+    if (answer.status === 200 && ETAG_RE.test(etag) && !(onePage && /^link:.*\brel="next"/im.test(answer.head))) {
       store.set(key, { etag, body: answer.body });
-      if (store.size > MAX_ETAGS) store.delete(/** @type {string} */ (store.keys().next().value));
+      if (store.size > max) store.delete(/** @type {string} */ (store.keys().next().value));
     }
     return { body: answer.body, head: answer.head, cached: false };
   };
+}
+
+/**
+ * `gh` for a reader that asks `["api", path]` and parses what it resolves, as readMergeHolds does: a path that names
+ * no page, or page 1, is asked through conditionalGet with `onePage`, so a list is answered from the store only when
+ * page 1 was all of it. A later page, and any other call, is passed to `gh` as it came.
+ * @param {(args: string[]) => Promise<string>} gh as conditionalGet's
+ * @param {EtagStore} store
+ * @param {{ max?: number }} [options]
+ * @returns {(args: string[]) => Promise<string>}
+ */
+export function conditionalReads(gh, store, options) {
+  const get = conditionalGet(gh, store, { ...options, onePage: true });
+  return async (args) => (args.length === 2 && args[0] === "api" && !/[?&]page=(?!1(?:&|$))/.test(args[1]) ? (await get(args[1])).body : gh(args));
 }

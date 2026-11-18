@@ -18,7 +18,7 @@
 //
 // Wired through the root vitest.config.ts (Vitest finds the nearest config by
 // walking up, so it covers every package without one) and through each
-// package's own config; scripts/vitest-yield-setup.test.mjs checks both.
+// package's own config.
 import { setImmediate } from "node:timers";
 import { beforeEach, vi } from "vitest";
 

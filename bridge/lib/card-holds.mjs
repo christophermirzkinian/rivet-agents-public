@@ -3,7 +3,7 @@ import { HOLDS_FILE, updateHolds } from "./holds-file.mjs";
 
 // A video card about a PR holds its merge from the moment it is posted until the owner's yes on that card, so a PR can't
 // merge before its video is approved. The hold is a holds.json entry, which every merge door reads
-// (merge-pr --check, the shepherd, the bridge's one-tap merge); a GitHub write would start CI, or land after the review
+// (the merge check, the shepherd, the bridge's one-tap merge); a GitHub write would start CI, or land after the review
 // evidence and block the gate. Entries carry no repository, so only the main repository's PRs (the first of RIVET_REPOS)
 // are held, and none while RIVET_REPOS names no repo.
 

@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { conditionalReads } from "../lib/conditional-gh.mjs";
 import { closingRefs, readMergeHolds, HOLD_LABELS } from "../lib/merge-holds.mjs";
 import { redactKeepingLines } from "../lib/redact-cut.mjs";
 import { showsToken, TOKEN } from "./padded-token.mjs";
@@ -71,6 +73,114 @@ test("all pages are read, issue comment order and texts order are preserved", as
   assert.deepEqual(read.comments, [...comments.map((c) => c.body), "Hold: page two"]);
   assert.deepEqual(read.texts, ["body", ...read.comments, "review", "inline"]);
   assert.deepEqual(read.holds, []);
+});
+
+// GitHub as `gh api -i` answers the hold reads: an ETag of each answer, a Link to the next page of a full one, and a
+// 304 with no body for an If-None-Match that names the answer as it stands.
+function github(routes) {
+  const calls = [];
+  const answers = [];
+  const gh = async (args) => {
+    calls.push(args);
+    const route = args.at(-1).replace("repos/o/r/", "");
+    const value = routes[route];
+    if (value instanceof Error) throw value;
+    const body = JSON.stringify(value);
+    if (!args.includes("-i")) return (answers.push(`plain ${route}`), body);
+    const etag = `W/"${createHash("sha1").update(body).digest("hex")}"`;
+    if (args.includes(`If-None-Match: ${etag}`)) {
+      answers.push(`304 ${route}`);
+      throw Object.assign(new Error("gh: HTTP 304"), { stdout: `HTTP/2.0 304 Not Modified\r\nEtag: ${etag}\r\n\r\n` });
+    }
+    answers.push(`200 ${route}`);
+    const next = Array.isArray(value) && value.length === 100 && routes[route.replace(/page=(\d+)$/, (_, n) => `page=${Number(n) + 1}`)]?.length ? 'Link: <https://api.github.com/next>; rel="next"\r\n' : "";
+    return `HTTP/2.0 200 OK\r\nEtag: ${etag}\r\n${next}\r\n${body}`;
+  };
+  return { gh, calls, answers };
+}
+const SURFACES = ["pulls/7", "issues/7/comments?per_page=100&page=1", "pulls/7/reviews?per_page=100&page=1", "pulls/7/comments?per_page=100&page=1"];
+
+test("a read through conditionalReads sends each surface's ETag again, and a 304 on all four reads as the first did", async (t) => {
+  const { options } = fixture(t);
+  const routes = { "pulls/7": { number: 7, body: "body", labels: [{ name: "on-hold" }], draft: true }, [SURFACES[1]]: [{ body: "a comment" }], [SURFACES[2]]: [{ body: "a review" }], [SURFACES[3]]: [{ body: "inline" }] };
+  const api = github(routes);
+  const reads = { ...options, forMerge: false, gh: conditionalReads(api.gh, new Map()) };
+  const first = await readMergeHolds(reads);
+  assert.deepEqual(api.calls, SURFACES.map((route) => ["api", "-i", `repos/o/r/${route}`]));
+  const sent = api.calls.length;
+  const second = await readMergeHolds(reads);
+  assert.deepEqual(api.answers.slice(sent), SURFACES.map((route) => `304 ${route}`));
+  assert.ok(api.calls.slice(sent).every((args) => args[2] === "-H" && /^If-None-Match: W\/"[0-9a-f]+"$/.test(args[3])));
+  assert.deepEqual(second, first);
+  assert.deepEqual([second.holds, second.texts, second.view.draft], [["label on-hold"], ["body", "a comment", "a review", "inline"], true]);
+  // A read with the reader's own gh is the plain one: no ETag, and the same answer.
+  const plain = github(routes);
+  assert.deepEqual(await readMergeHolds({ ...options, forMerge: false, gh: plain.gh }), first);
+  assert.deepEqual(plain.calls, SURFACES.map((route) => ["api", `repos/o/r/${route}`]));
+});
+
+test("a changed surface answers 200 and replaces what was kept: a new label holds on the next read, and its removal frees it", async (t) => {
+  const { options } = fixture(t);
+  const routes = { "pulls/7": { number: 7, body: "", labels: [] }, [SURFACES[1]]: [], [SURFACES[2]]: [], [SURFACES[3]]: [] };
+  const api = github(routes);
+  const reads = { ...options, forMerge: false, gh: conditionalReads(api.gh, new Map()) };
+  assert.deepEqual((await readMergeHolds(reads)).holds, []);
+  routes["pulls/7"] = { number: 7, body: "", labels: [{ name: "do-not-merge" }] };
+  routes[SURFACES[1]] = [{ body: "a new comment" }];
+  api.answers.length = 0;
+  const held = await readMergeHolds(reads);
+  assert.deepEqual(api.answers, ["200 pulls/7", `200 ${SURFACES[1]}`, `304 ${SURFACES[2]}`, `304 ${SURFACES[3]}`]);
+  assert.deepEqual([held.holds, held.comments], [["label do-not-merge"], ["a new comment"]]);
+  api.answers.length = 0;
+  assert.deepEqual((await readMergeHolds(reads)).holds, ["label do-not-merge"]);
+  assert.deepEqual(api.answers, SURFACES.map((route) => `304 ${route}`));
+  routes["pulls/7"] = { number: 7, body: "", labels: [] };
+  assert.deepEqual((await readMergeHolds(reads)).holds, []);
+  // holds.json is read from the file each time, whatever GitHub answers.
+  fs.writeFileSync(options.holdsFile, JSON.stringify([{ pr: 7, reason: "owner review" }]));
+  api.answers.length = 0;
+  assert.deepEqual((await readMergeHolds(reads)).holds, ["holds file: owner review"]);
+  assert.deepEqual(api.answers, SURFACES.map((route) => `304 ${route}`));
+});
+
+test("a list of more than one page is never kept: page 1 answers 200 each read and later pages are read plainly", async (t) => {
+  const { options } = fixture(t);
+  const full = Array.from({ length: 100 }, (_, i) => ({ body: `comment ${i}` }));
+  const routes = { "pulls/7": { number: 7, body: "", labels: [] }, [SURFACES[1]]: full, "issues/7/comments?per_page=100&page=2": [{ body: "page two" }], [SURFACES[2]]: [], [SURFACES[3]]: [] };
+  const api = github(routes);
+  const store = new Map();
+  const reads = { ...options, forMerge: false, gh: conditionalReads(api.gh, store) };
+  const expected = ["200 pulls/7", `200 ${SURFACES[1]}`, "plain issues/7/comments?per_page=100&page=2", `200 ${SURFACES[2]}`, `200 ${SURFACES[3]}`];
+  assert.equal((await readMergeHolds(reads)).comments.length, 101);
+  assert.deepEqual(api.answers, expected);
+  assert.ok(!store.has(`repos/o/r/${SURFACES[1]}`));
+  routes["issues/7/comments?per_page=100&page=2"] = [{ body: "page two" }, { body: "a later comment" }];
+  api.answers.length = 0;
+  assert.equal((await readMergeHolds(reads)).comments.at(-1), "a later comment");
+  assert.deepEqual(api.answers, [`304 pulls/7`, expected[1], expected[2], `304 ${SURFACES[2]}`, `304 ${SURFACES[3]}`]);
+  // A one-page list that grows past the page loses what was kept of it.
+  const grown = { ...routes, [SURFACES[2]]: [{ body: "review" }] };
+  const kept = new Map();
+  const growing = { ...options, forMerge: false, gh: conditionalReads(github(grown).gh, kept) };
+  await readMergeHolds(growing);
+  assert.ok(kept.has(`repos/o/r/${SURFACES[2]}`));
+  grown[SURFACES[2]] = Array.from({ length: 100 }, () => ({ body: "review" }));
+  grown["pulls/7/reviews?per_page=100&page=2"] = [{ body: "review 101" }];
+  assert.ok((await readMergeHolds(growing)).texts.includes("review 101"));
+  assert.ok(!kept.has(`repos/o/r/${SURFACES[2]}`));
+});
+
+test("a failed or malformed answer through conditionalReads fails closed, and a 304 with nothing kept is no answer", async (t) => {
+  for (const surface of SURFACES) {
+    for (const bad of [new Error("HTTP 503"), {}, null, [{ body: 1 }]]) {
+      const { options } = fixture(t);
+      const routes = { "pulls/7": { number: 7, body: "", labels: [] }, [SURFACES[1]]: [], [SURFACES[2]]: [], [SURFACES[3]]: [], [surface]: bad };
+      await assert.rejects(readMergeHolds({ ...options, forMerge: false, gh: conditionalReads(github(routes).gh, new Map()) }));
+    }
+  }
+  const { options } = fixture(t);
+  const lost = async () => { throw Object.assign(new Error("gh: HTTP 304"), { stdout: "HTTP/2.0 304 Not Modified\r\n\r\n" }); };
+  await assert.rejects(readMergeHolds({ ...options, forMerge: false, gh: conditionalReads(lost, new Map()) }), /HTTP 304/);
 });
 
 test("API errors and malformed responses fail closed on every surface", async (t) => {

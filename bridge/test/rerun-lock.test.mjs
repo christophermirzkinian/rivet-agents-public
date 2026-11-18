@@ -6,7 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { readRerunRecord, reserveRerun, underLock } from "../lib/rerun-guard.mjs";
 
-// The re-run record's lock is a darwin kernel lock (O_EXLOCK); CI's Linux runs skip this, and scripts/check-local.mjs
+// The re-run record's lock is a darwin kernel lock (O_EXLOCK); CI's Linux runs skip this, and a local check
 // runs it on the Mac.
 const darwinOnly = { skip: process.platform !== "darwin" && "the kernel lock is darwin-only", timeout: 30_000 };
 

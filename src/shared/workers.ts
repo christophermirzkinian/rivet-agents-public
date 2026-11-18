@@ -45,7 +45,7 @@ export const snapshotWorkerSchema = z
   })
   .strict();
 
-/** A chat's place in the push queue (scripts/push-queue.mjs), as the bridge reads it: `position` counts from 1, in release order. */
+/** A chat's place in the push queue, as the bridge reads it: `position` counts from 1, in release order. */
 export const pushQueueRowSchema = z
   .object({
     chat: z.string().regex(CHAT_PATTERN),
