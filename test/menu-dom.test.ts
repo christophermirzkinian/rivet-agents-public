@@ -25,8 +25,8 @@ afterEach(() => {
 describe("the menu", () => {
   it("lists the home screen, the readings and what is yours, each named with an icon", () => {
     const list = menuList();
-    expect(keys(list).filter(Boolean)).toEqual(["asks", "usage", "code", "machines", "mind", "what-you-used", "home", "media", "settings"]);
-    expect([...list.querySelectorAll(".menu-name")].map((one) => one.textContent)).toEqual(["Home", "Usage", "Code", "Machines", "Rivet's mind", "What you used", "Home Assistant", "Media", "Settings"]);
+    expect(keys(list).filter(Boolean)).toEqual(["asks", "usage", "code", "machines", "mind", "home", "media", "settings"]);
+    expect([...list.querySelectorAll(".menu-name")].map((one) => one.textContent)).toEqual(["Home", "Usage", "Code", "Machines", "Rivet's mind", "Home Assistant", "Media", "Settings"]);
     expect([...list.querySelectorAll<HTMLElement>(".menu-row")].every((one) => one.querySelector(".menu-icon"))).toBe(true);
   });
 
@@ -55,7 +55,7 @@ describe("the menu", () => {
     document.querySelector<HTMLButtonElement>(".menu-open")!.click();
     const drawer = document.querySelector<HTMLElement>(".sheet.menu-sheet")!;
     expect(drawer.getAttribute("aria-label")).toBe("Menu");
-    expect(drawer.querySelectorAll(".menu-row")).toHaveLength(9);
+    expect(drawer.querySelectorAll(".menu-row")).toHaveLength(8);
   });
 });
 

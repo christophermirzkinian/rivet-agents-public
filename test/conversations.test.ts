@@ -8,7 +8,7 @@ import { rivetPayload } from "../src/server/push.js";
 import { wantsText } from "../src/shared/answers.js";
 import type { ChatMessage, ChatPage } from "../src/shared/command.js";
 import type { CardThreadsResponse } from "../src/shared/threads.js";
-import { answerText, IDLE_ARCHIVE_MS, linksChat, TEAM_ROOM_ID, UPDATES_ID, type ConversationDetail, type ConversationPage, type ConversationsResponse } from "../src/shared/conversations.js";
+import { answerText, IDLE_ARCHIVE_MS, linksChat, READ_ALL_DRAWN_MAX, TEAM_ROOM_ID, UPDATES_ID, type ConversationDetail, type ConversationPage, type ConversationsResponse } from "../src/shared/conversations.js";
 import { THREAD_MESSAGES_MAX } from "../src/shared/threads.js";
 import { bearer, BOARD_TOKEN, BRIDGE_TOKEN, browser, fakeClock, REPLY_BOARD, revOf, startServer, type TestServer } from "./helpers.js";
 
@@ -681,8 +681,8 @@ describe("conversation routes", () => {
     expect((await patch(b, { unread: true })).status).toBe(200);
     const all = await send("POST", "/api/conversations/read", {}, browser(cookie));
     expect(all.status).toBe(200);
-    // The two, and Agent Chat's read marker the first time.
-    expect(await all.json()).toEqual({ read: 3 });
+    // The two; never Agent Chat, which Mark all read never offered.
+    expect(await all.json()).toEqual({ read: 2 });
     page = await list();
     expect(page.unread).toBe(0);
     expect(page.conversations.every((row) => row.unread === 0 && !row.markedUnread)).toBe(true);
@@ -691,6 +691,100 @@ describe("conversation routes", () => {
     // Only your session marks all read; the read state is the server's, so another device sees it.
     expect((await send("POST", "/api/conversations/read", {})).status).toBe(403);
     expect((await (await send("POST", "/api/conversations/read", {}, browser(cookie))).json())).toEqual({ read: 0 });
+  });
+
+  it("Mark all as read reads a topic idle past two hours too, so its old words never come back with its next reply", async () => {
+    await list();
+    const idle = await owner("Logo sketches", { conversation: null });
+    clock.advance(BATCH_QUIET_MS + 1000);
+    await rivet("Sketches are in.", { replyTo: idle });
+    await rivet("And the colour pass.", { replyTo: idle });
+    // Chat still draws its card, but it has left the open list for Archived, unread.
+    clock.advance(IDLE_ARCHIVE_MS + 1);
+    expect((await list()).conversations.map((row) => row.id)).not.toContain(idle);
+    expect((await list("?older=1")).conversations.find((row) => row.id === idle)).toMatchObject({ unread: 2 });
+    // The open list's answer counts it, so Mark all read is offered when nothing open is unread.
+    expect((await list()).olderUnread).toBe(1);
+
+    const all = await send("POST", "/api/conversations/read", {}, browser(cookie));
+    expect(all.status).toBe(200);
+    expect((await list()).olderUnread).toBe(0);
+    expect((await list("?older=1")).conversations.find((row) => row.id === idle)).toMatchObject({ unread: 0, markedUnread: false });
+    // Its next reply brings it back with one new word, not three.
+    await rivet("Final logo is up.", { replyTo: idle });
+    expect((await list()).conversations.find((row) => row.id === idle)).toMatchObject({ unread: 1 });
+    // Updates stays out of it.
+    await update("Nightly: green");
+    await send("POST", "/api/conversations/read", {}, browser(cookie));
+    expect((await list("?older=1")).conversations.find((row) => row.id === UPDATES_ID)).toMatchObject({ unread: 1 });
+  });
+
+  it("Mark all as read reads only up to the list the phone drew: a reply that came after it stays unread", async () => {
+    await list();
+    const a = await owner("Docs refresh", { conversation: null });
+    clock.advance(BATCH_QUIET_MS + 1000);
+    const b = await owner("Search index", { conversation: null });
+    clock.advance(BATCH_QUIET_MS + 1000);
+    await rivet("Docs are in.", { replyTo: a });
+    await rivet("Index is built.", { replyTo: b });
+    clock.advance(60_000);
+    const drawn = await list();
+    expect(drawn.at).toBe(clock.now().toISOString());
+    // Chat sits open; a new reply lands in b, and in a topic the phone has never drawn, before the tap.
+    clock.advance(60_000);
+    await rivet("Index is warm too.", { replyTo: b });
+    const fresh = await owner("Release notes", { conversation: null });
+    clock.advance(BATCH_QUIET_MS + 1000);
+    await rivet("Notes are drafted.", { replyTo: fresh });
+    // Marked unread on another device after the phone's list read: that mark stays too.
+    expect((await patch(a, { unread: true })).status).toBe(200);
+
+    const all = await send("POST", "/api/conversations/read", { upTo: drawn.at }, browser(cookie));
+    expect(all.status).toBe(200);
+    const page = await list();
+    expect(page.conversations.find((row) => row.id === a)).toMatchObject({ unread: 0, markedUnread: true });
+    // What was seen is read; the reply never seen stays new.
+    expect(page.conversations.find((row) => row.id === b)).toMatchObject({ unread: 1 });
+    expect(page.conversations.find((row) => row.id === fresh)!.unread).toBeGreaterThan(0);
+    expect((await send("POST", "/api/conversations/read", { upTo: "not a time" }, browser(cookie))).status).toBe(400);
+  });
+
+  it("Mark all as read reads a topic up to the line the phone drew on its card since its list read, and no other", async () => {
+    await list();
+    const a = await owner("Docs refresh", { conversation: null });
+    clock.advance(BATCH_QUIET_MS + 1000);
+    const b = await owner("Search index", { conversation: null });
+    clock.advance(BATCH_QUIET_MS + 1000);
+    await rivet("Docs are in.", { replyTo: a });
+    await rivet("Index is built.", { replyTo: b });
+    clock.advance(60_000);
+    const drawn = await list();
+    // After the list read: a reply in a the phone drew from the stream, then a later one in b it never saw, then one
+    // more in a after the drawn line.
+    clock.advance(60_000);
+    await rivet("Docs links checked too.", { replyTo: a });
+    const seenAt = clock.now().toISOString();
+    clock.advance(60_000);
+    await rivet("Index is warm too.", { replyTo: b });
+    clock.advance(60_000);
+    await rivet("Docs changelog.", { replyTo: a });
+    // A mark made after the list read stays, whatever line was drawn since: the line does not show the mark.
+    expect((await patch(b, { unread: true })).status).toBe(200);
+
+    const all = await send("POST", "/api/conversations/read", { upTo: drawn.at, drawn: { [a]: seenAt, [b]: drawn.at } }, browser(cookie));
+    expect(all.status).toBe(200);
+    const page = await list();
+    // a is read up to the drawn line, so only the changelog reply stays new; b's reply after the list read stays new.
+    expect(page.conversations.find((row) => row.id === a)).toMatchObject({ unread: 1 });
+    expect(page.conversations.find((row) => row.id === b)).toMatchObject({ unread: 1, markedUnread: true });
+
+    const bad = (body: unknown) => send("POST", "/api/conversations/read", body, browser(cookie)).then((one) => one.status);
+    expect(await bad({ upTo: drawn.at, drawn: { [a]: "not a time" } })).toBe(400);
+    expect(await bad({ upTo: drawn.at, drawn: { "../x": seenAt } })).toBe(400);
+    // The most the phone sends, at the longest ids, fits; one topic more is refused.
+    const full = (n: number) => Object.fromEntries(Array.from({ length: n }, (_, i) => [`${i}`.padStart(100, "t"), seenAt]));
+    expect(await bad({ upTo: drawn.at, drawn: full(READ_ALL_DRAWN_MAX) })).toBe(200);
+    expect(await bad({ upTo: drawn.at, drawn: full(READ_ALL_DRAWN_MAX + 1) })).toBe(400);
   });
 
   it("pins to the top, above newer ones; a pinned one before the cutover stays listed until closed", async () => {

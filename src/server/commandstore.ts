@@ -1658,25 +1658,38 @@ export class CommandStore {
     }
   }
 
-  /** Marks each conversation read up to its newest message and clears its marked unread; the ones that changed. */
-  readAll(ids: readonly string[], at: string): string[] {
+  /**
+   * Marks each conversation read up to its newest message, or its newest at or before `upTo` (what the phone had drawn:
+   * a later reply stays unread; `drawn` lifts that to the newest line the phone drew on a topic's card since), and
+   * clears its marked unread unless that mark came after `upTo`; the ones that changed.
+   */
+  readAll(ids: readonly string[], at: string, upTo: string | null = null, drawn: Readonly<Record<string, string>> = {}): string[] {
     const changed: string[] = [];
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      const newest = this.db.prepare("SELECT MAX(at) AS at FROM chat_messages WHERE COALESCE(thread_id, id) = ?");
+      const newest = this.db.prepare(
+        upTo === null
+          ? "SELECT MAX(at) AS at FROM chat_messages WHERE COALESCE(thread_id, id) = ?"
+          : "SELECT MAX(at) AS at FROM chat_messages WHERE COALESCE(thread_id, id) = ? AND at <= ?",
+      );
       const current = this.db.prepare("SELECT read_at, unread_at FROM chat_threads WHERE root_id = ?");
       const write = this.db.prepare(
-        `INSERT INTO chat_threads (root_id, read_at, unread_at, updated_at) VALUES (?, ?, NULL, ?)
-         ON CONFLICT (root_id) DO UPDATE SET read_at = excluded.read_at, unread_at = NULL, updated_at = excluded.updated_at`,
+        `INSERT INTO chat_threads (root_id, read_at, unread_at, updated_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT (root_id) DO UPDATE SET read_at = excluded.read_at, unread_at = excluded.unread_at, updated_at = excluded.updated_at`,
       );
       for (const id of ids) {
-        const last = (newest.get(id) as Row | undefined)?.at as string | null | undefined;
+        const seen = upTo !== null && Object.hasOwn(drawn, id) && drawn[id]! > upTo ? drawn[id]! : upTo;
+        const last = ((seen === null ? newest.get(id) : newest.get(id, seen)) as Row | undefined)?.at as string | null | undefined;
         if (!last) continue;
         const row = current.get(id) as Row | undefined;
         const readAt = (row?.read_at as string | null | undefined) ?? null;
         const next = readAt !== null && readAt >= last ? readAt : last;
-        if (next === readAt && ((row?.unread_at as string | null | undefined) ?? null) === null) continue;
-        write.run(id, next, at);
+        const unreadAt = (row?.unread_at as string | null | undefined) ?? null;
+        // Marked unread on another device after the list the phone drew: that mark stays (a line drawn since does not
+        // show the mark, so only the list read counts).
+        const keptMark = upTo !== null && unreadAt !== null && unreadAt > upTo ? unreadAt : null;
+        if (next === readAt && keptMark === unreadAt) continue;
+        write.run(id, next, keptMark, at);
         changed.push(id);
       }
       this.db.exec("COMMIT");

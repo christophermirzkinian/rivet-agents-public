@@ -226,12 +226,12 @@ function fakeRunner({ chats = /** @type {any[]} */ ([]), fail = /** @type {strin
 }
 
 /** gh answering one open PR with the given body and no comments, and its head branch. @param {string} [body] @param {string} [head] */
-const ghWith = (body = "", head = "example-org/pr-branch") => async (/** @type {string} */ _file, /** @type {string[]} */ args) => {
+const ghWith = (body = "", head = "example-org/pr-branch", labels = /** @type {string[]} */ ([])) => async (/** @type {string} */ _file, /** @type {string[]} */ args) => {
   // The PR's head branch, for the chat that may hold it.
   if (args[0] === "pr" && args[1] === "view") return { stdout: `${head}\n`, stderr: "" };
   const route = String(args[1]);
   if (!/^repos\/example-org\/example-repo\/pulls\/42$/.test(route)) return { stdout: "[]", stderr: "" };
-  return { stdout: JSON.stringify({ number: 42, body, labels: [], draft: false }), stderr: "" };
+  return { stdout: JSON.stringify({ number: 42, body, labels: labels.map((name) => ({ name })), draft: false }), stderr: "" };
 };
 
 const FIX_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "rivet-fix-home-"));
@@ -443,12 +443,12 @@ test("a pick-up leaves a parked item alone, and a person's fix does not", async 
   assert.equal(runner.made.length, 1);
 });
 
-test("a held PR opens no fix chat and writes no record", async () => {
+test("a PR with a hold label opens no fix chat and writes no record", async () => {
   const s = stubServer();
   const runner = fakeRunner();
-  const r = await cli(["fix", "pr", "42"], { env: FIX_ENV, fetch: s.fetch, runner, exec: ghWith("hold: waiting for the owner"), bin: () => "gh" });
+  const r = await cli(["fix", "pr", "42"], { env: FIX_ENV, fetch: s.fetch, runner, exec: ghWith("", undefined, ["do-not-merge"]), bin: () => "gh" });
   assert.equal(r.code, 1);
-  assert.match(r.stderr, /held: .*waiting for the owner.*: no fix chat opens/);
+  assert.match(r.stderr, /held: label do-not-merge: no fix chat opens/);
   assert.deepEqual(runner.made, []);
   assert.equal(s.state.calls.filter((c) => c.method !== "GET").length, 0);
 });

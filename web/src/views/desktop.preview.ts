@@ -889,7 +889,8 @@ const conversationFields: Record<string, PreviewFields> = {
 for (let n = 1; n <= 64; n++) {
   const id = `o${n}`;
   messages.push(mine(id, id, `An older topic, number ${n}`, 10_000 + n * 60), say(`${id}-a`, id, `Done with older topic ${n}.`, 10_000 + n * 60 - 5));
-  conversationFields[id] = { title: `Older topic ${n}`, closed: n % 3 === 0 };
+  // The newest two archived ones were left with a reply unread, as a topic idle past two hours can be.
+  conversationFields[id] = { title: `Older topic ${n}`, closed: n % 3 === 0, ...(n <= 2 ? { unread: 1 } : {}) };
 }
 const OLDER = new Set(Object.keys(conversationFields).filter((id) => id.startsWith("o")));
 
@@ -1294,7 +1295,8 @@ window.fetch = async (input, init) => {
     const open = openRows();
     const unread = open.filter(countsUnread).length;
     const rest = olderRows();
-    if (params.get("older") !== "1") return json({ conversations: open, older: rest.length, unread } satisfies ConversationsResponse);
+    const olderUnread = rest.filter((row) => !row.updates && row.id !== TEAM_ROOM_ID && countsUnread(row)).length;
+    if (params.get("older") !== "1") return json({ conversations: open, older: rest.length, olderUnread, unread, at: new Date().toISOString() } satisfies ConversationsResponse);
     const limit = Number(params.get("limit") ?? 50);
     const from = params.get("before") ? Number(params.get("before")) : 0;
     const page = rest.slice(from, from + limit);
@@ -1315,7 +1317,14 @@ window.fetch = async (input, init) => {
     return json({ changed });
   }
   if (url === "/api/conversations/read" && method === "POST") {
-    const changed = openRows().filter(countsUnread);
+    // As the server: the open list and every archived one unread, Updates and Agent Chat aside, and none whose newest
+    // reply came after the list the phone drew, or after the line `drawn` names for it. The preview marks nothing
+    // unread behind the phone's back, so no mark is kept.
+    const { upTo, drawn = {} } = JSON.parse(String(init?.body ?? "{}")) as { upTo?: string; drawn?: Record<string, string> };
+    const seen = (id: string) => (upTo !== undefined && (drawn[id] ?? "") > upTo ? drawn[id]! : upTo);
+    const changed = [...openRows(), ...olderRows().filter((row) => !row.updates)].filter(
+      (row) => row.id !== TEAM_ROOM_ID && countsUnread(row) && (upTo === undefined || row.lastAt <= seen(row.id)!),
+    );
     for (const row of changed) Object.assign(conversationFields[row.id]!, { unread: 0, markedUnread: false });
     return json({ read: changed.length });
   }

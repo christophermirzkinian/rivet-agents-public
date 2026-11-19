@@ -1333,7 +1333,7 @@ function deskActions(need: ServedNeed): HTMLElement {
     : options.length
     ? options.slice(0, 4).map((option, index) => {
         const element = keyed(
-          sending(button([kbd(String(index + 1)), h("span", { class: "pick-text" }, h("span", { class: "pick-label" }, option.label, option.recommended ? recommendedTag() : null), option.detail ? h("span", { class: "pick-detail" }, option.detail) : null)], () => decide(need, "choice", option.label), option.recommended ? "pick rec" : "pick", false, "cards.answer.choice", index + 1), option.detail ? `${option.label}, ${option.detail}` : option.label),
+          sending(button([kbd(String(index + 1)), h("span", { class: "pick-text" }, h("span", { class: "pick-label" }, option.label, option.recommended ? recommendedTag() : null), option.detail ? h("span", { class: "pick-detail" }, option.detail) : null)], () => decide(need, "choice", option.label), yellowAnswer(need, option) ? "pick rec" : "pick", false, "cards.answer.choice", index + 1), option.detail ? `${option.label}, ${option.detail}` : option.label),
           option.label,
         );
         element.title = option.label;

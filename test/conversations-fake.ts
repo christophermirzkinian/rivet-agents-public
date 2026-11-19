@@ -4,6 +4,7 @@ import {
   countsUnread,
   ownsNoCard,
   SEED_IDS,
+  TEAM_ROOM_ID,
   UPDATES_ID,
   type ConversationDetail,
   type ConversationPage,
@@ -26,6 +27,8 @@ export interface FakeConversation {
   closed?: boolean;
   appOnly?: boolean;
   markedUnread?: boolean;
+  /** When it was marked unread: Mark all read keeps a mark made after the list the phone drew. */
+  markedAt?: string;
   pinned?: boolean;
   done?: boolean;
   stage?: ConversationStage;
@@ -181,7 +184,10 @@ export function fakeServer(messages: ChatMessage[], conversations: Record<string
     if (url.pathname === "/api/conversations") {
       const { open, older } = lists();
       const unread = chatBadge(open);
-      if (url.searchParams.get("older") !== "1") return json({ conversations: open, older: older.length, unread } satisfies ConversationsResponse);
+      const olderUnread = older.filter((one) => !one.updates && one.id !== TEAM_ROOM_ID && countsUnread(one)).length;
+      // As the server's clock: never before the newest message it holds.
+      const at = server.messages.reduce((newest, one) => (one.at > newest ? one.at : newest), "2030-01-01T00:00:00.000Z");
+      if (url.searchParams.get("older") !== "1") return json({ conversations: open, older: older.length, olderUnread, unread, at } satisfies ConversationsResponse);
       const limit = Number(url.searchParams.get("limit") ?? 50);
       const from = Number(url.searchParams.get("before") ?? 0);
       const page = older.slice(from, from + limit);
@@ -210,9 +216,21 @@ export function fakeServer(messages: ChatMessage[], conversations: Record<string
       return json({ changed });
     }
     if (url.pathname === "/api/conversations/read" && method === "POST") {
-      const { open } = lists();
-      const changed = open.filter(countsUnread);
-      for (const one of changed) server.conversations.set(one.id, { ...server.conversations.get(one.id), unread: 0, markedUnread: false });
+      // As the server: the open list and every archived one unread, Updates and Agent Chat aside, and with `upTo` none
+      // whose newest reply came after it, or after the line `drawn` names for it; a mark made after `upTo` stays.
+      const body = JSON.parse(String(init?.body ?? "{}")) as { upTo?: string; drawn?: Record<string, string> };
+      server.posted.push(body);
+      const { upTo, drawn = {} } = body;
+      const seen = (id: string) => (upTo !== undefined && (drawn[id] ?? "") > upTo ? drawn[id]! : upTo);
+      const { open, older } = lists();
+      const changed = [...open, ...older.filter((one) => !one.updates)].filter(
+        (one) => one.id !== TEAM_ROOM_ID && countsUnread(one) && (upTo === undefined || one.lastAt <= seen(one.id)!),
+      );
+      for (const one of changed) {
+        const fields = server.conversations.get(one.id) ?? {};
+        const kept = upTo !== undefined && fields.markedUnread === true && (fields.markedAt ?? "") > upTo;
+        server.conversations.set(one.id, { ...fields, unread: 0, markedUnread: kept });
+      }
       return json({ read: changed.length });
     }
     const merging = /^\/api\/conversations\/([^/]+)\/merge$/.exec(url.pathname);

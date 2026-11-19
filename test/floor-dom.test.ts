@@ -141,8 +141,8 @@ describe("the app's frame", () => {
     wide(true);
     mount();
     const rows = () => [...document.querySelectorAll<HTMLElement>(".tabs .menu-row")];
-    expect(rows().map((one) => one.dataset.key)).toEqual(["asks", "usage", "code", "machines", "mind", "what-you-used", "home", "media", "settings"]);
-    expect(rows().map((one) => one.querySelector(".menu-name")?.textContent)).toEqual(["Home", "Usage", "Code", "Machines", "Rivet's mind", "What you used", "Home Assistant", "Media", "Settings"]);
+    expect(rows().map((one) => one.dataset.key)).toEqual(["asks", "usage", "code", "machines", "mind", "home", "media", "settings"]);
+    expect(rows().map((one) => one.querySelector(".menu-name")?.textContent)).toEqual(["Home", "Usage", "Code", "Machines", "Rivet's mind", "Home Assistant", "Media", "Settings"]);
     expect([...document.querySelectorAll<HTMLElement>(".tabs .rail-tool")].map((one) => one.dataset.key)).toEqual(["Chat"]);
     expect(document.querySelector(".home-dock")).toBeNull();
     expect(document.querySelector('.view[data-tab="home"] .home')).not.toBeNull();
@@ -226,9 +226,9 @@ describe("Decide N", () => {
     decide.click();
     await settle();
     expect(kind()).toBe("decide-sheet");
-    expect(sheet()!.querySelector(".decide-name")?.textContent).toBe("Rivet asks · example-repo");
-    expect(sheet()!.querySelector(".decide-count")?.textContent).toBe("Card 1 of 2");
-    expect(sheet()!.querySelector('.decide-seg[data-seg="open"]')?.textContent).toBe("Open 2");
+    expect(sheet()!.querySelector(".decide-name")?.textContent).toBe("example-repo");
+    expect(sheet()!.querySelector(".decide-count")?.textContent).toBe("1 of 2");
+    expect(sheet()!.querySelectorAll(".decide-bars > i")).toHaveLength(2);
     deal([]);
     expect(button("decide").classList.contains("has-cards")).toBe(false);
     expect(button("decide").querySelector(".home-decide-n")?.textContent).toBe("0");
@@ -476,8 +476,10 @@ describe("old tab ids", () => {
     mount();
     await settle();
     expect(kind()).toBe("decide-sheet");
-    expect(sheet()!.querySelector('.decide-seg[data-seg="answered"]')?.getAttribute("aria-pressed")).toBe("true");
-    sheet()!.querySelector<HTMLButtonElement>('.decide-seg[data-seg="open"]')!.click();
+    // Answered (its count once read), and Open N its way back in the top row.
+    const back = sheet()!.querySelector<HTMLButtonElement>('.decide-head .decide-seg[data-seg="open"]')!;
+    expect([sheet()!.querySelector(".decide-name")?.textContent, back.hidden, back.getAttribute("aria-pressed")]).toEqual(["Answered", false, "false"]);
+    back.click();
     await settle();
     expect(sheet()!.querySelector(".decide-none")).not.toBeNull();
     expect(decideShown()).toBeNull();
@@ -492,14 +494,15 @@ describe("old tab ids", () => {
     await settle();
     expect(sheet()!.querySelector(".decide-none")?.textContent).toBe("2 cards wait for you, all minimised.Show them ›");
     expect(sheet()!.textContent).not.toContain(NOTHING_NEEDS_YOU);
-    // The tab never says Open 0 over that line; Decide N stays the open cards.
-    expect(sheet()!.querySelector('.decide-seg[data-seg="open"]')?.textContent).toBe("Minimised 2");
+    // No tab says Open 0 over that line (the phone shows none there); Decide N stays the open cards.
+    const tab = sheet()!.querySelector<HTMLButtonElement>('.decide-seg[data-seg="open"]')!;
+    expect([tab.hidden, tab.textContent]).toEqual([true, "Minimised 2"]);
     expect(button("decide").querySelector(".home-decide-n")?.textContent).toBe("0");
     sheet()!.querySelector<HTMLButtonElement>(".decide-none .clear-min")!.click();
     await settle();
     expect(decideShown()).toBe("a");
-    expect(sheet()!.querySelector(".decide-name")?.textContent).toBe("Rivet asks · example-repo");
-    expect(sheet()!.querySelector(".decide-count")?.textContent).toBe("Card 1 of 1");
+    expect(sheet()!.querySelector(".decide-name")?.textContent).toBe("example-repo");
+    expect(sheet()!.querySelector(".decide-count")?.textContent).toBe("1 of 1");
     expect(sheet()!.querySelector('.decide-seg[data-seg="open"]')?.textContent).toBe("Open 1");
     expect(button("decide").querySelector(".home-decide-n")?.textContent).toBe("1");
   });
@@ -840,7 +843,7 @@ describe("links and pushes, as main.ts opens them", () => {
     expect(document.querySelector(`.sheet.update-sheet [data-need="u1"]`)).not.toBeNull();
   });
 
-  it("Rivet's sheet opens on the conversation: one head row, then the More topics row and the first bubble, no search or stage list over them", async () => {
+  it("Rivet's sheet opens on the conversation: one head row, then the More topics row, search and the first bubble, no stage list over them", async () => {
     const { chat } = await start("/");
     button("rivet").click();
     await flush();
@@ -850,10 +853,9 @@ describe("links and pushes, as main.ts opens them", () => {
     expect(head.querySelector(".chat-head .chat-tools")).not.toBeNull();
     const section = sheet()!.querySelector<HTMLElement>(".home-chat > .chat")!;
     expect(section.querySelector(".chat-head")).toBeNull();
-    // Over the messages only the More topics row shows; search waits inside it.
+    // Over the messages the More topics row shows, then search.
     const over = [...section.children].slice(0, [...section.children].indexOf(section.querySelector(".chat-scroll")!));
-    expect(over.filter((one) => !(one as HTMLElement).hidden).map((one) => one.className)).toEqual(["chat-topics-row"]);
-    expect(section.querySelector<HTMLElement>(".chat-search")!.hidden).toBe(true);
+    expect(over.filter((one) => !(one as HTMLElement).hidden).map((one) => one.className)).toEqual(["chat-topics-row", "chat-search"]);
     expect(section.querySelector('.chat-scroll .chat-msg[data-id="k1"]')).not.toBeNull();
     // A topic's page keeps the one head row and has no stage list over its talk.
     chat.showConversation("k1");
@@ -1180,8 +1182,8 @@ describe("the home screen before and between reads", () => {
   it("Decide while reading shows a placeholder card and no Answered or Open 0; a failed read shows Rivet and Try again", () => {
     mount();
     button("decide").click();
-    const segs = sheet()!.querySelector<HTMLElement>(".decide-segs")!;
-    expect(segs.hidden).toBe(true);
+    // Neither Open N nor ⋯, where Answered N is, shows before the board has loaded.
+    expect([sheet()!.querySelector<HTMLElement>('.decide-seg[data-seg="open"]')!.hidden, sheet()!.querySelector<HTMLElement>(".decide-more")!.hidden]).toEqual([true, true]);
     expect(sheet()!.querySelector(".decide-wait .decide-wait-card")).not.toBeNull();
     expect(sheet()!.querySelector(".decide-wait")!.textContent).toBe("Reading your cards…");
     expect(sheet()!.textContent).not.toContain(NOTHING_NEEDS_YOU);
@@ -1197,7 +1199,7 @@ describe("the home screen before and between reads", () => {
     expect(sheet()!.querySelector(".decide-wait")).not.toBeNull();
     expect(reads.mock.calls.some(([url]) => String(url).includes("/api/board"))).toBe(true);
     deal([card("d1")]);
-    expect([segs.hidden, sheet()!.querySelector(".decide-wait")]).toEqual([false, null]);
+    expect([sheet()!.querySelector<HTMLElement>(".decide-more")!.hidden, sheet()!.querySelector(".decide-wait")]).toEqual([false, null]);
   });
 
   it("a read that fails after a load puts an offline strip on the band, and the phone's Decide sheet its offline bar", () => {

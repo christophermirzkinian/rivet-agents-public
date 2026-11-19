@@ -159,6 +159,10 @@ export interface ConversationsResponse {
   unread: number;
   /** The cursor of the next page (`before`), when there is one. */
   next?: string;
+  /** Archived conversations, never Updates, with anything unread: Mark all read reads them too. Open list only. */
+  olderUnread?: number;
+  /** The server's time of this answer: Mark all read sends it back as `upTo`, so a later reply stays unread. */
+  at?: string;
 }
 
 /** GET /api/conversations/:id: the thread detail, plus what the list knows of it. */
@@ -203,6 +207,23 @@ export const conversationDoneSchema = z.object({ done: z.boolean() }).strict();
  * itself, and never across app-only and shareable (409). Merging one already merged into `into` changes nothing.
  */
 export const conversationMergeSchema = z.object({ into: z.string().regex(ID_PATTERN) }).strict();
+
+/** The most topics one Mark all read names as drawn past its list read. */
+export const READ_ALL_DRAWN_MAX = 200;
+
+/**
+ * POST /api/conversations/read: `upTo` is the `at` of the list the phone drew, and `drawn` the newest line it drew on
+ * a topic's card from the stream since; nothing newer is read.
+ */
+export const conversationReadAllSchema = z
+  .object({
+    upTo: z.string().datetime().optional(),
+    drawn: z
+      .record(z.string().regex(ID_PATTERN), z.string().datetime())
+      .refine((drawn) => Object.keys(drawn).length <= READ_ALL_DRAWN_MAX, { message: "too many drawn topics" })
+      .optional(),
+  })
+  .strict();
 
 export interface MergeResponse {
   /** How many messages moved; 0 when it was already merged. */

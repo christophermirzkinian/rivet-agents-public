@@ -488,10 +488,64 @@ describe("Chat", () => {
     expect(shownIds()).toEqual(["w1", "w2", "k1", "kp", "ka", "k2", "g1", "g2", "g3"]);
   });
 
+  it("Mark all read is offered and reads in one request when the only unread topic is idle under Archived", async () => {
+    server.conversations.get("g1")!.unread = 0;
+    server.conversations.set("o1", { title: "Old logo sketches", old: true, unread: 1 });
+    server.messages.push(owner("o2", "o1", 3, { text: "Sketches?" }), rivet("o3", "o1", 4));
+    await onChat();
+    root.querySelector<HTMLButtonElement>('[data-use="chat.options"]')!.click();
+    const mark = root.querySelector<HTMLButtonElement>('[data-use="chat.options.mark-read"]')!;
+    expect(mark.textContent).toContain("1 new");
+    expect(mark.disabled).toBe(false);
+    server.requests.length = 0;
+    mark.click();
+    await settle();
+    expect(server.requests.filter((one) => one.startsWith("POST /api/conversations/read"))).toHaveLength(1);
+    expect(server.requests.filter((one) => one.startsWith("PATCH "))).toEqual([]);
+    expect(server.row("o1")).toMatchObject({ unread: 0, markedUnread: false });
+    root.querySelector<HTMLButtonElement>('[data-use="chat.options"]')!.click();
+    expect(root.querySelector<HTMLButtonElement>('[data-use="chat.options.mark-read"]')!.disabled).toBe(true);
+  });
+
+  it("Mark all read reads only what Chat has drawn: a reply that lands after its last list read stays new", async () => {
+    server.conversations.get("g1")!.unread = 0;
+    server.conversations.set("o1", { title: "Old logo sketches", old: true, unread: 1 });
+    server.messages.push(owner("o2", "o1", 3, { text: "Sketches?" }), rivet("o3", "o1", 4));
+    await onChat();
+    // A reply lands in o1 on the server, and the phone has not read the list since.
+    server.messages.push(rivet("o4", "o1", 59, { text: "A reply never seen." }));
+    server.conversations.get("o1")!.unread = 2;
+    server.posted.length = 0;
+    root.querySelector<HTMLButtonElement>('[data-use="chat.options"]')!.click();
+    root.querySelector<HTMLButtonElement>('[data-use="chat.options.mark-read"]')!.click();
+    await settle();
+    expect(server.posted.at(-1)).toHaveProperty("upTo");
+    expect(server.row("o1")).toMatchObject({ unread: 2 });
+  });
+
+  it("a failed Mark all read gives the archived count back, so it is still offered", async () => {
+    server.conversations.get("g1")!.unread = 0;
+    server.conversations.set("o1", { title: "Old logo sketches", old: true, unread: 1 });
+    server.messages.push(owner("o2", "o1", 3, { text: "Sketches?" }), rivet("o3", "o1", 4));
+    await onChat();
+    server.failWith = 503;
+    root.querySelector<HTMLButtonElement>('[data-use="chat.options"]')!.click();
+    root.querySelector<HTMLButtonElement>('[data-use="chat.options.mark-read"]')!.click();
+    await settle();
+    server.failWith = null;
+    expect(server.row("o1")).toMatchObject({ unread: 1 });
+    root.querySelector<HTMLButtonElement>('[data-use="chat.options"]')!.click();
+    const mark = root.querySelector<HTMLButtonElement>('[data-use="chat.options.mark-read"]')!;
+    expect(mark.textContent).toContain("1 new");
+    expect(mark.disabled).toBe(false);
+  });
+
   it("a saved More topics entry lands back on the topics; Archived loads the older ones on a tap, never Updates; a thing's new reply shows on the row", async () => {
     server.conversations.get("k1")!.unread = 1;
     server.conversations.set("o1", { title: "Old quiz leaderboard", old: true });
     server.messages.push(owner("o2", "o1", 3, { text: "Leaderboard?" }));
+    // Minimised, so Chat at its newest does not read it itself (that shows at once).
+    localStorage.setItem("rivet.chat.minimised", JSON.stringify(["k1"]));
     await onChat();
     expect(root.querySelector(".chat-topics-open")!.textContent).toContain("1 new");
     history.pushState({ chatScreen: "list" }, "");

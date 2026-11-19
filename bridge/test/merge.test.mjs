@@ -159,9 +159,9 @@ test("refuses when the required checks cannot be read", async () => {
   await assertRefused(fakeGh({ checksError: new ExecError("gh", { code: 1 }, "boom", JSON.stringify(GREEN)) }), /could not be read/);
 });
 
-test("refuses a PR with a hold line in its body or a comment", async () => {
-  await assertRefused(fakeGh({ body: "HOLD: waiting on the owner" }), /on hold/);
-  await assertRefused(fakeGh({ comments: [{ body: "HOLD: waiting on the owner" }] }), /on hold/);
+test("a hold line in its body or a comment holds nothing: only a hold label or the holds file does", async () => {
+  assert.equal((await run(fakeGh({ body: "HOLD: waiting on the owner" }))).status, "merged");
+  assert.equal((await run(fakeGh({ comments: [{ body: "HOLD: waiting on the owner" }] }))).status, "merged");
 });
 
 test("refuses a PR with a hold label", async () => {

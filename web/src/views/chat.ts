@@ -21,6 +21,7 @@ import {
   type ConversationsResponse,
   type ConversationSummary,
   ownsNoCard,
+  READ_ALL_DRAWN_MAX,
   SEED_IDS,
   TEAM_ROOM_ID,
   UPDATES_ID,
@@ -781,6 +782,14 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   let detailTimer = 0;
   let detailTicket = 0;
   let list: ConversationsResponse | null = null;
+  /** Successful list reads, so a failed Mark all read never puts back over a newer one. */
+  let listReads = 0;
+  /** Per topic, the newest line Chat drew on its card from the stream: Mark all read reads it up to that. */
+  const drawnAt = new Map<string, string>();
+  /** The stream has (re)opened since the last list read: what it missed is not drawn, so nothing goes in drawnAt. */
+  let streamGap = true;
+  /** Times the stream has opened: a list read asked before the last one does not end its gap. */
+  let streamOpens = 0;
   /** Chat's newest page has come at least once since it last opened. */
   let chatLoaded = false;
   // While you were away: Chat marks his read the moment it lands at its newest, so the pill keeps the Rivet lines
@@ -1228,7 +1237,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     optionsBtn.focus();
   };
   function openMenu(): void {
-    const count = markable().length;
+    const count = unreadToMark();
     unreadCount.textContent = count ? `${count} new` : "";
     markAllBtn.disabled = count === 0;
     menu.hidden = false;
@@ -1663,19 +1672,59 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     return (list?.conversations ?? []).filter((row) => countsUnread(row) && row.id !== TEAM_ROOM_ID && !row.updates);
   }
 
+  /** Mark all read's count: the open list's unread topics plus the archived ones the server counted. */
+  function unreadToMark(): number {
+    return markable().length + (list?.olderUnread ?? 0);
+  }
+
+  /**
+   * One request reads every topic, the ones idle under Archived too, in one go: a PATCH a topic let a list reload land
+   * half way and bring dots back, and an idle topic Chat still draws was never read. The list is read again after it,
+   * so a mark the server kept shows; on a failure every row gets back what it had first, so nothing shows read that
+   * is not.
+   */
   function markAllRead(): void {
-    const rows = markable();
-    if (!rows.length) return;
-    for (const row of rows) {
+    if (!unreadToMark()) return;
+    // Only what Chat has drawn: up to the last list read, and a topic past it only up to the line Chat drew in it. A
+    // reply that came after stays unread.
+    const upTo = list?.at;
+    const drawn = upTo === undefined ? {} : Object.fromEntries([...drawnAt].filter(([, at]) => at > upTo).slice(0, READ_ALL_DRAWN_MAX));
+    const reads = listReads;
+    const shelf = archivedRead;
+    const olderUnread = list?.olderUnread ?? 0;
+    const shelved = (archived ?? []).filter((one) => !one.updates);
+    const cleared = [...markable(), ...shelved];
+    const before = new Map(cleared.map((row) => [row.id, [row.unread, row.markedUnread] as const]));
+    for (const row of cleared) {
       row.unread = 0;
       row.markedUnread = false;
     }
+    if (list) list.olderUnread = 0;
     noteUnread();
     render(false);
-    for (const row of rows)
-      cmd.patchConversation(row.id, { read: true }).catch((error: unknown) => {
-        if (!authFail(error) && alive) void loadList();
-      });
+    cmd.readAllConversations(upTo, drawn).then(
+      () => {
+        if (alive) void loadList();
+      },
+      (error: unknown) => {
+        if (authFail(error) || !alive) return;
+        // Every row goes back, by id (a stream line may have replaced a row or the list since), new words kept; the
+        // archived count too. A list read since is the server's word for the open list and the count, so nothing goes
+        // back over them; it never reads the Archived pages again, so their rows go back unless those were read anew.
+        const back = (row: ConversationSummary) => {
+          const was = before.get(row.id);
+          if (was) Object.assign(row, { unread: row.unread + was[0], markedUnread: row.markedUnread || was[1] });
+        };
+        if (listReads === reads) {
+          for (const row of list?.conversations ?? []) back(row);
+          if (list) list.olderUnread = (list.olderUnread ?? 0) + olderUnread;
+        }
+        if (archivedRead === shelf) for (const row of shelved) back(row);
+        noteUnread();
+        render(false);
+        void loadList();
+      },
+    );
   }
 
   function replyToCard(first: string): void {
@@ -2427,6 +2476,11 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       row.markedUnread = false;
     }
     noteUnread();
+    // Their cards go quiet and Mark all read's count goes with them now, not at the next list read: a stale count left
+    // Mark all read with nothing to read, so a tap did nothing. After this render, as it may be inside one.
+    queueMicrotask(() => {
+      if (alive) render(false);
+    });
     // The server takes 100 a request.
     for (let at = 0; at < rows.length; at += 100)
       cmd.batchConversations(rows.slice(at, at + 100).map((row) => row.id), "read").then(
@@ -2750,6 +2804,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     }
     const ticket = ++listTicket;
     const stamp = nextStamp();
+    const opens = streamOpens;
     return cmd.getConversations().then(
       (response) => {
         if (!alive || ticket !== listTicket) return false;
@@ -2768,6 +2823,11 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
           archivedRead++;
         }
         list = response;
+        listReads++;
+        // Only a list asked after the stream last opened covers its gap.
+        if (opens === streamOpens) streamGap = false;
+        // The rows are the server's now: a line drawn before is covered by its time, or this answer left it off.
+        drawnAt.clear();
         if (awayLoad && document.visibilityState === "visible") {
           awayLoad = false;
           // A fresh install has never read Chat: no mark, so nothing was missed.
@@ -3019,7 +3079,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   }
 
   /** A message on the stream: Chat or the open thing shows it, and the badge follows. */
-  function arrived(message: ChatMessage): void {
+  function arrived(message: ChatMessage, streamed = false): void {
     // Cancelled here or on another device: its lines leave the chat, and a read already out never brings them back.
     if (message.status === "cancelled") {
       gone.add(message.id);
@@ -3040,7 +3100,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       !inRoom(message);
     if (message.from === "rivet") counted.add(message.id);
     const here = shown.kind === "rivet" ? !inRoom(message) && inChat(message) : conversation === shownId();
-    if (!here || shown.kind === "rivet") bump(message, conversation, fresh);
+    if (!here || shown.kind === "rivet") bump(message, conversation, fresh, streamed);
     if (here) {
       const known = messages.has(message.id);
       messages.set(message.id, message);
@@ -3053,10 +3113,14 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   }
 
   /** A conversation's row takes its newest line, unread while Rivet spoke, so the badge moves before the list is read again. */
-  function bump(message: ChatMessage, id: string, fresh: boolean): void {
+  function bump(message: ChatMessage, id: string, fresh: boolean, streamed: boolean): void {
     if (!list) return;
     const at = list.conversations.findIndex((row) => row.id === id);
     if (at < 0) return;
+    // Chat draws this line on the topic's card: Mark all read reads this topic up to it. Only a line the stream
+    // brought, which comes in order, and not after a stream gap until the list is read again: a line missed in it, or
+    // before a send's own answer, may sit before this one.
+    if (streamed && !streamGap && message.at > (drawnAt.get(id) ?? "")) drawnAt.set(id, message.at);
     const rows = [...list.conversations];
     rows[at] = {
       ...rows[at]!,
@@ -3253,7 +3317,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       streamHeard();
       try {
         const message = JSON.parse((event as MessageEvent<string>).data) as ChatMessage;
-        arrived(message);
+        arrived(message, true);
       } catch {}
     });
     source.addEventListener("ping", streamHeard);
@@ -3315,6 +3379,10 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     source.addEventListener("open", () => {
       streamHeard();
       forgetAppOnly();
+      // The stream does not replay a gap: what Chat drew is only the next list read's.
+      streamGap = true;
+      streamOpens++;
+      drawnAt.clear();
       // Catches up on what was missed while it was down.
       void loadList(true);
       void loadDetail();
