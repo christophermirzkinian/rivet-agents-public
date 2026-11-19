@@ -12,6 +12,7 @@
     "build": "vite build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run && node --test 'bridge/test/*.test.mjs' 'readers/test/*.test.mjs' '.claude/hooks/test/*.test.mjs'",
+    "test:shard": "node scripts/test-shard.mjs",
     "setup": "node scripts/setup.mjs",
     "install-bridge": "bash scripts/install-bridge.sh",
     "chat": "node scripts/rivet-chat.mjs",

@@ -785,6 +785,7 @@ describe("one chat: every line its own More and Reply, each run its label", () =
     chat.showConversation(TEAM_ROOM_ID);
     chat.mount(root);
     await settle();
+    expect(bar().hidden).toBe(true);
     expect(bubble("t1").textContent).toContain("photo-album → monitor");
     // Only an agent's line names whom a reply in the room is for.
     expect(moreOn("t2")).not.toBeNull();
@@ -821,6 +822,27 @@ describe("one chat: every line its own More and Reply, each run its label", () =
     expect(autoSpeak()).toBe(false);
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     expect(menu.hidden).toBe(true);
+  });
+
+  it("offers Small, Medium and Large text in Chat's options, Medium at first, saved and applied at once", async () => {
+    localStorage.removeItem("rivet.chat.textSize");
+    delete document.documentElement.dataset.chatText;
+    await onChat();
+    expect(document.documentElement.dataset.chatText).toBe("m");
+    options().click();
+    const sizes = [...root.querySelectorAll<HTMLButtonElement>(".chat-menu .chat-size")];
+    expect(sizes.map((one) => one.textContent)).toEqual(["Small", "Medium", "Large"]);
+    expect(sizes.map((one) => one.getAttribute("aria-checked"))).toEqual(["false", "true", "false"]);
+    sizes[2]!.click();
+    expect(document.documentElement.dataset.chatText).toBe("l");
+    expect(localStorage.getItem("rivet.chat.textSize")).toBe("l");
+    expect(sizes.map((one) => one.getAttribute("aria-checked"))).toEqual(["false", "false", "true"]);
+    expect(root.querySelector<HTMLElement>(".chat-menu")!.hidden).toBe(false);
+    chat.unmount();
+    delete document.documentElement.dataset.chatText;
+    await onChat();
+    expect(document.documentElement.dataset.chatText).toBe("l");
+    localStorage.removeItem("rivet.chat.textSize");
   });
 
   it("shows Chat's head only on Chat, a conversation page keeping its own Read aloud", async () => {

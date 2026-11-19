@@ -79,6 +79,80 @@
   display: none;
 }
 
+/* Text size: Small, Medium or Large from Chat's options (chat-text-size.ts), Medium until he picks another. Large is
+   17px words, Medium 14px, Small 12px. It sizes a line's words, its reply quote and the box he types in, never the
+   head. These three rules are the only ones that set a --chat-fs variable (chat-bubble-text-css.test.ts). */
+:root {
+  --chat-fs: 14px;
+  --chat-fs-quote: 13px;
+  --chat-fs-title: 15px;
+  --chat-fs-type: 15px;
+}
+
+:root[data-chat-text="s"] {
+  --chat-fs: 12px;
+  --chat-fs-quote: 12px;
+  --chat-fs-title: 13px;
+  --chat-fs-type: 14px;
+}
+
+:root[data-chat-text="l"] {
+  --chat-fs: 17px;
+  --chat-fs-quote: 15px;
+  --chat-fs-title: 17px;
+  --chat-fs-type: 16px;
+}
+
+/* Its row in the menu: three choices, the picked one filled apricot, each name at its own size. */
+.chat-size-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 10px 10px;
+}
+
+.chat-size-title {
+  color: var(--muted);
+  font-size: var(--fs-body);
+  font-weight: 700;
+}
+
+.chat-size-choices {
+  display: flex;
+  gap: 6px;
+}
+
+.chat-size {
+  flex: 1;
+  min-width: 0;
+  min-height: 48px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--panel-2);
+  color: var(--text);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.chat-size-s {
+  font-size: 12px;
+}
+
+.chat-size-m {
+  font-size: 14px;
+}
+
+.chat-size-l {
+  font-size: 17px;
+}
+
+.chat-size[aria-checked="true"] {
+  background: var(--apricot);
+  color: #1a1614;
+}
+
 .chat-menu-item {
   display: flex;
   align-items: center;
@@ -439,7 +513,7 @@
 }
 
 .chat-ex .chat-body {
-  font-size: 17px;
+  font-size: var(--chat-fs);
   line-height: 1.45;
 }
 
@@ -806,7 +880,7 @@ button.chat-quote {
 
 .chat-quote-text {
   color: var(--muted);
-  font-size: var(--fs-m);
+  font-size: var(--chat-fs-quote);
   line-height: 1.35;
   overflow-wrap: anywhere;
 }
@@ -841,7 +915,7 @@ button.chat-quote {
   justify-content: center;
   overflow: hidden;
   color: var(--muted);
-  font-size: var(--fs-body);
+  font-size: var(--chat-fs-quote);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
@@ -1023,8 +1097,8 @@ button.chat-quote {
   border: 1px solid var(--line);
   border-radius: 26px;
   background: var(--panel);
-  /* Readable-first: what the owner types reads at 16px. */
-  font-size: var(--fs-xl);
+  /* What he types follows his text size: 14, 15 or 16px. */
+  font-size: var(--chat-fs-type);
   line-height: 1.3;
   resize: none;
 }

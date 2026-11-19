@@ -81,6 +81,7 @@ import { overlayTraversal } from "../overlay-history.js";
 import { createDraftLineage } from "../draft-lineage.js";
 import { chatSearch } from "./chat-search.js";
 import { openMore } from "./chat-more.js";
+import { applyChatTextSize, chatTextSizePicker } from "./chat-text-size.js";
 import { registerSearchSource } from "./search-sources.js";
 import { askLine, dueLine } from "./due-line.js";
 import { closeSheet, openSheet } from "./sheet.js";
@@ -805,6 +806,7 @@ registerSearchSource("chat-history", (query) =>
 export function mount(el: HTMLElement, later?: (then: () => void) => void): void {
   unmount();
   forgetRetired();
+  applyChatTextSize();
   /** The open conversation's messages. */
   let messages = new Map<string, ChatMessage>();
   let detail: ConversationDetail | null = null;
@@ -1202,11 +1204,13 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     }
   };
   renderSpeak();
-  // Collapse all, Expand all and Mark all read moved to the topics bar over Chat: Read aloud is the menu's own.
+  // Collapse all, Expand all and Mark all read moved to the topics bar over Chat. Read aloud, where the device can
+  // speak, and Text size are the menu's own.
   const menu = h(
     "div",
     { class: "chat-menu", attrs: { role: "menu", "aria-label": "Chat options" } },
     canSpeak() ? speakSwitch : null,
+    chatTextSizePicker(),
   );
   menu.hidden = true;
   /** The page the menu was last drawn for: "" is Chat. */
@@ -2054,9 +2058,8 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     }
     // In the Rivet sheet's head row it is the sheet's title, over a thing's page too.
     chatHead.hidden = kind !== "rivet" && !headHosted();
-    optionsBtn.hidden = !canSpeak();
     // A page opened with no tap outside it (a search hit, a push) must not leave the menu, and its keys, held open.
-    if ((optionsBtn.hidden || (shownId() ?? "") !== menuView) && !menu.hidden) closeMenu();
+    if ((shownId() ?? "") !== menuView && !menu.hidden) closeMenu();
     menuView = shownId() ?? "";
     headBox.hidden = kind === "rivet";
     due.setActive(kind === "rivet");
