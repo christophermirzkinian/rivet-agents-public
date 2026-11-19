@@ -22,11 +22,12 @@
 import { setImmediate } from "node:timers";
 import { beforeEach, vi } from "vitest";
 
-// Expected times in the tests are written for UTC+11 with no daylight saving.
+// Expected times in the tests are written for one fixed test zone with no
+// daylight saving, a POSIX rule that names no place; Node's clock and Intl both read it.
 // The server's setTimeZone falls back to the runtime zone, so fix that zone here.
 // shared/when.ts reads the zone once as it loads, so board.js (which pulls it in)
 // is imported only after this; a static import would hoist above it.
-process.env.TZ = "Etc/GMT-11";
+process.env.TZ = "TEST-11";
 const { setDefaultRepo } = await import("./src/shared/board.js");
 const { setKnownRepos } = await import("./src/shared/repos.js");
 // A row naming no repo is the default repo's; the fixtures' default is this one.

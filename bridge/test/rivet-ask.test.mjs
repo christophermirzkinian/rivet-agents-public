@@ -3,8 +3,8 @@ import { test } from "node:test";
 import { nextAskId, parseArgs, parseDueTime, run, when } from "../../scripts/rivet.mjs";
 
 const TOKEN = "cd".repeat(32);
-/** A fixed UTC+10 zone, so clock times read the same on any machine. */
-const ZONE = "Etc/GMT-10";
+/** A fixed zone with no daylight saving, so clock times read the same on any machine. */
+const ZONE = "Pacific/Port_Moresby";
 const ENV = { RIVET_BRIDGE_DEV: "1", RIVET_BOARD_TOKEN: TOKEN, RIVET_URL: "http://localhost:5999", RIVET_TIME_ZONE: ZONE, PATH: "" };
 const NOW = "2026-10-01T02:00:00.000Z";
 
@@ -218,7 +218,7 @@ test("ask set sends an absolute due, and a later one needs a why", async () => {
   assert.equal(first.code, 0, first.stderr);
   assert.deepEqual(server.state.calls.at(-1)?.body, { stage: "review", progress: 0.25, due: "2026-10-01T03:30:00.000Z" });
   assert.equal(first.stdout, "a-1 review, due 1:30pm, version 2\n");
-  // A clock time in RIVET_TIME_ZONE (UTC+10 here): 3pm on 1 October is 05:00Z.
+  // A clock time in RIVET_TIME_ZONE: 3pm on 1 October is 05:00Z.
   const moved = await cli(["ask", "set", "a-1", "--due", "3pm", "--why", "CI is slow"], { fetch: server.fetch });
   assert.equal(moved.code, 0, moved.stderr);
   assert.deepEqual(server.state.calls.at(-1)?.body, { why: "CI is slow", due: "2026-10-01T05:00:00.000Z" });
@@ -247,8 +247,8 @@ test("parseDueTime reads minutes, clock times in the zone and ISO times; when pr
   assert.deepEqual(parseDueTime("9am", now, ZONE), { dueAt: "2026-10-01T23:00:00.000Z" });
   // The same words in another zone name another instant.
   assert.deepEqual(parseDueTime("3pm", now, "UTC"), { dueAt: "2026-10-01T15:00:00.000Z" });
-  assert.deepEqual(parseDueTime("2026-10-01T10:00:00+10:00", now, ZONE), { error: "--due must be ahead of now" });
-  assert.deepEqual(parseDueTime("2026-10-02T10:00:00+10:00", now, ZONE), { dueAt: "2026-10-02T00:00:00.000Z" });
+  assert.deepEqual(parseDueTime("2026-10-01T02:00:00+02:00", now, ZONE), { error: "--due must be ahead of now" });
+  assert.deepEqual(parseDueTime("2026-10-02T02:00:00+02:00", now, ZONE), { dueAt: "2026-10-02T00:00:00.000Z" });
   assert.match(/** @type {any} */ (parseDueTime("0", now, ZONE)).error, /ahead of now/);
   assert.match(/** @type {any} */ (parseDueTime("2026-10-09T00:00:00Z", now, ZONE)).error, /at most 7 days/);
   assert.match(/** @type {any} */ (parseDueTime("later", now, ZONE)).error, /--due is minutes/);

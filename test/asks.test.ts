@@ -340,7 +340,7 @@ describe("an ask's promised time", () => {
     expect(ask).toMatchObject({ dueAt: inMinutes(90), why: "stills first", dueHistory: [] });
     // A first time on an ask that had none is a promise too.
     await create({ id: "a-2", words: "y" });
-    const first = (await (await send("PATCH", "/api/asks/a-2", { due: "2026-10-01T15:30:00+11:00" })).json()) as Ask;
+    const first = (await (await send("PATCH", "/api/asks/a-2", { due: "2026-10-01T06:30:00+02:00" })).json()) as Ask;
     expect(first).toMatchObject({ dueAt: "2026-10-01T04:30:00.000Z", dueHistory: [] });
   });
 

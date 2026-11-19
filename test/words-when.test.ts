@@ -29,9 +29,9 @@ import {
   yourOk,
 } from "../src/shared/words.js";
 
-// Mon 26 Oct 2026, 2:00pm in the test zone (UTC+11).
+// Mon 26 Oct 2026, 2:00pm in the test zone.
 const NOW = Date.parse("2026-10-26T03:00:00Z");
-const at = (local: string) => Date.parse(`${local}+11:00`);
+const at = (local: string) => Date.parse(local);
 
 describe("when.ts: one time style (§3d)", () => {
   it("writes a 12-hour clock with no space, tilde or capitals", () => {
@@ -119,7 +119,7 @@ describe("when.ts: one time style (§3d)", () => {
 
   it("keeps centuries apart for years 0-99 and a zone's old seconds offset", () => {
     expect(when("0099-10-26T12:00:00Z", "1999-10-26T12:00:00Z")).not.toBe(clock("0099-10-26T12:00:00Z"));
-    // This zone kept local mean time, UTC+11:39:04, until 1868.
+    // This zone kept local mean time, an offset with seconds in it, until 1868.
     setTimeZone("Pacific/Auckland");
     try {
       expect(localDay("1800-01-01T23:59:30")).toBe("1800-01-01");

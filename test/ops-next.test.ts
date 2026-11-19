@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { buildNext, nextWhen, MAX_NEXT_ROWS } from "../src/shared/ops-next.js";
 import type { Schedule } from "../src/shared/schedules.js";
 
-// 1pm on Saturday 24 Oct local time (UTC+11).
+// 1pm on Saturday 24 Oct in the test zone.
 const NOW = new Date("2026-10-24T02:00:00.000Z");
 const schedule = (extra: Partial<Schedule>): Schedule =>
   ({ id: "mac:nightly", source: "mac", name: "Nightly tidy", what: "", on: true, group: "daily", nextRun: "2026-10-24T08:00:00.000Z", runs: [], lastRun: null, ...extra }) as unknown as Schedule;

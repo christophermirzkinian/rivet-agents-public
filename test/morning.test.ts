@@ -27,7 +27,7 @@ function fake(start: string) {
       board = { ...board, needs: [...board.needs, { kind: "update", ...card } as Board["needs"][number]] };
       return { status: 200 };
     },
-    // 2026-10-11 07:00 local is 2026-10-10T20:00Z (UTC+11); 9pm the night before is 2026-10-10T10:00Z.
+    // 2026-10-11 07:00 local is 2026-10-10T20:00Z; 9pm the night before is 2026-10-10T10:00Z.
     merged: () => [merged(1, "2026-10-10T09:59:00Z"), merged(2, "2026-10-10T10:00:00Z"), merged(3, "2026-10-10T19:59:00Z"), merged(4, "2026-10-10T20:30:00Z")],
     needs: () => 2,
     board: () => board,

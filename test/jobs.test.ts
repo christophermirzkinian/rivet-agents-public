@@ -28,7 +28,7 @@ import {
 import { setKnownRepos } from "../src/shared/repos.js";
 import { setTimeZone } from "../src/shared/when.js";
 
-// 7:00am Saturday 24 Oct 2026 local time (the test zone, +11).
+// 7:00am Saturday 24 Oct 2026 in the fixed test zone (vitest.setup.ts).
 const SAT_7AM = new Date("2026-10-23T20:00:00.000Z");
 const HOUR = 3_600_000;
 

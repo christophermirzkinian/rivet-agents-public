@@ -413,15 +413,15 @@ describe("thread status and steps", () => {
       ask: undefined,
       stored: [
         { kind: "pr", label: "PR #7", url: "https://github.com/example-org/example-repo/pull/7", at: "2026-10-02T01:30:00.000Z" },
-        // 10:00 at +10:00 is midnight UTC: before the PR above.
-        { kind: "chat", label: "Chat x", at: "2026-10-02T10:00:00+10:00" },
+        // 02:00 at +02:00 is midnight UTC: before the PR above.
+        { kind: "chat", label: "Chat x", at: "2026-10-02T02:00:00+02:00" },
       ],
       merged: [],
       replies: (prs) => (asked.push(prs), []),
     });
     expect(asked).toEqual([[{ repo: "example-org/example-repo", number: 7 }]]);
     expect(steps.map((step) => step.kind)).toEqual(["chat", "pr"]);
-    expect(threadPatchSchema.parse({ steps: [{ kind: "pr", label: " PR #7 ", at: "2026-10-02T10:00:00+10:00" }] }).steps).toEqual([
+    expect(threadPatchSchema.parse({ steps: [{ kind: "pr", label: " PR #7 ", at: "2026-10-02T02:00:00+02:00" }] }).steps).toEqual([
       { kind: "pr", label: "PR #7", at: "2026-10-02T00:00:00.000Z" },
     ]);
     // An offset past ±14:00 is refused, never thrown on.

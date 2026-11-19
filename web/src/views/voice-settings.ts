@@ -26,9 +26,9 @@ export function voiceSettings(): HTMLElement {
     toggle.textContent = on ? "Read new messages aloud: On" : "Read new messages aloud: Off";
     const available = voiceAvailable();
     status.textContent = available
-      ? `Chat reads ${RIVET_NAME}'s messages aloud in your phone's own voice, in Australian or British English.`
+      ? `Chat reads ${RIVET_NAME}'s messages aloud in an English voice: your phone's own English first, then US English, then any English it has.`
       : canSpeak()
-        ? "Your phone has no Australian or British English voice, so Chat stays silent. Add one in your phone's text-to-speech settings."
+        ? "Your phone has no English voice, so Chat stays silent. Add one in your phone's text-to-speech settings."
         : "This browser can't read aloud, so Chat stays silent.";
     test.disabled = !available;
   };

@@ -19,8 +19,8 @@ import {
   zoneDay,
 } from "../lib/spend.mjs";
 
-// A UTC+10 zone with daylight saving, and two repos: the Mac's own settings must not change these tests.
-const ZONE = "Antarctica/Macquarie";
+// A zone with daylight saving, and two repos: the Mac's own settings must not change these tests.
+const ZONE = "America/New_York";
 process.env.RIVET_TIME_ZONE = ZONE;
 process.env.RIVET_REPOS = "example-org/example-repo,example-org/other-repo";
 
@@ -56,7 +56,7 @@ function tmp() {
   return { root, projects, file: path.join(projects, PROJECT, "s1.jsonl") };
 }
 
-const NOW = new Date("2026-09-28T06:00:00.000Z"); // 16:00 local
+const NOW = new Date("2026-09-28T20:00:00.000Z"); // 16:00 local
 /** Writes with an mtime of `at`, so the month filter sees the test's clock, not the real one. */
 function put(/** @type {string} */ file, /** @type {string} */ body, at = NOW) {
   fs.writeFileSync(file, body);
@@ -69,18 +69,18 @@ function add(/** @type {string} */ file, /** @type {string} */ body, at = NOW) {
 const agg = (/** @type {any} */ state, now = NOW) => aggregate(state, { now });
 
 test("zoneDay: midnight, the month edge, and both DST changes", () => {
-  assert.equal(zoneDay(new Date("2026-09-27T13:59:59.999Z")), "2026-09-27");
-  assert.equal(zoneDay(new Date("2026-09-27T14:00:00.000Z")), "2026-09-28");
-  assert.equal(zoneDay(new Date("2026-09-30T14:00:00.000Z")), "2026-10-01");
-  // Daylight time from 2026-10-04 02:00: midnight moves to 13:00Z.
-  assert.equal(zoneDay(new Date("2026-10-03T13:59:59.000Z")), "2026-10-03");
-  assert.equal(zoneDay(new Date("2026-10-03T14:00:00.000Z")), "2026-10-04");
-  assert.equal(zoneDay(new Date("2026-10-04T12:59:59.000Z")), "2026-10-04");
-  assert.equal(zoneDay(new Date("2026-10-04T13:00:00.000Z")), "2026-10-05");
-  // Back to standard time on 2026-04-05 03:00: that day runs 13:00Z to 14:00Z the next day.
-  assert.equal(zoneDay(new Date("2026-04-04T13:00:00.000Z")), "2026-04-05");
-  assert.equal(zoneDay(new Date("2026-04-05T13:59:59.000Z")), "2026-04-05");
-  assert.equal(zoneDay(new Date("2026-04-05T14:00:00.000Z")), "2026-04-06");
+  assert.equal(zoneDay(new Date("2026-09-28T03:59:59.999Z")), "2026-09-27");
+  assert.equal(zoneDay(new Date("2026-09-28T04:00:00.000Z")), "2026-09-28");
+  assert.equal(zoneDay(new Date("2026-10-01T04:00:00.000Z")), "2026-10-01");
+  // Standard time from 2026-11-01 02:00: that day runs 04:00Z to 05:00Z the next day.
+  assert.equal(zoneDay(new Date("2026-11-01T03:59:59.000Z")), "2026-10-31");
+  assert.equal(zoneDay(new Date("2026-11-01T04:00:00.000Z")), "2026-11-01");
+  assert.equal(zoneDay(new Date("2026-11-02T04:59:59.000Z")), "2026-11-01");
+  assert.equal(zoneDay(new Date("2026-11-02T05:00:00.000Z")), "2026-11-02");
+  // Daylight time from 2026-03-08 02:00: midnight moves to 04:00Z.
+  assert.equal(zoneDay(new Date("2026-03-08T05:00:00.000Z")), "2026-03-08");
+  assert.equal(zoneDay(new Date("2026-03-09T03:59:59.000Z")), "2026-03-08");
+  assert.equal(zoneDay(new Date("2026-03-09T04:00:00.000Z")), "2026-03-09");
 });
 
 /** Runs `fn` with `zone` as the configured zone, then puts the test zone back. @param {string} zone @param {() => void} fn */
@@ -125,8 +125,8 @@ async function labelOf(/** @type {string} */ launch, /** @type {(string | undefi
   const t = tmp();
   const project = encodeProjectPath(launch);
   fs.mkdirSync(path.join(t.projects, project), { recursive: true });
-  const lines = cwds.map((cwd) => line({ type: "user", timestamp: "2026-09-28T00:59:00.000Z", ...(cwd ? { cwd } : {}), message: { content: SECRET } }));
-  put(path.join(t.projects, project, "s2.jsonl"), lines.join("") + line({ type: "assistant", timestamp: "2026-09-28T01:00:00.000Z", sessionId: "s2", message: { id: "m1", model: "claude-opus-5-5", usage: { output_tokens: 50_000 } } }));
+  const lines = cwds.map((cwd) => line({ type: "user", timestamp: "2026-09-28T14:59:00.000Z", ...(cwd ? { cwd } : {}), message: { content: SECRET } }));
+  put(path.join(t.projects, project, "s2.jsonl"), lines.join("") + line({ type: "assistant", timestamp: "2026-09-28T15:00:00.000Z", sessionId: "s2", message: { id: "m1", model: "claude-opus-5-5", usage: { output_tokens: 50_000 } } }));
   const state = emptyState();
   await collect(state, { projectsDir: t.projects, now: NOW });
   const out = agg(state);
@@ -174,7 +174,7 @@ test("with no repo set every session is other, and nothing fails", async (t) => 
 
 test("a label older than its TTL is kept while its project still has spend, and dropped once it has none", async () => {
   const t = tmp();
-  put(t.file, user("2026-09-28T00:59:00.000Z") + asst("2026-09-28T01:00:00.000Z", "m1", 50_000));
+  put(t.file, user("2026-09-28T14:59:00.000Z") + asst("2026-09-28T15:00:00.000Z", "m1", 50_000));
   const state = emptyState();
   await collect(state, { projectsDir: t.projects, now: NOW });
   state.labels[PROJECT].seen = "2026-06-01";
@@ -197,7 +197,7 @@ test("a cost-state adds its increase at the nearest timestamped line, per model"
   const t = tmp();
   put(
     t.file,
-    user("2026-09-28T01:00:00.000Z") + meta() + cost(1, { opus: 10, sonnet: 1 }) + user("2026-09-28T02:00:00.000Z"),
+    user("2026-09-28T15:00:00.000Z") + meta() + cost(1, { opus: 10, sonnet: 1 }) + user("2026-09-28T16:00:00.000Z"),
   );
   const state = emptyState();
   const r = await collect(state, { projectsDir: t.projects, now: NOW });
@@ -213,17 +213,17 @@ test("a cost-state adds its increase at the nearest timestamped line, per model"
 test("the nearer neighbour wins: a following timestamp closer than the preceding one", async () => {
   const t = tmp();
   // Preceding timestamp is yesterday (local) and three lines back; the next is one line on, today.
-  put(t.file, user("2026-09-27T12:00:00.000Z") + meta() + meta() + cost(1, { opus: 4 }) + user("2026-09-27T14:30:00.000Z"));
+  put(t.file, user("2026-09-28T02:00:00.000Z") + meta() + meta() + cost(1, { opus: 4 }) + user("2026-09-28T04:30:00.000Z"));
   const state = emptyState();
   await collect(state, { projectsDir: t.projects, now: NOW });
   assert.equal(agg(state).today.totalUSD, 4);
 });
 
-test("local day boundary: 13:59Z and 14:00Z land on different days", async () => {
+test("local day boundary: 03:59Z and 04:00Z land on different days", async () => {
   const t = tmp();
   put(
     t.file,
-    user("2026-09-27T13:59:00.000Z") + cost(1, { opus: 3 }) + user("2026-09-27T14:01:00.000Z") + cost(1, { opus: 8 }),
+    user("2026-09-28T03:59:00.000Z") + cost(1, { opus: 3 }) + user("2026-09-28T04:01:00.000Z") + cost(1, { opus: 8 }),
   );
   const state = emptyState();
   await collect(state, { projectsDir: t.projects, now: NOW });
@@ -233,18 +233,18 @@ test("local day boundary: 13:59Z and 14:00Z land on different days", async () =>
   assert.equal(out.thisMonth.totalUSD, 8);
 });
 
-test("DST: after the October change, today starts at 13:00Z", async () => {
+test("DST: after the November change, today starts at 05:00Z", async () => {
   const t = tmp();
-  const now = new Date("2026-10-05T02:00:00.000Z");
+  const now = new Date("2026-11-02T18:00:00.000Z");
   put(
     t.file,
-    user("2026-10-04T12:59:00.000Z") + cost(1, { opus: 2 }) + user("2026-10-04T13:00:30.000Z") + cost(1, { opus: 7 }),
+    user("2026-11-02T04:59:00.000Z") + cost(1, { opus: 2 }) + user("2026-11-02T05:00:30.000Z") + cost(1, { opus: 7 }),
     now,
   );
   const state = emptyState();
   await collect(state, { projectsDir: t.projects, now });
   const out = agg(state, now);
-  assert.equal(out.day, "2026-10-05");
+  assert.equal(out.day, "2026-11-02");
   assert.equal(out.today.totalUSD, 5);
   assert.equal(out.thisMonth.totalUSD, 7);
 });
@@ -253,7 +253,7 @@ test("a session restart is a new run: both runs count in full", async () => {
   const t = tmp();
   put(
     t.file,
-    user("2026-09-28T01:00:00.000Z") + cost(1000, { opus: 10 }) + user("2026-09-28T02:00:00.000Z") + cost(2000, { opus: 3 }),
+    user("2026-09-28T15:00:00.000Z") + cost(1000, { opus: 10 }) + user("2026-09-28T16:00:00.000Z") + cost(2000, { opus: 3 }),
   );
   const state = emptyState();
   await collect(state, { projectsDir: t.projects, now: NOW });
@@ -264,10 +264,10 @@ test("out-of-order records in one run: a stale lower total adds nothing, and not
   const t = tmp();
   put(
     t.file,
-    user("2026-09-28T03:00:00.000Z") +
+    user("2026-09-28T17:00:00.000Z") +
       cost(1, { opus: 5 }) +
       cost(1, { opus: 8 }) +
-      user("2026-09-28T01:00:00.000Z") +
+      user("2026-09-28T15:00:00.000Z") +
       cost(1, { opus: 6 }) +
       cost(1, { opus: 8 }) +
       cost(1, { opus: 9, sonnet: 1 }),
@@ -281,7 +281,7 @@ test("out-of-order records in one run: a stale lower total adds nothing, and not
 
 test("a truncated last line waits for its newline and then counts once", async () => {
   const t = tmp();
-  const head = user("2026-09-28T01:00:00.000Z");
+  const head = user("2026-09-28T15:00:00.000Z");
   const tail = cost(1, { opus: 5 });
   put(t.file, head + tail.slice(0, 40));
   const state = emptyState();
@@ -302,7 +302,7 @@ test("a truncated last line waits for its newline and then counts once", async (
 test("incremental offsets survive a save and load, and only new lines are read", async () => {
   const t = tmp();
   const stateFile = path.join(t.root, "state", "spend-state.json");
-  put(t.file, user("2026-09-28T01:00:00.000Z") + cost(1, { opus: 5 }));
+  put(t.file, user("2026-09-28T15:00:00.000Z") + cost(1, { opus: 5 }));
   let state = emptyState();
   await collect(state, { projectsDir: t.projects, now: NOW });
   saveSpendState(stateFile, state);
@@ -314,7 +314,7 @@ test("incremental offsets survive a save and load, and only new lines are read",
   let r = await collect(state, { projectsDir: t.projects, now: NOW });
   assert.equal(r.records, 0);
 
-  add(t.file, user("2026-09-28T02:00:00.000Z") + cost(1, { opus: 12 }));
+  add(t.file, user("2026-09-28T16:00:00.000Z") + cost(1, { opus: 12 }));
   r = await collect(state, { projectsDir: t.projects, now: NOW });
   assert.equal(r.records, 1);
   assert.equal(agg(state).today.totalUSD, 12);
@@ -323,12 +323,12 @@ test("incremental offsets survive a save and load, and only new lines are read",
 
 test("a rewritten file is read again without counting its runs twice", async () => {
   const t = tmp();
-  const body = user("2026-09-28T01:00:00.000Z") + cost(1, { opus: 5 }) + user("2026-09-28T01:30:00.000Z") + cost(1, { opus: 6 });
+  const body = user("2026-09-28T15:00:00.000Z") + cost(1, { opus: 5 }) + user("2026-09-28T15:30:00.000Z") + cost(1, { opus: 6 });
   put(t.file, body);
   const state = emptyState();
   await collect(state, { projectsDir: t.projects, now: NOW });
   fs.rmSync(t.file);
-  put(t.file, user("2026-09-28T01:00:00.000Z") + cost(1, { opus: 5 }));
+  put(t.file, user("2026-09-28T15:00:00.000Z") + cost(1, { opus: 5 }));
   const r = await collect(state, { projectsDir: t.projects, now: NOW });
   assert.equal(r.records, 1);
   assert.equal(agg(state).today.totalUSD, 6);
@@ -336,8 +336,8 @@ test("a rewritten file is read again without counting its runs twice", async () 
 
 test("files untouched this local month are skipped; old day buckets are pruned", async () => {
   const t = tmp();
-  fs.writeFileSync(t.file, user("2026-08-10T01:00:00.000Z") + cost(1, { opus: 50 }));
-  const old = new Date("2026-08-10T02:00:00.000Z");
+  fs.writeFileSync(t.file, user("2026-08-10T15:00:00.000Z") + cost(1, { opus: 50 }));
+  const old = new Date("2026-08-10T16:00:00.000Z");
   fs.utimesSync(t.file, old, old);
   const state = emptyState();
   state.buckets["2026-07-31"] = { [PROJECT]: { opus: 1 } };
@@ -352,7 +352,7 @@ test("lines that are not JSON, and cost-states without a session, are skipped", 
   const t = tmp();
   put(
     t.file,
-    "not json\n" + user("2026-09-28T01:00:00.000Z") + line({ type: "cost-state", totalCostUSD: 99, startTime: 1 }) + cost(1, { opus: 2 }),
+    "not json\n" + user("2026-09-28T15:00:00.000Z") + line({ type: "cost-state", totalCostUSD: 99, startTime: 1 }) + cost(1, { opus: 2 }),
   );
   const state = emptyState();
   await collect(state, { projectsDir: t.projects, now: NOW });
@@ -362,7 +362,7 @@ test("lines that are not JSON, and cost-states without a session, are skipped", 
 test("pushSpend sends the aggregate with the bridge token and keeps the offsets", async () => {
   const t = tmp();
   const stateFile = path.join(t.root, "spend-state.json");
-  put(t.file, user("2026-09-28T01:00:00.000Z") + cost(1, { opus: 5 }));
+  put(t.file, user("2026-09-28T15:00:00.000Z") + cost(1, { opus: 5 }));
   /** @type {any[]} */
   const sent = [];
   const fetchFn = async (/** @type {string} */ url, /** @type {any} */ init) => {
@@ -433,8 +433,8 @@ test("a saved delta spreads over the session's messages by cost, each share on i
   // Local 27th 20:00 ($1 of tokens), then the 28th 09:00 ($3); the session saves $8 on the 28th.
   put(
     t.file,
-    asst("2026-09-27T10:00:00.000Z", "m1", 50_000) +
-      asst("2026-09-27T23:00:00.000Z", "m2", 150_000) +
+    asst("2026-09-28T00:00:00.000Z", "m1", 50_000) +
+      asst("2026-09-28T13:00:00.000Z", "m2", 150_000) +
       cost(1, { "claude-opus-5-5[1m]": 8 }),
   );
   const state = emptyState();
@@ -450,10 +450,10 @@ test("streamed lines of one message id count once, at their largest usage", asyn
   const t = tmp();
   put(
     t.file,
-    asst("2026-09-28T01:00:00.000Z", "m1", 50_000) +
-      asst("2026-09-28T01:00:01.000Z", "m1", 150_000) +
-      asst("2026-09-28T01:00:02.000Z", "m1", 100_000) +
-      asst("2026-09-28T01:05:00.000Z", "m2", 50_000),
+    asst("2026-09-28T15:00:00.000Z", "m1", 50_000) +
+      asst("2026-09-28T15:00:01.000Z", "m1", 150_000) +
+      asst("2026-09-28T15:00:02.000Z", "m1", 100_000) +
+      asst("2026-09-28T15:05:00.000Z", "m2", 50_000),
   );
   const state = emptyState();
   await collect(state, { projectsDir: t.projects, now: NOW });
@@ -462,24 +462,24 @@ test("streamed lines of one message id count once, at their largest usage", asyn
 
 test("a message id split across two reads still counts once", async () => {
   const t = tmp();
-  put(t.file, asst("2026-09-28T01:00:00.000Z", "m1", 50_000));
+  put(t.file, asst("2026-09-28T15:00:00.000Z", "m1", 50_000));
   const state = emptyState();
   await collect(state, { projectsDir: t.projects, now: NOW });
-  add(t.file, asst("2026-09-28T01:00:01.000Z", "m1", 100_000));
+  add(t.file, asst("2026-09-28T15:00:01.000Z", "m1", 100_000));
   await collect(state, { projectsDir: t.projects, now: NOW });
   assert.equal(agg(state).today.estimatedUSD, 2);
 });
 
 test("the estimate is replaced by the measured figure when the session saves, never counted twice", async () => {
   const t = tmp();
-  put(t.file, asst("2026-09-28T01:00:00.000Z", "m1", 100_000) + asst("2026-09-28T01:10:00.000Z", "m2", 50_000));
+  put(t.file, asst("2026-09-28T15:00:00.000Z", "m1", 100_000) + asst("2026-09-28T15:10:00.000Z", "m2", 50_000));
   const state = emptyState();
   await collect(state, { projectsDir: t.projects, now: NOW });
   let out = agg(state);
   assert.deepEqual([out.today.measuredUSD, out.today.estimatedUSD, out.today.totalUSD], [0, 3, 3]);
   assert.deepEqual(out.today.byChat, [{ repo: "example-repo", chat: "sample-chat", usd: 3, estimatedUSD: 3 }]);
 
-  add(t.file, cost(1, { "claude-opus-5-5": 3.3 }) + asst("2026-09-28T02:00:00.000Z", "m3", 25_000));
+  add(t.file, cost(1, { "claude-opus-5-5": 3.3 }) + asst("2026-09-28T16:00:00.000Z", "m3", 25_000));
   await collect(state, { projectsDir: t.projects, now: NOW });
   out = agg(state);
   assert.deepEqual([out.today.measuredUSD, out.today.estimatedUSD, out.today.totalUSD], [3.3, 0.5, 3.8]);
@@ -493,7 +493,7 @@ test("the estimate is replaced by the measured figure when the session saves, ne
 
 test("a session with no cost-state at all is all estimate", async () => {
   const t = tmp();
-  put(t.file, user("2026-09-28T01:00:00.000Z") + asst("2026-09-28T01:01:00.000Z", "m1", 75_000, "claude-sonnet-5"));
+  put(t.file, user("2026-09-28T15:00:00.000Z") + asst("2026-09-28T15:01:00.000Z", "m1", 75_000, "claude-sonnet-5"));
   const state = emptyState();
   await collect(state, { projectsDir: t.projects, now: NOW });
   const out = agg(state);
@@ -506,13 +506,13 @@ test("subagent transcripts join their parent's estimate and are replaced by the 
   const t = tmp();
   const subDir = path.join(t.projects, PROJECT, "s1", "subagents");
   fs.mkdirSync(subDir, { recursive: true });
-  put(path.join(subDir, "agent-a1.jsonl"), asst("2026-09-28T01:02:00.000Z", "sub1", 100_000));
-  put(t.file, asst("2026-09-28T01:00:00.000Z", "m1", 50_000));
+  put(path.join(subDir, "agent-a1.jsonl"), asst("2026-09-28T15:02:00.000Z", "sub1", 100_000));
+  put(t.file, asst("2026-09-28T15:00:00.000Z", "m1", 50_000));
   const state = emptyState();
   await collect(state, { projectsDir: t.projects, now: NOW });
   assert.equal(agg(state).today.estimatedUSD, 3);
 
-  add(t.file, asst("2026-09-28T01:05:00.000Z", "m2", 50_000) + cost(1, { "claude-opus-5-5": 4.4 }));
+  add(t.file, asst("2026-09-28T15:05:00.000Z", "m2", 50_000) + cost(1, { "claude-opus-5-5": 4.4 }));
   await collect(state, { projectsDir: t.projects, now: NOW });
   const out = agg(state);
   assert.deepEqual([out.today.measuredUSD, out.today.estimatedUSD], [4.4, 0]);
@@ -528,8 +528,8 @@ const subagentFile = (/** @type {ReturnType<typeof tmp>} */ t, name = "agent-a1.
 test("an oversized line is skipped without being held in memory, and the offset moves past it", async () => {
   const t = tmp();
   const limits = { maxLineBytes: 1024, chunkBytes: 64 };
-  const first = asst("2026-09-28T01:00:00.000Z", "m1", 50_000);
-  const huge = user("2026-09-28T01:01:00.000Z").replace(SECRET, SECRET.repeat(400));
+  const first = asst("2026-09-28T15:00:00.000Z", "m1", 50_000);
+  const huge = user("2026-09-28T15:01:00.000Z").replace(SECRET, SECRET.repeat(400));
   put(t.file, first + huge.slice(0, 3000));
   const state = emptyState();
   let r = await collect(state, { projectsDir: t.projects, now: NOW, ...limits });
@@ -537,7 +537,7 @@ test("an oversized line is skipped without being held in memory, and the offset 
   assert.equal(state.files[key].offset, Buffer.byteLength(first));
   assert.equal(r.skipped, 0);
 
-  add(t.file, huge.slice(3000) + asst("2026-09-28T01:02:00.000Z", "m2", 50_000));
+  add(t.file, huge.slice(3000) + asst("2026-09-28T15:02:00.000Z", "m2", 50_000));
   r = await collect(state, { projectsDir: t.projects, now: NOW, ...limits });
   assert.equal(r.skipped, 1);
   assert.equal(state.files[key].offset, fs.statSync(t.file).size);
@@ -548,8 +548,8 @@ test("an oversized line is skipped without being held in memory, and the offset 
 test("a transcript replaced on a new inode with the same content counts nothing twice", async () => {
   const t = tmp();
   const sub = subagentFile(t);
-  put(sub, asst("2026-09-28T02:05:00.000Z", "sub1", 150_000));
-  put(t.file, asst("2026-09-28T01:00:00.000Z", "m1", 50_000) + cost(1, { "claude-opus-5-5": 1 }) + asst("2026-09-28T02:00:00.000Z", "m2", 100_000));
+  put(sub, asst("2026-09-28T16:05:00.000Z", "sub1", 150_000));
+  put(t.file, asst("2026-09-28T15:00:00.000Z", "m1", 50_000) + cost(1, { "claude-opus-5-5": 1 }) + asst("2026-09-28T16:00:00.000Z", "m2", 100_000));
   const state = emptyState();
   await collect(state, { projectsDir: t.projects, now: NOW });
   const totals = () => {
@@ -568,10 +568,10 @@ test("a transcript replaced on a new inode with the same content counts nothing 
 
 test("a parent's cost-state covers subagent messages up to the time it was written, not the parent's last line", async () => {
   const t = tmp();
-  const start = ms("2026-09-28T00:59:00.000Z");
-  const written = ms("2026-09-28T01:15:00.000Z");
-  put(subagentFile(t), asst("2026-09-28T01:10:00.000Z", "sub1", 100_000) + asst("2026-09-28T01:20:00.000Z", "sub2", 50_000));
-  put(t.file, asst("2026-09-28T01:00:00.000Z", "m1", 50_000) + cost(start, { "claude-opus-5-5": 3 }, "s1", written - start));
+  const start = ms("2026-09-28T14:59:00.000Z");
+  const written = ms("2026-09-28T15:15:00.000Z");
+  put(subagentFile(t), asst("2026-09-28T15:10:00.000Z", "sub1", 100_000) + asst("2026-09-28T15:20:00.000Z", "sub2", 50_000));
+  put(t.file, asst("2026-09-28T15:00:00.000Z", "m1", 50_000) + cost(start, { "claude-opus-5-5": 3 }, "s1", written - start));
   const state = emptyState();
   await collect(state, { projectsDir: t.projects, now: NOW });
   const out = agg(state);
@@ -581,8 +581,8 @@ test("a parent's cost-state covers subagent messages up to the time it was writt
 
 test("without totalDuration, a cost-state covers up to the file's mtime", async () => {
   const t = tmp();
-  put(subagentFile(t), asst("2026-09-28T01:10:00.000Z", "sub1", 100_000));
-  put(t.file, asst("2026-09-28T01:00:00.000Z", "m1", 50_000) + cost(1, { "claude-opus-5-5": 3 }), new Date("2026-09-28T01:15:00.000Z"));
+  put(subagentFile(t), asst("2026-09-28T15:10:00.000Z", "sub1", 100_000));
+  put(t.file, asst("2026-09-28T15:00:00.000Z", "m1", 50_000) + cost(1, { "claude-opus-5-5": 3 }), new Date("2026-09-28T15:15:00.000Z"));
   const state = emptyState();
   await collect(state, { projectsDir: t.projects, now: NOW });
   const out = agg(state);
@@ -591,12 +591,12 @@ test("without totalDuration, a cost-state covers up to the file's mtime", async 
 
 test("a run that never saved keeps its estimate when a later run of the session saves", async () => {
   const t = tmp();
-  const start = ms("2026-09-28T02:00:00.000Z");
+  const start = ms("2026-09-28T16:00:00.000Z");
   put(
     t.file,
-    asst("2026-09-28T01:00:00.000Z", "m1", 50_000) +
-      user("2026-09-28T02:00:30.000Z") +
-      asst("2026-09-28T02:01:00.000Z", "m2", 100_000) +
+    asst("2026-09-28T15:00:00.000Z", "m1", 50_000) +
+      user("2026-09-28T16:00:30.000Z") +
+      asst("2026-09-28T16:01:00.000Z", "m2", 100_000) +
       cost(start, { "claude-opus-5-5": 2.2 }, "s1", 120_000),
   );
   const state = emptyState();
@@ -609,9 +609,9 @@ test("measured model names drop the context-size and date suffixes, so each mode
   const t = tmp();
   put(
     t.file,
-    asst("2026-09-28T01:00:00.000Z", "m1", 50_000, "claude-opus-5-5[1m]") +
+    asst("2026-09-28T15:00:00.000Z", "m1", 50_000, "claude-opus-5-5[1m]") +
       cost(1, { "claude-opus-5-5[1m]": 2, "claude-haiku-4-5-20251001": 0.5 }) +
-      asst("2026-09-28T02:00:00.000Z", "m2", 50_000, "claude-opus-5-5"),
+      asst("2026-09-28T16:00:00.000Z", "m2", 50_000, "claude-opus-5-5"),
   );
   const state = emptyState();
   await collect(state, { projectsDir: t.projects, now: NOW });
@@ -624,19 +624,19 @@ test("for two hours after a local day or month ends, its final totals are still 
   state.buckets["2026-09-30"] = { [PROJECT]: { opus: 51 } };
   state.buckets["2026-10-01"] = { [PROJECT]: { opus: 2 } };
   // 00:30 on 1 October, local.
-  let out = aggregate(state, { now: new Date("2026-09-30T14:30:00.000Z") });
+  let out = aggregate(state, { now: new Date("2026-10-01T04:30:00.000Z") });
   assert.equal(out.today.totalUSD, 2);
   assert.equal(out.previousDay?.day, "2026-09-30");
   assert.equal(out.previousDay?.spend.totalUSD, 51);
   assert.equal(out.previousMonth?.month, "2026-09");
   assert.equal(out.previousMonth?.spend.totalUSD, 51);
   // 02:30: the grace is over.
-  out = aggregate(state, { now: new Date("2026-09-30T16:30:00.000Z") });
+  out = aggregate(state, { now: new Date("2026-10-01T06:30:00.000Z") });
   assert.equal(out.previousDay, undefined);
   assert.equal(out.previousMonth, undefined);
   // An ordinary midnight carries only the day.
   state.buckets["2026-09-29"] = { [PROJECT]: { opus: 7 } };
-  out = aggregate(state, { now: new Date("2026-09-29T14:10:00.000Z") });
+  out = aggregate(state, { now: new Date("2026-09-30T04:10:00.000Z") });
   assert.equal(out.previousDay?.day, "2026-09-29");
   assert.equal(out.previousMonth, undefined);
 });
@@ -691,9 +691,9 @@ test("past the row limit the biggest chats keep their rows and the rest fold und
 
 test("a repeated or stale cost-state covers only up to its own write time", async () => {
   const t = tmp();
-  const start = ms("2026-09-28T00:59:00.000Z");
-  const saved = cost(start, { "claude-opus-5-5": 1 }, "s1", ms("2026-09-28T01:05:00.000Z") - start);
-  put(t.file, asst("2026-09-28T01:00:00.000Z", "m1", 50_000) + saved + asst("2026-09-28T01:10:00.000Z", "m2", 100_000) + saved);
+  const start = ms("2026-09-28T14:59:00.000Z");
+  const saved = cost(start, { "claude-opus-5-5": 1 }, "s1", ms("2026-09-28T15:05:00.000Z") - start);
+  put(t.file, asst("2026-09-28T15:00:00.000Z", "m1", 50_000) + saved + asst("2026-09-28T15:10:00.000Z", "m2", 100_000) + saved);
   const state = emptyState();
   await collect(state, { projectsDir: t.projects, now: NOW });
   const out = agg(state);
@@ -702,10 +702,10 @@ test("a repeated or stale cost-state covers only up to its own write time", asyn
 
 test("a transcript from the month that just ended is still read on the first scan of the grace window (DST)", async () => {
   const t = tmp();
-  // 23:59 on 31 October, local (daylight time, UTC+11); the scan runs at 00:01 on 1 November.
-  const written = new Date("2026-10-31T12:59:00.000Z");
+  // 23:59 on 31 October, local (daylight time); the scan runs at 00:01 on 1 November.
+  const written = new Date("2026-11-01T03:59:00.000Z");
   put(t.file, asst(written.toISOString(), "m1", 50_000), written);
-  const now = new Date("2026-10-31T13:01:00.000Z");
+  const now = new Date("2026-11-01T04:01:00.000Z");
   const state = emptyState();
   await collect(state, { projectsDir: t.projects, now });
   const out = aggregate(state, { now });
@@ -721,8 +721,8 @@ test("a session in a deleted folder takes its repo and chat from the transcript'
   const project = encodeProjectPath(`${root}/web`);
   fs.mkdirSync(path.join(t.projects, project));
   const file = path.join(t.projects, project, "s2.jsonl");
-  const cwdLine = (/** @type {string} */ cwd) => line({ type: "user", timestamp: "2026-09-28T00:59:00.000Z", cwd, message: { content: SECRET } });
-  put(file, cwdLine(`${HOME}/elsewhere`) + cwdLine(`${root}/web`) + asst("2026-09-28T01:00:00.000Z", "m1", 50_000));
+  const cwdLine = (/** @type {string} */ cwd) => line({ type: "user", timestamp: "2026-09-28T14:59:00.000Z", cwd, message: { content: SECRET } });
+  put(file, cwdLine(`${HOME}/elsewhere`) + cwdLine(`${root}/web`) + asst("2026-09-28T15:00:00.000Z", "m1", 50_000));
   const state = emptyState();
   await collect(state, { projectsDir: t.projects, now: NOW });
   const out = agg(state);
@@ -731,7 +731,7 @@ test("a session in a deleted folder takes its repo and chat from the transcript'
   // A cwd in an unknown repo, or that the session was not launched from, teaches nothing.
   const other = encodeProjectPath(`${HOME}/code/unknown/x`);
   fs.mkdirSync(path.join(t.projects, other));
-  put(path.join(t.projects, other, "s3.jsonl"), cwdLine(`${HOME}/code/unknown/x`) + cwdLine(`${root}/web`) + asst("2026-09-28T01:00:00.000Z", "m2", 50_000));
+  put(path.join(t.projects, other, "s3.jsonl"), cwdLine(`${HOME}/code/unknown/x`) + cwdLine(`${root}/web`) + asst("2026-09-28T15:00:00.000Z", "m2", 50_000));
   await collect(state, { projectsDir: t.projects, now: NOW });
   assert.equal(agg(state).today.byChat.find((row) => row.repo === "other")?.usd, 1);
 });

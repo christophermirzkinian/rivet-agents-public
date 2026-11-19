@@ -13,7 +13,7 @@ import { ROW_CLAUDE_ARGS, rowTitlerArgs } from "../../bridge/lib/row-titler.mjs"
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "model-pick-"));
 const picks = path.join(dir, "model-routing.json");
 process.env.RIVET_MODEL_ROUTING_FILE = picks;
-const pick = (jobs) => fs.writeFileSync(picks, JSON.stringify({ jobs, updated: { at: "2026-11-11T08:36:00+11:00", by: "owner", action: "set" } }));
+const pick = (jobs) => fs.writeFileSync(picks, JSON.stringify({ jobs, updated: { at: "2026-11-10T21:36:00Z", by: "owner", action: "set" } }));
 const flag = (args, name) => (args.includes(name) ? args[args.indexOf(name) + 1] : null);
 const SPEC = { name: "Issues", words: "look over the open issues", kind: "task", cron: "0 9 * * 1" };
 const PATHS = { rivet: "/home/someone/rivet-rivet/bin/rivet", logDir: "/home/someone/.rivet/jobs/logs" };

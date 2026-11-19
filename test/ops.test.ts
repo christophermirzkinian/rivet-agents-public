@@ -273,7 +273,7 @@ describe("bridge payload bounds", () => {
 
 describe("reset countdown", () => {
   const at = (iso: string) => Date.parse(iso);
-  // 2026-10-01T03:00Z is Thu 14:00 local time (UTC+11).
+  // 2026-10-01T03:00Z is Thu 14:00 in the test zone.
   const now = at("2026-10-01T03:00:00.000Z");
 
   it("shows the time and the countdown under a day", () => {
@@ -313,7 +313,7 @@ describe("reset countdown", () => {
 
 describe("briefing slots", () => {
   it("picks 07:30 and 18:00 local, else yesterday evening", () => {
-    // UTC+11: 07:30 local is 20:30 UTC the day before, 18:00 local is 07:00 UTC.
+    // In the test zone 07:30 local is 20:30 UTC the day before, 18:00 local is 07:00 UTC.
     expect(currentSlot(at("2026-09-27T20:29:00Z")).id).toBe("2026-09-27-evening");
     expect(currentSlot(at("2026-09-27T20:30:00Z")).id).toBe("2026-09-28-morning");
     expect(currentSlot(at("2026-09-28T07:00:00Z")).id).toBe("2026-09-28-evening");

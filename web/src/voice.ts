@@ -1,10 +1,11 @@
-// Read-aloud in the phone's own voice (the browser's speechSynthesis), free and on the device: Australian English
-// first, then British, and never any other. A phone with neither stays silent.
+// Read-aloud in the phone's own voice (the browser's speechSynthesis), free and on the device. The messages are
+// English, so it reads only in an English voice: the phone's own English, then US English, then any English.
+// A phone with no English voice stays silent.
 
 import { rivetWords } from "../../src/shared/names.js";
 
-/** The accents read-aloud may use, best first. */
-export const VOICE_LANGS = ["en-AU", "en-GB"] as const;
+/** The English read-aloud uses when the phone's own language is not English or it has no voice for it. */
+export const FALLBACK_LANG = "en-US";
 /** Longest piece given to the phone at once: Chrome can stop a long utterance part-way. */
 const PIECE_MAX = 250;
 /** Lines asked for before the phone has listed its voices wait this long for the list, then are dropped. */
@@ -48,19 +49,39 @@ export function canSpeak(): boolean {
   return synth() !== null;
 }
 
-const langOf = (voice: SpeechSynthesisVoice) => voice.lang.replace("_", "-").toLowerCase();
+/** A language tag's language and region, lower case: "en_GB" and "en-gb" both give ["en", "gb"]; "en" gives ["en", ""]. */
+function langParts(lang: string): [string, string] {
+  const [language = "", region = ""] = lang.replace(/_/g, "-").toLowerCase().split("-");
+  return [language, region];
+}
 
-/** The voice read-aloud uses: the first accent in VOICE_LANGS the phone has, its on-device voice before a network one. */
+/** `voice` is in `lang`: the same language, and the same region unless `lang` names none. */
+function speaks(voice: SpeechSynthesisVoice, lang: string): boolean {
+  const [language, region] = langParts(lang);
+  const [voiceLanguage, voiceRegion] = langParts(voice.lang);
+  return voiceLanguage === language && (!region || voiceRegion === region);
+}
+
+/**
+ * The languages read-aloud may use, best first. The messages are English, so: the phone's own (navigator.language)
+ * when that is English, then FALLBACK_LANG, then any English.
+ */
+export function voiceLangs(): string[] {
+  const own = typeof navigator === "undefined" ? "" : navigator.language || "";
+  return [...(langParts(own)[0] === "en" ? [own] : []), FALLBACK_LANG, "en"];
+}
+
+/** The voice read-aloud uses: the first language in voiceLangs() the phone has, its on-device voice before a network one. */
 export function pickVoice(voices: readonly SpeechSynthesisVoice[]): SpeechSynthesisVoice | null {
-  for (const lang of VOICE_LANGS) {
-    const matches = voices.filter((voice) => langOf(voice) === lang.toLowerCase());
+  for (const lang of voiceLangs()) {
+    const matches = voices.filter((voice) => speaks(voice, lang));
     const pick = matches.find((voice) => voice.localService) ?? matches[0];
     if (pick) return pick;
   }
   return null;
 }
 
-/** The phone has an Australian or British English voice. Until its list arrives this says no, and VOICES_EVENT follows. */
+/** The phone has an English voice. Until its list arrives this says no, and VOICES_EVENT follows. */
 export function voiceAvailable(): boolean {
   const s = synth();
   if (!s) return false;
@@ -104,7 +125,7 @@ function pieces(text: string): string[] {
   return out;
 }
 
-/** Queues `text` in the phone's voice; with no Australian or British voice it is skipped in silence. */
+/** Queues `text` in the phone's voice; with no English voice it is skipped in silence. */
 export function say(said: string): void {
   const text = rivetWords(said);
   const s = synth();

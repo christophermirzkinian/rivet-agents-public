@@ -16,7 +16,7 @@ const sha = (c: string) => c.repeat(64);
 const answered: MediaItem[] = ["1", "2"].map((c) => ({
   sha: sha(c),
   type: "image/png",
-  // 1:30am on Saturday 3 October at UTC+11, still the 2nd in UTC.
+  // 1:30am on Saturday 3 October in the test zone, still the 2nd in UTC.
   at: "2026-10-02T14:30:00.000Z",
   source: "card",
   title: "Results page: the new charts",
@@ -25,7 +25,7 @@ const answered: MediaItem[] = ["1", "2"].map((c) => ({
 const chat: MediaItem = {
   sha: sha("3"),
   type: "video/mp4",
-  // 11:30pm on Friday 2 October at UTC+11.
+  // 11:30pm on Friday 2 October in the test zone.
   at: "2026-10-02T12:30:00.000Z",
   source: "chat",
   title: "Results row",
@@ -34,7 +34,7 @@ const chat: MediaItem = {
 const open: MediaItem = {
   sha: sha("4"),
   type: "image/jpeg",
-  // 2:14pm on Thursday 1 October at UTC+11.
+  // 2:14pm on Thursday 1 October in the test zone.
   at: "2026-10-01T03:14:00.000Z",
   source: "card",
   title: "Quiz app: the sky",
@@ -49,7 +49,7 @@ const page: MediaPage = { items: [...answered, chat, open], next: null };
 
 beforeEach(async () => {
   vi.useFakeTimers({ toFake: ["Date"] });
-  // 2pm on Saturday 3 October at UTC+11.
+  // 2pm on Saturday 3 October in the test zone.
   vi.setSystemTime(new Date("2026-10-03T03:00:00.000Z"));
   vi.stubGlobal(
     "fetch",

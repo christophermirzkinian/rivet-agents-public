@@ -38,7 +38,7 @@ test("mentions keeps commits that name an issue after it was opened", () => {
 
 test("parseLog reads git's record and unit separators", () => {
   const sha = "d".repeat(40);
-  assert.deepEqual(parseLog(`${sha}\x1f2026-10-05T00:00:00+11:00\x1fsubject\x1fbody line\x1e\n`), [{ sha, at: "2026-10-05T00:00:00+11:00", subject: "subject", body: "body line" }]);
+  assert.deepEqual(parseLog(`${sha}\x1f2026-10-05T00:00:00+02:00\x1fsubject\x1fbody line\x1e\n`), [{ sha, at: "2026-10-05T00:00:00+02:00", subject: "subject", body: "body line" }]);
   assert.deepEqual(parseLog("garbage\x1e"), []);
 });
 

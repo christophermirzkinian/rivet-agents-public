@@ -622,26 +622,11 @@ a {
   padding: 10px 10px 14px 14px;
   border-radius: 18px;
   background: #0b0809;
-  border: 2px solid var(--line);
+  /* One even neutral line all round: the answer's colour is in its words, never a coloured outline. */
+  border: 1px solid var(--line);
   box-shadow: 0 16px 50px rgba(0, 0, 0, 0.6);
   pointer-events: auto;
   animation: toast-in 0.22s ease-out;
-}
-
-.toast.yes {
-  border-color: var(--yes);
-}
-
-.toast.no {
-  border-color: var(--no);
-}
-
-.toast.later {
-  border-color: var(--later);
-}
-
-.toast.note {
-  border-color: var(--note);
 }
 
 .toast.flash {
@@ -650,11 +635,11 @@ a {
 }
 
 .toast.flash.error {
-  border-color: var(--no);
+  color: var(--no);
 }
 
 .toast.flash.warn {
-  border-color: var(--apricot);
+  color: var(--apricot);
 }
 
 .toast-text {
@@ -678,6 +663,10 @@ a {
 
 .toast.later strong {
   color: var(--later);
+}
+
+.toast.note strong {
+  color: var(--note);
 }
 
 .toast-title {

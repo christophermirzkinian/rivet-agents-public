@@ -14,8 +14,8 @@ import { CLONE_SYNC, held, main, outputCollector, runCheck, spawnRun, stopped, u
 import { withRival } from "../../scripts/lock-race-fixture.mjs";
 import { tryLock } from "../../scripts/token-lock.mjs";
 
-// A UTC+10 zone with daylight saving and one repo: the Mac's own settings must not change these tests.
-const ZONE = "Antarctica/Macquarie";
+// A zone with daylight saving and one repo: the Mac's own settings must not change these tests.
+const ZONE = "America/New_York";
 const REPO = "example-org/example-repo";
 process.env.RIVET_TIME_ZONE = ZONE;
 process.env.RIVET_REPOS = REPO;
@@ -26,7 +26,7 @@ const NODE = "/usr/local/bin/node";
 const BASE = path.join(os.tmpdir(), "rivet-agents-fixture");
 const JOB_RUN = path.join(BASE, "scripts", "job-run.mjs");
 const LOGS = path.join(BASE, "logs");
-// The runner's clock starts at 2026-10-24T07:00:00Z, 6pm local.
+// The runner's clock starts at 2026-10-24T22:00:00Z, 6pm local.
 const ON_TIME = "0 18 * * *";
 // Assembled here so no token shape sits in the source.
 const FAKE_TOKEN = `${"gh"}p_abcdefghijklmnopqrstuvwxyz0123456789AB`;
@@ -421,7 +421,7 @@ function runner(opts = {}) {
   const ran = [];
   const detached = [];
   const out = [];
-  let now = Date.parse("2026-10-24T07:00:00Z");
+  let now = Date.parse("2026-10-24T22:00:00Z");
   const d = {
     env: { RIVET_URL: "http://localhost:5230", ...(opts.noRepoSet ? {} : { RIVET_REPOS: REPO }) },
     home,
@@ -896,7 +896,7 @@ test("job-run: two checks that both judged a dead check's lock stale do not both
   fs.mkdirSync(lock);
   const holder = path.join(lock, `${2 ** 22 + 12345}-${randomUUID()}`);
   fs.writeFileSync(holder, "");
-  const long = new Date(Date.parse("2026-10-24T03:00:00Z"));
+  const long = new Date(Date.parse("2026-10-24T18:00:00Z"));
   fs.utimesSync(holder, long, long);
   fs.utimesSync(lock, long, long);
   const lint = { script: "validate:docs", onRed: "card" };

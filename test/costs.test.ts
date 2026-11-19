@@ -40,12 +40,12 @@ async function cli(argv: string[]): Promise<{ code: number; stdout: string; stde
 
 describe("costs routes", () => {
   it("Rivet sets a row with the board token; Sam's session reads it with the totals", async () => {
-    const created = await send("PUT", "/api/costs/claude", { name: "Chat tool Team plan", aud: 1000, kind: "actual", note: "Paid by card" });
+    const created = await send("PUT", "/api/costs/chat-tool", { name: "Chat tool Team plan", aud: 1000, kind: "actual", note: "Paid by card" });
     expect(created.status).toBe(201);
-    expect(await created.json()).toEqual({ service: "claude", name: "Chat tool Team plan", aud: 1000, kind: "actual", note: "Paid by card", checkedAt: NOW });
-    expect((await send("PUT", "/api/costs/hosting", { name: "Hosting", aud: 400, kind: "actual", checkedAt: "2026-10-07T01:00:00+11:00" })).status).toBe(201);
+    expect(await created.json()).toEqual({ service: "chat-tool", name: "Chat tool Team plan", aud: 1000, kind: "actual", note: "Paid by card", checkedAt: NOW });
+    expect((await send("PUT", "/api/costs/hosting", { name: "Hosting", aud: 400, kind: "actual", checkedAt: "2026-10-06T16:00:00+02:00" })).status).toBe(201);
     // A second set replaces the whole row: its note goes when the set has none.
-    expect((await send("PUT", "/api/costs/claude", { name: "Chat tool Team plan", aud: 900.4, kind: "actual" })).status).toBe(200);
+    expect((await send("PUT", "/api/costs/chat-tool", { name: "Chat tool Team plan", aud: 900.4, kind: "actual" })).status).toBe(200);
 
     const view = await costs();
     expect(view.rows.map((row) => [row.service, row.aud, row.note, row.checkedAt])).toEqual([
@@ -107,25 +107,25 @@ describe("costsView", () => {
 
 describe("rivet cost", () => {
   it("sets, lists and drops rows; a set keeps the row's name, note and group unless given", async () => {
-    expect(await cli(["cost", "set", "chatgpt", "--name", "Writer Pro plan", "--aud", "500", "--kind", "actual", "--note", "Paid yearly", "--checked", "2026-10-07"])).toMatchObject({ code: 0, stdout: "chatgpt A$500 a month, actual, checked 2026-10-07\n" });
-    expect((await cli(["cost", "set", "chatgpt", "--aud", "480.2", "--kind", "actual"])).code).toBe(0);
-    expect((await costs()).rows).toEqual([{ service: "chatgpt", name: "Writer Pro plan", aud: 480.2, kind: "actual", note: "Paid yearly", checkedAt: NOW }]);
-    expect((await cli(["cost", "set", "chatgpt", "--aud", "480.2", "--kind", "actual", "--note", ""])).code).toBe(0);
+    expect(await cli(["cost", "set", "writer", "--name", "Writer Pro plan", "--aud", "500", "--kind", "actual", "--note", "Paid yearly", "--checked", "2026-10-07"])).toMatchObject({ code: 0, stdout: "writer A$500 a month, actual, checked 2026-10-07\n" });
+    expect((await cli(["cost", "set", "writer", "--aud", "480.2", "--kind", "actual"])).code).toBe(0);
+    expect((await costs()).rows).toEqual([{ service: "writer", name: "Writer Pro plan", aud: 480.2, kind: "actual", note: "Paid yearly", checkedAt: NOW }]);
+    expect((await cli(["cost", "set", "writer", "--aud", "480.2", "--kind", "actual", "--note", ""])).code).toBe(0);
     expect((await costs()).rows[0]?.note).toBeUndefined();
     // Rows of one group share a card on the page; a set without --group keeps it, --group "" takes it out.
-    expect((await cli(["cost", "set", "chatgpt", "--aud", "480.2", "--kind", "actual", "--group", "AI tools"])).code).toBe(0);
-    expect((await cli(["cost", "set", "chatgpt", "--aud", "480.2", "--kind", "actual"])).code).toBe(0);
+    expect((await cli(["cost", "set", "writer", "--aud", "480.2", "--kind", "actual", "--group", "AI tools"])).code).toBe(0);
+    expect((await cli(["cost", "set", "writer", "--aud", "480.2", "--kind", "actual"])).code).toBe(0);
     expect((await costs()).rows[0]?.group).toBe("AI tools");
     expect((await cli(["cost", "list"])).stdout).toContain("Writer Pro plan [AI tools]");
-    expect((await cli(["cost", "set", "chatgpt", "--aud", "480.2", "--kind", "actual", "--group", ""])).code).toBe(0);
+    expect((await cli(["cost", "set", "writer", "--aud", "480.2", "--kind", "actual", "--group", ""])).code).toBe(0);
     expect((await costs()).rows[0]?.group).toBeUndefined();
-    expect((await cli(["cost", "set", "chatgpt", "--aud", "1", "--kind", "actual", "--group", "x".repeat(61)])).code).toBe(2);
+    expect((await cli(["cost", "set", "writer", "--aud", "1", "--kind", "actual", "--group", "x".repeat(61)])).code).toBe(2);
 
     const listed = await cli(["cost", "list"]);
     expect(listed.code).toBe(0);
     expect(listed.stdout).toBe("A$480 a month, A$5,762 a year\nwriter  A$480  actual  2026-10-09  Writer Pro plan\n");
-    expect(await cli(["cost", "drop", "chatgpt"])).toMatchObject({ code: 0, stdout: "chatgpt dropped\n" });
-    expect((await cli(["cost", "drop", "chatgpt"])).code).toBe(1);
+    expect(await cli(["cost", "drop", "writer"])).toMatchObject({ code: 0, stdout: "writer dropped\n" });
+    expect((await cli(["cost", "drop", "writer"])).code).toBe(1);
   });
 
   it("keeps the name and note of a row a set leaves out, and only Rivet reads the row it set", async () => {
@@ -152,12 +152,12 @@ describe("rivet cost", () => {
 
   it("refuses a set it cannot send", async () => {
     for (const argv of [
-      ["cost", "set", "fly", "--kind", "estimate"],
-      ["cost", "set", "fly", "--aud", "1,000", "--kind", "estimate"],
-      ["cost", "set", "fly", "--aud", "10"],
-      ["cost", "set", "Fly", "--aud", "10", "--kind", "estimate"],
-      ["cost", "set", "fly", "--aud", "10", "--kind", "estimate", "--checked", "yesterday"],
-      ["cost", "list", "fly"],
+      ["cost", "set", "servers", "--kind", "estimate"],
+      ["cost", "set", "servers", "--aud", "1,000", "--kind", "estimate"],
+      ["cost", "set", "servers", "--aud", "10"],
+      ["cost", "set", "Servers", "--aud", "10", "--kind", "estimate"],
+      ["cost", "set", "servers", "--aud", "10", "--kind", "estimate", "--checked", "yesterday"],
+      ["cost", "list", "servers"],
     ])
       expect((await cli(argv)).code, argv.join(" ")).toBe(2);
   });

@@ -7,7 +7,7 @@ import type { OpsStatus, OpsStatusResponse } from "../src/shared/ops-status.js";
 import { setTimeZone } from "../src/shared/when.js";
 import { bearer, BOARD_TOKEN, fakeClock, startServer, type TestServer } from "./helpers.js";
 
-// Noon Saturday 24 October 2026 local time (+11).
+// Noon Saturday 24 October 2026 in the fixed test zone (vitest.setup.ts).
 const NOON = new Date("2026-10-24T01:00:00.000Z");
 
 describe("a done-by time read in local time", () => {
@@ -28,7 +28,7 @@ describe("a done-by time read in local time", () => {
     expect(due("today 18:00")).toBe("2026-10-24T07:00:00.000Z");
     expect(due("tonight")).toBe("2026-10-24T12:00:00.000Z");
     expect(due("12am")).toBe("2026-10-24T13:00:00.000Z");
-    expect(due("2026-10-24T16:00:00+11:00")).toBe("2026-10-24T05:00:00.000Z");
+    expect(due("2026-10-24T07:00:00+02:00")).toBe("2026-10-24T05:00:00.000Z");
   });
 
   it("takes a clock time already past as tomorrow's", () => {

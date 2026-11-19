@@ -13,7 +13,7 @@ const { opsData } = await import("../web/src/ops-data.js");
 const { MOOD_WORDS } = await import("../web/src/rivet/rivet.js");
 
 const MS = "example-org/example-repo";
-const NOW = Date.parse("2026-10-25T09:00:00+11:00");
+const NOW = Date.parse("2026-10-24T22:00:00Z");
 
 function worker(id: string, name: string, extra: Partial<Worker> = {}): Worker {
   return { id, name, repo: MS, chat: `chat-${id}`, state: "working", lastOutputAt: NOW - 30_000, ...extra } as Worker;

@@ -9,10 +9,29 @@ let host: HTMLElement | null = null;
 /** By key; `group` "answer" holds one at a time. */
 const undoToasts = new Map<string, { group: "answer" | "archive"; element: HTMLElement }>();
 let flashToast: { element: HTMLElement; timer: number } | null = null;
+let hostSize: ResizeObserver | null = null;
+
+/**
+ * Where the toasts end, as `--toasts-h` on the page (0 with none up): the phone's Decide card steps down below them so
+ * Undo never covers its head or title (decide-sheet.css).
+ */
+function sayToastsHeight(): void {
+  const root = document.documentElement;
+  const bottom = host?.firstElementChild ? Math.ceil(host.getBoundingClientRect().bottom) : 0;
+  const value = `${bottom}px`;
+  if (root.style.getPropertyValue("--toasts-h") !== value) root.style.setProperty("--toasts-h", value);
+}
 
 export function mountToasts(element: HTMLElement | null): void {
   clearToasts();
+  hostSize?.disconnect();
+  hostSize = null;
   host = element;
+  if (host && typeof ResizeObserver !== "undefined") {
+    hostSize = new ResizeObserver(sayToastsHeight);
+    hostSize.observe(host);
+  }
+  sayToastsHeight();
 }
 
 export function clearToasts(): void {

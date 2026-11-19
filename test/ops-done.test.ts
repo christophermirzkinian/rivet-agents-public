@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { doneToday, foldDue, foldedDone } from "../src/shared/ops-done.js";
 import type { OpsStatus } from "../src/shared/ops-status.js";
 
-// 1pm on Saturday 24 Oct local time (UTC+11).
+// 1pm on Saturday 24 Oct in the test zone.
 const NOW = new Date("2026-10-24T02:00:00.000Z");
 const fixed = (key: string, updatedAt: string, extra: Partial<OpsStatus> = {}): OpsStatus => ({ kind: "ci", key, state: "fixed", since: updatedAt, updatedAt, version: 1, ...extra });
 const noCard = () => false;

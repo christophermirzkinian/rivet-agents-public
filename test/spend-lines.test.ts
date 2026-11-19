@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { spendLines, type ClaudeLimit, type OpsResponse } from "../src/shared/ops.js";
 
-// The test zone is +11: 3 Oct 01:00 UTC is 12:00 local time.
+// In the fixed test zone (vitest.setup.ts), 3 Oct 01:00 UTC is 12:00 local time.
 const NOW = "2026-10-03T01:00:00.000Z";
 const at = Date.parse(NOW);
 const DAY = 86_400_000;

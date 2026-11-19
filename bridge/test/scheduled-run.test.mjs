@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { ExecError } from "../lib/config.mjs";
 
-// when.mjs reads the zone as it loads: a fixed UTC+11, for the day below.
+// when.mjs reads the zone as it loads: a fixed zone, for the day below.
 process.env.RIVET_TIME_ZONE = "Pacific/Guadalcanal";
 process.env.RIVET_REPOS = "example-org/example-repo";
 const { NO_RUN, resetWords, restReset, scheduledRun } = await import("../lib/scheduled-run.mjs");

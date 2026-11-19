@@ -28,6 +28,41 @@
   border-radius: 0;
 }
 
+/* On the phone the card has Rivet's chat's pull-down top again: a strip of the map above it, its grab bar, rounded
+   corners and an even 1px line. While a toast shows, the card steps down below it (--toasts-h, toast.ts), so Undo
+   never covers its head or title; it rises back when the toast goes. */
+html:not(.desktop) .sheet.is-tall.decide-sheet {
+  --decide-top: max(calc(env(safe-area-inset-top) + 40px), calc(var(--toasts-h, 0px) + 8px));
+  width: min(600px, calc(100% - 12px));
+  height: calc(var(--vv-h, 100dvh) - var(--decide-top));
+  max-height: calc(var(--vv-h, 100dvh) - var(--decide-top));
+  padding-top: 0;
+  border: 1px solid var(--line);
+  border-bottom: 0;
+  border-radius: 20px 20px 0 0;
+  transition:
+    transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1),
+    height 0.22s ease-out,
+    max-height 0.22s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:not(.desktop) .sheet.is-tall.decide-sheet {
+    transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+}
+
+/* While the finger holds it, it still follows with no lag: the rule above outranks the drag's `transition: none`. */
+html:not(.desktop) .sheet-backdrop.is-tall.is-dragging > .sheet.decide-sheet {
+  transition: none;
+}
+
+/* With the keyboard up the backdrop resizes at once (sheet.ts fitAboveKeyboard), so the card does too: an easing height
+   would stand it above the backdrop's top for a moment. */
+html:not(.desktop) .sheet-backdrop.is-tall.is-keyboard:not(.is-dragging) > .sheet.decide-sheet {
+  transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
 .sheet.is-tall > .sheet-body {
   display: flex;
   flex: 1;
@@ -35,8 +70,8 @@
   min-height: 0;
 }
 
-/* The drag-down handle: the whole width, so a thumb finds it. The Decide card has none: it is the screen, and a drag
-   down anywhere on it still closes it. */
+/* The drag-down handle: the whole width, so a thumb finds it. On the phone the Decide card has it too; a drag
+   down anywhere on the card still closes it. The computer's Decide has none. */
 .sheet-handle {
   display: flex;
   flex: none;
@@ -54,7 +89,7 @@
   background: rgba(214, 205, 255, 0.35);
 }
 
-.decide-sheet > .sheet-handle {
+html.desktop .decide-sheet > .sheet-handle {
   display: none;
 }
 

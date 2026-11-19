@@ -132,7 +132,7 @@ describe("ops statuses", () => {
   });
 
   it("takes a writer's since, and starts it again when a fixed failure comes back", async () => {
-    const first = await put("app/notes-app", { state: "fixed", since: "2026-10-01T09:00:00+10:00" });
+    const first = await put("app/notes-app", { state: "fixed", since: "2026-10-01T01:00:00+02:00" });
     expect(first.since).toBe("2026-09-30T23:00:00.000Z");
     clock.advance(60_000);
     expect((await put("app/notes-app", { state: "fixed", note: "redeployed" }, 200)).since).toBe("2026-09-30T23:00:00.000Z");
