@@ -148,6 +148,8 @@ export interface ConversationSummary {
   phase: ConversationPhase | null;
   /** A card is filed in it: it is a thing, with a page of its own, and not part of Chat. */
   thing: boolean;
+  /** The linked ask's id, as ThreadSummary.ask: the newest when it holds several. */
+  ask?: string;
 }
 
 /** GET /api/conversations: the open list, or with `older=1` a page of "Archived". */
@@ -159,10 +161,6 @@ export interface ConversationsResponse {
   unread: number;
   /** The cursor of the next page (`before`), when there is one. */
   next?: string;
-  /** Archived conversations, never Updates, with anything unread: Mark all read reads them too. Open list only. */
-  olderUnread?: number;
-  /** The server's time of this answer: Mark all read sends it back as `upTo`, so a later reply stays unread. */
-  at?: string;
 }
 
 /** GET /api/conversations/:id: the thread detail, plus what the list knows of it. */
@@ -208,23 +206,6 @@ export const conversationDoneSchema = z.object({ done: z.boolean() }).strict();
  */
 export const conversationMergeSchema = z.object({ into: z.string().regex(ID_PATTERN) }).strict();
 
-/** The most topics one Mark all read names as drawn past its list read. */
-export const READ_ALL_DRAWN_MAX = 200;
-
-/**
- * POST /api/conversations/read: `upTo` is the `at` of the list the phone drew, and `drawn` the newest line it drew on
- * a topic's card from the stream since; nothing newer is read.
- */
-export const conversationReadAllSchema = z
-  .object({
-    upTo: z.string().datetime().optional(),
-    drawn: z
-      .record(z.string().regex(ID_PATTERN), z.string().datetime())
-      .refine((drawn) => Object.keys(drawn).length <= READ_ALL_DRAWN_MAX, { message: "too many drawn topics" })
-      .optional(),
-  })
-  .strict();
-
 export interface MergeResponse {
   /** How many messages moved; 0 when it was already merged. */
   moved: number;
@@ -233,7 +214,7 @@ export interface MergeResponse {
 }
 
 /**
- * POST /api/conversations/split, your session or the board token (2026-10-20): every line typed with no Reply inside a
+ * POST /api/conversations/split, your session or the board token: every line typed with no Reply inside a
  * conversation it did not start before 2026-11-17 (from then such a line belongs there), moves out with what chains to it into a new
  * conversation named by its id; `conversation` limits it to one. `dryRun` answers the same and changes nothing. Run
  * again it moves nothing.
@@ -263,12 +244,6 @@ export const conversationBatchSchema = z
 export interface BatchResponse {
   /** How many conversations it changed (Updates is never closed; one already so is left). */
   changed: number;
-}
-
-/** POST /api/conversations/read with your session: marks every listed conversation read. */
-export interface ReadAllResponse {
-  /** How many conversations it marked read. */
-  read: number;
 }
 
 /** The `conversation` event on the chat stream: a conversation's title, closed or read state changed. */

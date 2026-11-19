@@ -487,12 +487,9 @@ describe("the desks", () => {
       const sheet = document.querySelector<HTMLElement>(".sheet.peek-sheet")!;
       expect(sheet).not.toBeNull();
       expect(sheet.querySelector(".peek-title")!.textContent).toBe(el.querySelector('.desk-agent[data-agent="a"] .desk-agent-what')!.textContent);
-      const facts = [...sheet.querySelectorAll(".peek-facts dt")].map((dt) => [dt.textContent, dt.nextElementSibling!.textContent]);
-      expect(facts).toEqual([
-        ["You asked", "the callouts should be off the page"],
-        ["Stage", "In review"],
-        ["PR", "#21 ›"],
-      ]);
+      expect([...sheet.querySelectorAll(".peek-strip .peek-chip")].map((chip) => chip.textContent)).toEqual(["In review", "PR#21 ›"]);
+      expect(sheet.querySelector('.peek-pane[data-pane="ticket"] .peek-words')!.textContent).toBe("the callouts should be off the page");
+      expect(sheet.querySelector(".peek-stage .peek-dot-s")!.getAttribute("data-tone")).toBe("review");
       expect(sheet.querySelector(".peek-screen-head .peek-h")!.textContent).toBe("Its screen");
       expect(sheet.textContent).not.toMatch(/live log/i);
       // Read only: nothing to type in.

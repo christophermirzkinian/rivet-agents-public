@@ -119,15 +119,15 @@ describe("a chat search hit", () => {
     expect(app.chatFocus).toBeNull();
   });
 
-  it("in a thing lights it in Chat, which shows it now (2026-11-16); its Open topic opens the thing's page, only that thing's messages", async () => {
+  it("in a thing lights it in Chat, which shows it now; the thing's page holds only that thing's messages", async () => {
     chat.mount(root);
     await settle();
-    expect(root.querySelector('.chat-thing-row[data-id="b1"]')).not.toBeNull();
     openTarget({ type: "message", id: "b2" });
     await settle();
     expect(chat.openConversation()).toBeNull();
     expect(shown("b2")!.classList.contains("lit")).toBe(true);
-    shown("b2")!.querySelector<HTMLButtonElement>(".chat-topic-link")!.click();
+    expect(shown("b2")!.querySelector(".chat-topic-link")).toBeNull();
+    chat.showConversation("b");
     await settle();
     expect(chat.openConversation()).toBe("b");
     expect(title()).toBe("Short one");
@@ -143,26 +143,45 @@ describe("a chat search hit", () => {
     expect(chatRequests().some((one) => one.includes("before="))).toBe(true);
     expect(shown("a010")!.scrollIntoView).toHaveBeenCalled();
     expect(shown("a010")!.classList.contains("lit")).toBe(true);
-    // Earlier ones than that are still there to load.
-    expect(root.querySelector<HTMLElement>(".conv-earlier")!.hidden).toBe(false);
+    // No Earlier messages button, and the loading note is down once the hit is in.
+    expect(root.querySelector("button.conv-earlier")).toBeNull();
+    expect(root.querySelector<HTMLElement>(".conv-earlier")!.hidden).toBe(true);
     expect(flashed).toEqual([]);
   });
 
-  it("Earlier messages loads the ones before the earliest shown, and goes once there are none", async () => {
+  it("no Earlier messages button; scrolling to the top loads the ones before, and nothing loads once there are none", async () => {
     chat.showConversation("a");
     chat.mount(root);
     await settle();
     expect(shown("a100")).not.toBeNull();
     expect(shown("a099")).toBeNull();
-    const earlier = root.querySelector<HTMLButtonElement>(".conv-earlier")!;
-    expect(earlier.hidden).toBe(false);
-    expect(earlier.textContent).toBe("Earlier messages");
-    earlier.click();
+    expect(root.querySelector("button.conv-earlier")).toBeNull();
+    expect(root.textContent).not.toContain("Earlier messages");
+    const box = root.querySelector<HTMLElement>(".chat-scroll")!;
+    let top = 900;
+    vi.spyOn(box, "clientHeight", "get").mockReturnValue(600);
+    vi.spyOn(box, "scrollTop", "get").mockImplementation(() => top);
+    vi.spyOn(box, "scrollTop", "set").mockImplementation((value: number) => void (top = value));
+    const before = () => server.requests.filter((one) => one.includes("before=")).length;
+    // Scrolling down here asks for nothing.
+    box.dispatchEvent(new Event("scroll"));
+    await settle();
+    expect(before()).toBe(0);
+    top = 0;
+    box.dispatchEvent(new Event("scroll"));
+    const note = root.querySelector<HTMLElement>(".conv-earlier")!;
+    expect(note.hidden).toBe(false);
+    expect(note.textContent).toBe("Loading earlier messages…");
     await settle();
     expect(shown("a099")).not.toBeNull();
     expect(shown("a")).not.toBeNull();
     expect(root.querySelectorAll(".chat-msg")).toHaveLength(400);
-    expect(earlier.hidden).toBe(true);
+    expect(note.hidden).toBe(true);
+    expect(before()).toBe(1);
+    top = 0;
+    box.dispatchEvent(new Event("scroll"));
+    await settle();
+    expect(before()).toBe(1);
   });
 
   it("says so for a message that is gone, and stays on Chat", async () => {

@@ -31,7 +31,7 @@ const MESSAGES: ChatMessage[] = [
 ];
 
 // Rivet's sheet on a phone with the keyboard up, as Chrome lays it out (measured in web/preview/typing-jump.mjs): the
-// sheet's chat shows 351px; its head, More topics and the attached photo take 263px over the box.
+// sheet's chat shows 351px; its head, the topics bar and the attached photo take 263px over the box.
 const SHOWN = 351;
 const ABOVE_BOX = 263;
 const ONE_LINE = 45;
@@ -64,7 +64,7 @@ function layOut(host: HTMLElement, text: HTMLTextAreaElement): void {
 }
 
 beforeEach(() => {
-  const server = fakeServer(MESSAGES.map((message) => ({ ...message })), { k1: { title: "Night Batch results row" } });
+  const server = fakeServer(MESSAGES.map((message) => ({ ...message })), { k1: { title: "Results row" } });
   history.replaceState(null, "");
   vi.stubGlobal("fetch", vi.fn(server.fetch));
   vi.stubGlobal("EventSource", FakeSource);
@@ -81,19 +81,19 @@ afterEach(() => {
 });
 
 describe("typing in Rivet's sheet with the keyboard up", () => {
-  it("More topics and the box stay where they are on every key", async () => {
+  it("the head and the box stay where they are on every key", async () => {
     chat.startDraft("");
     chat.mount(root);
     await settle();
     root.querySelector<HTMLButtonElement>(".thing-back")?.click();
     await settle();
     const text = root.querySelector<HTMLTextAreaElement>(".chat-text")!;
-    const row = root.querySelector<HTMLElement>(".chat-topics-row")!;
-    expect(row.textContent).toContain("More topics");
+    const row = root.querySelector<HTMLElement>(".chat-head")!;
+    expect(root.querySelector(".chat-topics-row")).toBeNull();
     layOut(root, text);
     text.value = "Before the next release, can we check the sign-up names";
     text.dispatchEvent(new Event("input"));
-    // The phone's Chrome brings the whole box above the keyboard, which scrolls More topics mostly out of view.
+    // The phone's Chrome brings the whole box above the keyboard, which scrolls the head mostly out of view.
     root.scrollTop = 64;
     expect(root.scrollTop).toBe(64);
 
@@ -101,7 +101,7 @@ describe("typing in Rivet's sheet with the keyboard up", () => {
     for (const key of " so nothing rude or out of place gets through?") {
       text.value += key;
       text.dispatchEvent(new Event("input"));
-      // What is on screen after the key: how far the sheet is scrolled, More topics there, and the box's height.
+      // What is on screen after the key: how far the sheet is scrolled, the head there, and the box's height.
       seen.add(JSON.stringify([root.scrollTop, row.hidden, row.isConnected, row.textContent, text.style.height]));
     }
     expect([...seen]).toEqual([JSON.stringify([64, false, true, row.textContent, "180px"])]);

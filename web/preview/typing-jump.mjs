@@ -74,7 +74,7 @@ try {
               t.scrollTop = t.scrollHeight;
               t.dispatchEvent(new Event("input", { bubbles: true }));
               requestAnimationFrame(() => {
-                const row = document.querySelector(".rivet-sheet .chat-topics-row").getBoundingClientRect();
+                const row = document.querySelector(".rivet-sheet .chat-search").getBoundingClientRect();
                 const box = document.querySelector(".rivet-sheet .chat-compose-box").getBoundingClientRect();
                 done([Math.round(host.scrollTop), Math.round(row.bottom), Math.round(box.bottom), Math.round(t.offsetHeight)]);
               });
@@ -84,7 +84,7 @@ try {
       );
     }
     const sheetBottom = await page.evaluate(() => Math.round(document.querySelector(".rivet-sheet .home-chat").getBoundingClientRect().bottom));
-    // Nothing may move: the scroll, More topics and the box stay where they are, the box above the sheet's bottom.
+    // Nothing may move: the scroll, the topics bar and the box stay where they are, the box above the sheet's bottom.
     const late = frames;
     const scrolls = new Set(late.map((f) => f[0]));
     const rows = new Set(late.map((f) => f[1]));
@@ -92,7 +92,7 @@ try {
     const cut = late.filter((f) => f[2] > sheetBottom + 4).length;
     const ok = late.length > 50 && scrolls.size === 1 && rows.size === 1 && bottoms.size === 1 && cut === 0;
     if (!ok) bad++;
-    console.log(`${ok ? "ok  " : "FAIL"} ${w}x${kb}: ${late.length} keys; scroll ${[...scrolls].join(",")} More topics bottom ${[...rows].join(",")} box bottom ${[...bottoms].join(",")} (sheet ${sheetBottom}) cut ${cut}`);
+    console.log(`${ok ? "ok  " : "FAIL"} ${w}x${kb}: ${late.length} keys; scroll ${[...scrolls].join(",")} topics bar bottom ${[...rows].join(",")} box bottom ${[...bottoms].join(",")} (sheet ${sheetBottom}) cut ${cut}`);
     if (shots) await page.screenshot({ path: `${shots}/typing-${w}.png` });
     await context.close();
   }

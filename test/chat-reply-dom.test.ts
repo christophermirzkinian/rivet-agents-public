@@ -2,18 +2,22 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { quoteText, type ChatMessage } from "../src/shared/command.js";
+import { TEAM_ROOM_ID, UPDATES_ID } from "../src/shared/conversations.js";
 import { app } from "../web/src/state.js";
-import { detailBody, EMPTY_LIST } from "./conversations-fake.js";
+import { detailBody, EMPTY_LIST, fakeServer, type FakeConversation, type FakeServer } from "./conversations-fake.js";
 
 vi.mock("../web/src/voice.js", async (original) => ({
   ...(await original<typeof import("../web/src/voice.js")>()),
   say: () => {},
+  canSpeak: () => true,
   unlockVoice: () => Promise.resolve(true),
   unlockOnTap: () => () => {},
   stopVoice: () => {},
 }));
 
 const chat = await import("../web/src/views/chat.js");
+const { closeSheet } = await import("../web/src/views/sheet.js");
+const { autoSpeak, setAutoSpeak } = await import("../web/src/voice.js");
 
 const LONG = `Photo Album v3 is live and verified on every phone we have, ${"and the demo video is next ".repeat(6)}\nsecond line`;
 let root: HTMLElement;
@@ -60,8 +64,9 @@ const settle = async () => {
   for (let i = 0; i < 6; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
 };
 const bubble = (id: string) => root.querySelector<HTMLElement>(`.chat-msg[data-id="${id}"]`)!;
-/** The one Reply under the topic card holding message `id`: it answers the card's last line. */
-const replyUnder = (id: string) => bubble(id).closest(".chat-ex")!.querySelector<HTMLButtonElement>(":scope > .chat-ex-foot .chat-reply")!;
+/** A line's own Reply. */
+const replyOn = (id: string) => bubble(id).querySelector<HTMLButtonElement>('.chat-msg-tools [data-use="chat.msg.reply"]')!;
+const moreOn = (id: string) => bubble(id).querySelector<HTMLButtonElement>('.chat-msg-tools [data-use="chat.msg.more"]');
 const bar = () => root.querySelector<HTMLElement>(".chat-replying")!;
 const box = () => root.querySelector<HTMLTextAreaElement>(".chat-text")!;
 
@@ -122,7 +127,7 @@ describe("a refresh redraws only what changed", () => {
     await settle();
     let answer!: () => void;
     postHeld = new Promise((resolve) => (answer = resolve));
-    replyUnder("h2").click();
+    replyOn("h2").click();
     box().value = "Send it";
     root.querySelector<HTMLButtonElement>(".chat-send")!.click();
     await settle();
@@ -162,7 +167,7 @@ describe("a refresh redraws only what changed", () => {
     app.board = null;
   });
 
-  it("keeps a posted card's one-line row on Chat, which shows it without its media", async () => {
+  it("keeps a posted card's row on Chat, a posted bubble with Open card and without its media", async () => {
     const stills = { kind: "stills" as const, stills: [{ sha256: "c".repeat(64), type: "image/png" as const }] };
     app.board = { version: 1, updatedAt: null, board: { updatedAt: "", needs: [{ id: "upd", kind: "update", title: "Home stills", rev: "r1", media: stills }], coming: [], chats: [], shipped: [] } } as unknown as typeof app.board;
     history = [...history, { id: "h3", from: "rivet", text: "", at: "2030-01-01T00:00:03.000Z", posted: { id: "upd", kind: "update", title: "Home stills" } }];
@@ -178,7 +183,9 @@ describe("a refresh redraws only what changed", () => {
     chat.mount(root);
     await settle();
     const h3 = bubble("h3");
-    expect(h3.classList.contains("chat-thing-row")).toBe(true);
+    expect(h3.classList.contains("chat-thing-row")).toBe(false);
+    expect(h3.querySelector(".chat-posted .chat-posted-open")!.textContent).toBe("Open card");
+    expect(h3.querySelector(".chat-posted > :not(span, strong, p, button)")).toBeNull();
     await chat.refresh();
     await settle();
     expect(bubble("h3")).toBe(h3);
@@ -251,21 +258,11 @@ describe("Chat's first page replaces the last visit's copy", () => {
 });
 
 describe("reply in chat", () => {
-  it("puts one Reply under his question and Rivet's answer, none on a bubble", async () => {
+  it("Reply shows who and the first line above the box on a conversation's page, focuses it, and × takes it back", async () => {
     chat.mount(root);
     await settle();
-    const card = bubble("c1").closest(".chat-ex")!;
-    expect(bubble("h2").closest(".chat-ex")).toBe(card);
-    expect(card.querySelectorAll(".chat-reply")).toHaveLength(1);
-    expect(replyUnder("h2")).not.toBeNull();
-    expect(root.querySelector(".chat-msg .chat-reply")).toBeNull();
-    expect(bar().hidden).toBe(true);
-  });
-
-  it("Reply shows who and the first line above the box, focuses it, and × takes it back", async () => {
-    chat.mount(root);
-    await settle();
-    replyUnder("h2").click();
+    replyOn("h2").click();
+    expect(bar().classList.contains("labelled")).toBe(false);
     expect(bar().hidden).toBe(false);
     expect(bar().querySelector(".chat-quote-who")!.textContent).toBe("Rivet");
     const line = bar().querySelector(".chat-quote-text")!.textContent!;
@@ -284,19 +281,10 @@ describe("reply in chat", () => {
     expect(posted[0]).not.toHaveProperty("replyTo");
   });
 
-  it("a reply to his own message says You", async () => {
-    history.push({ id: "c3", from: "owner", text: "And the pear?", at: "2030-01-01T00:00:03.000Z", status: "replied" });
-    chat.mount(root);
-    await settle();
-    replyUnder("c3").click();
-    expect(bar().querySelector(".chat-quote-who")!.textContent).toBe("You");
-    expect(bar().querySelector(".chat-quote-text")!.textContent).toBe("And the pear?");
-  });
-
   it("the sent message carries the id it answers and shows the quote in its bubble; the bar closes", async () => {
     chat.mount(root);
     await settle();
-    replyUnder("h2").click();
+    replyOn("h2").click();
     box().value = "Send it";
     root.querySelector<HTMLButtonElement>(".chat-send")!.click();
     await settle();
@@ -310,7 +298,7 @@ describe("reply in chat", () => {
   it("a tab switch keeps the reply with the draft, and a send clears both", async () => {
     chat.mount(root);
     await settle();
-    replyUnder("h2").click();
+    replyOn("h2").click();
     box().value = "Send it";
     box().dispatchEvent(new Event("input"));
     chat.unmount();
@@ -341,7 +329,7 @@ describe("reply in chat", () => {
     );
     chat.mount(root);
     await settle();
-    replyUnder("h2").click();
+    replyOn("h2").click();
     box().value = "Send it";
     root.querySelector<HTMLButtonElement>(".chat-send")!.click();
     await settle();
@@ -596,13 +584,15 @@ describe("a chat whose read fails (review F4)", () => {
     expect(document.activeElement).toBe(pane);
   });
 
-  it("Earlier messages failing says so plainly, never the server's words (review r2)", async () => {
+  it("earlier messages failing at the top says so plainly, never the server's words, and asks again only after a scroll away (review r2)", async () => {
     chat.unmount();
+    let failed = 0;
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = new URL(String(input), "http://x");
         if (url.pathname !== "/api/chat") return fakeFetch(input, init);
+        if (url.searchParams.has("before")) failed++;
         return url.searchParams.has("before")
           ? new Response(JSON.stringify({ error: "SQLITE_BUSY: database is locked" }), { status: 500, headers: { "content-type": "application/json" } })
           : new Response(JSON.stringify({ messages: [history[0]!], older: "c0" }), { status: 200, headers: { "content-type": "application/json" } });
@@ -611,9 +601,257 @@ describe("a chat whose read fails (review F4)", () => {
     chat.showRivetChat();
     chat.mount(root);
     await settle();
-    root.querySelector<HTMLButtonElement>("button.conv-earlier")!.click();
+    const box = root.querySelector<HTMLElement>(".chat-scroll")!;
+    let top = 0;
+    vi.spyOn(box, "clientHeight", "get").mockReturnValue(600);
+    vi.spyOn(box, "scrollTop", "get").mockImplementation(() => top);
+    box.dispatchEvent(new Event("scroll"));
     await settle();
+    expect(failed).toBe(1);
     expect(root.querySelector(".chat-hint")!.textContent).toBe("Couldn't load earlier messages.");
     expect(root.textContent).not.toMatch(/SQLITE|Request failed/);
+    // Still at the top, it is not asked again on every scroll event; away and back, it is.
+    box.dispatchEvent(new Event("scroll"));
+    await settle();
+    expect(failed).toBe(1);
+    top = 400;
+    box.dispatchEvent(new Event("scroll"));
+    top = 0;
+    box.dispatchEvent(new Event("scroll"));
+    await settle();
+    expect(failed).toBe(2);
+  });
+});
+
+describe("one chat: every line its own More and Reply, each run its label", () => {
+  const minute = (n: number) => new Date(Date.UTC(2030, 0, 1, 0, n)).toISOString();
+  const line = (id: string, from: "owner" | "rivet", thread: string, n: number, text: string, extra: Partial<ChatMessage> = {}): ChatMessage => ({
+    id,
+    from,
+    text,
+    at: minute(n),
+    threadId: thread,
+    ...(from === "owner" ? { status: "replied" as const } : {}),
+    ...extra,
+  });
+  const MESSAGES = (): ChatMessage[] => [
+    line(UPDATES_ID, "rivet", UPDATES_ID, 0, "Updates from Rivet"),
+    line("u1", "rivet", UPDATES_ID, 0, "Nightly: main green"),
+    line("a1", "owner", "a1", 1, "How is the demo ad going?"),
+    line("a2", "rivet", "a1", 2, "It is waiting on your approval.", { replyTo: "a1", quote: { from: "owner", text: "How is the demo ad going?" } }),
+    line("a3", "owner", "a1", 3, "Send me the stills"),
+    line("a4", "rivet", "a1", 4, "Three stills are on the card."),
+    line("p1", "owner", "p1", 5, "Is CI green?"),
+    line("p2", "rivet", "p1", 6, "Green on main."),
+    line("q1", "rivet", "a1", 7, "The upload finished.", { replyTo: "a0", quote: { from: "rivet", text: "Last week's upload is ready." } }),
+    line("b1", "owner", "b1", 8, "Ship the pear results row to everyone please today", { status: "sent" }),
+  ];
+  const CONVERSATIONS = (): Record<string, FakeConversation> => ({
+    [UPDATES_ID]: { title: "Updates" },
+    a1: { title: "Demo ad approval", ask: "a-12" },
+    p1: { title: "CI on main" },
+    b1: { title: "" },
+  });
+  let server: FakeServer;
+  const options = () => root.querySelector<HTMLButtonElement>(".chat-head .chat-options")!;
+  const run = (id: string) => bubble(id).closest<HTMLElement>(".chat-ex")!;
+
+  async function onChat(): Promise<void> {
+    chat.startDraft("");
+    chat.showRivetChat();
+    chat.mount(root);
+    await settle();
+  }
+
+  beforeEach(() => {
+    server = fakeServer(MESSAGES(), CONVERSATIONS());
+    window.history.replaceState(null, "");
+    vi.stubGlobal("fetch", vi.fn(server.fetch));
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+    app.chatFocus = null;
+    app.chatUnread = 0;
+  });
+
+  afterEach(() => closeSheet());
+
+  it("gives every line its own More and Reply, his own lines too", async () => {
+    await onChat();
+    for (const id of ["a2", "a4", "p2", "q1", "a1", "a3", "p1", "b1"]) {
+      expect(moreOn(id), id).not.toBeNull();
+      expect(replyOn(id), id).not.toBeNull();
+    }
+    expect(root.querySelector(".chat-ex-foot, .chat-reply, .chat-ex-more")).toBeNull();
+    expect(bar().hidden).toBe(true);
+  });
+
+  it("leaves Reply off his line while it still collects: a reply would send its window early", async () => {
+    server = fakeServer([...MESSAGES(), line("c2", "owner", "c2", 9, "and the copy", { status: "collecting", sendsAt: minute(30) })], {
+      ...CONVERSATIONS(),
+      c2: { title: "" },
+    });
+    vi.stubGlobal("fetch", vi.fn(server.fetch));
+    await onChat();
+    expect(moreOn("c2")).not.toBeNull();
+    expect(bubble("c2").querySelector('[data-use="chat.msg.reply"]')).toBeNull();
+    expect(replyOn("b1")).not.toBeNull();
+  });
+
+  it("drops a reply whose line was cancelled, here or on another device, so no send is refused for it", async () => {
+    server = fakeServer([...MESSAGES(), line("c3", "owner", "c3", 9, "one more thing", { status: "sent" })], { ...CONVERSATIONS(), c3: { title: "" } });
+    vi.stubGlobal("fetch", vi.fn(server.fetch));
+    await onChat();
+    replyOn("c3").click();
+    expect(bar().hidden).toBe(false);
+    fire({ id: "c3", from: "owner", text: "", at: minute(9), status: "cancelled" } as ChatMessage);
+    await settle();
+    expect(bar().hidden).toBe(true);
+    expect(localStorage.getItem("rivet.chat.reply")).toBeNull();
+  });
+
+  it("Reply on Chat says Replying to the line's label, and the send carries that line with no conversation", async () => {
+    await onChat();
+    replyOn("p2").click();
+    expect(bar().hidden).toBe(false);
+    expect(bar().classList.contains("labelled")).toBe(true);
+    expect(bar().querySelector(".chat-quote")!.textContent).toBe("Replying to CI on main");
+    expect(bar().querySelector(".chat-quote strong")!.textContent).toBe("CI on main");
+    expect(document.activeElement).toBe(box());
+    box().value = "And on the branch?";
+    box().dispatchEvent(new Event("input"));
+    root.querySelector<HTMLButtonElement>(".chat-send")!.click();
+    await settle();
+    expect(server.posted.at(-1)).toMatchObject({ text: "And on the branch?", replyTo: "p2", conversation: null });
+    expect(bar().hidden).toBe(true);
+  });
+
+  it("shows a grey label before Rivet's first line in each run, its ask and title when it has an ask", async () => {
+    await onChat();
+    const label = bubble("a2").previousElementSibling as HTMLElement;
+    expect(label.matches("li.chat-label")).toBe(true);
+    expect(label.textContent).toBe("a-12 · Demo ad approval");
+    expect(bubble("a1").nextElementSibling).toBe(label);
+    expect(run("a2").querySelectorAll(".chat-label")).toHaveLength(1);
+    expect(run("p2").querySelector(".chat-label")!.textContent).toBe("CI on main");
+    // His waiting line alone has no Rivet line to label.
+    expect(run("b1").querySelector(".chat-label")).toBeNull();
+    replyOn("a4").click();
+    expect(bar().querySelector(".chat-quote strong")!.textContent).toBe("a-12 · Demo ad approval");
+  });
+
+  it("keeps the quote on a reply to a line Chat has not loaded", async () => {
+    await onChat();
+    expect(bubble("q1").querySelectorAll(".chat-quote")).toHaveLength(1);
+    expect(bubble("q1").querySelector(".chat-quote")!.textContent).toContain("Last week's upload is ready.");
+    // No quote for a line answering the one just above it.
+    expect(bubble("a2").querySelector(".chat-quote")).toBeNull();
+  });
+
+  it("shows Rivet working on a run whose last line is his and unanswered", async () => {
+    await onChat();
+    const wait = run("b1").querySelector<HTMLElement>(".chat-ex-wait")!;
+    expect(wait.textContent).toContain("Rivet is working on it");
+    expect(run("p1").querySelector(".chat-ex-wait")).toBeNull();
+  });
+
+  it("offers More but no Reply on read-only Updates", async () => {
+    chat.showConversation(UPDATES_ID);
+    chat.mount(root);
+    await settle();
+    expect(moreOn("u1")).not.toBeNull();
+    expect(root.querySelector('[data-use="chat.msg.reply"]')).toBeNull();
+  });
+
+  it("in the agents' room, Reply on an agent's line answers that line and its agent; his own line has none", async () => {
+    const room = [
+      line("t1", "rivet", TEAM_ROOM_ID, 1, "board up", { team: { from: "photo-album", to: "monitor" } }),
+      line("t2", "owner", TEAM_ROOM_ID, 2, "looks good"),
+      line("t3", "rivet", TEAM_ROOM_ID, 3, "thanks, shipping it", { team: { from: "photo-album", to: "monitor" } }),
+      line("t4", "rivet", TEAM_ROOM_ID, 4, "video ready", { team: { from: "checkout-page", to: "monitor" } }),
+      // The hourly summary is Rivet's, with no agent on it.
+      line("team-summary-5", "rivet", TEAM_ROOM_ID, 5, "Last hour: 3 messages, 2 chats"),
+    ];
+    const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) =>
+        Promise.resolve(json(new URL(String(input), "http://x").pathname.startsWith("/api/conversations/") ? detailBody(TEAM_ROOM_ID, room) : EMPTY_LIST)),
+      ),
+    );
+    // A kept reply in the room that names no agent (another tab, an older build) is not brought back.
+    localStorage.setItem(
+      "rivet.chat.reply",
+      JSON.stringify({ id: "team-summary-5", quote: { from: "rivet", text: "Last hour: 3 messages, 2 chats" }, conversation: TEAM_ROOM_ID }),
+    );
+    chat.showConversation(TEAM_ROOM_ID);
+    chat.mount(root);
+    await settle();
+    expect(bubble("t1").textContent).toContain("photo-album → monitor");
+    // Only an agent's line names whom a reply in the room is for.
+    expect(moreOn("t2")).not.toBeNull();
+    expect(bubble("t2").querySelector('[data-use="chat.msg.reply"]')).toBeNull();
+    expect(moreOn("team-summary-5")).not.toBeNull();
+    expect(bubble("team-summary-5").querySelector('[data-use="chat.msg.reply"]')).toBeNull();
+    replyOn("t1").click();
+    await settle();
+    expect(bar().textContent).toContain("board up");
+    expect(JSON.parse(localStorage.getItem("rivet.chat.reply")!)).toMatchObject({ id: "t1", owner: "photo-album" });
+    replyOn("t4").click();
+    await settle();
+    expect(bar().textContent).toContain("video ready");
+    expect(JSON.parse(localStorage.getItem("rivet.chat.reply")!)).toMatchObject({ id: "t4", owner: "checkout-page" });
+  });
+
+  it("puts Read aloud alone in Chat's options, a switch that turns it on and off", async () => {
+    setAutoSpeak(false);
+    await onChat();
+    expect(options().getAttribute("aria-label")).toBe("Chat options");
+    expect(options().getAttribute("aria-haspopup")).toBe("menu");
+    expect(root.querySelector(".chat-head > .chat-tools > .chat-speak")).toBeNull();
+    const menu = root.querySelector<HTMLElement>(".chat-menu")!;
+    expect(menu.hidden).toBe(true);
+    options().click();
+    expect(menu.hidden).toBe(false);
+    expect([...menu.querySelectorAll(".chat-menu-item")].map((item) => item.textContent)).toEqual(["Read aloud"]);
+    const toggle = root.querySelector<HTMLButtonElement>(".chat-menu .chat-speak")!;
+    expect(toggle.getAttribute("role")).toBe("menuitemcheckbox");
+    toggle.click();
+    expect(autoSpeak()).toBe(true);
+    options().click();
+    toggle.click();
+    expect(autoSpeak()).toBe(false);
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(menu.hidden).toBe(true);
+  });
+
+  it("shows Chat's head only on Chat, a conversation page keeping its own Read aloud", async () => {
+    chat.showConversation("a1");
+    chat.mount(root);
+    await settle();
+    expect(root.querySelector(".chat-speak:not(.chat-menu-item)")).not.toBeNull();
+    expect(root.querySelector<HTMLElement>(".chat-head")!.hidden).toBe(true);
+    root.querySelector<HTMLButtonElement>(".thing-back")!.click();
+    await settle();
+    expect(root.querySelector<HTMLElement>(".chat-head")!.hidden).toBe(false);
+    expect(options().hidden).toBe(false);
+  });
+
+  it("lets go of the keyboard when a conversation opens, or Chat unmounts, with the options open", async () => {
+    await onChat();
+    options().click();
+    chat.showConversation("a1");
+    await settle();
+    expect(root.querySelector<HTMLElement>(".chat-menu")!.hidden).toBe(true);
+    expect(options().getAttribute("aria-expanded")).toBe("false");
+    const heard = vi.fn();
+    document.body.addEventListener("keydown", heard);
+    document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(heard).toHaveBeenCalledTimes(1);
+    root.querySelector<HTMLButtonElement>(".thing-back")!.click();
+    await settle();
+    options().click();
+    chat.unmount();
+    document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    document.body.removeEventListener("keydown", heard);
+    expect(heard).toHaveBeenCalledTimes(2);
   });
 });

@@ -1,6 +1,11 @@
 /* The map's chat sheet (chat-peek.ts). Its screen reads on a 320px phone: no text under 15px, every line wrapped,
    nothing cut off sideways. */
 
+/* One height for every tab, so the sheet's top stays put as the tabs change. */
+.sheet.is-tall.peek-sheet {
+  height: calc(var(--vv-h, 100dvh) - 40px);
+}
+
 /* A long ask or last sentence pushes the screen down: the sheet's body scrolls so it is always in reach. */
 .peek-body {
   display: flex;
@@ -60,23 +65,183 @@
   text-transform: uppercase;
 }
 
-.peek-facts {
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  gap: 8px 14px;
-  margin: 0;
-  font-size: var(--fs-xl);
-  line-height: 1.4;
+/* The ticket. Boxes keep a 1px line; colour only in the small dots. */
+.peek-h-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
 }
 
-.peek-facts dt {
+.peek-aside {
+  color: var(--dim);
+  font-size: var(--fs-l);
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.peek-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.peek-strip[hidden],
+.peek-meta[hidden],
+.peek-pane[hidden],
+.peek-thread[hidden],
+.peek-tab-n[hidden] {
+  display: none;
+}
+
+.peek-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-l);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.peek-pr {
+  text-decoration: none;
+}
+
+.peek-pr b {
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.peek-k {
   color: var(--muted);
+  font-weight: 600;
 }
 
-.peek-facts dd {
-  margin: 0;
-  min-width: 0;
+.peek-time.is-asked {
+  color: var(--no);
+}
+
+.peek-dot-s {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--dim);
+}
+
+.peek-dot-s[data-tone="needs-you"] {
+  background: var(--no);
+}
+
+.peek-dot-s[data-tone="review"],
+.peek-dot-s[data-tone="merging"],
+.peek-dot-s[data-tone="push-queue"] {
+  background: var(--accent);
+}
+
+.peek-dot-s[data-tone="building"],
+.peek-dot-s[data-tone="chat"] {
+  background: var(--mint);
+}
+
+.peek-dot-s[data-tone="deploying"] {
+  background: var(--yes);
+}
+
+.peek-dot-s[data-tone="rivet"] {
+  background: var(--later);
+}
+
+/* His own rows: the accent, so a row no one is named for (grey) never reads as his. */
+.peek-dot-s[data-tone="you"] {
+  background: var(--accent);
+}
+
+.peek-dot-s[data-tone="lenses"] {
+  background: var(--note);
+}
+
+.peek-meta {
+  margin: -4px 0 0;
+  color: var(--muted);
+  font-size: var(--fs-l);
   overflow-wrap: anywhere;
+}
+
+.peek-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg);
+}
+
+.peek-tab {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.peek-tab[aria-selected="true"] {
+  border-color: var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+.peek-tab-n {
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: var(--fs-l);
+  font-weight: 800;
+}
+
+.peek-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.peek-box {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+  font-size: var(--fs-xl);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.peek-box p {
+  margin: 0;
+  white-space: pre-line;
+}
+
+.peek-box p + p,
+.peek-box p + ul {
+  margin-top: 8px;
 }
 
 .peek-words {
@@ -84,47 +249,216 @@
   quotes: "\201C" "\201D";
 }
 
-.peek-stage {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 10px;
-}
-
-.peek-stage .pill {
+.peek-from {
+  color: var(--muted);
   font-size: var(--fs-l);
 }
 
-.peek-time.is-asked {
-  color: var(--no);
+.peek-points {
+  margin: 0;
+  padding-left: 20px;
 }
 
-.peek-prs {
+.peek-points li + li {
+  margin-top: 3px;
+}
+
+.peek-kv {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 6px 12px;
+  margin: 10px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-l);
+}
+
+.peek-kv dt {
+  color: var(--muted);
+}
+
+.peek-kv dd {
+  margin: 0;
+}
+
+.peek-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-l);
+  line-height: 1.45;
+}
+
+.peek-pics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.peek-pics.is-empty {
+  display: block;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+}
+
+.peek-pic {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: zoom-in;
+}
+
+.peek-pic img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  object-position: top;
+  background: #0c0a14;
+}
+
+.peek-pic-cap {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 8px 10px;
+  font-size: var(--fs-l);
+  line-height: 1.3;
+}
+
+.peek-pic-title {
+  display: -webkit-box;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 700;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.peek-pic-at {
+  flex: none;
+  color: var(--muted);
+}
+
+.peek-filters {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 14px;
+  gap: 6px;
 }
 
-.peek-prs a {
-  color: var(--accent);
-  font-weight: 800;
-  text-decoration: none;
+/* Five filters on one row at 412px: a little less padding than the strip's chips, same text size. */
+.peek-filter {
+  gap: 5px;
+  padding: 5px 10px;
+  cursor: pointer;
 }
 
-.peek-last {
+.peek-filter[aria-pressed="true"] {
+  background: var(--panel-2);
+  border-color: var(--dim);
+}
+
+.peek-thread {
   margin: 0;
-  padding: 10px 14px;
+  padding: 0;
+  list-style: none;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 14px;
   background: var(--panel);
+}
+
+.peek-act {
+  padding: 12px 14px;
+}
+
+.peek-act + .peek-act {
+  border-top: 1px solid var(--line);
+}
+
+.peek-act-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin-bottom: 4px;
+}
+
+.peek-act-name {
+  min-width: 0;
+  font-size: var(--fs-l);
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.peek-role {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: var(--fs-l);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.peek-act-at {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: var(--fs-l);
+  white-space: nowrap;
+}
+
+.peek-act-text {
+  margin: 0;
   font-size: var(--fs-xl);
   line-height: 1.45;
   overflow-wrap: anywhere;
   white-space: pre-line;
 }
 
+.peek-act-text .peek-words {
+  margin-left: 6px;
+}
+
+.peek-attach {
+  display: inline-flex;
+  margin-top: 8px;
+  padding: 3px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: var(--fs-l);
+}
+
+.peek-act-note:empty {
+  display: none;
+}
+
 .peek-screen-block {
   flex: 1 0 auto;
+}
+
+/* On its own tab the screen takes the rest of the sheet. */
+.peek-pane[data-pane="screen"] {
+  flex: 1 0 auto;
+}
+
+.peek-pane[data-pane="screen"] .peek-screen {
+  flex: 1 1 0;
+  height: auto;
 }
 
 .peek-screen-head {

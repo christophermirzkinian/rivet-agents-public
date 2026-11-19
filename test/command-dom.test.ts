@@ -488,6 +488,30 @@ describe("chat tab", () => {
     text.dispatchEvent(new Event("input"));
   });
 
+  it("a cancelled reply does not come back on another conversation's page opened while the Cancel was out", async () => {
+    messages = [
+      { id: "msg-1", from: "owner", text: "yes", at: new Date().toISOString(), status: "collecting", sendsAt: new Date(Date.now() + 5_000).toISOString(), threadId: "c1", replyTo: "h1" } as ChatMessage,
+    ];
+    chat.mount(root);
+    await settle();
+    let answer!: () => void;
+    const held = new Promise<void>((resolve) => (answer = resolve));
+    cancelAnswer = () => held.then(() => json({ ids: ["msg-1"], clientIds: [], text: "yes", images: [], files: [], replyTo: "h1", quote: { from: "rivet", text: "Ship it?" } }));
+    root.querySelector<HTMLButtonElement>(".chat-collecting-cancel")!.click();
+    messages = [];
+    chat.showConversation("c2");
+    await settle();
+    answer();
+    await settle();
+    await settle();
+    expect(root.querySelector<HTMLElement>(".chat-replying")!.hidden).toBe(true);
+    expect(localStorage.getItem("rivet.chat.reply")).toBeNull();
+    const text = root.querySelector<HTMLTextAreaElement>(".chat-text")!;
+    expect(text.value).toBe("yes");
+    text.value = "";
+    text.dispatchEvent(new Event("input"));
+  });
+
   it("Cancel forgets only its own lines' sends: another lost send with the same words keeps its clientId", async () => {
     const tried: string[] = [];
     const lost = (clientId: string) => {
@@ -1010,7 +1034,7 @@ describe("dragging and pasting into the chat", () => {
     expect(lit()).toBe(false);
   });
 
-  it("lights nothing and takes nothing while the composer is off screen: Rivet asleep, More topics or a search", async () => {
+  it("lights nothing and takes nothing while the composer is off screen: Rivet asleep or a search", async () => {
     chat.mount(root);
     await settle();
     const section = root.querySelector<HTMLElement>(".chat")!;
@@ -1024,11 +1048,9 @@ describe("dragging and pasting into the chat", () => {
       const pasted = fire(root.querySelector(".chat-text")!, "paste", carrier([png()]), "clipboardData").defaultPrevented;
       return { wasLit, effect, dropped, pasted };
     };
-    for (const name of ["topics", "searching"]) {
-      section.classList.add(name);
-      expect(refused()).toEqual({ wasLit: false, effect: "none", dropped: true, pasted: false });
-      section.classList.remove(name);
-    }
+    section.classList.add("searching");
+    expect(refused()).toEqual({ wasLit: false, effect: "none", dropped: true, pasted: false });
+    section.classList.remove("searching");
     heardAnswer(new Response("capped", { status: 503, headers: { "x-rivet-asleep": "1", "x-rivet-capped-until": String(Date.UTC(2026, 11, 1)) } }));
     try {
       expect(refused()).toEqual({ wasLit: false, effect: "none", dropped: true, pasted: false });

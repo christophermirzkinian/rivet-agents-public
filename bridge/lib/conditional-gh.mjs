@@ -6,7 +6,7 @@
 /** The answers kept; past it the one used longest ago goes. */
 export const MAX_ETAGS = 500;
 
-const ETAG_RE = /^(W\/)?"[\x21\x23-\x7e]{1,200}"$/;
+export const ETAG_RE = /^(W\/)?"[\x21\x23-\x7e]{1,200}"$/;
 
 /**
  * The headers and body of `gh api -i` output, or null when it does not start with a status line.
@@ -27,35 +27,71 @@ export function splitResponse(stdout) {
  * GitHub says has a next page is never kept. `max` is how many answers the store keeps, MAX_ETAGS unless given.
  * @param {(args: string[]) => Promise<string>} gh resolves stdout; on a non-zero exit rejects with the error's `stdout`
  * @param {EtagStore} store
- * @param {{ onePage?: boolean, max?: number }} [options]
+ * `onRate`, when given, is handed the headers of every answer GitHub gave, a 304's too (gh-budget.mjs's noteRate).
+ * @param {{ onePage?: boolean, max?: number, onRate?: (head: string) => void }} [options]
  * @returns {(path: string, jq?: string) => Promise<{ body: string, head: string, cached: boolean }>}
  */
-export function conditionalGet(gh, store, { onePage = false, max = MAX_ETAGS } = {}) {
+export function conditionalGet(gh, store, options = {}) {
   return async (path, jq) => {
-    const key = jq === undefined ? path : `${path}\n${jq}`;
-    const known = store.get(key);
-    const args = ["api", "-i", ...(known ? ["-H", `If-None-Match: ${known.etag}`] : []), path, ...(jq === undefined ? [] : ["--jq", jq])];
-    /** @type {string} */
+    const ask = asking(store, path, jq);
+    try {
+      return answered(store, ask, await gh(ask.args), options);
+    } catch (err) {
+      return notModified(store, ask, err, options);
+    }
+  };
+}
+
+/**
+ * conditionalGet for a synchronous `gh` (execFileSync's stdout; throws with the error's `stdout` on a non-zero exit),
+ * for scripts whose reads are synchronous, such as the push queue's.
+ * @param {(args: string[]) => string} gh
+ * @param {EtagStore} store
+ * @param {{ onePage?: boolean, max?: number, onRate?: (head: string) => void }} [options]
+ * @returns {(path: string, jq?: string) => { body: string, head: string, cached: boolean }}
+ */
+export function conditionalGetSync(gh, store, options = {}) {
+  return (path, jq) => {
+    const ask = asking(store, path, jq);
     let stdout;
     try {
-      stdout = await gh(args);
+      stdout = gh(ask.args);
     } catch (err) {
-      const answer = splitResponse(String(/** @type {any} */ (err)?.stdout ?? ""));
-      if (!known || answer?.status !== 304) throw err;
-      store.delete(key);
-      store.set(key, known);
-      return { body: known.body, head: answer.head, cached: true };
+      return notModified(store, ask, err, options);
     }
-    const answer = splitResponse(stdout);
-    if (!answer) return { body: stdout, head: "", cached: false };
-    const etag = /^etag:[ \t]*(.+?)[ \t]*$/im.exec(answer.head)?.[1] ?? "";
-    store.delete(key);
-    if (answer.status === 200 && ETAG_RE.test(etag) && !(onePage && /^link:.*\brel="next"/im.test(answer.head))) {
-      store.set(key, { etag, body: answer.body });
-      if (store.size > max) store.delete(/** @type {string} */ (store.keys().next().value));
-    }
-    return { body: answer.body, head: answer.head, cached: false };
+    return answered(store, ask, stdout, options);
   };
+}
+
+/** The store key, the answer kept for it and the `gh` arguments that ask with its ETag. @param {EtagStore} store @param {string} path @param {string} [jq] */
+function asking(store, path, jq) {
+  const key = jq === undefined ? path : `${path}\n${jq}`;
+  const known = store.get(key);
+  return { key, known, args: ["api", "-i", ...(known ? ["-H", `If-None-Match: ${known.etag}`] : []), path, ...(jq === undefined ? [] : ["--jq", jq])] };
+}
+
+/** A non-zero exit: the kept answer on a 304, else the error rethrown. */
+function notModified(store, { key, known }, /** @type {any} */ err, { onRate } = {}) {
+  const answer = splitResponse(String(err?.stdout ?? ""));
+  if (answer) onRate?.(answer.head);
+  if (!known || answer?.status !== 304) throw err;
+  store.delete(key);
+  store.set(key, known);
+  return { body: known.body, head: answer.head, cached: true };
+}
+
+/** A zero exit: the body, kept with its ETag when it is a whole 200. */
+function answered(store, { key }, /** @type {string} */ stdout, { onePage = false, max = MAX_ETAGS, onRate } = {}) {
+  const answer = splitResponse(stdout);
+  if (!answer) return { body: stdout, head: "", cached: false };
+  onRate?.(answer.head);
+  const etag = /^etag:[ \t]*(.+?)[ \t]*$/im.exec(answer.head)?.[1] ?? "";
+  store.delete(key);
+  if (answer.status === 200 && ETAG_RE.test(etag) && !(onePage && /^link:.*\brel="next"/im.test(answer.head))) {
+    store.set(key, { etag, body: answer.body });
+    if (store.size > max) store.delete(/** @type {string} */ (store.keys().next().value));
+  }
+  return { body: answer.body, head: answer.head, cached: false };
 }
 
 /**

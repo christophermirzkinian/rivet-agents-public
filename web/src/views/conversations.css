@@ -184,6 +184,61 @@
   position: relative;
 }
 
+/* Chat's search box with the Unread chip at its end: the chip takes its words' width, the box the rest. */
+.chat-search-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chat-search-row .chat-search-field {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+/* A pill; on, filled gold with dark words. No coloured edge beyond its 1px line. */
+.chat-unread-only {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  min-height: 48px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--apricot);
+  font: inherit;
+  font-size: var(--fs-body);
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* Over a thing's page (a desktop keeps the search row there) it goes. */
+.chat-unread-only[hidden] {
+  display: none;
+}
+
+.chat-unread-only[aria-pressed="true"] {
+  border-color: var(--apricot);
+  background: var(--apricot);
+  color: var(--bg);
+}
+
+.chat-unread-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.chat-unread-empty {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+}
+
 .chat-search-input {
   width: 100%;
   min-height: 48px;
@@ -289,6 +344,7 @@
   letter-spacing: 0.02em;
 }
 
+/* The card's title and ask as big as the other bubbles' words. */
 .chat-posted-title {
   font-size: var(--fs-xl);
   font-weight: 800;

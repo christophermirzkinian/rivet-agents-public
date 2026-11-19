@@ -26,7 +26,7 @@ export interface ChatSearch {
 export function chatSearch(open: (id: string, whole: boolean) => void, changed: () => void): ChatSearch {
   const input = h("input", {
     class: "chat-search-input",
-    attrs: { type: "search", placeholder: "Search every topic", "aria-label": "Search conversations and messages", autocomplete: "off", enterkeyhint: "search" },
+    attrs: { type: "search", placeholder: "Search chat", "aria-label": "Search conversations and messages", autocomplete: "off", enterkeyhint: "search" },
   });
   const clearBtn = h(
     "button",
@@ -36,7 +36,8 @@ export function chatSearch(open: (id: string, whole: boolean) => void, changed: 
   const status = h("p", { class: "chat-search-status", attrs: { role: "status" } });
   const list = h("ul", { class: "chat-search-results", attrs: { "aria-label": "Search results" } });
   const results = h("div", { class: "chat-search-body" }, status, list);
-  const el = h("div", { class: "chat-search", attrs: { role: "search" } }, h("div", { class: "chat-search-field" }, input, clearBtn), results);
+  const field = h("div", { class: "chat-search-field" }, input, clearBtn);
+  const el = h("div", { class: "chat-search", attrs: { role: "search" } }, field, results);
   let timer = 0;
   let generation = 0;
   let was = false;

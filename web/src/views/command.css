@@ -400,18 +400,23 @@
   padding-inline: 0;
 }
 
-/* A topic card: his lines on the right, Rivet's on the left, one heading, one More and one Reply. */
+/* One chat: a run of lines, his on the right, Rivet's on the left, no box around them. */
 .chat-ex {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 6px 6px 4px;
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.035);
 }
 
-.chat-ex.minimised {
-  padding: 0;
+/* The run's conversation over Rivet's first line: "<ask id> · <title>". */
+.chat-label {
+  overflow: hidden;
+  margin: 6px 0 -2px 4px;
+  color: var(--dim);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  list-style: none;
 }
 
 .chat-ex-turns {
@@ -427,9 +432,40 @@
   display: none;
 }
 
+/* Bigger bubbles: 17px words, each line's own More and Reply under them. */
 .chat-ex .chat-msg {
-  max-width: 88%;
-  padding: 9px 12px;
+  max-width: 85%;
+  padding: 12px 16px 0;
+}
+
+.chat-ex .chat-body {
+  font-size: 17px;
+  line-height: 1.45;
+}
+
+.chat-msg-tools {
+  display: flex;
+  justify-content: flex-end;
+  gap: 2px;
+  margin: 0 -10px 0 0;
+}
+
+.chat-msg.theirs .chat-msg-tools {
+  justify-content: flex-start;
+  margin: 0 0 0 -10px;
+}
+
+.chat-msg-tool {
+  min-width: var(--tap);
+  min-height: var(--tap);
+  padding: 0 10px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--fs-body);
+  font-weight: 700;
+  cursor: pointer;
 }
 
 .chat-ex .chat-msg.theirs {
@@ -671,7 +707,7 @@
   margin-left: auto;
 }
 
-/* An exchange's More sheet: Listen, Read all and Share. */
+/* A line's More sheet: Read aloud, Copy, Share and Open card. */
 .chat-more-sheet .sheet-title {
   overflow: hidden;
   color: var(--muted);
@@ -798,6 +834,20 @@ button.chat-quote {
   flex: 1;
   margin: 0;
   background: var(--panel);
+}
+
+/* "Replying to <label>": one slim line, the label in full words. */
+.chat-replying.labelled .chat-quote {
+  justify-content: center;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--fs-body);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.chat-replying.labelled strong {
+  color: var(--text);
 }
 
 .chat-replying-cancel {

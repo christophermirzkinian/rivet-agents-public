@@ -29,7 +29,6 @@ import {
   MAX_QUOTE_TEXT,
   MAX_WORKER_TEXT,
   modelsCreateSchema,
-  notAnswerOf,
   quoteText,
   saySchema,
   scheduleCreateSchema,
@@ -37,6 +36,7 @@ import {
   type ActionKind,
   type AuditEntry,
   type ChatMessage,
+  type ChatPage,
   type FixCreate,
 } from "../../shared/command.js";
 import { APP_NAME } from "../../shared/names.js";
@@ -46,7 +46,7 @@ import { idLike, namedPrs, textWords, THREAD_WINDOW_MS, type PrRef } from "../..
 import { CommandStore, type ActionRequest } from "../commandstore.js";
 import { HttpError, json, readJson, requireBearer, requireSameOrigin } from "../httputil.js";
 import { LogLeases } from "../logs.js";
-import { allAsksByThread, noticeThreads } from "../threads.js";
+import { allAsksByThread, noticeThreads, rowTitle } from "../threads.js";
 import { resolveConversation } from "../conversations.js";
 import { ownsNoCard, TEAM_ROOM_ID, UPDATES_ID } from "../../shared/conversations.js";
 import { ensureAsk } from "./asks.js";
@@ -431,73 +431,6 @@ export function register(router: Router): void {
     json(response, 200, cancelled);
   });
 
-  // Not an answer: your question goes to Rivet again as a reply to the Rivet line, flagged, on the chat path.
-  // One going re-ask per question; its clientId is the answer's, which no phone can send (clientId's pattern has no
-  // colon), numbered after the ones before it.
-  router.onPrefix("POST", "/api/chat/", async ({ request, response, url }) => {
-    const rest = url.pathname.slice("/api/chat/".length);
-    if (!rest.endsWith("/not-answer")) throw new HttpError(404, "not found");
-    requireSameOrigin(request, config.origin);
-    requireSession(request);
-    const id = rest.slice(0, -"/not-answer".length);
-    const answer = ID_PATTERN.test(id) ? commands.getChatMessage(id) : null;
-    if (!answer) throw new HttpError(404, "That message is not in the chat.");
-    const notAnswer = `That line is not ${RIVET_NAME}'s answer to a question you typed.`;
-    const replied = answer.replyTo ? commands.getChatMessage(answer.replyTo) : null;
-    const question = replied?.from === "owner" && replied.notAnswerFor ? commands.getChatMessage(replied.notAnswerFor) : replied;
-    const opener = question?.windowLead ? commands.getChatMessage(question.windowLead) : question;
-    const thread = opener ? commands.threadOf(opener.id) : null;
-    if (!opener || !thread || thread === TEAM_ROOM_ID || commands.threadOf(answer.id) !== thread) throw new HttpError(400, notAnswer);
-    // From the question's window to the newest line, however old the exchange.
-    const lines = [opener, ...(commands.threadMessagesAfter(thread, opener.id) ?? [])];
-    const asked = notAnswerOf(lines, answer, (line) => commands.getChatMessage(line));
-    if (!asked) throw new HttpError(400, notAnswer);
-    // Asked again already from another of Rivet's answers to it (another phone): that re-ask is the one.
-    const pending = asked.open.map((reAsk) => commands.getAction(reAsk.id)).find((entry) => entry && entry.status !== "failed" && entry.status !== "refused" && entry.status !== "cancelled");
-    if (pending) {
-      json(response, 200, pending);
-      return;
-    }
-    if (!asked.last) throw new HttpError(400, `${RIVET_NAME} has answered that question again since.`);
-    const said = asked.window.map((line) => ({ line, entry: commands.getAction(line.id) }));
-    const text = chatWindowText(said.map(({ line, entry }) => entry?.text ?? line.text));
-    const images = [...new Set(said.flatMap(({ line, entry }) => chatImages(entry ?? line)))];
-    const files = said.flatMap(({ entry }) => entry?.files ?? []).filter((file, at, all) => all.findIndex((one) => one.sha256 === file.sha256) === at);
-    if (images.length > bridge.chatWindowImages()) throw new HttpError(400, `That question has more photos than ${RIVET_NAME} takes in one message.`);
-    if (files.length > MAX_CHAT_FILES) throw new HttpError(400, `That question has more documents than ${RIVET_NAME} takes in one message.`);
-    const reAsk: ActionRequest = {
-      ...(text ? { text } : {}),
-      ...imageFields(images),
-      ...(files.length ? { files } : {}),
-      ...replying(id),
-      ...typedIn(id),
-      notAnswer: true,
-      notAnswerFor: asked.lead,
-    };
-    checkNew("chat", reAsk);
-    let tries = 1;
-    while (commands.getActionByClientId(tries === 1 ? `not-answer:${id}` : `not-answer:${id}:${tries}`)) tries += 1;
-    const time = now();
-    const at = time.toISOString();
-    const { entry, closed } = commands.addChat(
-      {
-        id: randomUUID(),
-        clientId: tries === 1 ? `not-answer:${id}` : `not-answer:${id}:${tries}`,
-        request: reAsk,
-        at,
-      },
-      time.getTime(),
-      bridge.chatWindowMax(),
-      bridge.photoRefusal() ? 0 : bridge.chatWindowImages(),
-    );
-    if (closed) sendBatch(closed);
-    // You typed nothing to add to it: a reply leads its own window, which goes to Rivet at once.
-    const lead = commands.flush(entry.id, at);
-    if (lead) sendBatch(lead);
-    router.deps.refreshWaits();
-    json(response, 202, commands.getAction(entry.id));
-  });
-
   // Feed's Fix it: one tap is your own message to Rivet, sent the chat's way, and the item's record
   // set investigating, so Rivet goes calm at once. Rivet opens the fix chat; the app never does. The phone names the
   // record version it saw: a record changed since (another tap, or Rivet already on it) sends nothing.
@@ -547,8 +480,23 @@ export function register(router: Router): void {
     const before = url.searchParams.get("before");
     if (before !== null && !ID_PATTERN.test(before)) throw new HttpError(400, "invalid cursor");
     const limit = Math.min(Math.max(Math.trunc(Number(url.searchParams.get("limit") ?? 30)) || 30, 1), 100);
-    json(response, 200, commands.listChat(before, limit, url.searchParams.get("chat") === "1"));
+    const page = commands.listChat(before, limit, url.searchParams.get("chat") === "1");
+    json(response, 200, { ...page, labels: chatLabels(page.messages) } satisfies ChatPage);
   });
+
+  /** Each line's conversation as its label names it: the list's title, ThreadSummary.ask's ask, and Updates. */
+  function chatLabels(messages: readonly ChatMessage[]): NonNullable<ChatPage["labels"]> {
+    const ids = new Set(messages.map((message) => message.threadId ?? message.id));
+    if (!ids.size) return {};
+    const rows = commands.threadRows().filter((row) => ids.has(row.id));
+    const asks = allAsksByThread(store.listAsks({ limit: MAX_ASKS }), rows, (id) => commands.threadOf(id));
+    return Object.fromEntries(
+      rows.map((row) => {
+        const ask = asks.get(row.id)?.[0];
+        return [row.id, { title: rowTitle(row), ...(ask ? { ask: ask.id } : {}), ...(row.id === UPDATES_ID ? { updates: true } : {}) }];
+      }),
+    );
+  }
 
   router.on("GET", "/api/chat/search", ({ request, response, url }) => {
     requireSession(request);
@@ -627,11 +575,11 @@ export function register(router: Router): void {
         400,
         "invalid say: text up to 4000 characters, 1 to 3 images, a video and a PDF (on a chat line, not a card) by sha256, replyTo a message id; text, an image, a video or a PDF, or an ack with replyTo alone",
       );
-    // The old Updates shows nowhere now (2026-11-16): a reply to one of its lines is refused, so it is sent again as what it
+    // The old Updates shows nowhere now: a reply to one of its lines is refused, so it is sent again as what it
     // is (a card, or a say replying to nothing), never filed where you cannot see it.
     if (parsed.data.replyTo !== undefined && commands.threadOf(parsed.data.replyTo) === UPDATES_ID) throw new HttpError(409, UPDATES_REPLY);
     // A say with no --reply-to naming the one conversation whose newest line is your typed line is a line in that
-    // conversation, so in Chat, not a Feed card (2026-11-16). It quotes nothing and marks nothing replied: the text only
+    // conversation, so in Chat, not a Feed card. It quotes nothing and marks nothing replied: the text only
     // names the conversation, so it may not answer your line, which may not even have reached the Mac yet.
     let inferred = false;
     if (parsed.data.replyTo === undefined && !parsed.data.new && !parsed.data.card && parsed.data.schedule === undefined && parsed.data.tag === undefined && parsed.data.thread === undefined) {
@@ -785,7 +733,7 @@ export function register(router: Router): void {
         ...(chat ? { chat } : {}),
         ...(outcome && say.ask ? { askId: say.ask } : {}),
         ...(thread ? { thread } : {}),
-        // A card with no line opening it is shown in the conversation its text names (2026-10-09).
+        // A card with no line opening it is shown in the conversation its text names.
         ...(conversation && say.replyTo === undefined ? { replyTo: conversation } : {}),
         ...(say.tag && !outcome ? { tag: say.tag } : {}),
         // The schedule whose break it is about: its push is keyed by it, so a held one is withdrawn once someone is on it.

@@ -1,29 +1,29 @@
-// An exchange's More: his question on top, then Listen, Read all, Share and Not an answer, on the shared bottom sheet.
-import { RIVET_NAME } from "../../../src/shared/names.js";
+// A line's More: the line on top, then Read aloud, Copy, Share and Open card, on the shared bottom sheet.
 import { h, svg } from "../dom.js";
 import { say } from "../voice.js";
+import { copyText } from "./agents-copy.js";
 import { closeSheet, openSheet } from "./sheet.js";
+import { flash } from "./toast.js";
 
 const LISTEN = '<svg viewBox="0 0 24 24"><path d="M7 5l12 7-12 7z" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/></svg>';
-const READ_ALL =
-  '<svg viewBox="0 0 24 24"><path d="M5 6h14M5 10h14M5 14h14M5 18h9" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>';
+const COPY =
+  '<svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3" fill="none" stroke="currentColor" stroke-width="2.2"/></svg>';
 const SHARE =
   '<svg viewBox="0 0 24 24"><path d="M12 15V4M7.5 8.5L12 4l4.5 4.5M6 12v7.5h12V12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-
-const NOT_ANSWER =
-  '<svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.4-5.7M4 4v4h4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const CARD =
+  '<svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M8 10h8M8 14h5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>';
 
 export interface MoreFor {
-  /** His question, the sheet's top line. */
-  question: string;
-  /** Rivet's answer to read aloud; null when it has no words. */
+  /** The line, the sheet's top line. */
+  line: string;
+  /** Rivet's words to read aloud; null on his own line or one with no words. */
   listen: string | null;
-  /** Opens the exchange's conversation; null on that conversation's own page. */
-  readAll: (() => void) | null;
-  /** Today's Share; null when the answer may not leave the app. */
+  /** The words Copy puts on the clipboard; null with none. */
+  copy: string | null;
+  /** Today's Share; null when the line may not leave the app. */
   share: (() => void) | null;
-  /** Asks Rivet his question again; null unless Rivet's last line answers one of his. */
-  notAnswer: (() => void) | null;
+  /** Opens the line's card; null when it has none on the board. */
+  card: (() => void) | null;
 }
 
 function row(icon: string, title: string, sub: string, use: string, go: () => void): HTMLElement {
@@ -45,17 +45,21 @@ function row(icon: string, title: string, sub: string, use: string, go: () => vo
 }
 
 export function openMore(more: MoreFor): void {
-  const { listen, readAll, share, notAnswer } = more;
+  const { listen, copy, share, card } = more;
   openSheet(
-    more.question,
+    more.line,
     {
       mount: (el) =>
         el.replaceChildren(
           ...[
-            listen ? row(LISTEN, "Listen", `${RIVET_NAME} reads this answer aloud`, "chat.more.listen", () => say(listen)) : null,
-            readAll ? row(READ_ALL, "Read all", "Open the full answer and its details", "chat.more.read-all", readAll) : null,
-            share ? row(SHARE, "Share", "Share this answer", "chat.more.share", share) : null,
-            notAnswer ? row(NOT_ANSWER, "Not an answer", `${RIVET_NAME} looks at your question again`, "chat.more.not-answer", notAnswer) : null,
+            listen ? row(LISTEN, "Read aloud", "Hear this line", "chat.more.listen", () => say(listen)) : null,
+            copy
+              ? row(COPY, "Copy", "Copy this line's words", "chat.more.copy", () =>
+                  void copyText(copy).then((done) => flash(done ? "Copied" : "Couldn't copy.", done ? "ok" : "error")),
+                )
+              : null,
+            share ? row(SHARE, "Share", "Share this line", "chat.more.share", share) : null,
+            card ? row(CARD, "Open card", "Open the card it came with", "chat.more.card", card) : null,
           ].filter((one): one is HTMLElement => one !== null),
         ),
       unmount: () => {},

@@ -241,6 +241,7 @@ export function conversationSummary(
     ...(stage.pr !== undefined ? { stagePr: stage.pr } : {}),
     phase: own || thread.id === TEAM_ROOM_ID ? null : phaseOf({ needsYou, stage: stage.stage, statusFrom: thread.statusFrom }),
     thing: filed && !own && thread.id !== TEAM_ROOM_ID,
+    ...(thread.ask !== undefined ? { ask: thread.ask } : {}),
   };
 }
 

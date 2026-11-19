@@ -110,7 +110,7 @@ export function registerThreads(router: Router, commands: CommandStore, announce
   }
 
   // threadMentions reads a week of chat text: most of every thread-list poll's CPU, which an open app repeats every few
-  // seconds and which ran the shared-cpu machine out of CPU (2026-10-05). Messages are only ever added, so an answer
+  // seconds and which ran the shared-cpu machine out of CPU. Messages are only ever added, so an answer
   // holds until a new message, for the same question. The query reads from `since`'s minute so it repeats, and its
   // answer keeps only the threads with a message since `since` itself, as the query alone would.
   const mentionsMemo = new Map<string, Map<string, Mentions>>();
@@ -171,7 +171,7 @@ export function registerThreads(router: Router, commands: CommandStore, announce
     const said = threadMentions(needles, known, keep, new Date(now().getTime() - THREAD_WINDOW_MS.week).toISOString());
     // A card's owner weighs what each thread's messages name below its ask's and Rivet's links (cardMatch). Only a
     // thread active this week has its messages read for it, so the list, an opened thread and /api/card-threads agree.
-    // A card filed in a conversation (2026-10-09) is that conversation's alone: another's ask naming it no longer counts.
+    // A card filed in a conversation is that conversation's alone: another's ask naming it no longer counts.
     const filed = commands.filedCards();
     const filedIn = new Map([...filed].flatMap(([thread, cards]) => cards.map((card) => [card, thread] as const)));
     const links = new Map(

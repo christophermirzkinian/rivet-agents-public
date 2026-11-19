@@ -61,11 +61,11 @@ const area = () => sheet()!.querySelector<HTMLTextAreaElement>("textarea")!;
 const lightboxNote = () => document.querySelector<HTMLElement>(".lightbox .lightbox-note")?.textContent;
 const sheetButton = (label: string) => [...sheet()!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === label)!;
 
-/** The More under the topic card holding message `id`: Share is in its sheet. */
-const moreUnder = (id: string) => root.querySelector<HTMLElement>(`.chat-msg[data-id="${id}"]`)!.closest(".chat-ex")!.querySelector<HTMLButtonElement>(":scope > .chat-ex-foot .chat-ex-more")!;
-const moreShare = () => document.querySelector<HTMLButtonElement>(".chat-more-sheet .chat-more-share");
+/** The More on message `id`'s own bubble: Share is in its sheet. */
+const moreUnder = (id: string) => root.querySelector<HTMLButtonElement>(`.chat-msg[data-id="${id}"] .chat-msg-tools [data-use="chat.msg.more"]`)!;
+const moreShare = () => document.querySelector<HTMLButtonElement>('.chat-more-sheet [data-use="chat.more.share"]');
 
-/** Whether the card's More offers Share now; the sheet is closed again. An open share sheet closes with it. */
+/** Whether the line's More offers Share now; the sheet is closed again. An open share sheet closes with it. */
 function offersShare(id = "h2"): boolean {
   moreUnder(id).click();
   const offered = moreShare() !== null;
@@ -335,19 +335,20 @@ describe("share a reply", () => {
     expect(root.querySelector(".chat-msg .chat-share")).toBeNull();
   });
 
-  it("puts Reply and More once under the card, never on a bubble, and a tap on a bubble shows nothing", async () => {
+  it("puts More and Reply on every bubble, his own too, and a tap on a bubble's words shows nothing", async () => {
     chat.mount(root);
     await settle();
-    const card = root.querySelector<HTMLElement>('.chat-msg[data-id="h2"]')!.closest(".chat-ex")!;
-    const foot = card.querySelector<HTMLElement>(":scope > .chat-ex-foot")!;
-    expect([...foot.querySelectorAll("button")].map((one) => one.textContent)).toEqual(["More", "Reply"]);
+    const tools = (id: string) =>
+      [...root.querySelectorAll<HTMLButtonElement>(`.chat-msg[data-id="${id}"] .chat-msg-tools button`)].map((one) => one.textContent);
+    expect(tools("h2")).toEqual(["More", "Reply"]);
+    expect(tools("c1")).toEqual(["More", "Reply"]);
+    expect(root.querySelector(".chat-ex-foot")).toBeNull();
     expect(root.querySelector(".chat-meta-tap")).toBeNull();
-    const before = card.innerHTML;
-    root.querySelector<HTMLElement>('.chat-msg[data-id="h2"] .chat-body')!.click();
-    expect(card.innerHTML).toBe(before);
-    for (const fn of listeners.thread ?? []) fn({ data: JSON.stringify({ id: "c1", project: null }) });
-    await settle();
-    expect(card.querySelector(":scope > .chat-ex-foot")).toBe(foot);
+    const line = root.querySelector<HTMLElement>('.chat-msg[data-id="h2"]')!;
+    const before = line.innerHTML;
+    line.querySelector<HTMLElement>(".chat-body")!.click();
+    expect(line.innerHTML).toBe(before);
+    expect(document.querySelector(".chat-more-sheet")).toBeNull();
   });
 
   it("shares exactly the edited, trimmed text", async () => {
@@ -407,7 +408,7 @@ describe("share a reply", () => {
     for (const fn of listeners.message ?? []) fn({ data: JSON.stringify(next) });
     expect(root.querySelector('.chat-msg[data-id="h3"] .chat-body')?.textContent).toBe("Still here");
     useShare(() => Promise.resolve());
-    // Rivet's newest answer in the card is the one its More shares.
+    // The new answer's own More shares it.
     moreUnder("h3").click();
     moreShare()!.click();
     sheetButton("Send").click();

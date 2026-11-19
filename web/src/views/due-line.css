@@ -1,0 +1,99 @@
+/*
+ * Chat's due line: one row under the head, a hairline under it; only a late time is amber, no fill or stripe.
+ * The time leads and stays whole; a long title wraps to a second line rather than cut to a word on a small phone.
+ */
+.chat-due {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 40px;
+  padding: 6px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-body);
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-due[hidden] {
+  display: none;
+}
+
+.chat-due-words {
+  display: -webkit-box;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow-wrap: anywhere;
+}
+
+.chat-due-time {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.chat-due.late .chat-due-time {
+  color: var(--apricot);
+}
+
+.chat-due-more {
+  flex: none;
+  color: var(--dim);
+}
+
+.chat-due-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chat-due-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 0;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-body);
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-due-row:disabled {
+  cursor: default;
+}
+
+.chat-due-row-time {
+  flex: none;
+  min-width: 76px;
+  color: var(--muted);
+}
+
+.chat-due-row.late .chat-due-row-time {
+  color: var(--apricot);
+}
+
+.chat-due-row-words {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.chat-due-row-words small {
+  color: var(--dim);
+  font-size: var(--fs-s);
+}

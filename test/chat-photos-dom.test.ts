@@ -63,10 +63,10 @@ describe("Rivet's photos and video in a chat answer", () => {
     const bubble = root.querySelector('.chat-msg.theirs[data-id="h1"]')!;
     expect(bubble.querySelector(".chat-image")!.getAttribute("src")).toBe(`/media/${A}`);
     expect(bubble.querySelector(".chat-body")).toBeNull();
-    // Share sends text; a photo-only answer has none, so its card's More offers no Share.
-    bubble.closest(".chat-ex")!.querySelector<HTMLButtonElement>(".chat-ex-more")!.click();
+    // Share sends text; a photo-only answer has none, so its More offers no Share.
+    bubble.querySelector<HTMLButtonElement>('.chat-msg-tools [data-use="chat.msg.more"]')!.click();
     expect(document.querySelector(".chat-more-sheet")).not.toBeNull();
-    expect(document.querySelector(".chat-more-share")).toBeNull();
+    expect(document.querySelector('[data-use="chat.more.share"]')).toBeNull();
     document.querySelector<HTMLButtonElement>(".chat-more-sheet > .btn")!.click();
     bubble.querySelector<HTMLButtonElement>(".chat-image-open")!.click();
     expect(document.querySelector(".lightbox-img")!.getAttribute("src")).toBe(`/media/${A}`);
@@ -86,7 +86,7 @@ describe("Rivet's photos and video in a chat answer", () => {
     expect(video.hasAttribute("controls")).toBe(true);
     expect(video.hasAttribute("playsinline")).toBe(true);
     expect(video.getAttribute("preload")).toBe("metadata");
-    expect([...bubble.children].map((child) => child.className)).toEqual(["rivet is-clear is-rivet chat-rivet", "chat-meta", "chat-images", "chat-video", "chat-body"]);
+    expect([...bubble.children].map((child) => child.className)).toEqual(["rivet is-clear is-rivet chat-rivet", "chat-meta", "chat-images", "chat-video", "chat-body", "chat-msg-tools"]);
   });
 
   it("keeps the same video element through a redraw, so a playing clip is not stopped or rewound", async () => {

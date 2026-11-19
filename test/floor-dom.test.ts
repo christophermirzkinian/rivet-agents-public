@@ -843,7 +843,7 @@ describe("links and pushes, as main.ts opens them", () => {
     expect(document.querySelector(`.sheet.update-sheet [data-need="u1"]`)).not.toBeNull();
   });
 
-  it("Rivet's sheet opens on the conversation: one head row, then the More topics row, search and the first bubble, no stage list over them", async () => {
+  it("Rivet's sheet opens on the conversation: one head row, then search and the first bubble, no stage list over them", async () => {
     const { chat } = await start("/");
     button("rivet").click();
     await flush();
@@ -853,9 +853,9 @@ describe("links and pushes, as main.ts opens them", () => {
     expect(head.querySelector(".chat-head .chat-tools")).not.toBeNull();
     const section = sheet()!.querySelector<HTMLElement>(".home-chat > .chat")!;
     expect(section.querySelector(".chat-head")).toBeNull();
-    // Over the messages the More topics row shows, then search.
+    // Over the messages only search shows: no topics bar, and no due line while no ask has a time.
     const over = [...section.children].slice(0, [...section.children].indexOf(section.querySelector(".chat-scroll")!));
-    expect(over.filter((one) => !(one as HTMLElement).hidden).map((one) => one.className)).toEqual(["chat-topics-row", "chat-search"]);
+    expect(over.filter((one) => !(one as HTMLElement).hidden).map((one) => one.className)).toEqual(["chat-search"]);
     expect(section.querySelector('.chat-scroll .chat-msg[data-id="k1"]')).not.toBeNull();
     // A topic's page keeps the one head row and has no stage list over its talk.
     chat.showConversation("k1");
@@ -865,39 +865,27 @@ describe("links and pushes, as main.ts opens them", () => {
     expect(section.querySelector(".thing-steps")).toBeNull();
   });
 
-  it("in Rivet's sheet, Back from a topic opened off More topics comes back to the list, then to Chat, and the sheet stays open", async () => {
-    await start("/");
+  it("in Rivet's sheet, Back from a topic's page comes back to Chat and the sheet stays open", async () => {
+    const { chat } = await start("/");
     button("rivet").click();
     await flush();
     const section = sheet()!.querySelector<HTMLElement>(".home-chat > .chat")!;
-    const open = section.querySelector<HTMLButtonElement>(".chat-topics-open")!;
-    open.focus();
-    open.click();
-    await flush();
-    expect(section.classList.contains("topics")).toBe(true);
-    // Focus goes with the row to its Back arrow, never to the page.
-    expect(document.activeElement?.classList.contains("chat-topics-back")).toBe(true);
-    section.querySelector<HTMLButtonElement>('.chat-topic[data-id="k1"]')!.click();
+    chat.showConversation("k1");
     await flush();
     section.querySelector<HTMLButtonElement>(".thing-back")!.click();
     await flush();
     expect(sheet()).not.toBeNull();
-    expect(section.classList.contains("topics")).toBe(true);
-    section.querySelector<HTMLButtonElement>(".chat-topics-back")!.click();
-    await flush();
-    expect(sheet()).not.toBeNull();
+    expect(chat.openConversation()).toBeNull();
     expect(section.classList.contains("topics")).toBe(false);
-    expect(document.activeElement?.classList.contains("chat-topics-open")).toBe(true);
+    expect(section.querySelector('.chat-scroll .chat-msg[data-id="k1"]')).not.toBeNull();
   });
 
-  it("in Rivet's sheet, Back over Share on a topic opened off More topics closes Share alone and keeps the topic", async () => {
-    await start("/");
+  it("in Rivet's sheet, Back over Share on a topic's page closes Share alone and keeps the topic", async () => {
+    const { chat } = await start("/");
     button("rivet").click();
     await flush();
     const section = sheet()!.querySelector<HTMLElement>(".home-chat > .chat")!;
-    section.querySelector<HTMLButtonElement>(".chat-topics-open")!.click();
-    await flush();
-    section.querySelector<HTMLButtonElement>('.chat-topic[data-id="k1"]')!.click();
+    chat.showConversation("k1");
     await flush();
     const topic = history.state;
     expect(topic?.chatScreen).toBe("k1");
@@ -965,23 +953,6 @@ describe("links and pushes, as main.ts opens them", () => {
     expect(back).not.toHaveBeenCalled();
     go.mockRestore();
     back.mockRestore();
-  });
-
-  it("closing Rivet's sheet on a topic opened off More topics goes back past the list's entry too", async () => {
-    await start("/");
-    button("rivet").click();
-    await flush();
-    const section = sheet()!.querySelector<HTMLElement>(".home-chat > .chat")!;
-    section.querySelector<HTMLButtonElement>(".chat-topics-open")!.click();
-    await flush();
-    section.querySelector<HTMLButtonElement>('.chat-topic[data-id="k1"]')!.click();
-    await flush();
-    expect(history.state).toMatchObject({ chatScreen: "k1", chatDepth: 2 });
-    const go = vi.spyOn(history, "go").mockImplementation(() => {});
-    document.querySelector<HTMLButtonElement>(".rivet-sheet .decide-close")!.click();
-    expect(sheet()).toBeNull();
-    expect(go).toHaveBeenCalledWith(-3);
-    go.mockRestore();
   });
 
   it("Back from one conversation to the last keeps Rivet's sheet open on it", async () => {

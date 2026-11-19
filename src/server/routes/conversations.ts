@@ -8,10 +8,8 @@ import {
   conversationDoneSchema,
   conversationMergeSchema,
   conversationPatchSchema,
-  conversationReadAllSchema,
   conversationSplitSchema,
   chatBadge,
-  countsUnread,
   ownsNoCard,
   TEAM_ROOM_ID,
   UPDATES_ID,
@@ -24,7 +22,6 @@ import {
   type ConversationStage,
   type ConversationSummary,
   type MergeResponse,
-  type ReadAllResponse,
   type SplitResponse,
 } from "../../shared/conversations.js";
 import { bareGotIt, DECISION, isGotIt, UPDATE } from "../../shared/answers.js";
@@ -51,8 +48,6 @@ const CARD_PREFIX = "/api/card-conversations/";
 /** How much of a card's ask its inline bubble keeps. */
 const POSTED_ASK_MAX = 200;
 const BATCH_BODY_MAX = 16 * 1024;
-/** Mark all read's body: READ_ALL_DRAWN_MAX topics, each a 100-character id and its time, fit. */
-const READ_ALL_BODY_MAX = 32 * 1024;
 
 /** How often the bridge's PR stages are recorded: well inside the 14 days a merge or close stays in its readings. */
 const STAGE_RECORD_MS = 60 * 60_000;
@@ -64,11 +59,6 @@ export function registerConversations(
   out: { broadcast: (message: ChatMessage) => void; announce: (event: ConversationEvent) => void },
 ): void {
   const { config, store, requireSession, now, logger, push } = router.deps;
-
-  /** The archived rows Mark all read reads and the bar counts: anything unread, never Updates. */
-  function archivedUnread<Row extends { summary: ConversationSummary }>(older: readonly Row[]): Row[] {
-    return older.filter((row) => !row.summary.updates && row.summary.id !== TEAM_ROOM_ID && countsUnread(row.summary));
-  }
 
   /** Every conversation as a row, with the order it arrived in, the open ones and the rest. Reads never write. */
   function rows(opened?: string): { open: { summary: ConversationSummary; seq: number }[]; older: { summary: ConversationSummary; seq: number }[] } {
@@ -197,8 +187,7 @@ export function registerConversations(
     if (!olderPage) {
       // The board token is the chats', and chats never read Agent Chat.
       const listed = rivet ? open.filter((row) => row.summary.id !== TEAM_ROOM_ID) : open;
-      const olderUnread = archivedUnread(older).length;
-      json(response, 200, { conversations: listOrder(listed), older: older.length, olderUnread, unread, at: now().toISOString() } satisfies ConversationsResponse);
+      json(response, 200, { conversations: listOrder(listed), older: older.length, unread } satisfies ConversationsResponse);
       return;
     }
     const list = older.filter((row) => (before === null || row.seq < Number(before)) && !(rivet && row.summary.id === TEAM_ROOM_ID)).sort((a, b) => b.seq - a.seq);
@@ -234,34 +223,6 @@ export function registerConversations(
     const page = commands.threadMessagesBefore(id, before, THREAD_MESSAGES_MAX);
     if (!page) throw new HttpError(400, "before is not a message of this conversation");
     json(response, 200, page satisfies ConversationPage);
-  });
-
-  // Mark all as read: every conversation on the open list, and every archived one with anything unread (Chat draws a
-  // card for a topic idle past two hours too, and its old words came back with its next reply), read up to its
-  // newest message, marked unread cleared. Updates and Agent Chat are never in it: the phone's Mark all read never
-  // offered them. With `upTo` (the `at` of the list the phone drew) nothing newer is read: a reply that came after the
-  // phone's last list read stays unread. One transaction, so a list read after any of its announcements sees them all read.
-  router.on("POST", "/api/conversations/read", async ({ request, response }) => {
-    requireSameOrigin(request, config.origin);
-    requireSession(request);
-    const parsed = conversationReadAllSchema.safeParse(await readJson(request, READ_ALL_BODY_MAX));
-    if (!parsed.success) {
-      json(response, 400, { error: "invalid read", issues: parsed.error.issues.slice(0, 20) });
-      return;
-    }
-    const { open, older } = rows();
-    const { upTo, drawn = {} } = parsed.data;
-    const changed = commands.readAll(
-      [...open.filter((row) => row.summary.id !== TEAM_ROOM_ID), ...archivedUnread(older)].map((row) => row.summary.id),
-      now().toISOString(),
-      upTo === undefined ? null : new Date(upTo).toISOString(),
-      // A line the phone drew on a topic's card after its list read; only with `upTo`.
-      upTo === undefined
-        ? {}
-        : Object.fromEntries(Object.entries(drawn).map(([id, at]) => [id, new Date(at).toISOString()])),
-    );
-    for (const id of changed) out.announce({ id });
-    json(response, 200, { read: changed.length } satisfies ReadAllResponse);
   });
 
   // Select mode: one action on every conversation ticked (any message's id names its conversation; an unknown one is
@@ -339,7 +300,7 @@ export function registerConversations(
       };
       const { owner } = threads.summaries(undefined, card);
       const fits = (id: string | null | undefined) => (id && !ownsNoCard(id) ? id : null);
-      // The conversation the card was filed in wins (2026-10-09); then as before. An answer from before conversations
+      // The conversation the card was filed in wins; then as before. An answer from before conversations
       // (retried now) keeps the conversation Rivet's replies to it are in; a card filed nowhere joins one its stem,
       // PR or chat matches before it starts its own.
       thread =
@@ -398,7 +359,7 @@ export function registerConversations(
 
   /**
    * The line of its conversation a card's replyTo names, which it answers, so Chat shows it beside a line you typed
-   * (2026-10-12). An update card is news, never an answer: the board refuses one answering his message, so only a say
+   *. An update card is news, never an answer: the board refuses one answering his message, so only a say
    * progress card, filed by naming its conversation, carries one.
    */
   function answersLine(need: Need, place: { thread: string }): string | undefined {
@@ -416,7 +377,7 @@ export function registerConversations(
 
   /**
    * Files a card and puts it in its conversation as Rivet's message, once. `fresh`: the card is new to the board, so
-   * one filed before (dropped, then added again) is placed again, and posted anew where it now belongs (2026-10-20).
+   * one filed before (dropped, then added again) is placed again, and posted anew where it now belongs.
    */
   function fileCard(need: Need, at: string, fresh: boolean): void {
     const before = commands.cardConversation(need.id);
@@ -452,7 +413,7 @@ export function registerConversations(
   // Each card new to the board, or newly naming its conversation, is filed as it is written. The cards on the board
   // when the server starts are known already: a restart never posts the board again.
   let known = new Set((store.getBoard()?.board.needs ?? []).map((need) => need.id));
-  // An answer from before card titles were kept takes its reply's title once (2026-10-20); later answers carry it.
+  // An answer from before card titles were kept takes its reply's title once; later answers carry it.
   commands.backfillCardTitles((id) => store.getReply(id)?.itemTitle);
   router.onClose(
     store.onBoard((board) => {

@@ -65,7 +65,7 @@ const messages: ChatMessage[] = [
   say("r3", "r1", 198, "Card: Plan", { posted: { id: "plan-colours", kind: "plan", title: "Plan: Colour picker", ask: "Five colour discs on the theme engine, saved between visits. Size M." } }),
   mine("r4", "r1", 188, "Approved: Plan\nYes", { card: "plan-colours", status: "sent" }),
   say("r5", "r1", 120, "Engine wired, UI next. Tests are on CI."),
-  say("r6", "r1", 40, "Card: Stills", { posted: { id: "stills-colours", kind: "decision", title: "Picks row at 320 wide", ask: "Big discs, five in a row on top. Good to go?" } }),
+  say("r6", "r1", 40, "Card: Stills", { posted: { id: "stills-colours", kind: "decision", title: "Picks row on a narrow phone", ask: "Big discs, five in a row on top. Good to go?" } }),
   mine("r7", "r1", 30, "Make the discs bigger, Sam won't see those on a phone"),
   say("r8", "r1", 28, "Bigger discs coming in the next stills."),
   mine("k1", "k1", 90, "Checkout results row is too small on Sam's phone"),
@@ -155,7 +155,7 @@ let held = collecting
     ]
   : [];
 
-/** As GET /api/chat?chat=1: every line but the old Updates, a thing's too (2026-11-16). */
+/** As GET /api/chat?chat=1: every line but the old Updates, a thing's too. */
 function chatLines(): ChatMessage[] {
   const due = Date.now() >= Date.parse(sendsAt);
   const extra = held.map((message) => (due ? { ...message, status: "sent" as const, sendsAt: undefined } : message));
@@ -167,7 +167,7 @@ const needs = [
   {
     id: "stills-colours",
     kind: "decision",
-    title: "Picks row at 320 wide",
+    title: "Picks row on a narrow phone",
     ask: "Big discs, five in a row on top. Good to go?",
     rev: "r1",
     chat: "colour-picker",
@@ -211,13 +211,37 @@ window.fetch = async (input, init) => {
     return json({ conversations: rows, older: 0, unread: chatBadge(rows) });
   }
   const one = /^\/api\/conversations\/([^/]+)$/.exec(path);
+  // A read mark holds, as on the server, so a topic he opened is not New again on the next list.
+  const read = (id: string) => (extra[id] = { ...extra[id], unread: 0, markedUnread: false });
+  if (one && init?.method === "PATCH") {
+    const wanted = decodeURIComponent(one[1]!);
+    const found = messages.find((message) => message.id === wanted || message.posted?.id === wanted);
+    if (!found) return json({ error: "no such conversation" }, 404);
+    const id = conversationOf(found);
+    const patch = JSON.parse(String(init.body ?? "{}")) as { read?: unknown; unread?: boolean };
+    if (patch.read !== undefined) read(id);
+    // Mark unread holds too, so the chip's marked-unread half can be seen here.
+    if (patch.unread) extra[id] = { ...extra[id], markedUnread: true };
+    return json(detail(id));
+  }
+  if (path === "/api/conversations/batch") {
+    const body = JSON.parse(String(init?.body ?? "{}")) as { ids?: string[]; action?: string };
+    if (body.action === "read") for (const id of body.ids ?? []) read(id);
+    return json({ changed: body.ids?.length ?? 0 });
+  }
+  if (path === "/api/conversations/read" && init?.method === "POST") {
+    // Mark all read: every topic read, as the server does, so the chip's All read can be seen here.
+    const ids = new Set(messages.map(conversationOf));
+    for (const id of ids) read(id);
+    return json({ read: ids.size });
+  }
   if (one) {
     // A thing's page by its conversation id, or by the id of a card it posted (?thing=plan-colours).
     const wanted = decodeURIComponent(one[1]!);
     const found = messages.find((message) => message.id === wanted || message.posted?.id === wanted);
     return found ? json(detail(conversationOf(found))) : json({ error: "no such conversation" }, 404);
   }
-  if (path === "/api/conversations/batch") return json({ changed: 0 });
+
   return json({ error: "not in the preview" }, 404);
 };
 

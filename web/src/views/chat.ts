@@ -8,7 +8,6 @@ import {
   chatImages,
   imageFields,
   MAX_CHAT_TEXT,
-  notAnswerOf,
   quoteText,
   type ChatCancelled,
   type ChatQuote,
@@ -21,7 +20,6 @@ import {
   type ConversationsResponse,
   type ConversationSummary,
   ownsNoCard,
-  READ_ALL_DRAWN_MAX,
   SEED_IDS,
   TEAM_ROOM_ID,
   UPDATES_ID,
@@ -82,8 +80,9 @@ import { closeLightbox } from "./lightbox.js";
 import { overlayTraversal } from "../overlay-history.js";
 import { createDraftLineage } from "../draft-lineage.js";
 import { chatSearch } from "./chat-search.js";
-import { registerSearchSource } from "./search-sources.js";
 import { openMore } from "./chat-more.js";
+import { registerSearchSource } from "./search-sources.js";
+import { askLine, dueLine } from "./due-line.js";
 import { closeSheet, openSheet } from "./sheet.js";
 import { flash } from "./toast.js";
 import { onShowThing, showThing, stopText, thingButtons, thingFacts, thingHead } from "./thing.js";
@@ -103,6 +102,9 @@ export const LIST_REFRESH_MS = 60_000;
 const SETTLE_MS = 400;
 /** How many of Chat's messages a read brings. */
 const CHAT_PAGE = 50;
+/** Within this many pixels of the top, the page before loads by itself. */
+const EARLIER_AT_PX = 160;
+const EARLIER_FAILED = "Couldn't load earlier messages.";
 /** A search hit's conversation loads at most this many earlier pages looking for it. */
 const EARLIER_PAGES_MAX = 20;
 /** The unsent message, kept on this device only so a tab switch, backgrounding or reload never loses it. */
@@ -113,12 +115,26 @@ const DRAFT_REV_KEY = "rivet.chat.draft.rev";
 const DRAFT_LONG_KEY = "rivet.chat.draft.long";
 /** The message the draft replies to, kept beside it so a tab switch or reload keeps the reply too. */
 const REPLY_KEY = "rivet.chat.reply";
-/** The retired Chat · Threads switch, folder, status chip and window: read for nothing, so removed. */
+/**
+ * The retired Chat · Threads switch, folder, status chip and window, the topics Clean Up's Auto kept at the foot,
+ * and the topic cards, Clean Up, the one-chat switch and the away pill's mark: read for
+ * nothing, so removed.
+ */
 const RETIRED_KEYS = [
   "rivet.chat.view",
   "rivet.chat.folder",
   "rivet.chat.status",
   "rivet.chat.since",
+  "rivet.chat.groups.kept",
+  "rivet.chat.groups.kept.run",
+  "rivet.chat.groups.seen",
+  "rivet.chat.groups.seen.run",
+  "rivet.chat.minimised",
+  "rivet.chat.groups.open",
+  "rivet.chat.groups.run",
+  "rivet.chat.cleanup.noted",
+  "rivet.chat.linear",
+  "rivet.chat.read",
 ];
 
 const SPEAKER =
@@ -127,25 +143,25 @@ const SEND =
   '<svg viewBox="0 0 24 24"><path d="M4 12l15-7-5 15-2.5-6z" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/></svg>';
 const SHARE =
   '<svg viewBox="0 0 24 24"><path d="M12 15V4M7.5 8.5L12 4l4.5 4.5M6 12v7.5h12V12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-const REPLY =
-  '<svg viewBox="0 0 24 24"><path d="M9.5 6L4 11.5 9.5 17M4 11.5h9.5a6.5 6.5 0 016.5 6.5v1" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const CLOSE =
   '<svg viewBox="0 0 24 24"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>';
-const CHEVRON =
-  '<svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const OPTIONS =
   '<svg viewBox="0 0 24 24"><path d="M4 7h9M19 7h1M4 17h3M13 17h7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><circle cx="16" cy="7" r="2.4" fill="none" stroke="currentColor" stroke-width="2.4"/><circle cx="10" cy="17" r="2.4" fill="none" stroke="currentColor" stroke-width="2.4"/></svg>';
-const COLLAPSE =
-  '<svg viewBox="0 0 24 24"><path d="M7 4l5 5 5-5M7 20l5-5 5 5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-const EXPAND =
-  '<svg viewBox="0 0 24 24"><path d="M7 9l5-5 5 5M7 15l5 5 5-5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-const MORE = '<svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="19" cy="12" r="1.6" fill="currentColor"/></svg>';
-/** The conversations whose topic card Chat shows minimised, on this device only. */
-const MINIMISED_KEY = "rivet.chat.minimised";
-const CHAT_READ_KEY = "rivet.chat.read";
 
 /** What the Chat tab shows: the one conversation with Rivet, or a thing's page. */
 type Screen = { kind: "rivet" } | { kind: "conversation"; id: string };
+
+/** What Chat knows of a line's conversation: ChatPage.labels, else its row in the list. */
+export type LabelSource = { title?: string; ask?: string; updates?: boolean };
+
+/** The grey label over a run of Rivet's lines: its ask and title, its title, "Update" for Updates; null with nothing known. */
+export function chatLabel(source: LabelSource | null | undefined): string | null {
+  if (!source) return null;
+  if (source.updates) return "Update";
+  const title = source.title?.trim();
+  if (source.ask) return title ? `${source.ask} · ${title}` : source.ask;
+  return title || null;
+}
 
 /** Kept for the session, so a tab switch comes back to it. */
 let shown: Screen = { kind: "rivet" };
@@ -185,7 +201,7 @@ export function answerLine(title: string | undefined, text: string): string {
   return notes.length ? `${head} · ${notes.join(" · ")}` : head;
 }
 
-/** Opens a thing's page (any message of its conversation names it): Feed and notifications call it so. */
+/** Opens a thing's page (any message of its conversation names it): Feed, Town and notifications call it so. */
 export const showConversation = showThing;
 
 /**
@@ -209,7 +225,7 @@ export function openThingFor(chat: string, repo?: string | null): Promise<boolea
       const row = response.conversations.find((item) => linksChat(item.links, chat, repo));
       if (!row) return false;
       showThing(row.id);
-      // From the Feed the page is on the Chat tab (a mounted chat switched itself above).
+      // From the Feed or the Town the page is on the Chat tab (a mounted chat switched itself above).
       app.tab = "chat";
       changed();
       return true;
@@ -217,11 +233,51 @@ export function openThingFor(chat: string, repo?: string | null): Promise<boolea
     .catch(() => false);
 }
 
-
 /** The Team room answered 404: no agent has written there yet. */
 let roomMissing = false;
 
-/** The conversation open on screen, for the service worker: null on the list, under search results or with no chat mounted. */
+/**
+ * One chat's lines in the Team room: what it sent or was sent, the owner's lines naming it, and untagged answers to those.
+ * A name reads as Rivet reads it: the open chat of exactly that name, else the only one with it
+ * as a part (`album` for `photo-album`); `live` is the open chats.
+ */
+export function fromChat(
+  messages: readonly ChatMessage[],
+  chat: string,
+  live: readonly string[] = [],
+): ChatMessage[] {
+  const kept = new Set<string>();
+  const chats = live.includes(chat) ? live : [...live, chat];
+  const target = (text: string): string | null | undefined => {
+    const word = (/^@([A-Za-z0-9._-]+)[\s:,]/.exec(`${text} `) ??
+      /^([A-Za-z0-9._-]+):\s/.exec(`${text} `))?.[1]?.toLowerCase();
+    if (word === undefined) return undefined;
+    const exact = chats.find((one) => one.toLowerCase() === word);
+    if (exact) return exact;
+    const parts = chats.filter((one) =>
+      one.toLowerCase().split(/[._-]/).includes(word),
+    );
+    return parts.length === 1 ? parts[0]! : null;
+  };
+  return messages.filter((message) => {
+    // A line with no team names is the owner's or Rivet's: kept when it names the chat, or names no one and answers a kept
+    // line; one naming another chat went there.
+    // Only the owner's lines are routed by name; Rivet's answer ("Status: done") follows the line it answers.
+    const to =
+      message.team || message.from !== "owner"
+        ? undefined
+        : target(message.text ?? "");
+    const mine = message.team
+      ? message.team.from === chat || message.team.to === chat
+      : to === undefined
+        ? kept.has(message.replyTo ?? "")
+        : message.from === "owner" && to === chat;
+    if (mine) kept.add(message.id);
+    return mine;
+  });
+}
+
+/** The conversation open on screen, for the service worker: null under search results or with no chat mounted. */
 export function openConversation(): string | null {
   return teardown !== null && shown.kind === "conversation" && !document.querySelector(".chat.searching") ? shown.id : null;
 }
@@ -358,8 +414,7 @@ export function collectLeft(messages: Iterable<ChatMessage>, now = serverNow()):
 }
 
 /**
- * The collect bar's width in percent, by the exact time left rather than whole seconds, so
- * drawn every frame it drains at one even pace and empties as the window goes. Full with no
+ * The collect bar's width in percent, by the exact time left rather than whole seconds, so drawn every frame it drains at one even pace and empties as the window goes. Full with no
  * deadline known.
  */
 export function collectBarWidth(messages: Iterable<ChatMessage>, now = serverNow()): number {
@@ -368,7 +423,7 @@ export function collectBarWidth(messages: Iterable<ChatMessage>, now = serverNow
   return Math.min(100, Math.max(0, ((until - now) * 100) / CHAT_WINDOW_QUIET_MS));
 }
 
-/** A collecting line's own status: its seconds left, short enough for a 320-wide screen; the banner says the rest. */
+/** A collecting line's own status: its seconds left, short enough for a narrow screen; the banner says the rest. */
 export function collectLine(left: number | null): string {
   return left === null ? STATUS_WORDS.collecting : left > 0 ? `${left}s` : "Sending…";
 }
@@ -399,37 +454,6 @@ function writeSpeak(on: boolean): void {
   setAutoSpeak(on);
 }
 
-function readMinimised(): Set<string> {
-  try {
-    const kept: unknown = JSON.parse(localStorage.getItem(MINIMISED_KEY) ?? "[]");
-    return new Set(Array.isArray(kept) ? kept.filter((id): id is string => typeof id === "string") : []);
-  } catch {
-    return new Set();
-  }
-}
-
-/** This install has read Chat at least once, so the server's read marks are his. */
-function readChatBefore(): boolean {
-  try {
-    return localStorage.getItem(CHAT_READ_KEY) !== null;
-  } catch {
-    return false;
-  }
-}
-
-function noteChatRead(): void {
-  try {
-    localStorage.setItem(CHAT_READ_KEY, "1");
-  } catch {}
-}
-
-function writeMinimised(ids: ReadonlySet<string>): void {
-  try {
-    if (ids.size) localStorage.setItem(MINIMISED_KEY, JSON.stringify([...ids]));
-    else localStorage.removeItem(MINIMISED_KEY);
-  } catch {}
-}
-
 function forgetRetired(): void {
   try {
     for (const key of RETIRED_KEYS) localStorage.removeItem(key);
@@ -439,8 +463,8 @@ function forgetRetired(): void {
 function readDraft(): string {
   try {
     const draft = localStorage.getItem(DRAFT_KEY) ?? "";
-    // Words Cancel put back are the owner's own, whatever their length (a window's raw lines, two put-backs in a row): kept
-    // whole until the owner trims them. Any other draft keeps the message limit.
+    // Words Cancel put back are his own, whatever their length (a window's raw lines, two put-backs in a row): kept
+    // whole until he trims them. Any other draft keeps the message limit.
     return localStorage.getItem(DRAFT_LONG_KEY) ? draft : draft.slice(0, MAX_CHAT_TEXT);
   } catch {
     return "";
@@ -463,7 +487,7 @@ function writeDraft(value: string, fresh = false): void {
     if (value.trim()) {
       const previous = fresh ? null : readDraftRev();
       const revision = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-      // Put back over a draft and over the limit together, it is kept whole while the owner trims it; any other stays capped.
+      // Put back over a draft and over the limit together, it is kept whole while he trims it; any other stays capped.
       const long = value.length > MAX_CHAT_TEXT && (fresh || localStorage.getItem(DRAFT_LONG_KEY) !== null);
       localStorage.setItem(DRAFT_KEY, value);
       localStorage.setItem(DRAFT_REV_KEY, revision);
@@ -483,6 +507,8 @@ interface ReplyTarget {
   quote: ChatQuote;
   /** The conversation it was picked in: the reply is dropped in any other. */
   conversation?: string;
+  /** Picked in Chat: the label of the run it answers, which the strip names in place of a quote. */
+  label?: string;
   /** In the Team room, the chat it answers: the sender of the line it was picked on. */
   owner?: string;
 }
@@ -497,7 +523,9 @@ function readReply(): ReplyTarget | null {
       typeof saved?.id !== "string" ||
       !quote ||
       (quote.from !== "owner" && quote.from !== "rivet") ||
-      typeof quote.text !== "string"
+      typeof quote.text !== "string" ||
+      // In the agents' room a reply is only ever to an agent's line, which names its owner; a kept one without is dropped.
+      (saved.conversation === TEAM_ROOM_ID && typeof saved.owner !== "string")
     )
       return null;
     return {
@@ -507,6 +535,7 @@ function readReply(): ReplyTarget | null {
         ? { conversation: saved.conversation }
         : {}),
       ...(typeof saved.owner === "string" ? { owner: saved.owner } : {}),
+      ...(typeof saved.label === "string" ? { label: saved.label } : {}),
     };
   } catch {
     return null;
@@ -563,11 +592,11 @@ function heardMessages(list: readonly ChatMessage[]): boolean {
  * newest goes out. A session's end forgets it.
  */
 let lastChat: readonly ChatMessage[] | null = null;
-/** The things Chat's pages named (ChatPage.things): their lines carry Open topic though their card line is not loaded. */
-const chatThings = new Set<string>();
+/** What Chat's pages named of their lines' conversations (ChatPage.labels), for the label over each run. */
+const chatLabels = new Map<string, LabelSource>();
 onSessionReset(() => {
   lastChat = null;
-  chatThings.clear();
+  chatLabels.clear();
   gone.clear();
   // Not the owed Cancel: every app start resets the session, and a reload must still ask for its words.
 });
@@ -583,11 +612,11 @@ const SHARE_APP_ONLY =
 let draftBox: { text: HTMLTextAreaElement; fit: () => void } | null = null;
 
 /**
- * Read-aloud state, kept for the session. `floor` is the time of the newest message the chat knew of when it first
+ * Read-aloud state, kept for the session. `home` is the time of the newest message the chat knew of when it first
  * loaded: nothing older is ever spoken, so a refresh or reconnect never replays history. `heard` holds the Rivet
  * messages already shown or spoken, by id, since arrival order (not id order) decides what is new.
  */
-let floor: string | null = null;
+let home: string | null = null;
 const heard = new Set<string>();
 const listTop = (rows: readonly ConversationSummary[]): string | null =>
   rows.reduce<string | null>(
@@ -632,7 +661,7 @@ export function startDraft(prefix: string): boolean {
   return true;
 }
 
-/** Rivet's chat: the conversation with him on the Chat tab, never the thing left open. */
+/** The Town's Rivet row: the conversation with him on the Chat tab, never the thing left open (review 2026-10-11). */
 export function showRivetChat(): void {
   openRivet();
   app.tab = "chat";
@@ -724,7 +753,7 @@ function openShare(reply: string, refusal: () => string | null): void {
         void navigator.clipboard?.writeText(text).then(() => flash("Copied. Paste it where you like."));
         return closeSheet();
       }
-      // share must start inside the tap, before any await, or iOS refuses it.
+      // share() must start inside the tap, before any await, or iOS refuses it.
       go.disabled = true;
       const waiting = setTimeout(() => (go.disabled = false), SHARE_WAIT_MS);
       navigator.share({ text }).then(
@@ -782,29 +811,11 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   let detailTimer = 0;
   let detailTicket = 0;
   let list: ConversationsResponse | null = null;
-  /** Successful list reads, so a failed Mark all read never puts back over a newer one. */
-  let listReads = 0;
-  /** Per topic, the newest line Chat drew on its card from the stream: Mark all read reads it up to that. */
-  const drawnAt = new Map<string, string>();
-  /** The stream has (re)opened since the last list read: what it missed is not drawn, so nothing goes in drawnAt. */
-  let streamGap = true;
-  /** Times the stream has opened: a list read asked before the last one does not end its gap. */
-  let streamOpens = 0;
   /** Chat's newest page has come at least once since it last opened. */
   let chatLoaded = false;
-  // While you were away: Chat marks his read the moment it lands at its newest, so the pill keeps the Rivet lines
-  // the first list since he came back had unread, by its read mark, until he leaves again.
-  /** Each topic's unread count from that list, until its lines are on hand. */
-  const awayOwed = new Map<string, number>();
-  /** The lines the pill counts. */
-  const away = new Set<string>();
-  let awayLoad = true;
-  const awayPill = h("li", { class: "chat-away", attrs: { role: "status" } });
-  /** A topic Chat may mark read: the pill counts only these, so what it counted is read by the time he is back. */
-  const readable = (row: ConversationSummary) =>
-    // A minimised topic shows New until he opens it; a thing he marked unread stays so until he opens it (2026-11-16).
-    row.id !== TEAM_ROOM_ID && !minimised.has(row.id) && !(row.thing && row.markedUnread);
-  /** Where Chat's held lines run unbroken from: a refresh keeps lines from before its page, past a gap (2026-11-16). */
+  /** A conversation Chat may mark read: a thing he marked unread stays so until he opens it. */
+  const readable = (row: ConversationSummary) => row.id !== TEAM_ROOM_ID && !(row.thing && row.markedUnread);
+  /** Where Chat's held lines run unbroken from: a refresh keeps lines from before its page, past a gap. */
   let unbrokenFrom = "";
   /** The open thing's first read failed, so its empty line says so and offers Try again rather than Loading… on. */
   let loadFailed = false;
@@ -837,20 +848,10 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   let jumps = 0;
   let seeking = 0;
   let litTimer = 0;
-  /** Conversations whose topic card Chat shows as one row. */
-  const minimised = readMinimised();
   /** Rivet messages that came into the open conversation since it was last marked read. */
   let unseen = 0;
   /** The newest message the open conversation was marked read up to. */
   let marked: string | null = null;
-  /** More topics is open over Chat: the conversations, with Chat's search on top of them. */
-  let topicsOpen = false;
-  /** The archived conversations read so far under More topics, and the cursor of the next page. */
-  let archived: ConversationSummary[] | null = null;
-  let archivedNext: string | null = null;
-  let archivedBusy = false;
-  /** Bumped when the archived pages are dropped, so a page still in flight from before lands nowhere. */
-  let archivedRead = 0;
   /** The thread waits for `later`; `heldStick`: a render while it waited asked to stick to the newest. */
   let threadHeld = !!later && !app.chatFocus && !focusOnMount;
   let heldStick = false;
@@ -859,22 +860,26 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     class: "chat-thread",
     attrs: { "aria-live": "polite", "aria-label": "Messages" },
   });
-  const earlier = button(
-    "Earlier messages",
-    () => void loadEarlier(),
-    "ghost conv-earlier",
-    false,
-    "chat.earlier",
-  );
+  // No Earlier messages button: scrolling to the top loads the page before; this says so while it comes.
+  const earlier = h("div", { class: "conv-earlier", attrs: { role: "status" } }, h("span", {}, "Loading earlier messages…"));
+  earlier.hidden = true;
+  /** Off after a failed earlier page until he scrolls away from the top, so a failure is not asked again on every pixel. */
+  let earlierArmed = true;
+  /** Pages before loaded by themselves since he last scrolled or opened this: at EARLIER_PAGES_MAX they wait for him. */
+  let earlierRun = 0;
+  function armEarlier(): void {
+    earlierArmed = true;
+    earlierRun = 0;
+  }
   const headBox = h("div", { class: "conv-head-box" });
-  /** A thing's Share and Stop it, under its say-line. */
+  /** A thing's Share, Open on Mac and Stop it, under its say-line. */
   const thingFoot = h("div", { class: "thing-foot" });
   const scroller = h("div", { class: "chat-scroll" }, earlier, thread);
   watchDepth(scroller, () => "chat");
   const foot = holdFoot(scroller, 40);
-  /** Where Chat was when More topics or search covered it, to put back when they go. */
+  /** Where Chat was when search covered it, to put back when it goes. */
   let covered: { held: boolean; top: number } | null = null;
-  /** What the last render drew: More topics opened from a conversation's page has no place of Chat's to keep. */
+  /** What the last render drew: a search over a conversation's page has no place of Chat's to keep. */
   let drawn: Screen["kind"] | null = null;
   let thingOnTop = false;
   const text = h("textarea", {
@@ -912,8 +917,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     ),
   );
   replyBar.hidden = true;
-  // While a window collects (2026-11-16): the seconds left by the server's deadline, and Cancel, which puts it back in
-  // the box.
+  // While a window collects: the seconds left by the server's deadline, and Cancel, which puts it back in the box.
   const collectWords = h("strong", { class: "chat-collecting-when" });
   const collectBar = h("span", { class: "chat-collecting-bar", attrs: { "aria-hidden": "true" } });
   const cancelBtn = h(
@@ -991,7 +995,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   }
   /**
    * Cancel: the server takes the window back before it goes, the lines leave the chat, and their words, photos and
-   * files return to the box, ahead of anything typed since. Sent already, they stay and the owner is told.
+   * files return to the box, ahead of anything typed since. Sent already, they stay and he is told.
    */
   function newestCollecting(): ChatMessage | undefined {
     const open = [...messages.values()].filter((message) => message.status === "collecting");
@@ -1045,6 +1049,8 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   }
   function putBack(back: ChatCancelled): void {
     cmd.tookBack(back);
+    // A page holds only its own lines: the cancelled ones on screen mean this page is where they (and their reply) were.
+    const theirPage = back.ids.some((id) => messages.has(id));
     for (const id of back.ids) {
       gone.add(id);
       messages.delete(id);
@@ -1058,9 +1064,21 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     }
     if (back.images.length || back.files.length) attach.put(back.images, back.files);
     // A reply comes back as one: on the page it is put back on, or from Chat as it was picked there.
-    if (back.replyTo && back.quote) {
-      const here = shownId();
-      setReply({ id: back.replyTo, quote: back.quote, ...(here && !back.ids.includes(here) ? { conversation: here } : {}) }, false);
+    // The reply comes back in Chat, or on the cancelled lines' own page; never on a page opened while the Cancel was out
+    // (another conversation, read-only Updates), and in the agents' room only on an agent's line.
+    const replied = back.replyTo ? messages.get(back.replyTo) : undefined;
+    const here = shownId();
+    const fits = here === null || (theirPage && (here !== TEAM_ROOM_ID || Boolean(replied?.team?.from)));
+    if (back.replyTo && back.quote && fits) {
+      setReply(
+        {
+          id: back.replyTo,
+          quote: back.quote,
+          ...(here && !back.ids.includes(here) ? { conversation: here } : {}),
+          ...(here === TEAM_ROOM_ID && replied?.team?.from ? { owner: replied.team.from } : {}),
+        },
+        false,
+      );
     }
     hint.textContent =
       text.value.length > MAX_CHAT_TEXT
@@ -1150,11 +1168,11 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       if (latest && !inRoom(latest)) say(latest.text);
       baseline([...messages.values()]);
       const top = list ? listTop(list.conversations) : null;
-      if (top !== null && (floor === null || top > floor)) floor = top;
+      if (top !== null && (home === null || top > home)) home = top;
       // While the conversation is empty, the press separates history from new replies, even if its list arrived.
       if (messages.size === 0) {
         const pressedAt = new Date(Date.now()).toISOString();
-        if (floor === null || pressedAt > floor) floor = pressedAt;
+        if (home === null || pressedAt > home) home = pressedAt;
       }
     } else stopVoice();
     renderSpeak();
@@ -1184,35 +1202,10 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     }
   };
   renderSpeak();
-  const unreadCount = h("small", { class: "chat-menu-count" });
-  const menuItem = (icon: string, label: string, use: string, go: () => void, extra: HTMLElement | null = null) =>
-    h(
-      "button",
-      {
-        class: "chat-menu-item",
-        attrs: { type: "button", role: "menuitem", "data-use": use },
-        on: {
-          click: () => {
-            closeMenu();
-            go();
-          },
-        },
-      },
-      svg(icon, "btn-icon"),
-      h("span", { class: "chat-menu-grow" }, label),
-      extra,
-    );
-  const markAllBtn = menuItem(ICONS.yes, "Mark all read", "chat.options.mark-read", () => markAllRead(), unreadCount);
-  // Off Chat only Read aloud stays: a topic's page in Rivet's sheet has no other.
-  const chatOnlyItems = [
-    menuItem(COLLAPSE, "Collapse all", "chat.options.collapse-all", () => collapseAll(true)),
-    menuItem(EXPAND, "Expand all", "chat.options.expand-all", () => collapseAll(false)),
-    markAllBtn,
-  ];
+  // Collapse all, Expand all and Mark all read moved to the topics bar over Chat: Read aloud is the menu's own.
   const menu = h(
     "div",
     { class: "chat-menu", attrs: { role: "menu", "aria-label": "Chat options" } },
-    ...chatOnlyItems,
     canSpeak() ? speakSwitch : null,
   );
   menu.hidden = true;
@@ -1237,9 +1230,6 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     optionsBtn.focus();
   };
   function openMenu(): void {
-    const count = unreadToMark();
-    unreadCount.textContent = count ? `${count} new` : "";
-    markAllBtn.disabled = count === 0;
     menu.hidden = false;
     optionsBtn.setAttribute("aria-expanded", "true");
     document.addEventListener("pointerdown", outside, true);
@@ -1277,16 +1267,24 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     (id, whole) => (whole ? openConversationNow(id) : openHit(id)),
     () => render(false),
   );
-  const topicsRow = h("div", { class: "chat-topics-row" });
-  const topicsList = h("ul", { class: "chat-topics", attrs: { "aria-label": "Topics" } });
+  // An ask is named as the grey label over its line names its conversation, when Chat holds that line.
+  const due = dueLine(
+    (id) => openHit(id),
+    (ask) => {
+      const line = askLine(ask);
+      const message = line ? messages.get(line) : undefined;
+      if (!message) return null;
+      const id = threadOf(message);
+      return (chatLabels.get(id) ?? summaryOf(id))?.title?.trim() || null;
+    },
+  );
   const section = h(
     "section",
     { class: "chat", attrs: { "data-card-keys": "off" } },
     chatHead,
     headBox,
-    topicsRow,
+    due.el,
     search.el,
-    topicsList,
     scroller,
     composeBox,
     thingFoot,
@@ -1305,6 +1303,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   // names none, so it is dropped.
   if (kept && shown.kind === "conversation" && kept.conversation === shown.id)
     setReply(kept, false);
+  else if (kept && kept.conversation === undefined && kept.label && shown.kind === "rivet") setReply(kept, false);
   else if (kept && kept.conversation === undefined) writeReply(null);
   const box = { text, fit };
   draftBox = box;
@@ -1337,13 +1336,33 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       send();
     }
   });
-  scroller.addEventListener("scroll", () => markRead());
+  scroller.addEventListener("scroll", () => {
+    markRead();
+    earlierAtTop();
+  });
+  // A Chat shorter than the screen never scrolls: dragging or wheeling it down at the top is his scroll away and back,
+  // once a drag (a new touch) or once a wheel gesture (after a second's pause), never on every event of one gesture.
+  let gesturePulled = false;
+  let wheeledAt = -Infinity;
+  const pullEarlier = (): void => {
+    if (gesturePulled || earlierArmed || scroller.scrollHeight - scroller.clientHeight > EARLIER_AT_PX) return;
+    gesturePulled = true;
+    armEarlier();
+    earlierAtTop();
+  };
+  scroller.addEventListener("touchstart", () => (gesturePulled = false), { passive: true });
+  scroller.addEventListener("touchmove", pullEarlier, { passive: true });
+  scroller.addEventListener("wheel", (event) => {
+    if (event.deltaY >= 0) return;
+    if (event.timeStamp - wheeledAt >= 1000) gesturePulled = false;
+    wheeledAt = event.timeStamp;
+    pullEarlier();
+  }, { passive: true });
   // Photos and files dragged from the desktop, or a screenshot pasted, attach as the clip's picker would. The whole
   // pane takes the drop, past the column's edges; a read-only conversation, with no composer, takes none.
-  // Only while the composer is on screen and takes files: not over More topics or a search, which hide it, nor while
-  // Rivet is asleep, when the clip is off too.
-  const composing = () =>
-    !composeBox.hidden && cappedWake === null && !section.classList.contains("topics") && !section.classList.contains("searching");
+  // Only while the composer is on screen and takes files: not over a search, which hides it, nor while Rivet is asleep,
+  // when the clip is off too.
+  const composing = () => !composeBox.hidden && cappedWake === null && !section.classList.contains("searching");
   const unzone = dropZone(el, (files) => attach.add(files), composing);
   // On the composer, so a screenshot pasted into the search field is not taken unseen.
   composeBox.addEventListener("paste", (event) => {
@@ -1356,7 +1375,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
 
   /**
    * The box grows with what is typed. Measuring shrinks it for a moment, and a scroll around it (Rivet's sheet with the
-   * keyboard up, or the messages) clamps to that shorter page and stays there: More topics flashed back and the box
+   * keyboard up, or the messages) clamps to that shorter page and stays there: the topics bar flashed back and the box
    * jumped on every key. Each one keeps its place.
    */
   function fit(): void {
@@ -1375,19 +1394,11 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   }
 
   /**
-   * In Chat: every line of every conversation but the old Updates (2026-11-16). A thing's lines stay on its page too;
-   * in Chat each of Rivet's carries Open topic (topicOf).
+   * In Chat: every line of every conversation but the old Updates. A
+   * thing's lines stay on its page too.
    */
   function inChat(message: ChatMessage): boolean {
     return (message.threadId ?? message.id) !== UPDATES_ID;
-  }
-
-  /** In Chat, the thing a line of Rivet's (not a card line, which opens its page already) belongs to: its Open topic. */
-  function topicOf(message: ChatMessage): string | null {
-    if (shown.kind !== "rivet" || message.from !== "rivet" || message.posted || message.team) return null;
-    const id = message.threadId ?? message.id;
-    if (ownsNoCard(id)) return null;
-    return chatThings.has(id) || hasCard(id) || !!list?.conversations.some((row) => row.id === id && row.thing) ? id : null;
   }
 
   /** The title of an answered card: the one the server sent with the answer, else its board card, else the line that posted it. */
@@ -1418,8 +1429,8 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   }
 
   /**
-   * A server-owned room other than the Agent Chat room: a line typed there with no Reply starts a chat of its own, since
-   * the room files no card. A topic's page keeps its lines (2026-11-17).
+   * A server-owned room (quote alerts…) other than the Agent Chat room: a line typed there with no Reply
+   * starts a chat of its own, since the room files no card. A topic's page keeps its lines.
    */
   function roomStartsChat(id: string): boolean {
     return ownsNoCard(id) && id !== TEAM_ROOM_ID;
@@ -1433,7 +1444,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
         : id === TEAM_ROOM_ID
         ? `Message ${RIVET_NAME} about a chat`
         : id !== null && !replyingTo
-          ? // Short enough for one line beside the mic at 320 (the box is about 100px of text there).
+          ? // Short enough for one line beside the mic on a narrow phone (the box is about 100px of text there).
             roomStartsChat(id)
             ? "New chat"
             : "Reply here"
@@ -1447,8 +1458,9 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     paintPlaceholder();
     writeReply(target);
     replyBar.hidden = target === null;
+    replyBar.classList.toggle("labelled", !!target?.label);
     if (!target) return replyQuote.replaceChildren();
-    replyQuote.replaceChildren(...quoteParts(target.quote));
+    replyQuote.replaceChildren(...(target.label ? ["Replying to ", h("strong", {}, target.label)] : quoteParts(target.quote)));
     if (focus) text.focus();
   }
 
@@ -1462,8 +1474,6 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
 
   /** Brings the quoted message into view and lights it for a moment; one not loaded here is left alone. */
   function jump(id: string): void {
-    const into = messages.get(id);
-    if (into && shown.kind === "rivet" && minimised.has(threadOf(into))) toggleMinimised(threadOf(into), false);
     const target = [...thread.querySelectorAll<HTMLElement>(".chat-msg")].find(
       (item) => item.dataset.id === id,
     );
@@ -1546,9 +1556,6 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       message.card ? answeredTitle(message) : null,
       timeOf(message.at),
       chatImages(message).map(mediaSrc),
-      topicOf(message),
-      // Its Open topic button names the topic, which the titler or the owner may rename.
-      summaryOf(topicOf(message) ?? "")?.title,
     ]);
     const was = rows.get(message.id);
     // A card's media is one element shared with the Feed and Answered, so another view may have taken it from the row.
@@ -1560,29 +1567,13 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   }
 
   /**
-   * Chat's messages as topic cards: a card holds a run of one conversation's lines, and a line replying to one
-   * in it. A conversation's own page has its title on top, so there a card is one turn: his lines and Rivet's answer.
-   */
-  /**
-   * Chat's topic cards: one per conversation, each in time order and the cards ordered by their newest line, so the
-   * newest line is last. A conversation's page splits at each new question.
+   * The messages in runs, oldest to newest. A conversation's page splits at each new question; Chat at another
+   * conversation's line too, so a run's label and Reply name its own conversation.
    */
   function exchangesOf(sorted: ChatMessage[]): ChatMessage[][] {
-    if (shown.kind === "rivet") {
-      const byThread = new Map<string, ChatMessage[]>();
-      const newest = new Map<ChatMessage[], number>();
-      sorted.forEach((message, index) => {
-        const thread = threadOf(message);
-        const group = byThread.get(thread) ?? [];
-        group.push(message);
-        byThread.set(thread, group);
-        newest.set(group, index);
-      });
-      return [...newest.keys()].sort((a, b) => newest.get(a)! - newest.get(b)!);
-    }
     const groups: ChatMessage[][] = [];
     // In the agents' room each agent's run is its own card, so its Reply goes to that agent: only another agent's line starts one.
-    if (shown.id === TEAM_ROOM_ID) {
+    if (shownId() === TEAM_ROOM_ID) {
       let agent: string | undefined;
       for (const message of sorted) {
         const last = groups.at(-1);
@@ -1595,7 +1586,8 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     for (const message of sorted) {
       const last = groups.at(-1);
       const before = last?.at(-1);
-      if (last && before && !(message.from === "owner" && before.from !== "owner")) last.push(message);
+      if (last && before && !(message.from === "owner" && before.from !== "owner") && (shown.kind !== "rivet" || threadOf(message) === threadOf(before)))
+        last.push(message);
       else groups.push([message]);
     }
     return groups;
@@ -1605,260 +1597,73 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     return message.threadId ?? message.id;
   }
 
-  /** A line as a minimised card's second line or a sheet's top line names it, whatever it carries. */
-  function lineOf(message: ChatMessage): string {
-    if (message.posted) return `Card: ${message.posted.title}`;
-    if (message.card && message.from === "owner") return answerLine(answeredTitle(message), message.text);
-    return lastLine(message);
-  }
-
-  /** His last line in the card is still waiting for Rivet. */
+  /** His last line in the run is still waiting for Rivet. */
   function waiting(group: ChatMessage[]): boolean {
     const last = group.at(-1)!;
     return last.from === "owner" && !last.card && (last.status === "sent" || last.status === "typed");
   }
 
-  /**
-   * A topic card's heading: the conversation's title, or his question until it has one, cut to the space by CSS. An
-   * idle topic is not in the open list, so its title is unknown here; his card answer ("Chose: …") is no question.
-   */
-  function titleOf(group: ChatMessage[]): string {
-    const title = summaryOf(threadOf(group[0]!))?.title?.trim();
-    if (title) return title;
-    const asked = group.find((message) => message.from === "owner" && !message.card && message.text.trim()) ?? group[0]!;
-    return lineOf(asked).replace(/\s+/g, " ").trim() || RIVET_NAME;
+  /** In Chat, the grey label over a run of Rivet's lines from one conversation; null elsewhere. */
+  function labelOf(group: ChatMessage[]): string | null {
+    if (shown.kind !== "rivet") return null;
+    const id = threadOf(group[0]!);
+    return chatLabel(chatLabels.get(id) ?? summaryOf(id));
   }
 
-  /** Each card as last drawn, by its first message: its turns list is kept, so no bubble or clip leaves the page. */
+  /** Each run as last drawn, by its first message: its turns list is kept, so no bubble or clip leaves the page. */
   let topicCards = new Map<string, { key: string; el: HTMLElement; turns: HTMLElement; chrome: HTMLElement[] }>();
-  /** Each card's messages as last drawn: Reply and More read them when tapped. */
+  /** Each run's messages as last drawn: Reply reads them when tapped. */
   let cardGroups = new Map<string, ChatMessage[]>();
 
-  function toggleMinimised(thread: string, close: boolean): void {
-    if (close) minimised.add(thread);
-    else minimised.delete(thread);
-    writeMinimised(minimised);
-    render(false);
-  }
-
-  /** Opening a minimised topic Rivet has replied in reads it, as its page would. */
-  function openMinimised(thread: string): void {
-    const row = list?.conversations.find((item) => item.id === thread);
-    const fresh = !!row && countsUnread(row);
-    if (fresh) {
-      row.unread = 0;
-      row.markedUnread = false;
-    }
-    toggleMinimised(thread, false);
-    if (!fresh) return;
-    noteUnread();
-    cmd.patchConversation(thread, { read: true }).catch((error: unknown) => {
-      if (!authFail(error) && alive) void loadList();
+  /** A line's More: Read aloud for Rivet's words, Copy, Share for a line that may leave the app, Open card. */
+  function moreOf(message: ChatMessage): void {
+    const words = message.posted ? message.posted.title : message.card && message.from === "owner" ? answerLine(answeredTitle(message), message.text) : message.text;
+    const card = cardOf(message);
+    const theirs = message.from !== "owner";
+    openMore({
+      line: words.replace(/\s+/g, " ").trim() || (theirs ? RIVET_NAME : "Your line"),
+      listen: theirs && !message.team && !message.posted && message.text.trim() ? rivetWords(message.text) : null,
+      copy: words.trim() || null,
+      // Share sends text: a line that is only photos or a video has none to send, and a card is no answer.
+      share:
+        theirs && !message.posted && message.text.trim() && !appOnly(message) && !inRoom(message)
+          ? () => openShare(message.text, () => (liveRefusal ? liveRefusal(message) : SHARE_CHECKING))
+          : null,
+      card: card ? () => showCard(card.id) : null,
     });
   }
 
-  /** Collapse all minimises every topic Chat shows; Expand all opens them. Others' saved state stays. */
-  function collapseAll(close: boolean): void {
-    for (const group of cardGroups.values()) {
-      if (close) minimised.add(threadOf(group[0]!));
-      else minimised.delete(threadOf(group[0]!));
-    }
-    writeMinimised(minimised);
-    render(false);
-  }
-
-  /** The conversations Mark all read reads: the ones the Chat badge counts. */
-  function markable(): ConversationSummary[] {
-    return (list?.conversations ?? []).filter((row) => countsUnread(row) && row.id !== TEAM_ROOM_ID && !row.updates);
-  }
-
-  /** Mark all read's count: the open list's unread topics plus the archived ones the server counted. */
-  function unreadToMark(): number {
-    return markable().length + (list?.olderUnread ?? 0);
-  }
-
-  /**
-   * One request reads every topic, the ones idle under Archived too, in one go: a PATCH a topic let a list reload land
-   * half way and bring dots back, and an idle topic Chat still draws was never read. The list is read again after it,
-   * so a mark the server kept shows; on a failure every row gets back what it had first, so nothing shows read that
-   * is not.
-   */
-  function markAllRead(): void {
-    if (!unreadToMark()) return;
-    // Only what Chat has drawn: up to the last list read, and a topic past it only up to the line Chat drew in it. A
-    // reply that came after stays unread.
-    const upTo = list?.at;
-    const drawn = upTo === undefined ? {} : Object.fromEntries([...drawnAt].filter(([, at]) => at > upTo).slice(0, READ_ALL_DRAWN_MAX));
-    const reads = listReads;
-    const shelf = archivedRead;
-    const olderUnread = list?.olderUnread ?? 0;
-    const shelved = (archived ?? []).filter((one) => !one.updates);
-    const cleared = [...markable(), ...shelved];
-    const before = new Map(cleared.map((row) => [row.id, [row.unread, row.markedUnread] as const]));
-    for (const row of cleared) {
-      row.unread = 0;
-      row.markedUnread = false;
-    }
-    if (list) list.olderUnread = 0;
-    noteUnread();
-    render(false);
-    cmd.readAllConversations(upTo, drawn).then(
-      () => {
-        if (alive) void loadList();
-      },
-      (error: unknown) => {
-        if (authFail(error) || !alive) return;
-        // Every row goes back, by id (a stream line may have replaced a row or the list since), new words kept; the
-        // archived count too. A list read since is the server's word for the open list and the count, so nothing goes
-        // back over them; it never reads the Archived pages again, so their rows go back unless those were read anew.
-        const back = (row: ConversationSummary) => {
-          const was = before.get(row.id);
-          if (was) Object.assign(row, { unread: row.unread + was[0], markedUnread: row.markedUnread || was[1] });
-        };
-        if (listReads === reads) {
-          for (const row of list?.conversations ?? []) back(row);
-          if (list) list.olderUnread = (list.olderUnread ?? 0) + olderUnread;
-        }
-        if (archivedRead === shelf) for (const row of shelved) back(row);
-        noteUnread();
-        render(false);
-        void loadList();
-      },
-    );
-  }
-
-  function replyToCard(first: string): void {
-    const group = cardGroups.get(first);
-    // The server routes a room reply by the line it answers: the card's agent's last line, never his own.
-    const agentLine = shownId() === TEAM_ROOM_ID ? [...(group ?? [])].reverse().find((one) => one.team) : undefined;
-    const message = agentLine ?? group?.at(-1);
-    if (!message) return;
-    const owner = agentLine?.team?.from;
+  /** Reply on a line: it answers that line, and in Chat the strip names its run's label. */
+  function replyToLine(message: ChatMessage): void {
+    const group = [...cardGroups.values()].find((one) => one.some((line) => line.id === message.id));
+    const label = group ? labelOf(group) : null;
+    const owner = shownId() === TEAM_ROOM_ID ? message.team?.from : undefined;
     setReply({
       id: message.id,
       quote: { from: message.from, text: quoteText(message) },
       ...(shownId() ? { conversation: shownId()! } : {}),
       ...(owner ? { owner } : {}),
+      ...(label ? { label } : {}),
     });
   }
 
-  function moreOf(first: string): void {
-    const group = cardGroups.get(first);
-    if (!group) return;
-    const answers = group.filter((message) => message.from === "rivet" && !message.posted && message.text.trim());
-    const answer = answers.at(-1) ?? null;
-    const asked = group.filter((message) => message.from === "owner").at(-1);
-    const thread = threadOf(group[0]!);
-    // Judged on all of the conversation loaded, as the server judges it: a card holds only its newest exchange.
-    const lines = [...messages.values()].filter((message) => threadOf(message) === thread).sort(byTime);
-    const reAsk = answer && notAnswerOf(lines, answer, (id) => messages.get(id));
-    const rejectable = !!reAsk && reAsk.last && !reAsk.open.length && !readOnly() && thread !== TEAM_ROOM_ID && !waiting(lines);
-    openMore({
-      question: asked ? lineOf(asked) : titleOf(group),
-      listen: answer ? rivetWords(answer.text) : null,
-      readAll: shown.kind === "rivet" ? () => openConversationNow(thread) : null,
-      // Share sends text: an answer that is only photos or a video has none to send, and a card is no answer.
-      share:
-        answer && !appOnly(answer) && !inRoom(answer)
-          ? () => openShare(answer.text, () => (liveRefusal ? liveRefusal(answer) : SHARE_CHECKING))
-          : null,
-      notAnswer: rejectable && answer ? () => askAgain(answer) : null,
-    });
-  }
-
-  /** Not an answer: his question goes to Rivet again, and the card shows Rivet at work as it does for a line just sent. */
-  function askAgain(answer: ChatMessage): void {
-    cmd.notAnswer(answer.id).then(
-      (entry) => {
-        if (!alive) return;
-        if (entry.status === "failed" || entry.status === "refused" || entry.status === "cancelled") {
-          hint.textContent = `${RIVET_NAME} did not get it. Tap Not an answer again.`;
-          return;
-        }
-        hint.textContent = "";
-        const stored = messages.get(entry.id);
-        arrived({
-          id: entry.id,
-          from: "owner",
-          text: entry.text ?? "",
-          ...imageFields(chatImages(entry)),
-          at: entry.at,
-          status: stored?.status ?? (entry.status === "collecting" ? "collecting" : "sent"),
-          ...(stored?.seq !== undefined ? { seq: stored.seq } : {}),
-          replyTo: answer.id,
-          ...(entry.quote ? { quote: entry.quote } : {}),
-          ...(entry.notAnswerFor ? { notAnswerFor: entry.notAnswerFor } : {}),
-          threadId: threadOf(answer),
-        });
-      },
-      (error: unknown) => {
-        if (authFail(error)) return;
-        hint.textContent = describe(error);
-        if (error instanceof ApiError && error.status === 424) flash(describe(error), "error", 6000);
-      },
-    );
-  }
-
+  /**
+   * A run of lines. In Chat its Rivet lines carry the grey label of their conversation, over the first of them;
+   * each line carries its own More and Reply (bubble).
+   */
   function exchange(group: ChatMessage[], bubbles: HTMLElement[], next: typeof topicCards): HTMLElement {
     const first = group[0]!.id;
     const thread = threadOf(group[0]!);
-    const onChat = shown.kind === "rivet";
-    const closed = onChat && minimised.has(thread);
-    const last = group.at(-1)!;
     const wait = waiting(group);
-    const summary = onChat ? summaryOf(thread) : null;
-    const fresh = !!summary && countsUnread(summary);
-    const title = onChat ? titleOf(group) : "";
-    // His card answer already reads "You approved “…”".
-    const said = last.team || (last.card && last.from === "owner") ? lineOf(last) : `${last.from === "owner" ? "You" : RIVET_NAME}: ${lineOf(last)}`;
-    const replies = !readOnly();
-    const key = JSON.stringify([onChat, closed, wait, fresh, title, closed ? [said, timeOf(last.at)] : null, replies]);
+    const label = labelOf(group);
+    const key = JSON.stringify([wait, label]);
     const was = topicCards.get(first);
     const kept = was?.key === key ? was : null;
     const turns = was?.turns ?? h("ol", { class: "chat-ex-turns" });
+    const labelEl = kept?.chrome.find((one) => one.classList.contains("chat-label")) ?? (label ? h("li", { class: "chat-label" }, label) : null);
     const chrome = kept?.chrome ?? [
-      onChat && !closed
-        ? h(
-            "div",
-            { class: "chat-ex-head" },
-            h("i", { class: "chat-ex-dot", attrs: { "aria-hidden": "true" } }),
-            h("span", { class: "chat-ex-title" }, title),
-            h(
-              "button",
-              {
-                class: "chat-ex-chev",
-                attrs: { type: "button", "aria-label": `Minimise ${title}`, "aria-expanded": "true", "data-use": "chat.ex.minimise" },
-                on: { click: () => toggleMinimised(thread, true) },
-              },
-              svg(CHEVRON, "chat-ex-chev-icon"),
-            ),
-          )
-        : null,
-      closed
-        ? h(
-            "button",
-            {
-              class: "chat-ex-min",
-              attrs: { type: "button", "aria-label": `Open ${title}${fresh ? ", new reply" : ""}`, "aria-expanded": "false", "data-use": "chat.ex.open" },
-              on: { click: () => openMinimised(thread) },
-            },
-            h("i", { class: `chat-ex-dot${fresh ? " new" : ""}`, attrs: { "aria-hidden": "true" } }),
-            h(
-              "span",
-              { class: "chat-ex-min-words" },
-              h("strong", { class: "chat-ex-title" }, title),
-              h(
-                "span",
-                { class: "chat-ex-min-row" },
-                h("span", { class: `chat-ex-min-line${wait ? " working" : ""}` }, wait ? `${RIVET_NAME} is working on it` : said),
-                fresh ? h("span", { class: "chat-ex-new" }, "New") : h("small", { class: "chat-ex-time" }, timeOf(last.at) ?? ""),
-              ),
-            ),
-            svg(CHEVRON, "chat-ex-chev-icon"),
-          )
-        : null,
       turns,
-      wait && !closed
+      wait
         ? h(
             "p",
             { class: "chat-ex-wait", attrs: { role: "status" } },
@@ -1867,42 +1672,22 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
             `${RIVET_NAME} is working on it`,
           )
         : null,
-      closed
-        ? null
-        : h(
-            "div",
-            { class: "chat-ex-foot" },
-            h(
-              "button",
-              { class: "btn ghost chat-ex-more", attrs: { type: "button", "aria-label": "More for this topic", "data-use": "chat.ex.more" }, on: { click: () => moreOf(first) } },
-              svg(MORE, "btn-icon"),
-              "More",
-            ),
-            // Updates is read-only: nothing to reply with.
-            replies
-              ? h(
-                  "button",
-                  { class: "btn ghost chat-reply", attrs: { type: "button", "aria-label": "Reply to this topic", "data-use": "chat.msg.reply" }, on: { click: () => replyToCard(first) } },
-                  svg(REPLY, "btn-icon"),
-                  "Reply",
-                )
-              : null,
-          ),
+      labelEl,
     ].filter((one): one is HTMLElement => one !== null);
-    turns.hidden = closed;
-    placeChildren(turns, bubbles);
+    const at = group.findIndex((message) => message.from !== "owner");
+    placeChildren(turns, labelEl && at >= 0 ? [...bubbles.slice(0, at), labelEl, ...bubbles.slice(at)] : bubbles);
     const el = was?.el ?? h("li", { class: "chat-ex", attrs: { "data-ex": first } });
     el.dataset.thread = thread;
-    el.classList.toggle("minimised", closed);
-    el.classList.toggle("on-chat", onChat);
-    placeChildren(el, chrome);
+    placeChildren(
+      el,
+      chrome.filter((one) => one !== labelEl),
+    );
     next.set(first, { key, el, turns, chrome });
     return el;
   }
 
   function bubble(message: ChatMessage, quoted: boolean): HTMLElement {
     const mine = message.from === "owner";
-    const topic = topicOf(message);
     const posted = message.posted;
     // A card answer is his message too; its card opens from here while it is still on the board. Rivet's "Card: … ›"
     // line (say.mjs --card) opens its update card the same way, the line itself one tap; so does the line beside a
@@ -1921,7 +1706,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
             ` · ${RIVET_NAME}: ${ackWords(message.ack.text)}`,
           )
         : mine && message.status === "replied"
-          ? // A small tick, not the word (the owner).
+          ? // A small tick, not the word.
             [" · ", h("span", { class: "chat-status replied", attrs: { role: "img", "aria-label": STATUS_WORDS.replied, title: STATUS_WORDS.replied } }, svg(ICONS.yes, "chat-tick"))]
           : mine && message.status
           ? h(
@@ -1933,7 +1718,6 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     ].flat();
     const images = chatImages(message).map(mediaSrc);
     const alt = mine ? "Photo you sent" : "Photo";
-    // Reply and More sit once under the topic card, not on each bubble.
     const meta = h("p", { class: "chat-meta" }, ...said);
     const openCard = card && !posted
       ? h(
@@ -1947,38 +1731,29 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
         )
       : null;
     const replyTo = message.replyTo;
-    // In Chat a thing's card is a way to its page; its other lines carry Open topic (2026-11-16).
-    if (posted && shown.kind === "rivet") {
-      const thing = message.threadId ?? message.id;
-      return h(
-        "li",
-        { class: `chat-msg theirs posted chat-thing-row${message.id === lit ? " lit" : ""}`, attrs: { "data-id": message.id } },
-        h(
-          "button",
-          { class: "chat-thing-link", attrs: { type: "button", "aria-label": `Open the page for ${posted.title}`, "data-use": "chat.msg.thing-link" }, on: { click: () => openConversationNow(thing) } },
-          h("span", { class: "chat-posted-kind" }, postedKind(posted.kind)),
-          h("strong", { class: "chat-posted-title" }, posted.title),
-          h("span", { class: "chat-thing-open" }, "Open its page ›"),
-        ),
-        h("p", { class: "chat-meta" }, `Rivet · ${timeOf(message.at) ?? ""}`),
-      );
-    }
-    // In Chat a card answer is one line that opens the card's conversation, where the answer stays with its card.
-    if (mine && message.card && shown.kind === "rivet") {
-      const thing = message.threadId ?? message.id;
-      const line = answerLine(answeredTitle(message), message.text);
-      return h(
-        "li",
-        { class: `chat-msg mine chat-answer-row${message.id === lit ? " lit" : ""}`, attrs: { "data-id": message.id } },
-        h(
-          "button",
-          { class: "chat-thing-link", attrs: { type: "button", "aria-label": `${line}. Open its chat`, "data-use": "chat.msg.answer-line" }, on: { click: () => openConversationNow(thing) } },
-          h("span", { class: "chat-answer-text" }, line),
-          h("span", { class: "chat-thing-open" }, "Open its chat ›"),
-        ),
-        h("p", { class: "chat-meta" }, `You · ${timeOf(message.at) ?? ""}`),
-      );
-    }
+    // Every line has its own More and Reply, his own lines too: a reply
+    // to his line goes to that line's conversation. None in the read-only Updates; none on his line while it still
+    // collects (Cancel can take the line away from under the reply); and in the agents' room only on an agent's line
+    // (`team`), the one that names whom the reply is for: not his own, nor the hourly summary or a say reply there.
+    const replies = !readOnly() && (shownId() === TEAM_ROOM_ID ? Boolean(message.team?.from) : !(mine && message.status === "collecting"));
+    const tools = h(
+      "div",
+      { class: "chat-msg-tools" },
+      h(
+        "button",
+        { class: "chat-msg-tool", attrs: { type: "button", "aria-label": "More for this line", "data-use": "chat.msg.more" }, on: { click: () => moreOf(messages.get(message.id) ?? message) } },
+        "More",
+      ),
+      replies
+        ? h(
+            "button",
+            { class: "chat-msg-tool", attrs: { type: "button", "aria-label": "Reply to this line", "data-use": "chat.msg.reply" }, on: { click: () => replyToLine(messages.get(message.id) ?? message) } },
+            "Reply",
+          )
+        : null,
+    );
+    // In Chat his card answer reads as the answer to its card: "You approved “…”".
+    const text = mine && message.card && shown.kind === "rivet" ? answerLine(answeredTitle(message), message.text) : message.text;
     return h(
       "li",
       {
@@ -2055,7 +1830,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
             posted.ask
               ? h("p", { class: "chat-posted-ask" }, posted.ask)
               : null,
-            card?.media ? cardMedia(card.id, card.media, card.title) : null,
+            card?.media && shown.kind !== "rivet" ? cardMedia(card.id, card.media, card.title) : null,
             card
               ? h(
                   "button",
@@ -2068,7 +1843,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
                 )
               : null,
           )
-        : message.text
+        : text
         ? card && !mine
           ? h(
               "button",
@@ -2077,22 +1852,12 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
                 attrs: { type: "button", "data-use": "chat.msg.card-line" },
                 on: { click: () => showCard(card.id) },
               },
-              message.text,
+              text,
             )
-          : h("p", { class: "chat-body" }, ...linkify(message.text))
-        : null,
-      topic
-        ? h(
-            "button",
-            {
-              class: "btn ghost chat-topic-link",
-              attrs: { type: "button", "aria-label": `Open topic: ${summaryOf(topic)?.title ?? "its page"}`, "data-use": "chat.msg.topic-open" },
-              on: { click: () => openConversationNow(topic) },
-            },
-            "Open topic ›",
-          )
+          : h("p", { class: "chat-body" }, ...linkify(text))
         : null,
       openCard ? h("div", { class: "chat-foot" }, h("div", { class: "chat-foot-tools" }, openCard)) : null,
+      tools,
     );
   }
 
@@ -2206,7 +1971,9 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
         cmd.sendChat(words, [], [], undefined, id).then(
           (entry) => {
             flash(`Asked ${RIVET_NAME} to stop it.`);
-            if (alive) arrived({ id: entry.id, from: "owner", text: words, at: entry.at, status: "sent", threadId: typeof entry.conversation === "string" ? entry.conversation : id });
+            // The stream's copy, when it came first, keeps its status, place and deadline (as send() does).
+            const had = messages.get(entry.id);
+            if (alive) arrived({ id: entry.id, from: "owner", text: words, at: entry.at, status: had?.status ?? (entry.status === "collecting" ? "collecting" : "sent"), ...(had?.seq !== undefined ? { seq: had.seq } : {}), ...(had?.sendsAt ? { sendsAt: had.sendsAt } : {}), threadId: typeof entry.conversation === "string" ? entry.conversation : id });
           },
           (error: unknown) => {
             if (!authFail(error)) flash(describe(error), "error");
@@ -2217,7 +1984,16 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     );
   }
 
-  type Reading = { line: HTMLElement | null; lineOffset: number; card: HTMLElement; first: string; thread: string; cardOffset: number };
+  type Reading = {
+    line: HTMLElement | null;
+    lineOffset: number;
+    card: HTMLElement;
+    first: string;
+    thread: string;
+    cardOffset: number;
+    /** On an open card's foot, its lines all above the screen: where the card's bottom sits, which earlier lines landing in it leave put. */
+    footOffset: number | null;
+  };
   /** What he is reading: the first line, or minimised card or card foot, whose bottom is below the scroller's top, and where it and its card sit. */
   function readingAt(): Reading | null {
     if (scroller.clientHeight === 0) return null;
@@ -2225,13 +2001,12 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     for (const card of thread.querySelectorAll<HTMLElement>(".chat-ex")) {
       const box = card.getBoundingClientRect();
       if (box.bottom <= top) continue;
-      const reading = { line: null, lineOffset: 0, card, first: card.dataset.ex ?? "", thread: card.dataset.thread ?? "", cardOffset: box.top - top };
-      if (!card.classList.contains("minimised"))
-        for (const line of card.querySelectorAll<HTMLElement>(".chat-msg[data-id]")) {
-          const at = line.getBoundingClientRect();
-          if (at.bottom > top) return { ...reading, line, lineOffset: at.top - top };
-        }
-      return reading;
+      const reading: Reading = { line: null, lineOffset: 0, card, first: card.dataset.ex ?? "", thread: card.dataset.thread ?? "", cardOffset: box.top - top, footOffset: null };
+      for (const line of card.querySelectorAll<HTMLElement>(".chat-msg[data-id]")) {
+        const at = line.getBoundingClientRect();
+        if (at.bottom > top) return { ...reading, line, lineOffset: at.top - top };
+      }
+      return { ...reading, footOffset: box.bottom - top };
     }
     return null;
   }
@@ -2239,38 +2014,38 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   /** Puts what he was reading back where it sat: its line, or its card when the line went into a minimised card. */
   function holdReading(reading: Reading | null): void {
     if (!reading || scroller.clientHeight === 0) return;
-    // On Chat a card is its topic, which an earlier line coming in leaves the same; elsewhere a topic has several cards.
     const card = reading.card.isConnected
       ? reading.card
-      : [...thread.querySelectorAll<HTMLElement>(".chat-ex")].find((one) =>
-          shown.kind === "rivet" ? one.dataset.thread === reading.thread : one.dataset.ex === reading.first,
-        );
-    const kept = reading.line?.isConnected
-      ? reading.line
-      : reading.line && [...thread.querySelectorAll<HTMLElement>(".chat-msg[data-id]")].find((one) => one.dataset.id === reading.line!.dataset.id);
-    const line = kept && !kept.closest(".chat-ex")?.classList.contains("minimised") ? kept : null;
+      : [...thread.querySelectorAll<HTMLElement>(".chat-ex")].find((one) => one.dataset.ex === reading.first);
+    const line =
+      (reading.line?.isConnected
+        ? reading.line
+        : reading.line && [...thread.querySelectorAll<HTMLElement>(".chat-msg[data-id]")].find((one) => one.dataset.id === reading.line!.dataset.id)) || null;
     const el = line ?? card;
     if (!el) return;
-    const delta = el.getBoundingClientRect().top - scroller.getBoundingClientRect().top - (line ? reading.lineOffset : reading.cardOffset);
+    const top = scroller.getBoundingClientRect().top;
+    // On a run's foot: its bottom stays put, so the foot does not jump down by the lines landing above it.
+    const foot = !line && reading.footOffset !== null;
+    const delta = foot
+      ? el.getBoundingClientRect().bottom - top - reading.footOffset!
+      : el.getBoundingClientRect().top - top - (line ? reading.lineOffset : reading.cardOffset);
     if (Math.abs(delta) >= 1) scroller.scrollTop += delta;
   }
 
   /** True when it leaves the newest message on screen: stuck to the bottom, or already near it. */
   function render(stick: boolean): boolean {
     const kind = shown.kind;
-    const topics = topicsOpen && kind === "rivet";
     paintSend();
     search.el.dataset.view = kind;
-    // On Chat under the More topics row; a wide window's pane keeps it on top (conversations.css).
+    // On Chat under the topics bar; a wide window's pane keeps it on top (conversations.css).
     search.el.hidden = kind !== "rivet";
-    // Both hide the scroller, which then reads 0 everywhere: where Chat was is taken before, not measured after.
-    const covers = topics || (search.active() && kind === "rivet");
-    const wasCovered = section.classList.contains("topics") || section.classList.contains("searching");
+    // It hides the scroller, which then reads 0 everywhere: where Chat was is taken before, not measured after.
+    const covers = search.active() && kind === "rivet";
+    const wasCovered = section.classList.contains("searching");
     if (covers && !wasCovered && drawn === "rivet" && scroller.clientHeight > 0)
       covered = { held: foot.held(), top: scroller.scrollTop };
     // Results stand in for Chat's messages while a search is typed.
-    section.classList.toggle("searching", search.active() && kind === "rivet");
-    section.classList.toggle("topics", topics);
+    section.classList.toggle("searching", covers);
     section.classList.toggle("thing-page", thingPage());
     if (thingPage() !== thingOnTop) {
       thingOnTop = !thingOnTop;
@@ -2279,20 +2054,16 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     }
     // In the Rivet sheet's head row it is the sheet's title, over a thing's page too.
     chatHead.hidden = kind !== "rivet" && !headHosted();
-    optionsBtn.hidden = kind !== "rivet" && !canSpeak();
-    for (const item of chatOnlyItems) item.hidden = kind !== "rivet";
+    optionsBtn.hidden = !canSpeak();
     // A page opened with no tap outside it (a search hit, a push) must not leave the menu, and its keys, held open.
     if ((optionsBtn.hidden || (shownId() ?? "") !== menuView) && !menu.hidden) closeMenu();
     menuView = shownId() ?? "";
     headBox.hidden = kind === "rivet";
-    topicsRow.hidden = kind !== "rivet";
-    topicsList.hidden = !topics;
-    paintTopics(topics);
+    due.setActive(kind === "rivet");
     thingFoot.hidden = !thingPage();
     // The server takes a room line once the room exists, with its first agent line.
     composeBox.hidden = readOnly() || (roomMissing && shownId() === TEAM_ROOM_ID);
     paintPlaceholder();
-    earlier.hidden = !(earlierMore ?? detail?.more);
     tickCollect();
     if (kind === "conversation") paintHead();
     else paintThing(null, "");
@@ -2316,12 +2087,6 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     const sorted = [...messages.values()]
       .filter((message) => !SEED_IDS.includes(message.id))
       .sort(byTime);
-    if (kind === "rivet" && chatLoaded && minimised.size) {
-      const held = new Set(sorted.map(threadOf));
-      const before = minimised.size;
-      for (const id of minimised) if (!held.has(id)) minimised.delete(id);
-      if (minimised.size !== before) writeMinimised(minimised);
-    }
     // A new message keeps the keyboard on the control it was on; dropped to the page, Enter would answer the card.
     const refocus = keepFocus(thread);
     // A first-read Try again goes however the chat loads (its own tap, a refresh, the stream): its keyboard moves on.
@@ -2340,21 +2105,6 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     });
     rows = next;
     topicCards = nextCards;
-    if (kind === "rivet" && chatLoaded) {
-      for (const [id, count] of awayOwed) {
-        const words = sorted.filter((message) => threadOf(message) === id && message.from === "rivet" && !message.card && !message.posted && !message.team);
-        if (!words.length) continue;
-        for (const message of words.slice(-count)) away.add(message.id);
-        awayOwed.delete(id);
-      }
-      // Above the topmost card holding one, so every answer it counts is below it: cards go by their newest line.
-      const at = groups.findIndex((group) => group.some((message) => away.has(message.id)));
-      if (at >= 0) {
-        const count = sorted.filter((message) => away.has(message.id)).length;
-        awayPill.textContent = `While you were away · ${count} ${count === 1 ? "answer" : "answers"}`;
-        bubbles.splice(at, 0, awayPill);
-      }
-    }
     const retry = () => {
       loadFailed = false;
       render(false);
@@ -2367,7 +2117,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       { class: "chat-empty" },
       kind === "rivet"
         ? chatLoaded
-          ? `Say anything to ${RIVET_NAME}. Each piece of work gets a page of its own.`
+          ? `Say anything to ${RIVET_NAME}.`
           : "Loading…"
         : !detail
           ? roomMissing && shownId() === TEAM_ROOM_ID
@@ -2380,14 +2130,28 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     placeChildren(thread, bubbles.length ? bubbles : [empty]);
     refocus();
     if (retryHeld && !thread.contains(document.activeElement)) handFocus();
-    // Under More topics or search the scroller is hidden and measures 0 everywhere: the hold stays as the reader left it.
+    // Under search the scroller is hidden and measures 0 everywhere: the hold stays as the reader left it.
     if (back && !atBottom) scroller.scrollTop = back.top;
     holdReading(anchor);
     if (stick || scroller.clientHeight > 0) foot.place(stick || atBottom);
     // Under search results nothing in the conversation is on screen, whatever the hidden scroller measures.
-    const showsNewest = (stick || atBottom) && !section.classList.contains("searching") && !topics;
+    const showsNewest = (stick || atBottom) && !section.classList.contains("searching");
     if (showsNewest) markRead();
+    earlierAtTop();
     return showsNewest;
+  }
+
+  /**
+   * At the top with earlier messages still to come, the page before loads by itself (this took the Earlier messages
+   * button out); a thread too short to scroll counts as at the top. Under search nothing of it shows.
+   */
+  function earlierAtTop(): void {
+    if (scroller.clientHeight === 0 || section.classList.contains("searching")) return;
+    if (scroller.scrollTop > EARLIER_AT_PX) {
+      armEarlier();
+      return;
+    }
+    if (earlierArmed && loadingEarlier?.into !== messages && (earlierMore ?? detail?.more)) void loadEarlier();
   }
 
   /** The keyboard a Try again held when it went: the message box, or on a touch screen or with the box hidden the chat. */
@@ -2454,13 +2218,12 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       document.visibilityState !== "visible" ||
       coveredOver(section) ||
       section.classList.contains("searching") ||
-      section.classList.contains("topics") ||
       scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight >= 40
     )
       return;
     // A thing is read only once Chat holds its newest line and as many of Rivet's words in it as it has unread (the
     // server's count: no card lines), counted only where Chat's lines run unbroken, so its replies were on screen; never
-    // when the owner marked it unread: that stays until the owner opens it (2026-11-16).
+    // when the owner marked it unread himself: that stays until he opens it.
     const loaded = [...messages.values()];
     const seen = (row: ConversationSummary) => {
       if (!row.thing) return true;
@@ -2468,7 +2231,6 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       const words = own.filter((message) => message.at >= unbrokenFrom && message.from === "rivet" && !message.posted && !message.card).length;
       return own.some((message) => message.at >= row.lastAt) && words >= row.unread;
     };
-    noteChatRead();
     const rows = list.conversations.filter((row) => countsUnread(row) && readable(row) && seen(row));
     if (!rows.length) return;
     for (const row of rows) {
@@ -2476,7 +2238,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       row.markedUnread = false;
     }
     noteUnread();
-    // Their cards go quiet and Mark all read's count goes with them now, not at the next list read: a stale count left
+    // Their cards go quiet and the bar's count goes with them now, not at the next list read: a stale "N new" left
     // Mark all read with nothing to read, so a tap did nothing. After this render, as it may be inside one.
     queueMicrotask(() => {
       if (alive) render(false);
@@ -2532,13 +2294,17 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     search.clear(true);
     const fresh = shownId() !== id;
     shown = { kind: "conversation", id };
-    topicsOpen = false;
     if (fresh) {
       messages = new Map();
       detail = null;
       loadFailed = false;
       earlierMore = null;
       earliestPage = null;
+      armEarlier();
+      // The last view's page before, still coming, is dropped: it neither blocks nor disarms this one.
+      loadingEarlier = null;
+      earlier.hidden = true;
+      if (hint.textContent === EARLIER_FAILED) hint.textContent = "";
       marked = null;
       unseen = 0;
       detailTicket++;
@@ -2559,7 +2325,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   /**
    * Back to Chat. From the button, through history when this chat pushed the page's entry, so back stays in step; a
    * thing opened as the first screen (a notification's tap, a link) has no Chat entry behind it, and going back from it
-   * would leave the app, so Chat is shown in place.
+   * would leave the app, so Chat is shown in place (review 2026-10-11).
    */
   function back(): void {
     if (shown.kind === "rivet") return;
@@ -2573,16 +2339,18 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     showRivet();
   }
 
-  /** Chat: the one conversation with Rivet, on its newest, or brought to `focus` (a search hit) once it loads; `topics` opens More topics over it. */
-  function showRivet(focus: string | null = null, topics = false): void {
+  /** Chat: the one conversation with Rivet, on its newest, or brought to `focus` (a search hit) once it loads. */
+  function showRivet(focus: string | null = null): void {
     const fresh = shown.kind !== "rivet";
     shown = { kind: "rivet" };
-    if (topicsOpen && !topics) search.clear(true);
-    topicsOpen = topics;
     if (fresh) {
       detail = null;
       earlierMore = null;
       earliestPage = null;
+      armEarlier();
+      loadingEarlier = null;
+      earlier.hidden = true;
+      if (hint.textContent === EARLIER_FAILED) hint.textContent = "";
       messages = new Map();
       chatLoaded = false;
       loadFailed = false;
@@ -2613,145 +2381,10 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     return !section.contains(chatHead);
   }
 
-  let paintedTopics = "";
-  /** More topics: one row over Chat, or open, every conversation the server lists, then the archived ones on a tap. */
-  function paintTopics(open: boolean): void {
-    const rows = (list?.conversations ?? []).filter((row) => !row.updates && row.id !== TEAM_ROOM_ID);
-    const fresh = rows.filter((row) => row.thing && countsUnread(row)).length;
-    const shape = (row: ConversationSummary) => [row.id, row.title, row.lastFrom, row.lastText, row.lastAt, row.needsYou, countsUnread(row)];
-    const key = JSON.stringify(
-      open
-        ? [rows.map(shape), archived?.map(shape) ?? null, archivedNext, archivedBusy, list?.older ?? 0, list === null]
-        : [fresh],
-    );
-    if (key === paintedTopics) return;
-    paintedTopics = key;
-    // The row's button goes with the redraw (More topics ›, or the list's Back arrow): focus on it moves to the new
-    // one, never to the page, where an Enter would reach the desk's keys (feed.ts deskKey).
-    const here = topicsRow.contains(document.activeElement) || topicsList.contains(document.activeElement);
-    const keep = keepFocus(section);
-    const refocus = () => {
-      keep();
-      if (here && !section.contains(document.activeElement)) topicsRow.querySelector<HTMLElement>("button")?.focus({ preventScroll: true });
-    };
-    if (!open) {
-      topicsRow.replaceChildren(
-        button(
-          [
-            h("span", { class: "chat-topics-label" }, "More topics"),
-            fresh ? h("span", { class: "chat-topics-new" }, `${fresh} new`) : null,
-            svg(ICONS.forward, "btn-icon"),
-          ],
-          () => openTopics(),
-          "ghost chat-topics-open",
-          false,
-          "chat.topics.open",
-        ),
-      );
-      topicsList.replaceChildren();
-      return refocus();
-    }
-    topicsRow.replaceChildren(
-      h(
-        "button",
-        { class: "icon-btn chat-topics-back", attrs: { type: "button", "aria-label": "Back to Chat", "data-use": "chat.topics.back" }, on: { click: () => closeTopics() } },
-        svg(ICONS.back, "icon-btn-icon"),
-      ),
-      h("h2", { class: "chat-topics-title" }, "More topics"),
-    );
-    const older = list?.older ?? 0;
-    topicsList.replaceChildren(
-      ...(list === null
-        ? [h("li", { class: "chat-topics-empty" }, "Loading…")]
-        : rows.length || older
-          ? rows.map(topicRow)
-          : [h("li", { class: "chat-topics-empty" }, "No other topics yet.")]),
-      ...(archived ? [h("li", { class: "chat-topics-group" }, archived.length ? "Archived" : "Nothing archived."), ...archived.map(topicRow)] : []),
-      ...(older && (archived === null || archivedNext)
-        ? [
-            h(
-              "li",
-              {},
-              button(archivedBusy ? "Loading…" : archived === null ? "Archived" : "More archived", () => loadArchived(), "ghost chat-topics-more", archivedBusy, "chat.topics.archived"),
-            ),
-          ]
-        : []),
-    );
-    refocus();
-  }
-
-  function topicRow(row: ConversationSummary): HTMLElement {
-    const meta = [row.needsYou ? "Needs you" : null, countsUnread(row) ? "New reply" : null, timeOf(row.lastAt)].filter(Boolean).join(" · ");
-    return h(
-      "li",
-      {},
-      h(
-        "button",
-        { class: "chat-topic", attrs: { type: "button", "data-id": row.id, "data-use": "chat.topics.row" }, on: { click: () => openConversationNow(row.id) } },
-        h("span", { class: "chat-topic-title" }, row.title),
-        row.lastText ? h("span", { class: "chat-topic-last" }, `${row.lastFrom === "owner" ? "You" : RIVET_NAME}: ${row.lastText}`) : null,
-        meta ? h("span", { class: `chat-topic-meta${row.needsYou ? " needs-you" : ""}` }, meta) : null,
-      ),
-    );
-  }
-
-  /** Opens More topics over Chat, with an entry of its own so Back comes back to Chat; it counts in the depth too. */
-  function openTopics(): void {
-    if (shown.kind !== "rivet" || topicsOpen) return;
-    topicsOpen = true;
-    try {
-      history.pushState({ ...withScreen("list"), chatDepth: historyDepth() + 1 }, "");
-    } catch {}
-    render(false);
-    void loadList();
-  }
-
-  /** Chat shown in place under More topics (a search hit already in Chat): its list entry becomes Chat's. */
-  function leaveTopics(): void {
-    if (!topicsOpen) return;
-    topicsOpen = false;
-    try {
-      if (history.state?.chatScreen === "list") history.replaceState(withoutScreen(), "");
-    } catch {}
-    render(false);
-  }
-
-  function closeTopics(): void {
-    if (!topicsOpen) return;
-    // Through history when its entry is on top, so Back stays in step; onPop shows Chat.
-    if (history.state?.chatScreen === "list") return history.back();
-    showRivet();
-  }
-
-  /** The next page of archived conversations under More topics. */
-  function loadArchived(): void {
-    if (archivedBusy) return;
-    archivedBusy = true;
-    const read = archivedRead;
-    render(false);
-    cmd.getConversations({ before: archivedNext, limit: 30 }).then(
-      (response) => {
-        if (!alive || read !== archivedRead) return;
-        archivedBusy = false;
-        if (Array.isArray(response?.conversations)) {
-          archived = [...(archived ?? []), ...response.conversations.filter((row) => !row.updates && row.id !== TEAM_ROOM_ID)];
-          archivedNext = response.next ?? null;
-        }
-        render(false);
-      },
-      (error: unknown) => {
-        if (!alive || read !== archivedRead) return;
-        archivedBusy = false;
-        render(false);
-        if (!authFail(error)) flash("Couldn't load the archived chats.", "error");
-      },
-    );
-  }
 
   /** A message hit: brought up in Chat when it is Chat's, else on its thing's page. */
   function openHit(id: string): void {
     if (shown.kind === "rivet" && messages.has(id)) {
-      leaveTopics();
       app.chatFocus = id;
       return seek();
     }
@@ -2763,10 +2396,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
         if (!alive) return;
         // A hit Chat has not loaded: a thing's opens its page, which holds it, as Chat's paging back may not reach it.
         if (found?.conversation && (found.conversation.thing || ownsNoCard(found.id))) openConversationNow(found.id, id);
-        else {
-          leaveTopics();
-          showRivet(id);
-        }
+        else showRivet(id);
       },
       (error: unknown) => {
         seeking--;
@@ -2781,8 +2411,8 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     // Closing a viewer or the phone's menu keeps the screen under it.
     if (overlayTraversal(event)) return;
     const named: unknown = history.state?.chatScreen;
-    if (named === "list") return showRivet(null, true);
-    if (typeof named !== "string" || ["rivet", "older", "new"].includes(named)) return showRivet();
+    // "list" is a More topics entry saved before it went: Chat.
+    if (typeof named !== "string" || ["rivet", "list", "older", "new"].includes(named)) return showRivet();
     if (named !== shownId()) openConversationNow(named, null, false);
   };
   window.addEventListener("popstate", onPop);
@@ -2804,36 +2434,15 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     }
     const ticket = ++listTicket;
     const stamp = nextStamp();
-    const opens = streamOpens;
     return cmd.getConversations().then(
       (response) => {
         if (!alive || ticket !== listTicket) return false;
         if (!response || !Array.isArray(response.conversations)) return false;
         for (const row of response.conversations)
           heardProject(row.id, row.appOnly, stamp);
-        if (floor === null) floor = listTop(response.conversations);
-        // A topic that left the active list (archived since) or came back to it (a reply) outdates the archived pages
-        // read so far: they are read again from the first on the next tap.
-        const active = new Set(response.conversations.map((row) => row.id));
-        const was = list?.conversations ?? [];
-        if (archived && (archived.some((row) => active.has(row.id)) || was.some((row) => !active.has(row.id)))) {
-          archived = null;
-          archivedNext = null;
-          archivedBusy = false;
-          archivedRead++;
-        }
+        if (home === null) home = listTop(response.conversations);
         list = response;
-        listReads++;
-        // Only a list asked after the stream last opened covers its gap.
-        if (opens === streamOpens) streamGap = false;
-        // The rows are the server's now: a line drawn before is covered by its time, or this answer left it off.
-        drawnAt.clear();
-        if (awayLoad && document.visibilityState === "visible") {
-          awayLoad = false;
-          // A fresh install has never read Chat: no mark, so nothing was missed.
-          if (readChatBefore())
-            for (const row of response.conversations) if (row.unread > 0 && readable(row) && !row.updates) awayOwed.set(row.id, row.unread);
-        }
+        due.refresh();
         noteUnread();
         render(false);
         return true;
@@ -2898,7 +2507,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
           }
           if (gen === appOnlyGen) appOnlyHeard = true;
           lastChat = page.messages;
-          for (const one of page.things ?? []) chatThings.add(one);
+          for (const [id, label] of Object.entries(page.labels ?? {})) chatLabels.set(id, label);
           refreshed();
           return showTimeline(page.messages, page.older, stick, focus);
         },
@@ -2959,7 +2568,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     // that was cancelled elsewhere.
     const nowServer = serverNow();
     for (const [id, message] of messages)
-      if (message.at >= from && !ids.has(id) && !(message.status === "collecting" && (!message.sendsAt || Date.parse(message.sendsAt) > nowServer))) messages.delete(id);
+      if (message.at >= from && !ids.has(id) &&!(message.status === "collecting" && (!message.sendsAt || Date.parse(message.sendsAt) > nowServer))) messages.delete(id);
     heardMessages(page);
     take(page);
     for (const message of page) messages.set(message.id, message);
@@ -3029,32 +2638,64 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       id === null
         ? cmd.getChat(first, CHAT_PAGE, true).then((page) => {
             if (!Array.isArray(page?.messages)) return null;
-            for (const one of page.things ?? []) chatThings.add(one);
+            for (const [id, label] of Object.entries(page.labels ?? {})) chatLabels.set(id, label);
             return { messages: page.messages, more: page.older !== null };
           })
         : cmd.getConversationPage(id, first);
+    /** Lines this page brought that were not loaded already: none when it was a page held before. */
+    let added = 0;
     const done = read.then(
       (page) => {
         if (!alive || messages !== into || !Array.isArray(page?.messages))
           return false;
         heardMessages(page.messages);
-        for (const message of page.messages) if (!gone.has(message.id)) messages.set(message.id, message);
+        for (const message of page.messages)
+          if (!gone.has(message.id)) {
+            if (!messages.has(message.id)) added += 1;
+            messages.set(message.id, message);
+          }
+        if (hint.textContent === EARLIER_FAILED) hint.textContent = "";
         earlierMore = page.more;
         if (page.messages[0]) earliestPage = page.messages[0].id;
-        const anchor = readingAt();
-        render(false);
+        // At the newest (Chat shorter than the screen on open), he stays there: held by the top card instead, lines
+        // landing in a card below it would push the newest off the screen.
+        const atNewest = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 40;
+        const anchor = atNewest ? null : readingAt();
+        render(atNewest);
         holdReading(anchor);
         return page.more;
       },
       (error: unknown) => {
+        if (messages === into) earlierArmed = false;
         if (alive && messages === into && !authFail(error))
-          hint.textContent = "Couldn't load earlier messages.";
+          hint.textContent = EARLIER_FAILED;
         return false;
       },
     );
     loadingEarlier = { into, done };
+    earlier.hidden = false;
+    const tall = scroller.scrollHeight;
     void done.finally(() => {
-      if (loadingEarlier?.done === done) loadingEarlier = null;
+      if (loadingEarlier?.done !== done) return;
+      loadingEarlier = null;
+      earlier.hidden = true;
+      if (messages !== into) return;
+      // A page whose new lines drew nothing taller (they went into minimised cards or closed main topics), or in a
+      // Chat he can scroll too little to take him out of the top band, leaves him at the top: the next one waits
+      // until he scrolls (or drags) away and back, so opening Chat never pulls the whole history in. A Chat shorter
+      // than the screen, which cannot scroll, asks for the one before at once while each page makes it taller; a page
+      // with nothing new in it (held before) goes on to the one before. Either way at most EARLIER_PAGES_MAX come by
+      // themselves before a drag or scroll.
+      const short = scroller.scrollHeight - scroller.clientHeight <= EARLIER_AT_PX;
+      if (!seeking) earlierRun += 1;
+      if (
+        earliestPage === first ||
+        earlierRun >= EARLIER_PAGES_MAX ||
+        (added > 0 && (scroller.scrollHeight <= tall || (!short && scroller.scrollTop <= EARLIER_AT_PX)))
+      )
+        earlierArmed = false;
+      // A search hit's loads ask for theirs themselves.
+      if (alive && !seeking) earlierAtTop();
     });
     return done;
   }
@@ -3084,6 +2725,9 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     if (message.status === "cancelled") {
       gone.add(message.id);
       cmd.heardCancelled([message.id]);
+      // A reply picked on a line that is now gone has nothing to answer: every send would be refused.
+      if (replyingTo?.id === message.id) setReply(null, false);
+      else if (readReply()?.id === message.id) writeReply(null);
       if (messages.delete(message.id)) render(false);
       void loadList(true);
       return;
@@ -3117,10 +2761,6 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     if (!list) return;
     const at = list.conversations.findIndex((row) => row.id === id);
     if (at < 0) return;
-    // Chat draws this line on the topic's card: Mark all read reads this topic up to it. Only a line the stream
-    // brought, which comes in order, and not after a stream gap until the list is read again: a line missed in it, or
-    // before a send's own answer, may sit before this one.
-    if (streamed && !streamGap && message.at > (drawnAt.get(id) ?? "")) drawnAt.set(id, message.at);
     const rows = [...list.conversations];
     rows[at] = {
       ...rows[at]!,
@@ -3133,17 +2773,17 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     noteUnread();
   }
 
-  /** Speaks, oldest first, the Rivet messages not heard before and not older than the floor; the first load only sets it. */
+  /** Speaks, oldest first, the Rivet messages not heard before and not older than the home; the first load only sets it. */
   function take(found: readonly ChatMessage[]): void {
-    if (floor === null) return baseline(found);
-    // Strictly newer: the floor can come from the list, which names no message, and its newest is history already.
+    if (home === null) return baseline(found);
+    // Strictly newer: the home can come from the list, which names no message, and its newest is history already.
     const fresh = found.filter(
       (message) =>
         message.from === "rivet" &&
         !inRoom(message) &&
         !message.posted &&
         !heard.has(message.id) &&
-        message.at > floor!,
+        message.at > home!,
     );
     for (const message of [...fresh].sort(byTime)) {
       heard.add(message.id);
@@ -3151,11 +2791,11 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     }
   }
 
-  /** What is on screen counts as heard, and the floor rises to its newest message. */
+  /** What is on screen counts as heard, and the home rises to its newest message. */
   function baseline(found: readonly ChatMessage[]): void {
     for (const message of found) {
       if (message.from === "rivet") heard.add(message.id);
-      if (floor === null || message.at > floor) floor = message.at;
+      if (home === null || message.at > home) home = message.at;
     }
   }
 
@@ -3191,7 +2831,6 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     const searching = section.classList.contains("searching");
     search.clear(true);
     if (messages.has(id)) {
-      leaveTopics();
       if (searching) render(false);
       return jump(id);
     }
@@ -3222,7 +2861,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     changed();
     const target = replyingTo;
     // Typed on a topic's page (the Agent Chat room too), with or without Reply, it joins that topic, whatever its stage or
-    // a closed chat (2026-11-17). Chat's own box, and a server-owned room's with no Reply, start a conversation of their own.
+    // a closed chat. Chat's own box, and a server-owned room's with no Reply, start a conversation of their own.
     const conversation = screen.kind === "conversation" && (target || !roomStartsChat(screen.id)) ? screen.id : null;
     const sentBox = draftBox;
     const sentRev = readDraft().trim() === body ? readDraftRev() : null;
@@ -3328,7 +2967,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       source.close();
       if (stream === source) stream = null;
     });
-    // the owner's rename, Close or read marker, from this device or another.
+    // The owner's rename, Close or read marker, from this device or another.
     source.addEventListener("conversation", (event) => {
       streamHeard();
       try {
@@ -3372,17 +3011,13 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
         }
         void loadList(true);
         if (shownId() === changedThread.id) void loadDetail(true);
-        // At once: a conversation just moved to an app-only project loses its Share buttons before anything is fetched.
+        // At once: a conversation just moved to personal loses its Share buttons before anything is fetched.
         render(false);
       } catch {}
     });
     source.addEventListener("open", () => {
       streamHeard();
       forgetAppOnly();
-      // The stream does not replay a gap: what Chat drew is only the next list read's.
-      streamGap = true;
-      streamOpens++;
-      drawnAt.clear();
       // Catches up on what was missed while it was down.
       void loadList(true);
       void loadDetail();
@@ -3398,7 +3033,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     streamHeard();
   }
 
-  /** A conversation may move to an app-only project while the stream is down: no Share until a read asked for after this lands. */
+  /** A conversation may move to personal while the stream is down: no Share until a read asked for after this lands. */
   function forgetAppOnly(): void {
     if (!alive) return;
     appOnlyHeard = false;
@@ -3512,11 +3147,6 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     markRead();
     // Hidden, the stream's pings would keep the phone's radio waking; back in front, a fresh one catches up as it opens.
     if (document.visibilityState === "hidden") {
-      const pill = away.size > 0;
-      away.clear();
-      awayOwed.clear();
-      awayLoad = true;
-      if (pill) render(false);
       window.clearTimeout(idle);
       stream?.close();
       stream = null;

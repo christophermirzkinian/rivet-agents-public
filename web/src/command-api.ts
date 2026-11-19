@@ -10,7 +10,6 @@ import type {
   ConversationPage,
   ConversationPatch,
   ConversationsResponse,
-  ReadAllResponse,
 } from "../../src/shared/conversations.js";
 import { ApiError, call, getIfChanged } from "./api.js";
 import { onSessionReset, sameSession, StaleSession } from "./session.js";
@@ -92,13 +91,6 @@ export const getConversation = (id: string) => call<ConversationDetail>("GET", `
 export const getConversationPage = (id: string, before: string) =>
   call<ConversationPage>("GET", `/api/conversations/${encodeURIComponent(id)}?before=${encodeURIComponent(before)}`);
 export const patchConversation = (id: string, patch: ConversationPatch) => call<ConversationDetail>("PATCH", `/api/conversations/${encodeURIComponent(id)}`, patch);
-/** Mark all read: every topic, idle ones under Archived too, in one request. */
-export const readAllConversations = (upTo: string | undefined, drawn: Readonly<Record<string, string>> = {}) =>
-  call<ReadAllResponse>(
-    "POST",
-    "/api/conversations/read",
-    upTo === undefined ? {} : { upTo, ...(Object.keys(drawn).length ? { drawn } : {}) },
-  );
 /** One action on several conversations at once: Chat marks its lines read this way. */
 export const batchConversations = (ids: readonly string[], action: ConversationAction) => call<BatchResponse>("POST", "/api/conversations/batch", { ids, action });
 export const searchChat = (query: string) => call<{ results: SearchItem[] }>("GET", `/api/chat/search?q=${encodeURIComponent(query)}`);
@@ -118,9 +110,6 @@ export const sendChat = (text: string, images: readonly string[], files: readonl
       ...(typed ? { typed } : {}),
     }),
   );
-
-/** Asks Rivet again the question Rivet's line `id` did not answer; the same answer asked twice gets its first back. */
-export const notAnswer = (id: string) => call<AuditEntry>("POST", `/api/chat/${encodeURIComponent(id)}/not-answer`);
 
 /** Cancels the collecting chat window `id` is in; a 409 says it has already gone to Rivet. */
 export const cancelChat = (id: string) => call<ChatCancelled>("POST", "/api/chat/cancel", { id });

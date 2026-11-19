@@ -376,7 +376,7 @@ const board = boardSchema.parse({
       kind: "update",
       thread: "Admin page",
       tag: "Chat finished",
-      title: "Search box shipped (#411)",
+      title: "Search box shipped",
       ask: "Deployed to the admin page, checked.",
       since: ago(61),
     },
@@ -491,14 +491,14 @@ if (new URLSearchParams(location.search).get("crew") === "live") {
   );
   // Ops' timeline for the desks' bubbles and cheer: a merge from earlier, read 1.5 s after load (no cheer: old news), and
   // the export chat's PR merging 7 s after load (&cheer=<ms> after the first read moves it) (Rivet cheers, the chat hops).
-  const merges: TimelineEvent[] = [{ kind: "merged", at: new Date(at(40)).toISOString(), repo: "example-repo", title: "Loading art: the first loop (#418)", number: 418 }];
+  const merges: TimelineEvent[] = [{ kind: "merged", at: new Date(at(40)).toISOString(), repo: "example-repo", title: "Loading art: the first loop", number: 418 }];
   const readTimeline = () => void import("../ops-data.js").then(({ refreshOps }) => refreshOps());
   setTimeout(() => {
     const inner = window.fetch;
     window.fetch = (input, init) => (String(input) === "/api/ops/timeline" ? Promise.resolve(Response.json({ days: [{ day: "today", events: merges }], repos: [] })) : inner(input, init));
     readTimeline();
     setTimeout(() => {
-      merges.unshift({ kind: "merged", at: new Date().toISOString(), repo: "example-repo", title: "Export: the review's three fixes (#419)", number: 419 });
+      merges.unshift({ kind: "merged", at: new Date().toISOString(), repo: "example-repo", title: "Export: the review's three fixes", number: 419 });
       readTimeline();
     }, Number(new URLSearchParams(location.search).get("cheer") ?? 5_500));
   }, 1_500);
@@ -1295,8 +1295,7 @@ window.fetch = async (input, init) => {
     const open = openRows();
     const unread = open.filter(countsUnread).length;
     const rest = olderRows();
-    const olderUnread = rest.filter((row) => !row.updates && row.id !== TEAM_ROOM_ID && countsUnread(row)).length;
-    if (params.get("older") !== "1") return json({ conversations: open, older: rest.length, olderUnread, unread, at: new Date().toISOString() } satisfies ConversationsResponse);
+    if (params.get("older") !== "1") return json({ conversations: open, older: rest.length, unread } satisfies ConversationsResponse);
     const limit = Number(params.get("limit") ?? 50);
     const from = params.get("before") ? Number(params.get("before")) : 0;
     const page = rest.slice(from, from + limit);
@@ -1361,7 +1360,15 @@ window.fetch = async (input, init) => {
     }
     return json(detailOf(id));
   }
-  if (url.startsWith("/api/chat") && method === "GET") return json({ messages: [...messages].sort((x, y) => x.at.localeCompare(y.at)).slice(-30), older: null });
+  if (url.startsWith("/api/chat") && method === "GET") {
+    const page = [...messages].sort((x, y) => x.at.localeCompare(y.at)).slice(-30);
+    // As the server: each line's conversation, its title and linked ask.
+    const asked: Record<string, string> = { k1: "a-3", lp1: "a-2", or1: "a-1" };
+    const labels = Object.fromEntries(
+      [...new Set(page.map((one) => one.threadId ?? one.id))].map((id) => [id, { title: rowOf(id).title, ...(asked[id] ? { ask: asked[id] } : {}), ...(id === UPDATES_ID ? { updates: true } : {}) }]),
+    );
+    return json({ messages: page, older: null, labels });
+  }
   if (url.startsWith("/api/chat")) {
     const body = JSON.parse(String(init?.body)) as { clientId: string; text?: string; conversation?: string | null; image?: string; images?: string[]; files?: ChatMessage["files"] };
     const id = `c-${++seq}`;

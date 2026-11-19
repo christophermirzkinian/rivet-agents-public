@@ -202,11 +202,11 @@ function migrate(db: DatabaseSync): void {
   if (!threads.has("read_at")) db.exec("ALTER TABLE chat_threads ADD COLUMN read_at TEXT");
   if (!threads.has("closed_at")) db.exec("ALTER TABLE chat_threads ADD COLUMN closed_at TEXT");
   if (!threads.has("owner_title")) db.exec("ALTER TABLE chat_threads ADD COLUMN owner_title TEXT");
-  // Your marked unread and pin, and Rivet's done (2026-10-05).
+  // Your marked unread and pin, and Rivet's done.
   if (!threads.has("unread_at")) db.exec("ALTER TABLE chat_threads ADD COLUMN unread_at TEXT");
   if (!threads.has("pinned_at")) db.exec("ALTER TABLE chat_threads ADD COLUMN pinned_at TEXT");
   if (!threads.has("done_at")) db.exec("ALTER TABLE chat_threads ADD COLUMN done_at TEXT");
-  // When the merged-and-quiet sweep closed it, or you reopened it (2026-10-05).
+  // When the merged-and-quiet sweep closed it, or you reopened it.
   if (!threads.has("swept_at")) db.exec("ALTER TABLE chat_threads ADD COLUMN swept_at TEXT");
   // The last stage GitHub showed each PR a conversation links, so one past the bridge's 14 days keeps its colour.
   db.exec("CREATE TABLE IF NOT EXISTS pr_stages (pr TEXT PRIMARY KEY, stage TEXT NOT NULL, at TEXT NOT NULL)");
@@ -410,7 +410,7 @@ function toMessage(row: Row): ChatMessage {
 const STOP_LINE = /^Stop [^:\n]+: /;
 
 /**
- * From this time a line you type on a topic's page belongs there, Reply or not (2026-11-17): split only takes such a line
+ * From this time a line you type on a topic's page belongs there, Reply or not: split only takes such a line
  * from before it, when the 2026-10-20 rule made it a misfiled ask.
  */
 export const TOPIC_LINES_STAY_FROM = Date.parse("2026-11-17T00:00:00.000Z");
@@ -912,7 +912,7 @@ export class CommandStore {
 
   /**
    * Files a card once: a later write of the same card never moves it (your merge does, through its message). `again`:
-   * the card left the board and came back, so this filing replaces the old one (2026-10-20) and its posted line is unset.
+   * the card left the board and came back, so this filing replaces the old one and its posted line is unset.
    */
   fileCard(input: { card: string; thread: string; via: string; stem: string | null; repo: string | null; pr: number | null; chat: string | null; at: string; again?: true }): boolean {
     const filed =
@@ -925,7 +925,7 @@ export class CommandStore {
   }
 
   /**
-   * Stores the card's title on your answers from before titles were kept (2026-10-20), from `titleOf` (the answer's
+   * Stores the card's title on your answers from before titles were kept, from `titleOf` (the answer's
    * own reply), so an old answer names its card once the card and any line that posted it are gone. Returns how many.
    */
   backfillCardTitles(titleOf: (id: string) => string | undefined): number {
@@ -965,7 +965,7 @@ export class CommandStore {
 
   /**
    * The conversations each of `cards` is in: filed there (a say card too), or shown by a card line of Rivet's, as a
-   * question card filed before cards were (2026-10-09) is only.
+   * question card filed before cards were is only.
    */
   conversationsOfCards(cards: readonly string[]): Map<string, string[]> {
     const found = new Map<string, Set<string>>();
@@ -1043,7 +1043,7 @@ export class CommandStore {
   }
 
   /**
-   * What splits off (2026-10-20): in each conversation (only `only`, when given; never a server-owned one or a Find more
+   * What splits off: in each conversation (only `only`, when given; never a server-owned one or a Find more
    * work issue's), every root, and the messages that chain to it. A root is a line you typed with no Reply and no card
    * on the page of a conversation it did not start before 2026-11-17 (`TOPIC_LINES_STAY_FROM`; sent naming that
    * conversation: never a merged-in conversation's first line, nor a Stop it). A message chains by the line it replies to; a
@@ -1317,13 +1317,6 @@ export class CommandStore {
       .prepare(`${MESSAGE_SELECT} WHERE COALESCE(m.thread_id, m.id) = ? AND m.seq < ? ORDER BY m.seq DESC LIMIT ?`)
       .all(id, anchor.seq as number, limit + 1) as Row[];
     return { messages: rows.slice(0, limit).map(toMessage).reverse(), more: rows.length > limit };
-  }
-
-  /** A thread's messages newer than its message `after`, oldest first; null when `after` is not in it. */
-  threadMessagesAfter(id: string, after: string): ChatMessage[] | null {
-    const anchor = this.db.prepare("SELECT seq FROM chat_messages WHERE id = ? AND COALESCE(thread_id, id) = ?").get(after, id) as Row | undefined;
-    if (!anchor) return null;
-    return (this.db.prepare(`${MESSAGE_SELECT} WHERE COALESCE(m.thread_id, m.id) = ? AND m.seq > ? ORDER BY m.seq`).all(id, anchor.seq as number) as Row[]).map(toMessage);
   }
 
   /** Rivet's steps on a thread, in the order set. */
@@ -1793,7 +1786,7 @@ export class CommandStore {
   /**
    * Newest first, `limit` at a time, older than the message `before`. A seed root (SEED_IDS) is a heading, not a message,
    * and the Team room's traffic is no news for the desktop strip's dot. With `chat`, the Chat tab's one conversation
-   * (2026-10-11): every line but the old Updates, a thing's too (2026-11-16).
+   *: every line but the old Updates, a thing's too.
    */
   listChat(before: string | null, limit: number, chat = false): ChatPage {
     const cursor = before === null ? null : (this.db.prepare("SELECT seq FROM chat_messages WHERE id = ?").get(before) as Row | undefined);
@@ -1806,20 +1799,7 @@ export class CommandStore {
       .all(cursor ? (cursor.seq as number) : Number.MAX_SAFE_INTEGER, ...SEED_IDS, TEAM_ROOM_ID, ...(chat ? [UPDATES_ID] : []), limit + 1) as Row[];
     const messages = rows.slice(0, limit).map(toMessage).reverse();
     const older = rows.length > limit ? messages[0]!.id : null;
-    if (!chat) return { messages, older };
-    const threads = [...new Set(messages.map((message) => message.threadId ?? message.id))].filter((one) => !ownsNoCard(one));
-    const filed = this.filedCards();
-    const posted = threads.length
-      ? (
-          this.db
-            .prepare(
-              `SELECT DISTINCT COALESCE(thread_id, id) AS thread FROM chat_messages WHERE sender = 'rivet' AND media IS NOT NULL
-                AND json_extract(media, '$.posted.id') IS NOT NULL AND COALESCE(thread_id, id) IN (${threads.map(() => "?").join(", ")})`,
-            )
-            .all(...threads) as Row[]
-        ).map((row) => row.thread as string)
-      : [];
-    return { messages, older, things: threads.filter((one) => filed.has(one) || posted.includes(one)) };
+    return { messages, older };
   }
 
   /** Rivet answered: the message it names, or every line typed so far when it names none; each with its whole window. */

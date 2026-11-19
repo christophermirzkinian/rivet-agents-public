@@ -8,7 +8,7 @@ import { rivetPayload } from "../src/server/push.js";
 import { wantsText } from "../src/shared/answers.js";
 import type { ChatMessage, ChatPage } from "../src/shared/command.js";
 import type { CardThreadsResponse } from "../src/shared/threads.js";
-import { answerText, IDLE_ARCHIVE_MS, linksChat, READ_ALL_DRAWN_MAX, TEAM_ROOM_ID, UPDATES_ID, type ConversationDetail, type ConversationPage, type ConversationsResponse } from "../src/shared/conversations.js";
+import { answerText, IDLE_ARCHIVE_MS, linksChat, TEAM_ROOM_ID, UPDATES_ID, type ConversationDetail, type ConversationPage, type ConversationsResponse } from "../src/shared/conversations.js";
 import { THREAD_MESSAGES_MAX } from "../src/shared/threads.js";
 import { bearer, BOARD_TOKEN, BRIDGE_TOKEN, browser, fakeClock, REPLY_BOARD, revOf, startServer, type TestServer } from "./helpers.js";
 
@@ -201,7 +201,7 @@ describe("conversation routes", () => {
     return (await response.json()) as ChatMessage;
   }
 
-  /** A line in the old Updates, as earlier rules filed them: say files none there now (2026-11-16), so the store writes it. */
+  /** A line in the old Updates, as earlier rules filed them: say files none there now, so the store writes it. */
   async function update(text: string): Promise<ChatMessage> {
     const commands = new CommandStore(server.dataDir);
     const at = clock.now().toISOString();
@@ -298,7 +298,7 @@ describe("conversation routes", () => {
   it("Rivet's message lands by the id he quotes, or Updates; one replying to nothing is a Got it card; --new starts one", async () => {
     await list();
     const batch = await owner("Night Batch results row, PR #412", { conversation: null });
-    // Rivet's line is its newest: a note naming it while your line waits answers that line instead (2026-11-16).
+    // Rivet's line is its newest: a note naming it while your line waits answers that line instead.
     const onIt = await rivet("On it.", { replyTo: batch });
     clock.advance(BATCH_QUIET_MS);
     const card = async (text: string) => {
@@ -328,7 +328,7 @@ describe("conversation routes", () => {
     expect((await open(UPDATES_ID)).messages[0]).toMatchObject({ id: UPDATES_ID, text: "Updates from Rivet" });
   });
 
-  it("refuses a reply to an id it does not know, filing it nowhere, not even Updates (2026-11-16)", async () => {
+  it("refuses a reply to an id it does not know, filing it nowhere, not even Updates", async () => {
     await list();
     expect((await send("POST", "/api/bridge/say", { text: "Late reply.", replyTo: "not-a-message" })).status).toBe(404);
     expect((await send("POST", "/api/bridge/say", { text: "Late card", replyTo: "not-a-message", card: true })).status).toBe(404);
@@ -339,7 +339,7 @@ describe("conversation routes", () => {
     expect(board.board?.needs.map((need) => need.title) ?? []).not.toContain("Late card");
   });
 
-  it("Chat lists a thing's every reply: Rivet's follow-up after its first card and Rivet's reply to a card answer (2026-11-16)", async () => {
+  it("Chat lists a thing's every reply: Rivet's follow-up after its first card and Rivet's reply to a card answer", async () => {
     await list();
     const ask = await owner("Signup forms, the simple way", { conversation: null });
     clock.advance(BATCH_QUIET_MS);
@@ -439,6 +439,28 @@ describe("conversation routes", () => {
     expect((await send("POST", "/api/bridge/say", { text: "x", replyTo: asked, card: true, ask: "A 1" })).status).toBe(400);
   });
 
+  it("labels each Chat line with its conversation: the list's title, its newest linked ask, and Updates", async () => {
+    await list();
+    const asked = await owner("Make Docs Sync darker", { conversation: null });
+    await rivet("On it.", { replyTo: asked });
+    expect((await send("POST", "/api/asks", { id: "a-dark", words: "Docs Sync darker", replyId: asked, stage: "building" })).status).toBe(201);
+    clock.advance(60_000);
+    expect((await send("POST", "/api/asks", { id: "a-glow", words: "Docs Sync glow", replyId: asked, stage: "building" })).status).toBe(201);
+    const plain = await owner("Night Batch results row", { conversation: null });
+    await rivet("Looking.", { replyTo: plain });
+    await update("Nightly: main green");
+    clock.advance(60_000);
+    const rows = (await list()).conversations;
+    expect(rows.find((row) => row.id === asked)?.ask).toBe("a-glow");
+    expect(rows.find((row) => row.id === plain)).not.toHaveProperty("ask");
+    const page = (await (await send("GET", "/api/chat", undefined, browser(cookie))).json()) as ChatPage;
+    expect(page.labels).toEqual({
+      [asked]: { title: (await open(asked)).conversation.title, ask: "a-glow" },
+      [plain]: { title: (await open(plain)).conversation.title },
+      [UPDATES_ID]: { title: "Updates", updates: true },
+    });
+  });
+
   it("--card answers an ask with an outcome card in Needs you, Yes, keep it or Change it, and one line that opens it", async () => {
     await list();
     const asked = await owner("Make Docs Sync darker", { conversation: null });
@@ -486,7 +508,7 @@ describe("conversation routes", () => {
     expect(after.board.needs.find((need) => need.id === second.card)).toMatchObject({ kind: "decision", title: "Tiles fixed" });
   });
 
-  it("a line you type with no Reply on a closed topic's page joins it and reopens it (2026-11-17)", async () => {
+  it("a line you type with no Reply on a closed topic's page joins it and reopens it", async () => {
     await list();
     const id = await owner("Sketcher Android crash on open", { conversation: null });
     clock.advance(BATCH_QUIET_MS);
@@ -654,7 +676,7 @@ describe("conversation routes", () => {
     notify.mockRestore();
   });
 
-  it("marks one unread with a dot, reading it clears it, Mark all as read clears every count and dot; the badge counts Chat once", async () => {
+  it("marks one unread with a dot, reading it clears it; the badge counts Chat once; Mark all read is gone", async () => {
     await list();
     const a = await owner("Docs refresh", { conversation: null });
     clock.advance(BATCH_QUIET_MS + 1000);
@@ -680,111 +702,8 @@ describe("conversation routes", () => {
 
     expect((await patch(b, { unread: true })).status).toBe(200);
     const all = await send("POST", "/api/conversations/read", {}, browser(cookie));
-    expect(all.status).toBe(200);
-    // The two; never Agent Chat, which Mark all read never offered.
-    expect(await all.json()).toEqual({ read: 2 });
-    page = await list();
-    expect(page.unread).toBe(0);
-    expect(page.conversations.every((row) => row.unread === 0 && !row.markedUnread)).toBe(true);
-    // Updates is not in the list it reads.
-    expect((await list("?older=1")).conversations.find((row) => row.id === UPDATES_ID)).toMatchObject({ unread: 1 });
-    // Only your session marks all read; the read state is the server's, so another device sees it.
-    expect((await send("POST", "/api/conversations/read", {})).status).toBe(403);
-    expect((await (await send("POST", "/api/conversations/read", {}, browser(cookie))).json())).toEqual({ read: 0 });
-  });
-
-  it("Mark all as read reads a topic idle past two hours too, so its old words never come back with its next reply", async () => {
-    await list();
-    const idle = await owner("Logo sketches", { conversation: null });
-    clock.advance(BATCH_QUIET_MS + 1000);
-    await rivet("Sketches are in.", { replyTo: idle });
-    await rivet("And the colour pass.", { replyTo: idle });
-    // Chat still draws its card, but it has left the open list for Archived, unread.
-    clock.advance(IDLE_ARCHIVE_MS + 1);
-    expect((await list()).conversations.map((row) => row.id)).not.toContain(idle);
-    expect((await list("?older=1")).conversations.find((row) => row.id === idle)).toMatchObject({ unread: 2 });
-    // The open list's answer counts it, so Mark all read is offered when nothing open is unread.
-    expect((await list()).olderUnread).toBe(1);
-
-    const all = await send("POST", "/api/conversations/read", {}, browser(cookie));
-    expect(all.status).toBe(200);
-    expect((await list()).olderUnread).toBe(0);
-    expect((await list("?older=1")).conversations.find((row) => row.id === idle)).toMatchObject({ unread: 0, markedUnread: false });
-    // Its next reply brings it back with one new word, not three.
-    await rivet("Final logo is up.", { replyTo: idle });
-    expect((await list()).conversations.find((row) => row.id === idle)).toMatchObject({ unread: 1 });
-    // Updates stays out of it.
-    await update("Nightly: green");
-    await send("POST", "/api/conversations/read", {}, browser(cookie));
-    expect((await list("?older=1")).conversations.find((row) => row.id === UPDATES_ID)).toMatchObject({ unread: 1 });
-  });
-
-  it("Mark all as read reads only up to the list the phone drew: a reply that came after it stays unread", async () => {
-    await list();
-    const a = await owner("Docs refresh", { conversation: null });
-    clock.advance(BATCH_QUIET_MS + 1000);
-    const b = await owner("Search index", { conversation: null });
-    clock.advance(BATCH_QUIET_MS + 1000);
-    await rivet("Docs are in.", { replyTo: a });
-    await rivet("Index is built.", { replyTo: b });
-    clock.advance(60_000);
-    const drawn = await list();
-    expect(drawn.at).toBe(clock.now().toISOString());
-    // Chat sits open; a new reply lands in b, and in a topic the phone has never drawn, before the tap.
-    clock.advance(60_000);
-    await rivet("Index is warm too.", { replyTo: b });
-    const fresh = await owner("Release notes", { conversation: null });
-    clock.advance(BATCH_QUIET_MS + 1000);
-    await rivet("Notes are drafted.", { replyTo: fresh });
-    // Marked unread on another device after the phone's list read: that mark stays too.
-    expect((await patch(a, { unread: true })).status).toBe(200);
-
-    const all = await send("POST", "/api/conversations/read", { upTo: drawn.at }, browser(cookie));
-    expect(all.status).toBe(200);
-    const page = await list();
-    expect(page.conversations.find((row) => row.id === a)).toMatchObject({ unread: 0, markedUnread: true });
-    // What was seen is read; the reply never seen stays new.
-    expect(page.conversations.find((row) => row.id === b)).toMatchObject({ unread: 1 });
-    expect(page.conversations.find((row) => row.id === fresh)!.unread).toBeGreaterThan(0);
-    expect((await send("POST", "/api/conversations/read", { upTo: "not a time" }, browser(cookie))).status).toBe(400);
-  });
-
-  it("Mark all as read reads a topic up to the line the phone drew on its card since its list read, and no other", async () => {
-    await list();
-    const a = await owner("Docs refresh", { conversation: null });
-    clock.advance(BATCH_QUIET_MS + 1000);
-    const b = await owner("Search index", { conversation: null });
-    clock.advance(BATCH_QUIET_MS + 1000);
-    await rivet("Docs are in.", { replyTo: a });
-    await rivet("Index is built.", { replyTo: b });
-    clock.advance(60_000);
-    const drawn = await list();
-    // After the list read: a reply in a the phone drew from the stream, then a later one in b it never saw, then one
-    // more in a after the drawn line.
-    clock.advance(60_000);
-    await rivet("Docs links checked too.", { replyTo: a });
-    const seenAt = clock.now().toISOString();
-    clock.advance(60_000);
-    await rivet("Index is warm too.", { replyTo: b });
-    clock.advance(60_000);
-    await rivet("Docs changelog.", { replyTo: a });
-    // A mark made after the list read stays, whatever line was drawn since: the line does not show the mark.
-    expect((await patch(b, { unread: true })).status).toBe(200);
-
-    const all = await send("POST", "/api/conversations/read", { upTo: drawn.at, drawn: { [a]: seenAt, [b]: drawn.at } }, browser(cookie));
-    expect(all.status).toBe(200);
-    const page = await list();
-    // a is read up to the drawn line, so only the changelog reply stays new; b's reply after the list read stays new.
-    expect(page.conversations.find((row) => row.id === a)).toMatchObject({ unread: 1 });
-    expect(page.conversations.find((row) => row.id === b)).toMatchObject({ unread: 1, markedUnread: true });
-
-    const bad = (body: unknown) => send("POST", "/api/conversations/read", body, browser(cookie)).then((one) => one.status);
-    expect(await bad({ upTo: drawn.at, drawn: { [a]: "not a time" } })).toBe(400);
-    expect(await bad({ upTo: drawn.at, drawn: { "../x": seenAt } })).toBe(400);
-    // The most the phone sends, at the longest ids, fits; one topic more is refused.
-    const full = (n: number) => Object.fromEntries(Array.from({ length: n }, (_, i) => [`${i}`.padStart(100, "t"), seenAt]));
-    expect(await bad({ upTo: drawn.at, drawn: full(READ_ALL_DRAWN_MAX) })).toBe(200);
-    expect(await bad({ upTo: drawn.at, drawn: full(READ_ALL_DRAWN_MAX + 1) })).toBe(400);
+    expect(all.status).not.toBe(200);
+    expect((await list()).conversations.find((row) => row.id === b)).toMatchObject({ markedUnread: true });
   });
 
   it("pins to the top, above newer ones; a pinned one before the cutover stays listed until closed", async () => {
@@ -896,7 +815,7 @@ describe("conversation routes", () => {
     // Rivet's question card, then a plain line: the line is the last word, the card still waits for his answer.
     await rivet("Same on the Docs Sync tile?", { replyTo: carded });
     await rivet("Build is green.", { replyTo: carded });
-    // As one filed before cards were (2026-10-09): only its card line shows it in the conversation.
+    // As one filed before cards were: only its card line shows it in the conversation.
     const legacy = await owner("Log Viewer charts", { conversation: null });
     clock.advance(BATCH_QUIET_MS + 1000);
     await rivet("Same on the second chart?", { replyTo: legacy });
@@ -1043,7 +962,7 @@ describe("conversation routes", () => {
     expect(detail.messages[2]).toMatchObject({ from: "rivet", text: "Card signup-forms-4861", posted: { id: "signup-forms-4861", kind: "decision", title: "Card signup-forms-4861", ask: "Pick one" } });
     // Its unanswered cards are your ball: the row waits on you.
     expect((await list()).conversations.find((row) => row.id === ask)).toMatchObject({ needsYou: true, phase: "waiting", thing: true });
-    // Chat's timeline holds every line of the thing, as its page does (2026-11-16).
+    // Chat's timeline holds every line of the thing, as its page does.
     const timeline = (await (await send("GET", "/api/chat?chat=1", undefined, browser(cookie))).json()) as { messages: ChatMessage[] };
     expect(timeline.messages.filter((message) => message.threadId === ask || message.id === ask).map((message) => message.posted?.id ?? message.text)).toEqual([
       "Lobby packages, the Apple way",
@@ -1062,10 +981,11 @@ describe("conversation routes", () => {
     const reply = (await answered.json()) as { id: string };
     expect((await open(reply.id)).id).toBe(ask);
     expect((await rivet("Share button added.", { replyTo: reply.id })).threadId).toBe(ask);
-    // Chat's page names the thing though its cards are off the page, so the line still carries Open topic (2026-11-16).
+    // Chat's page labels the line with its conversation's title, as the list names it.
     const newest = (await (await send("GET", "/api/chat?chat=1&limit=1", undefined, browser(cookie))).json()) as ChatPage;
     expect(newest.messages.map((message) => message.text)).toEqual(["Share button added."]);
-    expect(newest.things).toEqual([ask]);
+    expect(Object.keys(newest.labels ?? {})).toEqual([ask]);
+    expect(newest.labels![ask]!.title).toBe((await open(ask)).conversation.title);
 
     // A card nothing matches joins none (the CLI says so), and its answer starts one, as before.
     expect((await card("kids-cooking-concepts")).status).toBe(200);
@@ -1101,7 +1021,7 @@ describe("conversation routes", () => {
     expect((await open(other)).id).toBe(ask);
   });
 
-  it("a card filed by reply to a line you typed in a thing is in Chat with every other line of the thing (2026-11-16)", async () => {
+  it("a card filed by reply to a line you typed in a thing is in Chat with every other line of the thing", async () => {
     await list();
     const ask = await owner("Top 10 chart libraries research, PR #999", { conversation: null });
     clock.advance(BATCH_QUIET_MS);
@@ -1239,7 +1159,7 @@ describe("conversation routes", () => {
     const townAnswer = (await (await send("POST", "/api/replies", { clientId: "reply-0201", itemId: "town-status", decision: "approve", rev: trev }, browser(cookie))).json()) as { id: string };
     expect(await filed("town-status")).toBe(townAnswer.id);
 
-    // A card on a line in Updates is refused (2026-11-16): Updates shows nowhere and owns no card.
+    // A card on a line in Updates is refused: Updates shows nowhere and owns no card.
     expect((await send("POST", "/api/bridge/say", { text: "Status note", replyTo: UPDATES_ID, card: true })).status).toBe(409);
 
     // One write, the follow-up before its parent: it still follows the parent in.
@@ -1289,7 +1209,7 @@ describe("conversation routes", () => {
     expect((await list()).conversations.map((row) => row.id)).toContain(a);
   });
 
-  describe("a line typed with no Reply starts its own chat (2026-10-20)", () => {
+  describe("a line typed with no Reply starts its own chat", () => {
     const card = (id: string, extra: Record<string, unknown> = {}) => send("PUT", `/api/board/needs/${id}`, { kind: "decision", title: `Card ${id}`, ask: "Pick one\nmore", ...extra });
     const filed = async (id: string) => ((await (await send("GET", `/api/card-conversations/${id}`)).json()) as { conversation: { id: string; via: string } | null }).conversation;
     const split = (body: unknown = {}, headers: Record<string, string> = bearer(BOARD_TOKEN)) => send("POST", "/api/conversations/split", body, headers);

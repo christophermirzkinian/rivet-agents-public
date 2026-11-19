@@ -48,43 +48,6 @@ export function chatWindowText(texts: readonly (string | undefined)[]): string {
     .join(" | ");
 }
 
-/**
- * Not an answer: the question Rivet's line `answer` answers, or null when it answers none. A Rivet line
- * replying to a line of his, or to a re-ask, answers the chat window that line went to Rivet in (a re-ask's own
- * window), `lead` its lead, when the window holds a line he typed (`typed`); `window` is those typed lines, oldest
- * first. `last`: no later Rivet line replies to the window or a re-ask of it. `open`: its re-asks still going with no
- * line of Rivet's but a team line after them replying to nothing or to the window, a re-ask of it or an answer to either.
- * `lines` is the conversation in order and holds `answer`; `line` finds a line outside it.
- */
-export function notAnswerOf(
-  lines: readonly ChatMessage[],
-  answer: ChatMessage,
-  line: (id: string) => ChatMessage | null | undefined,
-): { lead: string; window: ChatMessage[]; last: boolean; open: ChatMessage[] } | null {
-  const rivet = (message: ChatMessage) => message.from === "rivet" && !message.card && !message.posted && !message.team;
-  const cancelled = (message: ChatMessage) => message.from === "owner" && message.status === "cancelled";
-  const typed = (message: ChatMessage) => message.from === "owner" && !!message.typed && !message.card && !cancelled(message);
-  const at = lines.findIndex((message) => message.id === answer.id);
-  if (at < 0 || !rivet(answer) || !answer.replyTo) return null;
-  const find = (id: string) => lines.find((message) => message.id === id) ?? line(id) ?? undefined;
-  const replied = find(answer.replyTo);
-  if (replied?.from !== "owner") return null;
-  // Rivet replies to a window's lead, which a tap may have sent: the question is the window's typed lines, if any.
-  const lead = replied.notAnswerFor ?? replied.windowLead ?? replied.id;
-  const inWindow = lines.filter((message) => typed(message) && (message.windowLead ?? message.id) === lead);
-  const window = inWindow.length || replied.notAnswerFor || !typed(replied) ? inWindow : [replied];
-  if (!window.length) return null;
-  const reAsks = lines.filter((message) => message.from === "owner" && message.notAnswerFor === lead);
-  const asked = new Set([...window, ...reAsks].map((message) => message.id));
-  const last = !lines.slice(at + 1).some((message) => rivet(message) && message.replyTo !== undefined && asked.has(message.replyTo));
-  // A failed or refused re-ask has no going status, and an ack alone marks one replied: a line of Rivet's after it, a
-  // card included, ends it when it replies to nothing or to this question's chain, never one written for something else.
-  const chain = new Set([...asked, ...lines.filter((message) => rivet(message) && message.replyTo !== undefined && asked.has(message.replyTo)).map((message) => message.id)]);
-  const ends = (message: ChatMessage) => message.from === "rivet" && !message.team && (message.replyTo === undefined || chain.has(message.replyTo));
-  const going = new Set<ChatMessage["status"]>(["collecting", "sent", "typed", "unconfirmed", "replied"]);
-  const open = reAsks.filter((reAsk) => going.has(reAsk.status) && !lines.slice(lines.indexOf(reAsk) + 1).some(ends));
-  return { lead, window, last, open };
-}
 export const MAX_SAY_TEXT = 4000;
 /** say.mjs --new --title: the MAX_THREAD_TITLE a thread title holds. */
 export const MAX_SAY_TITLE = 120;
@@ -437,10 +400,10 @@ export interface ChatPage {
   /** Pass as `before` for the next older page; null at the start of the thread. */
   older: string | null;
   /**
-   * Chat's page (`chat=1`) only: the conversations of its lines that are things (a card filed or posted in them), so Chat
-   * gives their lines Open topic though the card's own line is on a page not loaded (2026-11-16).
+   * Each line's conversation, by its id (threadId, else the line's own id), for the line's label: its title as the
+   * conversation list names it, its linked ask's id as ThreadSummary.ask, and `updates` for the Updates conversation.
    */
-  things?: string[];
+  labels?: Record<string, { title: string; ask?: string; updates?: boolean }>;
 }
 
 export interface LogsResponse {

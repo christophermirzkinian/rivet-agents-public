@@ -11,7 +11,7 @@ afterEach(() => {
 });
 
 describe.each([
-  ["ops", () => import("../web/src/views/ops.preview.js"), "Say anything to Rivet. Each piece of work gets a page of its own."],
+  ["ops", () => import("../web/src/views/ops.preview.js"), "Say anything to Rivet."],
 ])("the %s preview", (_name, load, shown) => {
   it("answers the list as empty and any conversation as gone, and its Chat tab shows its Chat page", async () => {
     history.replaceState(null, "", "/?tab=chat");

@@ -272,6 +272,7 @@ export function peekFacts(id: string): PeekFacts | null {
     project: projectName(homeOf(w)),
     ...(ask ? { ask } : {}),
     stage: view.stage === "needs-you" ? NEEDS_YOU : IN_HAND[view.stage],
+    stageKey: view.stage,
     time: view.time,
     prs: [
       ...(ask?.prs ?? w.prs ?? []).map((number) => ({ number, repo: ask ? askPrRepo(ask, w) : w.repo })),

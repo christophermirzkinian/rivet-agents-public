@@ -1,7 +1,7 @@
 import { startAuthentication, startRegistration } from "@simplewebauthn/browser";
 
 import type { AnsweredResponse, Reopen } from "../../src/shared/answered.js";
-import type { AsksResponse } from "../../src/shared/asks.js";
+import type { Ask, AsksResponse } from "../../src/shared/asks.js";
 import type { BacklogIssueResponse, BacklogResponse, BacklogStart, IssueWriteState } from "../../src/shared/backlog.js";
 import type { BoardResponse, Decision, FileRef, FileType, PushConfigResponse, Reply, ServedNeed, StatusResponse } from "../../src/shared/board.js";
 import type { OpsDismissal, OpsDismissalsResponse } from "../../src/shared/ops-dismiss.js";
@@ -231,6 +231,8 @@ export const getUsageReport = (device: UsageDevice) => call<UsageReport>("GET", 
 export const askUsage = (id: string, ask: UsageAsk, device: UsageDevice) => call<{ card: string }>("POST", "/api/usage/ask", { id, ask, device });
 /** Your asks still moving, and those finished in the last few days (Your asks). */
 export const getAsks = () => call<AsksResponse>("GET", "/api/asks");
+/** One ask whole: the list's rows carry only their newest timeline event, this has all of it. */
+export const getAsk = (id: string) => call<Ask>("GET", `/api/asks/${encodeURIComponent(id)}`);
 /** A project's backlog: the repos' open issues as the bridge last read them, and the asks not started or parked. */
 export const getBacklog = () => call<BacklogResponse>("GET", "/api/backlog");
 /** An issue opened from a backlog: pending while the Mac reads it from GitHub. */

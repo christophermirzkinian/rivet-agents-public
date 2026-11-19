@@ -267,6 +267,11 @@ export function filedProject(row: Pick<ThreadRow, "rivetProject" | "aiProject">,
   return row.rivetProject ?? (ask ? askProject(ask) : null) ?? row.aiProject;
 }
 
+/** A thread's name on the conversation list: the owner's rename, else Rivet's title, else the titler's, else its first line. */
+export function rowTitle(row: Pick<ThreadRow, "ownerTitle" | "title" | "aiTitle" | "rootText" | "rootImages" | "rootFiles">): string {
+  return row.ownerTitle ?? row.title ?? row.aiTitle ?? threadTitle(row.rootText, { images: row.rootImages, files: row.rootFiles });
+}
+
 export function summarize(row: ThreadRow, ask: Ask | undefined, now: Date, facts: Partial<StatusFacts> = {}): ThreadSummary {
   const { status, from, pr, chat, card } = threadStatus({
     ...facts,
@@ -278,7 +283,7 @@ export function summarize(row: ThreadRow, ask: Ask | undefined, now: Date, facts
   const filed = filedProject(row, ask);
   return {
     id: row.id,
-    title: row.ownerTitle ?? row.title ?? row.aiTitle ?? threadTitle(row.rootText, { images: row.rootImages, files: row.rootFiles }),
+    title: rowTitle(row),
     status,
     statusFrom: from,
     ...(pr !== undefined ? { statusPr: pr } : {}),

@@ -63,7 +63,7 @@ const message = (id: string, threadId: string, n: number, text = `Message ${id}`
   threadId,
 });
 const MESSAGES = [message("m1", "m1", 0, "Morning"), message("m2", "m1", 1, "Morning. Three things building.")];
-// More than one page (THREAD_MESSAGES_MAX, 300): Earlier messages has the rest.
+// More than one page (THREAD_MESSAGES_MAX, 300): scrolling to the top loads the rest.
 const LONG = Array.from({ length: 400 }, (_, i) => message(`a${String(i).padStart(3, "0")}`, "a", i, undefined, 2029));
 
 // The chat on a narrow phone, as Chrome measured it: it shows 414 px of a thread that stood 3910 px when it
@@ -72,6 +72,8 @@ const SHOWN = 414;
 let tall = 3910;
 /** When set, the thread stands this many px a message, so loading earlier ones makes it taller. */
 let perMessage = 0;
+/** When set, a line's own height in px by its id, in place of perMessage. */
+let heightOf: ((id: string) => number) | null = null;
 /** The Rivet sheet put away: the scroller is display:none. */
 let hidden = false;
 let top = 0;
@@ -79,26 +81,21 @@ let root: HTMLElement;
 let restore: (() => void)[] = [];
 
 const scrolls = (el: HTMLElement) => el.classList.contains("chat-scroll") || el.classList.contains("cmd-log");
-/** More topics and search hide the scroller too (conversations.css). Hidden, it reads 0; here it also comes back at its top, as an engine may drop the offset of a display:none box. */
+/** Search hides the scroller too (conversations.css). Hidden, it reads 0; here it also comes back at its top, as an engine may drop the offset of a display:none box. */
 const unseen = (el: HTMLElement) => {
-  const gone = hidden || !!el.closest(".chat.topics, .chat.searching");
+  const gone = hidden || !!el.closest(".chat.searching");
   if (gone) top = 0;
   return gone;
 };
-/** Where the scroller's top is on the page, and how tall a card's foot (More, Reply) stands, with perMessage set. */
+/** Where the scroller's top is on the page, with perMessage set. */
 const HEAD = 60;
-let foot = 0;
-/** Each card and shown line in the thread, from its top to its bottom. */
+/** Each run and shown line in the thread, from its top to its bottom. */
 function laidOut(): Map<Element, [number, number]> {
   const at = new Map<Element, [number, number]>();
   let y = 0;
   for (const card of document.querySelectorAll(".chat-thread .chat-ex")) {
     const from = y;
-    if (card.classList.contains("minimised")) y += perMessage;
-    else {
-      for (const line of card.querySelectorAll(".chat-msg")) at.set(line, [y, (y += perMessage)]);
-      y += foot;
-    }
+    for (const line of card.querySelectorAll<HTMLElement>(".chat-msg")) at.set(line, [y, (y += heightOf?.(line.dataset.id!) ?? perMessage)]);
     at.set(card, [from, y]);
   }
   return at;
@@ -124,7 +121,7 @@ function layOut(): void {
     if (scrolls(this) && !unseen(this)) top = Math.max(0, Math.min(value, height() - SHOWN));
   });
   // With perMessage set, the scroller sits HEAD px down the page and each line at its place in the thread, less the
-  // scroll; a card spans its lines and its foot, a minimised one is one line tall, and a line in it, unlaid, reads 0.
+  // scroll; a run spans its lines.
   const rect = vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
     const span = (from: number, to: number) => DOMRect.fromRect({ x: 0, y: from, width: 300, height: to - from });
     if (perMessage && scrolls(this as HTMLElement)) return span(HEAD, HEAD + SHOWN);
@@ -165,7 +162,7 @@ beforeEach(() => {
   localStorage.clear();
   tall = 3910;
   perMessage = 0;
-  foot = 0;
+  heightOf = null;
   hidden = false;
   top = 0;
   layOut();
@@ -253,10 +250,8 @@ describe("the chat opens on its newest message when the thread grows after it sc
   const withTopic = () =>
     vi.stubGlobal("fetch", vi.fn(fakeServer([...MESSAGES, ...LONG.slice(0, 5)].map((one) => ({ ...one })), { a: { title: "Long one" } }).fetch));
   const lit = () => root.querySelector(".chat-msg.lit")?.getAttribute("data-id");
-  /** Chat → More topics → a topic, at `at` on its page (its foot when null) → Back to the list. */
+  /** Chat → a topic's page, at `at` on it (its foot when null) → Back to a saved More topics entry, which is Chat now. */
   async function viaTopic(at: number | null): Promise<void> {
-    root.querySelector<HTMLButtonElement>(".chat-topics-open")!.click();
-    await settle();
     chat.showConversation("a");
     await settle();
     expect(root.querySelector('.chat-msg[data-id="a001"]')).not.toBeNull();
@@ -265,19 +260,18 @@ describe("the chat opens on its newest message when the thread grows after it sc
     history.replaceState({ chatScreen: "list" }, "");
     window.dispatchEvent(new PopStateEvent("popstate", { state: history.state }));
     await settle();
-    expect(root.querySelector(".chat")!.classList.contains("topics")).toBe(true);
+    expect(chat.openConversation()).toBeNull();
+    expect(root.querySelector(".chat")!.classList.contains("topics")).toBe(false);
   }
 
-  it("More topics opened from a topic's page keeps nothing of that page for Chat", async () => {
+  it("Back from a topic's page to a saved More topics entry keeps nothing of that page for Chat", async () => {
     withTopic();
     await open();
     scrollTo(scroller(), 600);
     await viaTopic(1200);
-    // A search hit in Chat leaves More topics with a redraw, then jumps to it (its scroll is a stub here).
     openTarget({ type: "message", id: "m1" });
-    expect(root.querySelector(".chat")!.classList.contains("topics")).toBe(false);
     expect(lit()).toBe("m1");
-    // Neither the topic's 1200 nor Chat's 600 from before it: Back to the list showed Chat afresh, on its newest.
+    // Neither the topic's 1200 nor Chat's 600 from before it: Back showed Chat afresh, on its newest.
     expect(top).toBe(3910 - SHOWN);
     // The jump let go of it: growth moves nothing.
     tall = 4185;
@@ -301,7 +295,7 @@ describe("the chat opens on its newest message when the thread grows after it sc
     expect(gap()).toBe(0);
   });
 
-  it("held on a topic's foot, then a search hit in Chat from the list: the jump lets go and growth leaves it there", async () => {
+  it("held on a topic's foot, then Back and a search hit in Chat: the jump lets go and growth leaves it there", async () => {
     withTopic();
     await open();
     await viaTopic(null);
@@ -354,7 +348,7 @@ describe("the chat opens on its newest message when the thread grows after it sc
     expect(top).toBe(at);
   });
 
-  it("Earlier messages keeps the place: the ones above come in and the reader stays on the message they were on", async () => {
+  it("scrolling to the top keeps the place: the ones above come in by themselves and the reader stays on the message they were on", async () => {
     perMessage = 50;
     vi.stubGlobal("fetch", vi.fn(fakeServer(LONG.map((one) => ({ ...one })), { a: { title: "Long one" } }).fetch));
     chat.showConversation("a");
@@ -362,8 +356,8 @@ describe("the chat opens on its newest message when the thread grows after it sc
     await settle();
     expect(root.querySelectorAll(".chat-msg")).toHaveLength(300);
     expect(gap()).toBe(0);
+    expect(root.querySelector("button.conv-earlier")).toBeNull();
     scrollTo(scroller(), 0);
-    root.querySelector<HTMLButtonElement>(".conv-earlier")!.click();
     await settle();
     expect(root.querySelectorAll(".chat-msg")).toHaveLength(400);
     // 100 messages more above: the one at the top stays at the top.
@@ -372,7 +366,7 @@ describe("the chat opens on its newest message when the thread grows after it sc
     expect(top).toBe(100 * 50);
   });
 
-  it("scrolled up on Chat, a topic card moving to the end leaves the line being read where it was", async () => {
+  it("scrolled up on Chat, a line landing at the end leaves the line being read where it was", async () => {
     perMessage = 50;
     const lines = Array.from({ length: 20 }, (_, i) => message(i < 10 ? `a${i}` : `b${i - 10}`, i < 10 ? "a" : "b", i));
     const server = fakeServer(lines);
@@ -390,10 +384,9 @@ describe("the chat opens on its newest message when the thread grows after it sc
     expect(shownTop(line("a2"))).toBe(0);
   });
 
-  it("on a topic's page, a line landing leaves the card whose foot he is on where it was, its cards sharing one thread", async () => {
+  it("on a topic's page, a line landing leaves the run he is reading where it was, its runs sharing one thread", async () => {
     perMessage = 50;
-    foot = 40;
-    // Four cards of his question and three answers: each 240 px, its foot the last 40.
+    // Four runs of his question and three answers: each 200 px.
     const lines = Array.from({ length: 16 }, (_, i) => ({ ...message(`t${i}`, "t", i), from: i % 4 ? ("rivet" as const) : ("owner" as const) }));
     const server = fakeServer(lines, { t: { title: "Four rounds" } });
     vi.stubGlobal("fetch", vi.fn(server.fetch));
@@ -402,59 +395,184 @@ describe("the chat opens on its newest message when the thread grows after it sc
     await settle();
     expect(root.querySelectorAll(".chat-ex")).toHaveLength(4);
     const second = root.querySelectorAll<HTMLElement>(".chat-ex")[1]!;
-    scrollTo(scroller(), 450);
-    expect(shownTop(second)).toBe(-210);
+    scrollTo(scroller(), 300);
+    expect(shownTop(second)).toBe(-100);
     server.messages.push({ ...message("t16", "t", 17), from: "rivet" });
     await chat.refresh();
     await settle();
     expect(root.querySelectorAll(".chat-msg")).toHaveLength(17);
-    expect(top).toBe(450);
-    expect(shownTop(second)).toBe(-210);
+    expect(top).toBe(300);
+    expect(shownTop(second)).toBe(-100);
   });
 
-  it("scrolled up on Chat at a topic card's foot, Earlier messages bringing an older line of it keeps the card where it was", async () => {
+  it("scrolled to the top on Chat on a line, the earlier lines coming in by themselves keep that line where it was", async () => {
     perMessage = 50;
-    foot = 40;
-    // Chat's first page is the newest 50: a1-a10 and b0-b39. Earlier brings z0, an older topic's card, and a0.
+    // Chat's first page is the newest 50: a1 and b0-b48. At the top, the page before brings z0 and a0.
     const lines = [
       message("z0", "z", 0),
       message("a0", "a", 1),
-      ...Array.from({ length: 10 }, (_, i) => message(`a${i + 1}`, "a", 2 + i)),
-      ...Array.from({ length: 40 }, (_, i) => message(`b${i}`, "b", 12 + i)),
+      message("a1", "a", 2),
+      ...Array.from({ length: 49 }, (_, i) => message(`b${i}`, "b", 3 + i)),
     ];
     vi.stubGlobal("fetch", vi.fn(fakeServer(lines).fetch));
     chat.mount(root);
     await settle();
     root.querySelector<HTMLButtonElement>(".thing-back")?.click();
     await settle();
-    const card = () => root.querySelector<HTMLElement>('.chat-ex[data-thread="a"]')!;
     expect(root.querySelector('.chat-msg[data-id="a0"]')).toBeNull();
-    scrollTo(scroller(), 510);
-    expect(shownTop(card())).toBe(-510);
-    root.querySelector<HTMLButtonElement>(".conv-earlier")!.click();
+    // On a1 (0-50), 10 px of it above the screen.
+    scrollTo(scroller(), 10);
     await settle();
-    expect(root.querySelector('.chat-msg[data-id="z0"]')).not.toBeNull();
-    expect(card().querySelector<HTMLElement>(".chat-msg")!.dataset.id).toBe("a0");
-    expect(shownTop(card())).toBe(-510);
+    expect(line("z0")).toBeTruthy();
+    expect(line("a0")).toBeTruthy();
+    expect(shownTop(line("a1"))).toBe(-10);
   });
 
-  it("scrolled up on Chat, minimising the card he is reading keeps it where it was", async () => {
-    perMessage = 50;
-    foot = 40;
-    const lines = ["a", "b", "c"].flatMap((thread, t) => Array.from({ length: 10 }, (_, i) => message(`${thread}${i}`, thread, t * 10 + i)));
-    vi.stubGlobal("fetch", vi.fn(fakeServer(lines).fetch));
+  it("a Chat shorter than the screen keeps asking while each page before makes it taller, 20 pages at most until he wheels it", async () => {
+    // Lines a quarter px tall: 1300 of them never fill the screen. Chat's first page is the newest 50, then 25 before.
+    perMessage = 0.25;
+    const lines = Array.from({ length: 1300 }, (_, i) => message(`a${i}`, "a", i));
+    const server = fakeServer(lines);
+    vi.stubGlobal("fetch", vi.fn(server.fetch));
     chat.mount(root);
     await settle();
     root.querySelector<HTMLButtonElement>(".thing-back")?.click();
     await settle();
-    const card = () => root.querySelector<HTMLElement>('.chat-ex[data-thread="b"]')!;
-    scrollTo(scroller(), 540);
-    expect(shownTop(card())).toBe(0);
-    card().querySelector<HTMLButtonElement>(".chat-ex-chev")!.click();
     await settle();
-    expect(card().classList.contains("minimised")).toBe(true);
-    expect(top).toBe(540);
-    expect(shownTop(card())).toBe(0);
+    const before = () => server.requests.filter((one) => one.includes("before=")).length;
+    expect(before()).toBe(20);
+    scroller().dispatchEvent(new WheelEvent("wheel", { deltaY: 30 }));
+    await settle();
+    expect(before()).toBe(20);
+    scroller().dispatchEvent(new WheelEvent("wheel", { deltaY: -30 }));
+    await settle();
+    await settle();
+    expect(before()).toBe(25);
+  });
+
+  it("a failed page before in a Chat shorter than the screen is asked again when he drags it, and its note clears", async () => {
+    // Chat's first page, the newest 50 lines at 1 px, cannot scroll: the page before is asked at once, and fails.
+    perMessage = 1;
+    const lines = Array.from({ length: 150 }, (_, i) => message(`a${i}`, "a", i));
+    const server = fakeServer(lines);
+    let failing = true;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        server.failWith = failing && String(input).includes("before=") ? 500 : null;
+        return server.fetch(input, init);
+      }),
+    );
+    chat.mount(root);
+    await settle();
+    root.querySelector<HTMLButtonElement>(".thing-back")?.click();
+    await settle();
+    const before = () => server.requests.filter((one) => one.includes("before=")).length;
+    expect(before()).toBe(1);
+    expect(root.textContent).toContain("Couldn't load earlier messages.");
+    await settle();
+    expect(before()).toBe(1);
+    // One drag asks once, failing or not: its other touch events ask nothing.
+    scroller().dispatchEvent(new Event("touchstart"));
+    scroller().dispatchEvent(new Event("touchmove"));
+    await settle();
+    expect(before()).toBe(2);
+    scroller().dispatchEvent(new Event("touchmove"));
+    await settle();
+    scroller().dispatchEvent(new Event("touchmove"));
+    await settle();
+    expect(before()).toBe(2);
+    failing = false;
+    scroller().dispatchEvent(new Event("touchstart"));
+    scroller().dispatchEvent(new Event("touchmove"));
+    await settle();
+    await settle();
+    // That page lands, Chat is still short, so the last page comes by itself.
+    expect(before()).toBe(4);
+    expect(root.querySelectorAll(".chat-msg")).toHaveLength(150);
+    expect(root.textContent).not.toContain("Couldn't load earlier messages.");
+  });
+
+  it("a page before still coming from a topic's page neither holds up nor stops Chat's own after Back", async () => {
+    perMessage = 5;
+    const lines = Array.from({ length: 400 }, (_, i) => message(`a${i}`, "a", i));
+    const server = fakeServer(lines, { a: { title: "Long" } });
+    const held: (() => void)[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes("/api/conversations/a") && url.includes("before=")) await new Promise<void>((go) => held.push(go));
+        return server.fetch(input, init);
+      }),
+    );
+    chat.showConversation("a");
+    chat.mount(root);
+    await settle();
+    scrollTo(scroller(), 0);
+    await settle();
+    expect(held).toHaveLength(1);
+    root.querySelector<HTMLButtonElement>(".thing-back")?.click();
+    await settle();
+    // Chat's newest 50 of a's lines stand 250 px, shorter than the screen: its pages before come at once.
+    const chatBefore = () => server.requests.filter((one) => one.startsWith("GET /api/chat") && one.includes("before=")).length;
+    const asked = chatBefore();
+    expect(asked).toBeGreaterThan(0);
+    for (const go of held) go();
+    await settle();
+    expect(root.querySelector<HTMLElement>(".conv-earlier")!.hidden).toBe(true);
+    // Chat's own state stands: scrolled away and back, it asks again if there is more.
+    scrollTo(scroller(), 400);
+    scrollTo(scroller(), 0);
+    await settle();
+    expect(chatBefore()).toBeGreaterThanOrEqual(asked);
+  });
+
+  it("a page before that leaves him in the top band of a Chat he can scroll is the last one asked until he scrolls away and back", async () => {
+    // z's 30 lines stand 20 px each, a's 1 px: Chat's first page (z and a's newest 20) scrolls, and a's 300 lines go
+    // back six pages of 50 px, too little to take him past the top band.
+    heightOf = (id) => (id.startsWith("z") ? 20 : 1);
+    perMessage = 1;
+    const lines = [
+      ...Array.from({ length: 300 }, (_, i) => message(`a${i}`, "a", i)),
+      ...Array.from({ length: 30 }, (_, i) => message(`z${i}`, "z", 300 + i)),
+    ];
+    const server = fakeServer(lines);
+    vi.stubGlobal("fetch", vi.fn(server.fetch));
+    chat.mount(root);
+    await settle();
+    root.querySelector<HTMLButtonElement>(".thing-back")?.click();
+    await settle();
+    const before = () => server.requests.filter((one) => one.includes("before=")).length;
+    expect(before()).toBe(0);
+    scrollTo(scroller(), 0);
+    await settle();
+    expect(before()).toBe(1);
+    expect(top).toBeLessThanOrEqual(160);
+    scrollTo(scroller(), 300);
+    scrollTo(scroller(), 0);
+    await settle();
+    expect(before()).toBe(2);
+  });
+
+  it("at the newest, a page before landing above keeps the newest on screen", async () => {
+    perMessage = 5;
+    // Chat's first page: a's ten lines and b's newest forty, short of the screen, so the page before comes at once.
+    const lines = [
+      ...Array.from({ length: 50 }, (_, i) => message(`b${i}`, "b", i)),
+      ...Array.from({ length: 10 }, (_, i) => message(`a${i}`, "a", 50 + i)),
+      ...Array.from({ length: 40 }, (_, i) => message(`b${50 + i}`, "b", 60 + i)),
+    ];
+    const server = fakeServer(lines);
+    vi.stubGlobal("fetch", vi.fn(server.fetch));
+    chat.mount(root);
+    await settle();
+    root.querySelector<HTMLButtonElement>(".thing-back")?.click();
+    await settle();
+    expect(server.requests.filter((one) => one.includes("before=")).length).toBe(1);
+    expect(line("b0")).toBeTruthy();
+    expect(height()).toBeGreaterThan(SHOWN);
+    expect(gap()).toBeLessThan(40);
   });
 
   it("closed, the chat holds nothing: its thread growing moves nothing", async () => {
@@ -464,6 +582,44 @@ describe("the chat opens on its newest message when the thread grows after it sc
     tall = 4185;
     FakeResizeObserver.grew(thread());
     expect(top).toBe(at);
+  });
+});
+
+describe("One chat: Chat oldest to newest, no topics", () => {
+  // Ten lines of a, five of b, ten more of a: in time order, never gathered by topic.
+  const LINES = () => [
+    ...Array.from({ length: 10 }, (_, i) => message(`a${i}`, "a", i)),
+    ...Array.from({ length: 5 }, (_, i) => message(`b${i}`, "b", 10 + i)),
+    ...Array.from({ length: 10 }, (_, i) => message(`a${10 + i}`, "a", 15 + i)),
+  ];
+  const ids = () => [...root.querySelectorAll<HTMLElement>(".chat-thread .chat-msg")].map((one) => one.dataset.id);
+
+  async function onChat(lines: ChatMessage[] = LINES()): Promise<void> {
+    vi.stubGlobal("fetch", vi.fn(fakeServer(lines, { a: { title: "Topic a" }, b: { title: "Topic b" } }).fetch));
+    chat.mount(root);
+    await settle();
+    root.querySelector<HTMLButtonElement>(".thing-back")?.click();
+    await settle();
+  }
+
+  it("shows every line in time order, with no topics bar and no minimised card", async () => {
+    perMessage = 50;
+    await onChat();
+    expect(ids()).toEqual(LINES().map((one) => one.id));
+    expect(root.querySelector(".chat-topics-bar, .chat-thread .chat-ex.minimised, .chat-away")).toBeNull();
+  });
+
+  it("scrolling to the top loads the page before and keeps the reader on the message they were on", async () => {
+    perMessage = 50;
+    // Two pages of 50 and more: a and b in turns of ten.
+    const lines = Array.from({ length: 120 }, (_, i) => message(`m${String(i).padStart(3, "0")}`, Math.floor(i / 10) % 2 ? "b" : "a", i));
+    await onChat(lines);
+    expect(ids()).toEqual(lines.slice(70).map((one) => one.id));
+    scrollTo(scroller(), 0);
+    await settle();
+    expect(ids()).toEqual(lines.slice(20).map((one) => one.id));
+    expect(top).toBe(50 * 50);
+    expect(shownTop(line("m070"))).toBe(0);
   });
 });
 

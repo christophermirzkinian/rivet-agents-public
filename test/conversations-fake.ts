@@ -1,7 +1,6 @@
 import type { ChatMessage } from "../src/shared/command.js";
 import {
   chatBadge,
-  countsUnread,
   ownsNoCard,
   SEED_IDS,
   TEAM_ROOM_ID,
@@ -27,8 +26,6 @@ export interface FakeConversation {
   closed?: boolean;
   appOnly?: boolean;
   markedUnread?: boolean;
-  /** When it was marked unread: Mark all read keeps a mark made after the list the phone drew. */
-  markedAt?: string;
   pinned?: boolean;
   done?: boolean;
   stage?: ConversationStage;
@@ -40,6 +37,8 @@ export interface FakeConversation {
   statusCard?: string;
   /** A card is filed in it; unset, it is one when a card line is in it. */
   thing?: boolean;
+  /** The linked ask's id. */
+  ask?: string;
 }
 
 export interface FakeServer {
@@ -65,7 +64,7 @@ export function conversationOf(message: Pick<ChatMessage, "id" | "threadId">): s
   return message.threadId ?? message.id;
 }
 
-/** As GET /api/chat?chat=1: every line but Updates' (2026-11-16). */
+/** As GET /api/chat?chat=1: every line but Updates'. */
 export function chatOnly(messages: readonly ChatMessage[]): ChatMessage[] {
   return messages.filter((message) => conversationOf(message) !== UPDATES_ID);
 }
@@ -129,6 +128,7 @@ export function fakeServer(messages: ChatMessage[], conversations: Record<string
       ...(fields.stagePr ? { stagePr: fields.stagePr } : {}),
       phase: fields.phase ?? null,
       thing: fields.thing ?? own(id).some((message) => !!message.posted),
+      ...(fields.ask ? { ask: fields.ask } : {}),
     };
   }
 
@@ -184,10 +184,7 @@ export function fakeServer(messages: ChatMessage[], conversations: Record<string
     if (url.pathname === "/api/conversations") {
       const { open, older } = lists();
       const unread = chatBadge(open);
-      const olderUnread = older.filter((one) => !one.updates && one.id !== TEAM_ROOM_ID && countsUnread(one)).length;
-      // As the server's clock: never before the newest message it holds.
-      const at = server.messages.reduce((newest, one) => (one.at > newest ? one.at : newest), "2030-01-01T00:00:00.000Z");
-      if (url.searchParams.get("older") !== "1") return json({ conversations: open, older: older.length, olderUnread, unread, at } satisfies ConversationsResponse);
+      if (url.searchParams.get("older") !== "1") return json({ conversations: open, older: older.length, unread } satisfies ConversationsResponse);
       const limit = Number(url.searchParams.get("limit") ?? 50);
       const from = Number(url.searchParams.get("before") ?? 0);
       const page = older.slice(from, from + limit);
@@ -214,24 +211,6 @@ export function fakeServer(messages: ChatMessage[], conversations: Record<string
         changed += 1;
       }
       return json({ changed });
-    }
-    if (url.pathname === "/api/conversations/read" && method === "POST") {
-      // As the server: the open list and every archived one unread, Updates and Agent Chat aside, and with `upTo` none
-      // whose newest reply came after it, or after the line `drawn` names for it; a mark made after `upTo` stays.
-      const body = JSON.parse(String(init?.body ?? "{}")) as { upTo?: string; drawn?: Record<string, string> };
-      server.posted.push(body);
-      const { upTo, drawn = {} } = body;
-      const seen = (id: string) => (upTo !== undefined && (drawn[id] ?? "") > upTo ? drawn[id]! : upTo);
-      const { open, older } = lists();
-      const changed = [...open, ...older.filter((one) => !one.updates)].filter(
-        (one) => one.id !== TEAM_ROOM_ID && countsUnread(one) && (upTo === undefined || one.lastAt <= seen(one.id)!),
-      );
-      for (const one of changed) {
-        const fields = server.conversations.get(one.id) ?? {};
-        const kept = upTo !== undefined && fields.markedUnread === true && (fields.markedAt ?? "") > upTo;
-        server.conversations.set(one.id, { ...fields, unread: 0, markedUnread: kept });
-      }
-      return json({ read: changed.length });
     }
     const merging = /^\/api\/conversations\/([^/]+)\/merge$/.exec(url.pathname);
     if (merging && method === "POST") {
@@ -289,10 +268,14 @@ export function fakeServer(messages: ChatMessage[], conversations: Record<string
       const limit = Number(url.searchParams.get("limit") ?? 30);
       const page = all.slice(Math.max(0, end - limit), end);
       const older = end > limit ? page[0]!.id : null;
-      if (url.searchParams.get("chat") !== "1") return json({ messages: page, older });
-      // As the server: the conversations of its lines with a card posted in them, loaded or not.
-      const things = [...new Set(page.map(conversationOf))].filter((id) => server.messages.some((one) => conversationOf(one) === id && one.posted));
-      return json({ messages: page, older, things });
+      // As the server: each line's conversation, its title and linked ask.
+      const labels = Object.fromEntries(
+        [...new Set(page.map(conversationOf))].map((id) => {
+          const { title, ask, updates } = row(id);
+          return [id, { title, ...(ask ? { ask } : {}), ...(updates ? { updates } : {}) }];
+        }),
+      );
+      return json({ messages: page, older, labels });
     }
     return json({});
   }
