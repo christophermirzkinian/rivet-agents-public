@@ -79,9 +79,20 @@ const settle = async () => {
   for (let i = 0; i < 12; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
 };
 const shownIds = () => [...root.querySelectorAll<HTMLElement>(".chat-msg")].map((el) => el.dataset.id);
-/** The Reply on line `id`'s own bubble. */
-const replyUnder = (id: string) =>
-  root.querySelector<HTMLButtonElement>(`.chat-msg[data-id="${id}"] .chat-msg-tools [data-use="chat.msg.reply"]`);
+/** The Reply on line `id`'s own bubble, its line tapped open first; null with no such line or Reply. */
+const replyUnder = (id: string) => {
+  const line = root.querySelector<HTMLElement>(`.chat-msg[data-id="${id}"]`);
+  const strip = line?.querySelector<HTMLElement>(":scope > .chat-msg-open");
+  if (!line || !strip) return null;
+  if (!line.classList.contains("open")) {
+    expect(strip.hidden).toBe(true);
+    line.click();
+  }
+  expect(strip.hidden).toBe(false);
+  return strip.querySelector<HTMLButtonElement>('.chat-msg-tools [data-use="chat.msg.reply"]');
+};
+const searchBar = () => root.querySelector<HTMLElement>(".chat-search")!;
+const magnifier = () => root.querySelector<HTMLButtonElement>(".chat-head .chat-tools > button.chat-find")!;
 const title = () => root.querySelector(".thing-title")?.textContent;
 const box = () => root.querySelector<HTMLTextAreaElement>(".chat-text")!;
 const sheet = () => document.querySelector<HTMLElement>(".sheet");
@@ -416,7 +427,10 @@ describe("Chat", () => {
     ));
     await onChat();
     expect(root.querySelector(".chat-topics-open, .chat-topics, .chat-topic")).toBeNull();
-    expect(root.querySelector<HTMLElement>(".chat-search")!.hidden).toBe(false);
+    // The bar waits behind the head's magnifier.
+    expect(searchBar().hidden).toBe(true);
+    magnifier().click();
+    expect(searchBar().hidden).toBe(false);
     const input = root.querySelector<HTMLInputElement>(".chat-search-input")!;
     input.value = "rivet";
     input.dispatchEvent(new Event("input"));
@@ -428,9 +442,61 @@ describe("Chat", () => {
     expect(root.querySelector(".chat")!.classList.contains("searching")).toBe(false);
     expect(root.querySelector(".chat-msg.lit")?.getAttribute("data-id")).toBe("g2");
     expect(chat.openConversation()).toBeNull();
+    // Picking a hit puts the bar away, emptied.
+    expect(searchBar().hidden).toBe(true);
+    expect(input.value).toBe("");
+    expect(magnifier().getAttribute("aria-expanded")).toBe("false");
     chat.showConversation("k1");
     await settle();
-    expect(root.querySelector<HTMLElement>(".chat-search")!.hidden).toBe(true);
+    expect(searchBar().hidden).toBe(true);
+    expect(magnifier().hidden).toBe(true);
+  });
+
+  it("keeps search behind a magnifier in the head: a tap shows the bar with the caret in it, a second tap puts it away and clears it", async () => {
+    await onChat();
+    const tools = [...root.querySelector(".chat-head .chat-tools")!.children];
+    // The due clock, the magnifier, then the options and their menu.
+    expect(tools.map((one) => one.className.split(" ").at(-1))).toEqual(["chat-due", "chat-find", "chat-options", "chat-menu"]);
+    expect(magnifier().dataset.use).toBe("chat.search.open");
+    expect(magnifier().getAttribute("aria-label")).toBe("Search chat");
+    expect(magnifier().getAttribute("aria-expanded")).toBe("false");
+    expect(magnifier().hidden).toBe(false);
+    expect(searchBar().hidden).toBe(true);
+    const input = root.querySelector<HTMLInputElement>(".chat-search-input")!;
+    magnifier().click();
+    expect(searchBar().hidden).toBe(false);
+    expect(magnifier().getAttribute("aria-expanded")).toBe("true");
+    expect(document.activeElement).toBe(input);
+    input.value = "poster";
+    magnifier().click();
+    expect(searchBar().hidden).toBe(true);
+    expect(magnifier().getAttribute("aria-expanded")).toBe("false");
+    expect(input.value).toBe("");
+    expect(document.activeElement).toBe(magnifier());
+  });
+
+  it("Escape on the empty search bar puts it away; with words in it, Escape first clears them", async () => {
+    await onChat();
+    magnifier().click();
+    // Rivet's sheet closes on an Escape that reaches the page: the bar's own Escape never gets there.
+    let reached = 0;
+    const page = (event: KeyboardEvent) => void (event.key === "Escape" && reached++);
+    document.addEventListener("keydown", page);
+    const input = root.querySelector<HTMLInputElement>(".chat-search-input")!;
+    input.value = "poster";
+    // An Escape mid-composition only cancels the keyboard's half-typed word: the query stays.
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true, isComposing: true }));
+    expect(input.value).toBe("poster");
+    expect(reached).toBe(1);
+    reached = 0;
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    expect(input.value).toBe("");
+    expect(searchBar().hidden).toBe(false);
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    expect(searchBar().hidden).toBe(true);
+    expect(magnifier().getAttribute("aria-expanded")).toBe("false");
+    document.removeEventListener("keydown", page);
+    expect(reached).toBe(0);
   });
 
 });

@@ -843,7 +843,7 @@ describe("links and pushes, as main.ts opens them", () => {
     expect(document.querySelector(`.sheet.update-sheet [data-need="u1"]`)).not.toBeNull();
   });
 
-  it("Rivet's sheet opens on the conversation: one head row, then search and the first bubble, no stage list over them", async () => {
+  it("Rivet's sheet opens on the conversation: one head row with the magnifier in it, then the first bubble, no search bar or stage list over it", async () => {
     const { chat } = await start("/");
     button("rivet").click();
     await flush();
@@ -853,9 +853,16 @@ describe("links and pushes, as main.ts opens them", () => {
     expect(head.querySelector(".chat-head .chat-tools")).not.toBeNull();
     const section = sheet()!.querySelector<HTMLElement>(".home-chat > .chat")!;
     expect(section.querySelector(".chat-head")).toBeNull();
-    // Over the messages only search shows: no topics bar, and no due line while no ask has a time.
+    // Over the messages nothing shows: no topics bar, and search waits behind the head's magnifier,
+    // beside the due clock, which is hidden while no ask has a time.
     const over = [...section.children].slice(0, [...section.children].indexOf(section.querySelector(".chat-scroll")!));
+    expect(over.filter((one) => !(one as HTMLElement).hidden).map((one) => one.className)).toEqual([]);
+    expect(section.querySelector(".chat-due")).toBeNull();
+    expect(head.querySelector<HTMLElement>(".chat-tools > .chat-due")!.hidden).toBe(true);
+    head.querySelector<HTMLButtonElement>(".chat-tools > .chat-find")!.click();
     expect(over.filter((one) => !(one as HTMLElement).hidden).map((one) => one.className)).toEqual(["chat-search"]);
+    head.querySelector<HTMLButtonElement>(".chat-tools > .chat-find")!.click();
+    expect(section.querySelector<HTMLElement>(".chat-search")!.hidden).toBe(true);
     expect(section.querySelector('.chat-scroll .chat-msg[data-id="k1"]')).not.toBeNull();
     // A topic's page keeps the one head row and has no stage list over its talk.
     chat.showConversation("k1");

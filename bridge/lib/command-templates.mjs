@@ -23,6 +23,17 @@ export const MAX_QUOTE_TEXT = 120;
 /** The most of a conversation's title the line shows; the server keeps 120. */
 export const MAX_CONVERSATION_TITLE = 80;
 
+/**
+ * Chat's Reply style, as the line that goes with the owner's message or card answer: Short and Detailed each add
+ * one fixed sentence; Normal, and anything else, adds nothing, so the line is as it was before the setting.
+ * @param {unknown} style
+ */
+export function replyStyleSentence(style) {
+  if (style === "short") return " Reply style: Short — answer in 1–2 sentences.";
+  if (style === "detailed") return " Reply style: Detailed — full answer, with the why and what's next.";
+  return "";
+}
+
 /** @typedef {{ from: "owner" | "rivet", text: string }} Quote */
 /** @typedef {{ id: string, title: string }} Conversation */
 
@@ -35,13 +46,14 @@ export const MAX_CONVERSATION_TITLE = 80;
  * @param {import("./validate.mjs").FileRef[]} [files] documents, named but not downloaded
  * @param {{ replyTo: string, quote?: Quote, notAnswer?: true }} [reply] the message the owner replied to; its quote is data like the text
  * @param {Conversation} [conversation] the conversation it was typed in; its title is data like the text
+ * @param {"short" | "detailed"} [replyStyle] Chat's Reply style when it was sent; absent for Normal
  */
-export function appChatLine(id, text, attachments = [], files = [], reply, conversation) {
+export function appChatLine(id, text, attachments = [], files = [], reply, conversation, replyStyle) {
   const sent = [
     ...(attachments.length ? [attachments.length > 1 ? `${attachments.length} images` : "an image"] : []),
     ...(files.length ? [files.length > 1 ? `${files.length} files` : "a file"] : []),
   ];
-  const tail = `${attachmentsSentence(attachments)}${filesSentence(id, files)} — reply with: node ~/.rivet-agents/app/scripts/say.mjs --reply-to ${id} --text "…"`;
+  const tail = `${attachmentsSentence(attachments)}${filesSentence(id, files)} — reply with: node ~/.rivet-agents/app/scripts/say.mjs --reply-to ${id} --text "…"${replyStyleSentence(replyStyle)}`;
   const who = reply?.quote ? (reply.quote.from === "rivet" ? "Rivet's" : "their own") : "";
   const replying = !reply
     ? ""

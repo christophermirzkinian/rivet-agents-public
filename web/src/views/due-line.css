@@ -1,52 +1,20 @@
 /*
- * Chat's due line: one row under the head, a hairline under it; only a late time is amber, no fill or stripe.
- * The time leads and stays whole; a long title wraps to a second line rather than cut to a word on a small phone.
+ * Chat's due button (once a due line, now a plain clock in the head, beside search and the options, sized as
+ * they are by .chat-options): no time on it, and only the clock itself is amber while something is late, no fill or
+ * stripe.
  */
-.chat-due {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  min-height: 40px;
-  padding: 6px 12px;
-  border: 0;
-  border-bottom: 1px solid var(--line);
-  background: none;
-  color: var(--text);
-  font: inherit;
-  font-size: var(--fs-body);
-  text-align: left;
-  cursor: pointer;
-}
-
-.chat-due[hidden] {
+.chat-due[hidden],
+.chat-find[hidden] {
   display: none;
 }
 
-.chat-due-words {
-  display: -webkit-box;
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  line-height: 1.35;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  overflow-wrap: anywhere;
+/* Search on: the magnifier is filled, with no ring around it (the bar under it shows it is on). */
+.chat-find[aria-expanded="true"] {
+  box-shadow: none;
 }
 
-.chat-due-time {
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.chat-due.late .chat-due-time {
+.chat-due.late {
   color: var(--apricot);
-}
-
-.chat-due-more {
-  flex: none;
-  color: var(--dim);
 }
 
 .chat-due-list {
@@ -78,7 +46,7 @@
 
 .chat-due-row-time {
   flex: none;
-  min-width: 76px;
+  min-width: 84px;
   color: var(--muted);
 }
 
@@ -96,4 +64,74 @@
 .chat-due-row-words small {
   color: var(--dim);
   font-size: var(--fs-s);
+}
+
+/* Done and Up next: two tabs over the list, the picked one filled; a hairline round the pair, no coloured edge. */
+.chat-due-tabs {
+  display: grid;
+  flex: none;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg);
+}
+
+.chat-due-tab {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--fs-body);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* The picked tab is plainly filled (the head's open options colour) and bolder; the other is dim. */
+.chat-due-tab[aria-selected="true"] {
+  border-color: var(--line);
+  background: #3b3566;
+  color: var(--text);
+  font-weight: 800;
+}
+
+.chat-due-tab-n {
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--muted);
+  font-weight: 800;
+}
+
+/* The tabs stay under the heading too: the body holds still and only the list scrolls. */
+.sheet.chat-due-sheet:not(.is-tall) > .sheet-body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* 4px of room inside the list's edge (given back by the margin) keeps a row's focus ring whole. */
+.chat-due-pane {
+  min-height: 0;
+  margin: 0 -4px;
+  padding: 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.chat-due-row.done .chat-due-row-time {
+  color: var(--muted);
+}
+
+.chat-due-empty {
+  margin: 12px 0;
+  color: var(--dim);
 }

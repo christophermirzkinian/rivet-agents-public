@@ -13,6 +13,7 @@ import type {
 } from "../../src/shared/conversations.js";
 import { ApiError, call, getIfChanged } from "./api.js";
 import { onSessionReset, sameSession, StaleSession } from "./session.js";
+import { replyStyleField } from "./views/chat-reply-style.js";
 
 /** The clientId of each request still waiting for an answer, keyed by what it asks for. */
 const unresolved = new Map<string, string>();
@@ -108,6 +109,7 @@ export const sendChat = (text: string, images: readonly string[], files: readonl
       ...(replyTo ? { replyTo } : {}),
       conversation,
       ...(typed ? { typed } : {}),
+      ...replyStyleField(),
     }),
   );
 

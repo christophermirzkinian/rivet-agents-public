@@ -9,7 +9,7 @@ import type { OpsStatus } from "../src/shared/ops-status.js";
 import type { Health, OpsResponse, PullRequest, WorkflowRun } from "../src/shared/ops.js";
 import { HANDLER_BY } from "../src/shared/ops-owned.js";
 import { setKnownRepos } from "../src/shared/repos.js";
-import { backlogGreen, fixCard, fixResults, itemGreen, FIX_RESULT_WINDOW_MS } from "../src/server/ops/fixes.js";
+import { backlogGreen, fixCard, fixResults, itemGreen, FIX_RESULT_WINDOW_MS, postsFixCard } from "../src/server/ops/fixes.js";
 import { createOps } from "../src/server/ops/service.js";
 import { Store } from "../src/server/store.js";
 
@@ -284,6 +284,36 @@ describe("Fix result", () => {
     ops.settleFixes();
     expect(cards).toEqual([{ id: expect.stringMatching(/^fix-app-tasks-app-[0-9a-f]{12}$/), title: "tasks-app back up: Machine restarted, health check OK", tag: "Fixed", chat: "fix-app-tasks-app" }]);
     expect(store.getOpsStatus("app", "tasks-app")).toMatchObject({ state: "fixed", by: "Rivet", since: SINCE });
+    ops.close();
+  });
+
+  it("on the server: a machine, a disk or a runner set fixed files no Fix result card; an app set fixed still does", () => {
+    expect([postsFixCard("machine"), postsFixCard("disk"), postsFixCard("runner"), postsFixCard("app"), postsFixCard("ci")]).toEqual([false, false, false, true, true]);
+    const dir = mkdtempSync(join(tmpdir(), "rivet-fix-hw-"));
+    const store = new Store(dir);
+    const cards: Record<string, unknown>[] = [];
+    const ops = createOps({
+      dataDir: dir,
+      store,
+      bridge: { status: () => ({ connected: true }) as never },
+      push: { notify: async () => ({}) as never, flushHeld: async () => null, onDigestSettled: () => () => {}, onDigestRelease: () => () => {}, onDigestReword: () => () => {} } as never,
+      checks: [{ name: "tasks-app", url: "https://tasks-app.example/health" }],
+      fetch: (async () => new Response("")) as typeof fetch,
+      now: () => NOW,
+      logger: { error: () => {} },
+      addUpdate: (card) => {
+        cards.push(card);
+        return { status: 200 };
+      },
+    });
+    const fixedAt = NOW.toISOString();
+    store.addOpsStatus(status({ kind: "disk", key: opsStatusKey("disk", "Data"), state: "fixed", updatedAt: fixedAt, chat: "fix-disk-data", note: "46.5 GiB free", version: store.nextOpsStatusVersion() }));
+    store.addOpsStatus(status({ kind: "machine", key: "mac", state: "fixed", updatedAt: fixedAt, chat: "fix-machine-mac", note: "awake", version: store.nextOpsStatusVersion() }));
+    store.addOpsStatus(status({ kind: "runner", key: opsStatusKey("runner", "runner-1"), state: "fixed", updatedAt: fixedAt, chat: "fix-runner", note: "back online", version: store.nextOpsStatusVersion() }));
+    store.addOpsStatus(status({ state: "fixed", updatedAt: fixedAt, chat: "fix-app-tasks-app", note: "Machine restarted", version: store.nextOpsStatusVersion() }));
+    ops.store.put("health", { "tasks-app": health("up") }, NOW);
+    ops.settleFixes();
+    expect(cards.map((card) => card.id)).toEqual([expect.stringMatching(/^fix-app-tasks-app-/)]);
     ops.close();
   });
 });

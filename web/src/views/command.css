@@ -34,14 +34,16 @@
 .chat-tools {
   position: relative;
   display: flex;
-  gap: 8px;
+  /* Three buttons (the clock, search, the options): 6px keeps them clear of Close on a narrow phone. */
+  gap: 6px;
 }
 
 /* Chat's one options button: Collapse all, Expand all, Mark all read and Read aloud under it. */
 .chat-options {
-  width: 40px;
-  min-width: 40px;
-  height: 40px;
+  /* A full tap each: the head holds three of them beside Close. */
+  width: var(--tap);
+  min-width: var(--tap);
+  height: var(--tap);
   border-radius: 12px;
   background: var(--panel-2);
   color: var(--text);
@@ -122,7 +124,8 @@
   gap: 6px;
 }
 
-.chat-size {
+.chat-size,
+.chat-style {
   flex: 1;
   min-width: 0;
   min-height: 48px;
@@ -148,7 +151,13 @@
   font-size: 17px;
 }
 
-.chat-size[aria-checked="true"] {
+/* Reply style's names all at one size: only the text size row shows its choices at their own. */
+.chat-style {
+  font-size: 14px;
+}
+
+.chat-size[aria-checked="true"],
+.chat-style[aria-checked="true"] {
   background: var(--apricot);
   color: #1a1614;
 }
@@ -249,6 +258,14 @@
   flex-wrap: nowrap;
   min-width: 0;
   margin-bottom: 0;
+}
+
+/* On narrow phones (360 and 375 wide too, once text is scaled up) the name, three full-tap buttons and Close leave no
+   room for the face: the name stays and the face goes, so no button runs under Close. */
+@media (max-width: 379px) {
+  .home-sheet-head:has(> .chat-head) > .home-sheet-face {
+    display: none;
+  }
 }
 
 .home-sheet-head > .chat-head .chat-speak:not(.chat-menu-item) {
@@ -474,29 +491,34 @@
   padding-inline: 0;
 }
 
-/* One chat: a run of lines, his on the right, Rivet's on the left, no box around them. */
+/* One chat, as close as Messenger: runs of lines, his on the right, Rivet's on the left, no box around
+   them. The lines of a run sit 2px apart and a new run 10px under the last; the spacing is each line's own margin, so
+   a run that spans two groups still reads as one. */
+.chat-thread:has(> .chat-ex) {
+  gap: 0;
+}
+
 .chat-ex {
   display: flex;
   flex-direction: column;
-  gap: 6px;
 }
 
-/* The run's conversation over Rivet's first line: "<ask id> · <title>". */
-.chat-label {
-  overflow: hidden;
-  margin: 6px 0 -2px 4px;
+/* A chunk's heading: small, grey and centred, at each new day and after an hour's gap. */
+.chat-day {
+  margin: 14px 0 2px;
   color: var(--dim);
-  font-size: 13px;
+  font-size: var(--fs-s);
   font-weight: 600;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  list-style: none;
+  text-align: center;
+}
+
+.chat-ex:first-child > .chat-day {
+  margin-top: 4px;
 }
 
 .chat-ex-turns {
   display: flex;
   flex-direction: column;
-  gap: 6px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -506,27 +528,53 @@
   display: none;
 }
 
-/* Bigger bubbles: 17px words, each line's own More and Reply under them. */
+/* A line hugs its words: the size he picked (--chat-fs), with only the padding and the gaps taken in. */
 .chat-ex .chat-msg {
   max-width: 85%;
-  padding: 12px 16px 0;
+  margin-top: 2px;
+  padding: 7px 12px;
+  cursor: pointer;
+}
+
+.chat-ex .chat-msg.run-first {
+  margin-top: 10px;
+}
+
+.chat-ex .chat-msg:focus-visible {
+  outline: 2px solid var(--apricot);
+  outline-offset: 2px;
 }
 
 .chat-ex .chat-body {
   font-size: var(--chat-fs);
-  line-height: 1.45;
+  line-height: 1.3;
+}
+
+/* A line's strip, opened by a tap on it: its time on one side, More and Reply on the other. */
+.chat-msg-open {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0 10px;
+  margin: 2px -8px -7px 0;
+}
+
+.chat-msg-open[hidden] {
+  display: none;
+}
+
+.chat-msg-open > .chat-meta {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-s);
+  font-weight: 600;
 }
 
 .chat-msg-tools {
   display: flex;
-  justify-content: flex-end;
   gap: 2px;
-  margin: 0 -10px 0 0;
-}
-
-.chat-msg.theirs .chat-msg-tools {
-  justify-content: flex-start;
-  margin: 0 0 0 -10px;
+  margin-left: auto;
 }
 
 .chat-msg-tool {
@@ -542,24 +590,44 @@
   cursor: pointer;
 }
 
+/* His line's state that shows without a tap (collecting, not delivered), and who wrote to whom in the agents' room. */
+.chat-state,
+.chat-who {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: var(--fs-s);
+  font-weight: 600;
+}
+
+.chat-who {
+  margin: 0 0 2px;
+  color: var(--dim);
+}
+
+/* A run's corners: square where the next line of the run joins it, round at the run's two ends. */
 .chat-ex .chat-msg.theirs {
-  border-radius: 20px 20px 20px 6px;
+  border-radius: 6px 18px 18px 6px;
   background: var(--panel-2);
 }
 
+.chat-ex .chat-msg.theirs.run-first {
+  border-top-left-radius: 18px;
+}
+
+.chat-ex .chat-msg.theirs.run-last {
+  border-bottom-left-radius: 18px;
+}
+
 .chat-ex .chat-msg.mine {
-  border-radius: 20px 20px 6px 20px;
+  border-radius: 18px 6px 6px 18px;
 }
 
-.chat-ex .chat-msg > .chat-meta {
-  margin: 0 0 3px;
-  color: var(--dim);
-  font-size: var(--fs-s);
-  font-weight: 700;
+.chat-ex .chat-msg.mine.run-first {
+  border-top-right-radius: 18px;
 }
 
-.chat-ex .chat-msg.mine > .chat-meta {
-  color: var(--muted);
+.chat-ex .chat-msg.mine.run-last {
+  border-bottom-right-radius: 18px;
 }
 
 .chat-ex-head {
@@ -719,7 +787,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 0;
+  margin: 10px 0 0;
   padding: 2px 4px;
   color: var(--apricot);
   font-size: var(--fs-body);
@@ -2181,6 +2249,73 @@ button.chat-quote {
   position: absolute;
   left: -32px;
   bottom: 0;
+}
+
+/* Pull a line right to reply: the browser keeps the up-and-down scroll, the page the sideways pull.
+   The line follows the finger, and a reply arrow fades in behind it as `--swipe` goes from 0 to 1 at the threshold. */
+.chat-msg {
+  position: relative;
+  touch-action: pan-y;
+}
+
+.chat-msg::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: -40px;
+  width: 28px;
+  height: 28px;
+  margin-top: -14px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--text) 14%, transparent);
+  opacity: var(--swipe, 0);
+  transform: scale(calc(0.6 + 0.4 * var(--swipe, 0)));
+  pointer-events: none;
+}
+
+.chat-msg::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: -34px;
+  width: 16px;
+  height: 16px;
+  margin-top: -8px;
+  background: var(--text);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M10 7L5 12l5 5M5 12h9a5 5 0 0 1 5 5v1' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M10 7L5 12l5 5M5 12h9a5 5 0 0 1 5 5v1' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
+  opacity: var(--swipe, 0);
+  pointer-events: none;
+}
+
+/* Rivet's face sits in the first 32px left of his line, so the arrow stands past it. */
+.chat-msg.has-rivet::before {
+  left: -72px;
+}
+
+.chat-msg.has-rivet::after {
+  left: -66px;
+}
+
+/* While pulled, the line is drawn whole (the arrow sits past its clip margin) and picks no words. */
+.chat-msg.swiping {
+  content-visibility: visible;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.chat-msg.swipe-back {
+  transition: transform 0.2s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-msg.swipe-back {
+    transition: none;
+  }
+
+  .chat-msg::before {
+    transform: none;
+  }
 }
 
 /* Only his newest message's Rivet moves; the earlier ones sit still, so a long thread costs no more than a short one. */

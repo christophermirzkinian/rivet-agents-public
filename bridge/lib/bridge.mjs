@@ -3,6 +3,7 @@ import { newChatName } from "./actions/command.mjs";
 import { fetchImage } from "./images.mjs";
 import { SseParser } from "./sse.mjs";
 import { LEGACY_ERROR, StateStore } from "./state.mjs";
+import { replyStyleSentence } from "./command-templates.mjs";
 import { chatLine, field, githubCommentBody, githubTarget, replyMarker, sanitizeLine } from "./templates.mjs";
 import { resolveChatTerminal } from "./terminals.mjs";
 import { isChatName, validateReply } from "./validate.mjs";
@@ -448,7 +449,8 @@ export function createBridge(deps) {
     const handle = found?.handle ?? newChatName(reply.id);
     /** @type {Route} */
     const route = { target: found && !found.direct ? "rivet" : "chat", chat: handle, ...(found?.direct ? {} : { reason: chat ? "relay" : "no-chat" }) };
-    const line = chatLine(reply, github, route, attachments, released);
+    // Chat's Reply style ends the line, after any hold release, so a cut note never takes it.
+    const line = chatLine(reply, github, route, attachments, `${released}${replyStyleSentence(reply.replyStyle)}`);
     /** @type {{ confirmed: boolean, stages: string[] }} */
     let receipt;
     try {

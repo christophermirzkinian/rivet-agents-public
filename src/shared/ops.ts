@@ -622,6 +622,8 @@ export interface UsageCell {
   resetsAt: string | null;
   /** The window the percent is of: "week", "5 hr"… */
   window: string;
+  /** A Claude account's Fable week used, from the bridge's "fable 15%" note; absent when not sent. */
+  fable?: number | null;
   /** The rows the cell came from: a Codex account's every window, a Claude account's one row. */
   rows: ClaudeLimit[];
 }
@@ -643,7 +645,16 @@ const cellWho = (label: string) => MASK_RE.exec(label.replace(/^Account /, ""))?
 export function claudeCells(limits: readonly ClaudeLimit[]): UsageCell[] {
   return limits
     .filter((limit) => limit.kind.startsWith("account_"))
-    .map((limit) => ({ who: cellWho(limit.label), percent: limit.percent, unread: limitUnread(limit), active: limitNotes(limit).includes("active"), resetsAt: limit.resetsAt, window: "week", rows: [limit] }));
+    .map((limit) => ({ who: cellWho(limit.label), percent: limit.percent, unread: limitUnread(limit), active: limitNotes(limit).includes("active"), resetsAt: limit.resetsAt, window: "week", fable: fableOf(limit), rows: [limit] }));
+}
+
+/** The "fable 15%" note on a Claude account row as 15; null without one. */
+export function fableOf(limit: ClaudeLimit): number | null {
+  for (const note of limitNotes(limit)) {
+    const m = /^fable (\d{1,3})%$/.exec(note);
+    if (m) return Math.min(100, Number(m[1]));
+  }
+  return null;
 }
 
 /** The most Usage rows the server takes in one reading (the bridge cuts the tail to fit). */

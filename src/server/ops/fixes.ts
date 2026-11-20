@@ -25,6 +25,13 @@ import { itemId, machineReds } from "./pickup.js";
 export const FIX_RESULT_WINDOW_MS = 3600_000;
 /** The card ids already posted that are remembered, newest last. */
 export const MAX_FIX_RESULTS = 500;
+
+/**
+ * Whether a fixed record gets a Fix result card. A machine, a disk or any CI runner fixed is hardware
+ * news, and the owner hears of hardware only when it needs him (2026-11-20): the record is still set fixed, with no
+ * card. Other kinds keep theirs.
+ */
+export const postsFixCard = (kind: OpsStatus["kind"]): boolean => kind !== "machine" && kind !== "disk" && kind !== "runner";
 const MAX_TITLE = 300;
 
 export interface FixReadings {

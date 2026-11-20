@@ -4,7 +4,7 @@ import { createRequire } from "node:module";
 import { join } from "node:path";
 
 import type { AskCreate } from "../shared/asks.js";
-import { MAX_CHAT_FILES, type FileRef, type FileType, type Need } from "../shared/board.js";
+import { MAX_CHAT_FILES, type FileRef, type FileType, type Need, type ReplyStyle } from "../shared/board.js";
 import {
   chatImages,
   CHAT_WINDOW_QUIET_MS,
@@ -296,6 +296,8 @@ export interface ActionRequest {
   notAnswerFor?: string;
   /** A chat line you typed in a message box, not one a tap sent. */
   typed?: true;
+  /** Chat's Reply style when you sent it (absent for Normal); a window goes with its newest line's. */
+  replyStyle?: ReplyStyle;
   /** The ask this line names, made after it by its id: a retry or a bridge attach makes it when it is missing. */
   ask?: AskCreate;
   /** A GitHub write on an issue (kind "issue"): a backlog issue's Start work label or Close. */
@@ -691,10 +693,18 @@ export class CommandStore {
       (row) => JSON.parse(row.request as string) as ActionRequest,
     );
     if (requests.length === 0) return lead;
-    const { text: _text, image: _image, images: _images, files: _files, ...rest } = lead;
+    const { text: _text, image: _image, images: _images, files: _files, replyStyle: _style, ...rest } = lead;
     const text = chatWindowText(requests.map((request) => request.text));
     const files = uniqueFiles(requests.flatMap((request) => request.files ?? []));
-    return { ...rest, ...(text ? { text } : {}), ...imageFields([...new Set(requests.flatMap(chatImages))]), ...(files.length ? { files } : {}) };
+    // The Reply style you had when you sent the window's newest line: a change while it collects counts.
+    const replyStyle = requests.at(-1)!.replyStyle;
+    return {
+      ...rest,
+      ...(text ? { text } : {}),
+      ...imageFields([...new Set(requests.flatMap(chatImages))]),
+      ...(files.length ? { files } : {}),
+      ...(replyStyle ? { replyStyle } : {}),
+    };
   }
 
   /**

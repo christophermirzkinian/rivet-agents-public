@@ -891,6 +891,7 @@ export function createApp(
       text,
       ...imageFields(images),
       files,
+      ...(body.replyStyle ? { replyStyle: body.replyStyle } : {}),
       rev: body.rev,
       item,
     });

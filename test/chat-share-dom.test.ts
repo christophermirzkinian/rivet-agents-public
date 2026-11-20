@@ -61,8 +61,17 @@ const area = () => sheet()!.querySelector<HTMLTextAreaElement>("textarea")!;
 const lightboxNote = () => document.querySelector<HTMLElement>(".lightbox .lightbox-note")?.textContent;
 const sheetButton = (label: string) => [...sheet()!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === label)!;
 
-/** The More on message `id`'s own bubble: Share is in its sheet. */
-const moreUnder = (id: string) => root.querySelector<HTMLButtonElement>(`.chat-msg[data-id="${id}"] .chat-msg-tools [data-use="chat.msg.more"]`)!;
+/** The More on message `id`'s own bubble, its line tapped open first: Share is in its sheet. */
+const moreUnder = (id: string) => {
+  const line = root.querySelector<HTMLElement>(`.chat-msg[data-id="${id}"]`)!;
+  const strip = line.querySelector<HTMLElement>(":scope > .chat-msg-open")!;
+  if (!line.classList.contains("open")) {
+    expect(strip.hidden).toBe(true);
+    line.click();
+  }
+  expect(strip.hidden).toBe(false);
+  return strip.querySelector<HTMLButtonElement>('.chat-msg-tools [data-use="chat.msg.more"]')!;
+};
 const moreShare = () => document.querySelector<HTMLButtonElement>('.chat-more-sheet [data-use="chat.more.share"]');
 
 /** Whether the line's More offers Share now; the sheet is closed again. An open share sheet closes with it. */
@@ -335,20 +344,27 @@ describe("share a reply", () => {
     expect(root.querySelector(".chat-msg .chat-share")).toBeNull();
   });
 
-  it("puts More and Reply on every bubble, his own too, and a tap on a bubble's words shows nothing", async () => {
+  it("puts More and Reply on every bubble, his own too, shown by a tap on the bubble's words, which opens no sheet", async () => {
     chat.mount(root);
     await settle();
     const tools = (id: string) =>
-      [...root.querySelectorAll<HTMLButtonElement>(`.chat-msg[data-id="${id}"] .chat-msg-tools button`)].map((one) => one.textContent);
+      [...root.querySelectorAll<HTMLButtonElement>(`.chat-msg[data-id="${id}"] > .chat-msg-open > .chat-msg-tools button`)].map((one) => one.textContent);
     expect(tools("h2")).toEqual(["More", "Reply"]);
     expect(tools("c1")).toEqual(["More", "Reply"]);
     expect(root.querySelector(".chat-ex-foot")).toBeNull();
     expect(root.querySelector(".chat-meta-tap")).toBeNull();
     const line = root.querySelector<HTMLElement>('.chat-msg[data-id="h2"]')!;
+    const strip = line.querySelector<HTMLElement>(":scope > .chat-msg-open")!;
+    expect(strip.hidden).toBe(true);
     const before = line.innerHTML;
     line.querySelector<HTMLElement>(".chat-body")!.click();
-    expect(line.innerHTML).toBe(before);
+    expect(strip.hidden).toBe(false);
+    expect(line.classList.contains("open")).toBe(true);
     expect(document.querySelector(".chat-more-sheet")).toBeNull();
+    // A second tap puts the line back as it was.
+    line.querySelector<HTMLElement>(".chat-body")!.click();
+    expect(line.innerHTML).toBe(before);
+    expect(line.classList.contains("open")).toBe(false);
   });
 
   it("shares exactly the edited, trimmed text", async () => {

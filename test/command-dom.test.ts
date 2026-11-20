@@ -230,7 +230,11 @@ describe("chat tab", () => {
     expect(posts).toHaveLength(1);
     expect(posts[0]!.body.text).toBe("deploy rivet");
     expect(text.value).toBe("");
-    expect(root.querySelector(".chat-msg.mine:last-child")!.textContent).toContain("Sent");
+    // Sent long after the lines above, it starts a chunk of its own, under its own heading.
+    const sent = [...root.querySelectorAll<HTMLElement>(".chat-msg.mine")].at(-1)!;
+    expect(sent.querySelector(".chat-body")!.textContent).toBe("deploy rivet");
+    expect(sent.textContent).toContain("Sent");
+    expect(sent.closest(".chat-ex")!.querySelector(":scope > .chat-day")).not.toBeNull();
   });
 
   it("a message waiting for follow-ups reads Collecting…, with a banner above the box until the window goes", async () => {
@@ -247,7 +251,9 @@ describe("chat tab", () => {
     root.querySelector<HTMLButtonElement>(".chat-send")!.click();
     await settle();
     await settle();
-    expect(root.querySelector(".chat-msg.mine:last-child .chat-status")!.textContent).toBe(" · Collecting…");
+    // Under the line's words with no tap, not in its strip.
+    expect(root.querySelector(".chat-msg.mine:last-child > .chat-state > .chat-status.collecting")!.textContent).toBe("Collecting…");
+    expect(root.querySelector(".chat-msg.mine:last-child .chat-msg-open .chat-status")).toBeNull();
     expect(note.hidden).toBe(false);
     // No deadline from the server yet: no number is guessed.
     expect(note.querySelector(".chat-collecting-when")!.textContent).toBe("Sending to Rivet soon");
@@ -281,7 +287,7 @@ describe("chat tab", () => {
     expect(note.hidden).toBe(false);
     // The number never wraps away from its words at 320.
     expect(note.querySelector(".chat-collecting-when")!.textContent).toBe("Sending to Rivet in\u00a07s");
-    expect([...root.querySelectorAll(".chat-msg .chat-status.collecting")].map((status) => status.textContent)).toEqual([" · 7s", " · 7s"]);
+    expect([...root.querySelectorAll(".chat-msg > .chat-state > .chat-status.collecting")].map((status) => status.textContent)).toEqual(["7s", "7s"]);
 
     text.value = "and green";
     cancelAnswer = () => Promise.resolve(json({ ids: ["msg-1", "msg-2"], clientIds: [], text: "ship signup flow\nthen the report", images: [IMAGE], files: [] }));

@@ -42,7 +42,14 @@ const hero = (id: "claude" | "openai") => root.querySelector<HTMLElement>(`.usag
 /** The overall's two figures: used, from the line under the meter, then left, the lead figure. */
 const figures = (id: "claude" | "openai") => [hero(id).querySelector(".usage-lines")!.textContent!.split(" used")[0], hero(id).querySelector(".reading-lead-n")!.textContent];
 const lines = (id: "claude" | "openai") => hero(id).querySelector(".usage-lines")!.textContent;
-const reset = (id: "claude" | "openai") => [...hero(id).querySelectorAll(".usage-reset > span")].map((n) => n.textContent);
+/** The overall's account rows: state, name, figure and the line under its bar. */
+const accountRows = (id: "claude" | "openai") =>
+  [...hero(id).querySelectorAll<HTMLElement>(".usage-account")].map((row) => [
+    row.dataset.state,
+    row.querySelector(".usage-account-who")!.textContent,
+    row.querySelector(".usage-account-figure")!.textContent,
+    row.querySelector(".usage-account-detail")!.textContent,
+  ]);
 const card = (id: string) => root.querySelector<HTMLElement>(`[data-section="${id}"]`)!;
 const cards = (el: Element) => [...el.querySelectorAll<HTMLElement>(".cost-card")];
 const names = (el: Element) => cards(el).map((row) => row.querySelector(".cost-name")!.textContent);
@@ -116,7 +123,15 @@ describe("Ops Usage page", () => {
       [true, ""],
       [false, "51%"],
     ]);
-    expect(reset("claude")).toEqual(["Next reset", "Mon 10:00pm, in 4 days, 8h 0m", "cc***, 51% used"]);
+    // One named row per account in the bridge's order: an unread one says so, never 0%, each with its own reset.
+    expect(accountRows("claude")).toEqual([
+      ["unread", "aa***", "Not read", "No reading yet"],
+      ["read", "ff*** · in use", "31% used", "Resets Fri 12:00am"],
+      ["unread", "zz***", "Not read", "No reading yet"],
+      ["read", "cc***", "51% used", "Resets Mon 10:00pm"],
+    ]);
+    // No Next reset block: each row carries its own.
+    expect(hero("claude").querySelector(".usage-reset")).toBeNull();
 
     // OpenAI: each Codex account's week, summed the same way.
     expect(figures("openai")).toEqual(["1.5", "0.5"]);
@@ -124,7 +139,10 @@ describe("Ops Usage page", () => {
     // A quarter left is gold, and an account at 90% or over says so on a gold card.
     expect(hero("openai").classList.contains("t-warn")).toBe(true);
     expect(lines("openai")).toBe("1.5 used · 1 account full");
-    expect(reset("openai")).toEqual(["Next reset", "Sun 4:00am, in 2 days, 14h 0m", "cc***, 100% used"]);
+    expect(accountRows("openai")).toEqual([
+      ["full", "cc*** · in use", "Full · 100%", "Resets Sun 4:00am"],
+      ["read", "bb***", "47% used", "Resets Thu 12:35pm"],
+    ]);
 
     const accounts = card("claude-accounts");
     const lists = accounts.querySelectorAll(".costs-list");
@@ -308,7 +326,7 @@ describe("Ops Usage page", () => {
     expect(figures("claude")).toEqual(["0.6", "0.4+"]);
     expect(hero("claude").querySelector(".reading-lead-words")!.textContent).toBe("of 4 left");
     expect(lines("claude")).toBe("0.6 used · 3 accounts not read");
-    expect(reset("claude")[2]).toBe("ff***, 62% used");
+    expect(accountRows("claude")[0]!.slice(0, 3)).toEqual(["read", "ff*** · in use", "62% used"]);
     ops.unmount();
 
     // With none marked active, the own week still stands in for one of the four, never a fifth beside them.
@@ -326,8 +344,15 @@ describe("Ops Usage page", () => {
     expect(figures("claude")).toEqual(["3.7", "0.3"]);
     expect(lines("claude")).toBe("3.7 used · 3 accounts full");
     expect([...hero("claude").querySelectorAll<HTMLElement>(".usage-cell-fill")].map((f) => f.style.width)).toEqual(["100%", "98%", "90%", "80%"]);
-    expect(hero("claude").querySelector(".usage-cells")!.getAttribute("aria-label")).toBe("Claude: 0.3 of 4 left, 3.7 used · 3 accounts full");
-    expect(reset("claude")).toEqual(["Next reset", "Mon 10:00pm, in 4 days, 8h 0m", "a0***, 100% used"]);
+    // Full from 90%, said in words and red; 80% is gold.
+    expect(accountRows("claude").map(([state, , figure]) => [state, figure])).toEqual([
+      ["full", "Full · 100%"],
+      ["full", "Full · 98%"],
+      ["full", "Full · 90%"],
+      ["read", "80% used"],
+    ]);
+    expect([...hero("claude").querySelectorAll(".usage-account")].map((row) => ["t-bad", "t-warn", "t-ok"].find((t) => row.classList.contains(t)))).toEqual(["t-bad", "t-bad", "t-bad", "t-warn"]);
+    expect(hero("claude").querySelector(".usage-cell")!.getAttribute("aria-label")).toBe("a0***: Full · 100%");
     expect(hero("claude").classList.contains("t-bad")).toBe(true);
     ops.unmount();
 

@@ -248,13 +248,13 @@ export function register(router: Router): void {
   }
 
   function bridgePayload(entry: AuditEntry): Record<string, unknown> {
-    const { id, at, repo, chat, pr, headSha, target, schedule, on, text, image, images, files, replyTo, quote, notAnswer, job, models, base } = entry;
+    const { id, at, repo, chat, pr, headSha, target, schedule, on, text, image, images, files, replyTo, quote, notAnswer, replyStyle, job, models, base } = entry;
     // A chat window names the conversation it was typed in, so Rivet has the context without looking it up.
     const thread = entry.kind === "chat" ? commands.threadOf(id) : null;
     const title = thread ? commands.conversationTitle(thread) : null;
     const conversation = thread && title !== null ? { id: thread, title } : undefined;
     return Object.fromEntries(
-      Object.entries({ id, at, repo, chat, pr, headSha, target, schedule, on, text, image, images, files, replyTo, quote, notAnswer, conversation, job, models, base }).filter(
+      Object.entries({ id, at, repo, chat, pr, headSha, target, schedule, on, text, image, images, files, replyTo, quote, notAnswer, replyStyle, conversation, job, models, base }).filter(
         ([, value]) => value !== undefined,
       ),
     );
@@ -404,6 +404,7 @@ export function register(router: Router): void {
           ...replying(body.replyTo),
           ...typedIn(body.conversation),
           ...(body.typed ? { typed: true as const } : {}),
+          ...(body.replyStyle ? { replyStyle: body.replyStyle } : {}),
         }),
         "chat message",
       ),

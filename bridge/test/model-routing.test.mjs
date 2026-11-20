@@ -7,7 +7,7 @@ import { test } from "node:test";
 import table from "../../config/model-jobs.json" with { type: "json" };
 import { createCommandFamily, validateCommand } from "../lib/actions/command.mjs";
 import { ActionJournal } from "../lib/journal.mjs";
-import { readModelReport, sendModelReport, validPicks, writePicks } from "../lib/model-routing.mjs";
+import { readModelReport, REPORT_EVERY_MS, REPORT_POLL_MS, runModelReportLoop, sendModelReport, validPicks, writePicks } from "../lib/model-routing.mjs";
 import { StateStore } from "../lib/state.mjs";
 
 const defaults = () => Object.fromEntries(table.jobs.map((job) => [job.key, { model: job.models[0], effort: job.effort }]));
@@ -347,4 +347,163 @@ test("models reports carry the bridge's run, and one the server answers stale is
     assert.equal(stale.length, 1);
     assert.deepEqual(Object.keys(stale[0]).sort(), ["event", "readAt", "run"]);
     assert.equal(h.acks[0].status, "succeeded");
+  }));
+
+/** Real files and report serialization; wait for each poll's timer so filesystem I/O has finished before ticking. */
+async function withReportLoop(t, work, { failures = 0 } = {}) {
+  await inTemp(async (dir) => {
+    const file = path.join(dir, "model-routing.json");
+    const statusFile = path.join(dir, "model-routing-status.json");
+    const stamp = new Date("2026-01-01T00:00:00.000Z");
+    for (const name of [file, statusFile]) {
+      fs.writeFileSync(name, JSON.stringify({ jobs: {} }));
+      fs.utimesSync(name, stamp, stamp);
+    }
+    t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+    const stop = new AbortController();
+    let pollWait = Promise.withResolvers();
+    const addEventListener = stop.signal.addEventListener.bind(stop.signal);
+    t.mock.method(stop.signal, "addEventListener", (event, listener, options) => {
+      addEventListener(event, listener, options);
+      // The loop registers its abort listener after installing the minute's timer.
+      if (event === "abort") {
+        const waiting = pollWait;
+        pollWait = Promise.withResolvers();
+        waiting.resolve();
+      }
+    });
+    const reports = [];
+    const logs = [];
+    const ready = pollWait.promise;
+    const loop = runModelReportLoop({
+      stop: stop.signal, file, statusFile, origin: "https://rivet.test", token: "test-token",
+      fetch: async (url, init) => {
+        assert.equal(url, "https://rivet.test/api/bridge/models");
+        assert.equal(init.method, "PUT");
+        reports.push({ at: Date.now(), body: JSON.parse(init.body) });
+        if (failures > 0) {
+          failures--;
+          return new Response("{}", { status: 502 });
+        }
+        return new Response("{}");
+      },
+      log: (event, fields) => logs.push({ event, ...fields }),
+    });
+    const atNextPoll = async (action) => {
+      const waiting = pollWait.promise;
+      action();
+      await waiting;
+    };
+    try {
+      await ready;
+      await work({
+        ...loop, stop, file, statusFile, reports, logs,
+        poll: (ms = REPORT_POLL_MS) => atNextPoll(() => t.mock.timers.tick(ms)),
+        reconnect: () => atNextPoll(loop.kick),
+        failNext: () => { failures++; },
+      });
+    } finally {
+      stop.abort();
+      await loop.done;
+      t.mock.timers.reset();
+    }
+  });
+}
+
+test("runModelReportLoop reports immediately without advancing time", (t) =>
+  withReportLoop(t, async (h) => {
+    assert.equal(h.reports.length, 1);
+    assert.equal(h.reports[0].at, 0);
+    assert.deepEqual(h.reports[0].body.file, { jobs: {} });
+    assert.deepEqual(h.reports[0].body.status, {});
+    assert.deepEqual(h.logs, []);
+  }));
+
+test("runModelReportLoop leaves unchanged files for five minutes between reports", (t) =>
+  withReportLoop(t, async (h) => {
+    for (let minute = 1; minute < 5; minute++) {
+      await h.poll();
+      assert.equal(h.reports.length, 1, `no report at minute ${minute}`);
+    }
+    t.mock.timers.tick(REPORT_POLL_MS - 1);
+    assert.equal(h.reports.length, 1);
+    await h.poll(1);
+    assert.deepEqual(h.reports.map((report) => report.at), [0, 300_000]);
+  }));
+
+for (const changed of ["file", "statusFile"]) {
+  test(`runModelReportLoop reports a changed ${changed} mtime at the next minute`, (t) =>
+    withReportLoop(t, async (h) => {
+      // Change only the timestamp, so content comparisons cannot stand in for stat().
+      const stamp = new Date("2026-01-01T00:01:00.000Z");
+      fs.utimesSync(h[changed], stamp, stamp);
+      t.mock.timers.tick(REPORT_POLL_MS - 1);
+      assert.equal(h.reports.length, 1);
+      await h.poll(1);
+      assert.deepEqual(h.reports.map((report) => report.at), [0, 60_000]);
+      assert.deepEqual(h.reports[1].body.file, { jobs: {} });
+      assert.deepEqual(h.reports[1].body.status, {});
+      await h.poll();
+      assert.equal(h.reports.length, 2, "the new timestamp is remembered after success");
+    }));
+}
+
+test("runModelReportLoop reconnect kick wakes a pending wait and restarts the minute poll", (t) =>
+  withReportLoop(t, async (h) => {
+    t.mock.timers.tick(10_000);
+    await h.reconnect();
+    assert.deepEqual(h.reports.map((report) => report.at), [0, 10_000]);
+    await h.poll();
+    assert.equal(h.reports.length, 2, "the old timer does not trigger another report");
+  }));
+
+test("runModelReportLoop logs a failed initial report and retries at the next minute", (t) =>
+  withReportLoop(t, async (h) => {
+    assert.deepEqual(h.logs, [{ event: "models-report-failed", error: "models report http 502" }]);
+    t.mock.timers.tick(REPORT_POLL_MS - 1);
+    assert.equal(h.reports.length, 1);
+    await h.poll(1);
+    assert.deepEqual(h.reports.map((report) => report.at), [0, 60_000]);
+    await h.poll();
+    assert.equal(h.reports.length, 2, "a successful retry resumes the normal cadence");
+    assert.equal(h.logs.length, 1);
+  }, { failures: 1 }));
+
+test("runModelReportLoop retries a failed changed-file report on the next poll", (t) =>
+  withReportLoop(t, async (h) => {
+    const updated = { at: "2026-01-01T00:01:00.000Z", by: "test", action: "test-change" };
+    fs.writeFileSync(h.file, JSON.stringify({ jobs: {}, updated }));
+    fs.utimesSync(h.file, new Date(updated.at), new Date(updated.at));
+    h.failNext();
+    await h.poll();
+    assert.deepEqual(h.logs, [{ event: "models-report-failed", error: "models report http 502" }]);
+    await h.poll();
+    assert.deepEqual(h.reports.map((report) => report.at), [0, 60_000, 120_000]);
+    assert.deepEqual(h.reports[2].body.file.updated, updated);
+    await h.poll();
+    assert.equal(h.reports.length, 3);
+  }));
+
+test("runModelReportLoop a failed reconnect with unchanged files waits for the five-minute deadline", (t) =>
+  withReportLoop(t, async (h) => {
+    h.failNext();
+    await h.reconnect();
+    assert.equal(h.reports.length, 2);
+    assert.deepEqual(h.logs, [{ event: "models-report-failed", error: "models report http 502" }]);
+    for (let minute = 1; minute < 5; minute++) {
+      await h.poll();
+      assert.equal(h.reports.length, 2);
+    }
+    await h.poll();
+    assert.deepEqual(h.reports.map((report) => report.at), [0, 0, REPORT_EVERY_MS]);
+  }));
+
+test("runModelReportLoop abort settles done and prevents reports from later ticks or kicks", (t) =>
+  withReportLoop(t, async (h) => {
+    h.stop.abort();
+    await h.done;
+    h.kick();
+    t.mock.timers.tick(2 * REPORT_EVERY_MS);
+    assert.equal(h.reports.length, 1);
+    assert.deepEqual(h.logs, []);
   }));

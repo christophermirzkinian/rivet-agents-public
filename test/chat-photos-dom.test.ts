@@ -60,11 +60,18 @@ describe("Rivet's photos and video in a chat answer", () => {
     history = [{ id: "h1", from: "rivet", text: "", at: "2030-01-01T00:00:01.000Z", image: A }];
     chat.mount(root);
     await settle();
-    const bubble = root.querySelector('.chat-msg.theirs[data-id="h1"]')!;
+    const bubble = root.querySelector<HTMLElement>('.chat-msg.theirs[data-id="h1"]')!;
     expect(bubble.querySelector(".chat-image")!.getAttribute("src")).toBe(`/media/${A}`);
     expect(bubble.querySelector(".chat-body")).toBeNull();
+    // A photo-only line has no words to tap (a tap on the photo opens it), so its strip shows from the start, and a
+    // tap on the bubble leaves it shown.
+    const strip = bubble.querySelector<HTMLElement>(":scope > .chat-msg-open")!;
+    expect(bubble.classList.contains("held")).toBe(true);
+    expect(strip.hidden).toBe(false);
+    bubble.click();
+    expect(strip.hidden).toBe(false);
     // Share sends text; a photo-only answer has none, so its More offers no Share.
-    bubble.querySelector<HTMLButtonElement>('.chat-msg-tools [data-use="chat.msg.more"]')!.click();
+    strip.querySelector<HTMLButtonElement>('.chat-msg-tools [data-use="chat.msg.more"]')!.click();
     expect(document.querySelector(".chat-more-sheet")).not.toBeNull();
     expect(document.querySelector('[data-use="chat.more.share"]')).toBeNull();
     document.querySelector<HTMLButtonElement>(".chat-more-sheet > .btn")!.click();
@@ -86,7 +93,13 @@ describe("Rivet's photos and video in a chat answer", () => {
     expect(video.hasAttribute("controls")).toBe(true);
     expect(video.hasAttribute("playsinline")).toBe(true);
     expect(video.getAttribute("preload")).toBe("metadata");
-    expect([...bubble.children].map((child) => child.className)).toEqual(["rivet is-clear is-rivet chat-rivet", "chat-meta", "chat-images", "chat-video", "chat-body", "chat-msg-tools"]);
+    // The time, More and Reply come last, in the strip a tap opens.
+    expect([...bubble.children].map((child) => child.className)).toEqual(["rivet is-clear is-rivet chat-rivet", "chat-images", "chat-video", "chat-body", "chat-msg-open"]);
+    const strip = bubble.querySelector<HTMLElement>(":scope > .chat-msg-open")!;
+    expect([...strip.children].map((child) => child.className)).toEqual(["chat-meta", "chat-msg-tools"]);
+    // The clip keeps its own tap: playing it does not open the line.
+    video.click();
+    expect(strip.hidden).toBe(true);
   });
 
   it("keeps the same video element through a redraw, so a playing clip is not stopped or rewound", async () => {

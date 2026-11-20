@@ -59,6 +59,11 @@
   display: flex;
 }
 
+/* A desktop's side pane keeps the bar shown, so it has no magnifier to open it. */
+.desktop .side .chat-find {
+  display: none;
+}
+
 .chat.searching .chat-search {
   flex: 1;
   min-height: 0;
@@ -251,9 +256,11 @@
   font-size: var(--fs-xl);
 }
 
+/* The bar opens with the caret in it, so its focus is its own thin border turned apricot, not a thick ring
+   around it that the sheet's sides cut at 320 wide. */
 .chat-search-input:focus {
-  outline: 3px solid var(--apricot);
-  outline-offset: 1px;
+  outline: 0;
+  border-color: color-mix(in srgb, var(--apricot) 70%, var(--line));
 }
 
 .chat-search-input::-webkit-search-cancel-button {

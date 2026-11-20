@@ -3,7 +3,9 @@ import type { ScreenItem } from "./screen-view.js";
 import { z } from "zod";
 
 import { ASK_ID_PATTERN, type AskCreate } from "./asks.js";
-import { CHAT_PATTERN, fileRefsSchema, ID_PATTERN, MAX_CHAT_IMAGES, PDF_NAME_PATTERN, type FileRef } from "./board.js";
+import { CHAT_PATTERN, fileRefsSchema, ID_PATTERN, MAX_CHAT_IMAGES, PDF_NAME_PATTERN, replyStyleSchema, type FileRef, type ReplyStyle } from "./board.js";
+
+export type { ReplyStyle } from "./board.js";
 import type { JobAction } from "./jobs.js";
 import { modelPicksSchema, type ModelPicks } from "./models.js";
 import { RIVET_NAME } from "./names.js";
@@ -122,6 +124,8 @@ export const chatCreateSchema = z
      * replied message's. Absent (an app from before conversations): the open chat window's, else a new one.
      */
     conversation: z.string().regex(ID_PATTERN).nullable().optional(),
+    /** Chat's Reply style when he sent it; absent for Normal. */
+    replyStyle: replyStyleSchema.optional(),
   })
   .strict()
   .refine((value) => value.image === undefined || value.images === undefined, "send image or images, not both")
@@ -319,6 +323,8 @@ export interface AuditEntry {
   notAnswer?: true;
   /** That re-ask's question: the lead of the chat window Rivet's answer replied to. */
   notAnswerFor?: string;
+  /** Chat's Reply style when he sent it (absent for Normal); a window goes with its newest line's. */
+  replyStyle?: ReplyStyle;
   /** The ask a chat line made, by the id its line names. */
   ask?: AskCreate;
   /** A scheduled job's change on the Mac. */

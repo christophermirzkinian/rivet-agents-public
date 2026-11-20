@@ -18,6 +18,7 @@ import type { UsageAsk, UsageDevice, UsageReport } from "../../src/shared/usage-
 import type { WorkersResponse } from "../../src/shared/workers.js";
 import { heardAnswer, isAsleep, isBackground } from "./rivet-sleep.js";
 import { sameSession, StaleSession } from "./session.js";
+import { replyStyleField } from "./views/chat-reply-style.js";
 
 export class ApiError extends Error {
   constructor(
@@ -197,8 +198,8 @@ export const setMinimised = (key: string, rev: string | null) =>
 /** Answer again: the answered card at `rev` becomes a new revision, for a new answer. */
 export const answerAgain = (id: string, rev: string) => call<{ version: number; item: ServedNeed }>("POST", `/api/board/needs/${encodeURIComponent(id)}/again`, { rev });
 
-/** Always `keepalive`: a send still in flight when the page closes outlives the page. */
-export const sendReply = (input: ReplyInput) => call<Reply>("POST", "/api/replies", input, true);
+/** Always `keepalive`: a send still in flight when the page closes outlives the page. Chat's Reply style goes with it. */
+export const sendReply = (input: ReplyInput) => call<Reply>("POST", "/api/replies", { ...input, ...replyStyleField() }, true);
 
 /** Uploads an attached image as raw bytes; the answer names it by its sha256. */
 export const uploadImage = (image: Blob, signal?: AbortSignal): Promise<{ image: string; type: string; size: number }> =>

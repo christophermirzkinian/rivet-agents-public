@@ -54,7 +54,7 @@ import { openSheet } from "./sheet.js";
 import { machinesTrend } from "./machines-trend.js";
 import { holdOf, holdReason, isHold } from "../../../src/shared/pr-holds.js";
 import * as api from "../api.js";
-import { machinesHead, machinesWorstFirst, usageLead } from "../reading-figures.js";
+import { accountLines, machinesHead, machinesWorstFirst, usageLead } from "../reading-figures.js";
 import { leadFigure, readingFrame, readingView } from "./reading.js";
 import { onSessionReset } from "../session.js";
 
@@ -1311,19 +1311,6 @@ interface Overall {
   empty: string;
 }
 
-/** The overall's bar: one cell per account, each filled to its own use, all in the overall's colour. */
-function cellsBar(cells: readonly UsageCell[], label: string, tone: Shade): HTMLElement {
-  return h(
-    "span",
-    { class: `usage-cells t-${tone}`, attrs: { role: "img", "aria-label": label } },
-    ...cells.map((cell) => {
-      const fill = h("span", { class: "usage-cell-fill" });
-      if (!cell.unread) fill.style.width = `${Math.min(100, Math.max(0, cell.percent))}%`;
-      return h("span", { class: `usage-cell${cell.unread ? " unread" : ""}` }, fill);
-    }),
-  );
-}
-
 function overallCard(ops: OpsResponse | null, view: Overall): HTMLElement {
   const stale = !!view.usage && usageStale(view.usage);
   const lead = view.usage ? usageLead(view.cells, stale) : null;
@@ -1345,20 +1332,36 @@ function overallCard(ops: OpsResponse | null, view: Overall): HTMLElement {
   const shell = (...body: Child[]) =>
     h("section", { class: `usage-hero box t-${lead?.cardTone ?? "idle"}`, attrs: { "data-section": view.id, "aria-labelledby": `ops-${view.id}-title` } }, head, ...body);
   if (!lead) return shell(h("p", { class: "usage-hero-empty" }, view.empty));
-  const sum = sumCells(view.cells)!;
   const left = `${lead.left}${lead.unread ? "+" : ""}`;
-  const reset = sum.next ? resetText(sum.next.resetsAt, Date.now()) : null;
   return shell(
     leadFigure(left, `of ${lead.of} left`, lead.tone),
-    cellsBar(view.cells, `${view.name}: ${left} of ${lead.of} left, ${lead.line}`, lead.tone),
     h("p", { class: "reading-lines usage-lines" }, lead.line),
-    h(
-      "div",
-      { class: "usage-reset" },
-      h("span", { class: "usage-reset-label" }, "Next reset"),
-      h("span", { class: "usage-reset-when" }, reset ? reset.replace(/^resets /, "") : "no reset time"),
-      sum.next && reset ? h("span", { class: "usage-reset-who" }, `${sum.next.who}, ${Math.round(sum.next.percent)}% used`) : null,
-    ),
+    accountList(view.cells),
+  );
+}
+
+/** "Resets Tue 12:59am": the day and time alone, the countdown left off so a row fits a 320 px phone. */
+const resetsLabel = (at: string | null): string | null => {
+  const text = resetText(at, Date.now());
+  return text ? `R${text.slice(1).replace(/, in .*$/, "")}` : null;
+};
+
+/** The overall's accounts, one row each: name, used (or "Not read" / "Full"), its own bar, then Fable and the reset. */
+function accountList(cells: readonly UsageCell[]): HTMLElement {
+  return h(
+    "ul",
+    { class: "usage-accounts" },
+    ...accountLines(cells, resetsLabel).map((line) => {
+      const fill = h("span", { class: "usage-cell-fill" });
+      if (line.fill !== null) fill.style.width = `${line.fill}%`;
+      return h(
+        "li",
+        { class: `usage-account s-${line.state} t-${line.tone}`, attrs: { "data-state": line.state } },
+        h("div", { class: "usage-account-head" }, h("span", { class: "usage-account-who" }, line.who), h("span", { class: "usage-account-figure" }, line.figure)),
+        h("span", { class: `usage-cell${line.fill === null ? " unread" : ""}`, attrs: { role: "img", "aria-label": `${line.who}: ${line.figure}` } }, fill),
+        h("span", { class: "usage-account-detail" }, line.detail),
+      );
+    }),
   );
 }
 
@@ -1419,7 +1422,7 @@ const windowOf = (row: ClaudeLimit) => /, ([^(]+?)(?: \(|$)/.exec(row.label)?.[1
 const notePills = (row: ClaudeLimit): string[] =>
   limitNotes(row)
     .filter((note) => note !== "old" && note !== "no reading")
-    .map((note) => (note === "active" ? "Active" : note === "limited" ? "Limited" : note));
+    .map((note) => (note === "active" ? "Active" : note === "limited" ? "Limited" : note.replace(/^fable /, "Fable ")));
 
 /** Claude's accounts, the soonest reset first, then the signed-in account's own meters: the 5-hour session and the weeks. */
 function claudeAccounts(ops: OpsResponse | null): HTMLElement | null {

@@ -17,13 +17,16 @@ export interface ChatSearch {
   active(): boolean;
   /** Empties the bar; `quiet` leaves the redraw to the caller, which is about to show something else. */
   clear(quiet?: boolean): void;
+  /** Puts the caret in the bar, as the head's magnifier shows it. */
+  focus(): void;
 }
 
 /**
  * `open` takes the id of the message hit, or of a conversation's first message with `whole` set (a title hit opens on
- * the newest, not at its first message); `changed` runs as results show or go.
+ * the newest, not at its first message); `changed` runs as results show or go; `close` at Escape on an empty bar, which
+ * puts the bar away (it shows only while the head's magnifier is on).
  */
-export function chatSearch(open: (id: string, whole: boolean) => void, changed: () => void): ChatSearch {
+export function chatSearch(open: (id: string, whole: boolean) => void, changed: () => void, close: () => void = () => {}): ChatSearch {
   const input = h("input", {
     class: "chat-search-input",
     attrs: { type: "search", placeholder: "Search chat", "aria-label": "Search conversations and messages", autocomplete: "off", enterkeyhint: "search" },
@@ -111,11 +114,15 @@ export function chatSearch(open: (id: string, whole: boolean) => void, changed: 
     timer = window.setTimeout(() => void run(), DEBOUNCE_MS);
   });
   input.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && input.value) {
-      event.preventDefault();
+    // An Escape mid-composition is the keyboard's own: it cancels the half-typed word, not the query.
+    if (event.key !== "Escape" || event.isComposing) return;
+    // The bar takes its own Escape: Rivet's sheet closes on an Escape that reaches the page.
+    event.preventDefault();
+    event.stopPropagation();
+    if (input.value) {
       clear();
-    }
+    } else close();
   });
   paint();
-  return { el, active, clear };
+  return { el, active, clear, focus: () => input.focus() };
 }

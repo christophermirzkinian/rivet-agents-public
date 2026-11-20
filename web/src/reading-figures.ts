@@ -41,8 +41,44 @@ export function usageLead(cells: readonly UsageCell[], stale: boolean): UsageLea
   const tone: FigureTone = leftShare > 0.25 ? "ok" : leftShare >= 0.1 ? "warn" : "bad";
   const full = cells.filter((cell) => !cell.unread && cell.percent >= ACCOUNT_FULL_PCT).length;
   const cardTone: FigureTone = tone === "ok" && (full > 0 || stale) ? "warn" : tone;
-  const line = [`${asLimits(used)} used`, sum.unread ? `${plural(sum.unread, "account")} not read` : null, full ? `${plural(full, "account")} full` : null].filter(Boolean).join(" · ");
+  // A little use never reads "0 used" over an account row saying "4% used".
+  const usedText = used > 0 && asLimits(used) === "0" ? "Under 0.1" : asLimits(used);
+  const line = [`${usedText} used`, sum.unread ? `${plural(sum.unread, "account")} not read` : null, full ? `${plural(full, "account")} full` : null].filter(Boolean).join(" · ");
   return { left: asLimits(left), of: asLimits(sum.total), used: asLimits(used), leftShare, tone, cardTone, unread: sum.unread, full, line };
+}
+
+export type AccountState = "unread" | "full" | "read";
+
+export interface AccountLine {
+  /** "ab***", with " · in use" on the account working now. */
+  who: string;
+  state: AccountState;
+  /** "6% used", "Full · 100%", "Not read". */
+  figure: string;
+  /** The bar's fill, 0-100; null while not read (hatched). */
+  fill: number | null;
+  tone: FigureTone;
+  /** "Fable 15% · resets Mon 10:00pm"; an unread account says why it shows nothing. */
+  detail: string;
+}
+
+/**
+ * Each account of an overall as its own line, so every account shows: its masked name, what it used, its Fable week
+ * where sent, its reset, and "Not read" or "Full" said in words. Full is the card's own count, 90% and over. The accounts keep the bridge's order.
+ */
+export function accountLines(cells: readonly UsageCell[], resetsLabel: (at: string | null) => string | null): AccountLine[] {
+  return cells.map((cell) => {
+    const who = `${cell.who}${cell.active ? " · in use" : ""}`;
+    if (cell.unread) return { who, state: "unread", figure: "Not read", fill: null, tone: "idle", detail: "No reading yet" };
+    // Floored, so a row reading "90%" is always one the card, the menu and the bridge also call full (89.6 reads 89%).
+    const used = Math.floor(Math.min(100, Math.max(0, cell.percent)));
+    const full = cell.percent >= ACCOUNT_FULL_PCT;
+    const tone: FigureTone = full ? "bad" : cell.percent >= 80 ? "warn" : "ok";
+    const reset = resetsLabel(cell.resetsAt);
+    const window = cell.window === "week" ? null : `${cell.window} window`;
+    const detail = [window, typeof cell.fable === "number" ? (cell.fable >= 100 ? "Fable full" : `Fable ${cell.fable}%`) : null, reset ?? "no reset time"].filter(Boolean).join(" · ");
+    return { who, state: full ? "full" : "read", figure: full ? `Full · ${used}%` : `${used}% used`, fill: used, tone, detail };
+  });
 }
 
 /** Machines worst first: red, then amber, then not read, then green. */

@@ -61,7 +61,7 @@ export const FILE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9 ._()-]{0,95}\.(?:pdf|txt|log
  * @typedef {{ sha256: string, name: string }} FileRef
  * @typedef {{ id: string, itemId: string, decision: "approve"|"reject"|"choice"|"comment"|"done"|"seen"|"dismiss",
  *   choice?: string, text?: string, image?: string, images?: string[], files?: FileRef[], at?: string, rev?: string,
- *   item: ReplyItem }} Reply
+ *   replyStyle?: "short" | "detailed", item: ReplyItem }} Reply
  * @typedef {{ ok: true, reply: Reply } | { ok: false, id: string, reason: string }} Validated
  */
 
@@ -287,6 +287,8 @@ export function validateReply(raw) {
   if (files !== undefined) reply.files = files;
   if (at !== undefined) reply.at = at;
   if (rev !== undefined) reply.rev = rev;
+  // Chat's Reply style: context only, so one this bridge does not know is left out and the answer goes as Normal.
+  if (raw.replyStyle === "short" || raw.replyStyle === "detailed") reply.replyStyle = raw.replyStyle;
   return { ok: true, reply };
 }
 

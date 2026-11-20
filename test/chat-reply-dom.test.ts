@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { quoteText, type ChatMessage } from "../src/shared/command.js";
 import { TEAM_ROOM_ID, UPDATES_ID } from "../src/shared/conversations.js";
+import { maybeWhen } from "../src/shared/when.js";
 import { app } from "../web/src/state.js";
 import { detailBody, EMPTY_LIST, fakeServer, type FakeConversation, type FakeServer } from "./conversations-fake.js";
 
@@ -64,9 +65,24 @@ const settle = async () => {
   for (let i = 0; i < 6; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
 };
 const bubble = (id: string) => root.querySelector<HTMLElement>(`.chat-msg[data-id="${id}"]`)!;
-/** A line's own Reply. */
-const replyOn = (id: string) => bubble(id).querySelector<HTMLButtonElement>('.chat-msg-tools [data-use="chat.msg.reply"]')!;
-const moreOn = (id: string) => bubble(id).querySelector<HTMLButtonElement>('.chat-msg-tools [data-use="chat.msg.more"]');
+/** A line's strip: its time, More and Reply, hidden until the line is tapped. */
+const strip = (id: string) => bubble(id).querySelector<HTMLElement>(":scope > .chat-msg-open")!;
+/** Taps a line open, unless it is; its strip was hidden until then. */
+function openLine(id: string): void {
+  if (bubble(id).classList.contains("open")) return;
+  expect(strip(id).hidden).toBe(true);
+  bubble(id).click();
+  expect(strip(id).hidden).toBe(false);
+}
+/** A line's own Reply, its line tapped open first. */
+const replyOn = (id: string) => {
+  openLine(id);
+  return bubble(id).querySelector<HTMLButtonElement>('.chat-msg-open > .chat-msg-tools [data-use="chat.msg.reply"]')!;
+};
+const moreOn = (id: string) => {
+  openLine(id);
+  return bubble(id).querySelector<HTMLButtonElement>('.chat-msg-open > .chat-msg-tools [data-use="chat.msg.more"]');
+};
 const bar = () => root.querySelector<HTMLElement>(".chat-replying")!;
 const box = () => root.querySelector<HTMLTextAreaElement>(".chat-text")!;
 
@@ -258,6 +274,26 @@ describe("Chat's first page replaces the last visit's copy", () => {
 });
 
 describe("reply in chat", () => {
+  it("pulling a line right past the threshold starts its reply, as its Reply does, and opens no strip", async () => {
+    chat.mount(root);
+    await settle();
+    const touch = (type: string, x: number) => {
+      const event = new MouseEvent(type, { clientX: x, clientY: 300, bubbles: true, cancelable: true });
+      Object.defineProperty(event, "pointerId", { value: 7 });
+      Object.defineProperty(event, "pointerType", { value: "touch" });
+      bubble("h2").dispatchEvent(event);
+    };
+    touch("pointerdown", 100);
+    touch("pointermove", 130);
+    touch("pointermove", 200);
+    touch("pointerup", 200);
+    bubble("h2").click();
+    expect(bar().hidden).toBe(false);
+    expect(bar().querySelector(".chat-quote-who")!.textContent).toBe("Rivet");
+    expect(document.activeElement).toBe(box());
+    expect(strip("h2").hidden).toBe(true);
+  });
+
   it("Reply shows who and the first line above the box on a conversation's page, focuses it, and × takes it back", async () => {
     chat.mount(root);
     await settle();
@@ -623,7 +659,7 @@ describe("a chat whose read fails (review F4)", () => {
   });
 });
 
-describe("one chat: every line its own More and Reply, each run its label", () => {
+describe("one chat: every line its own More and Reply, shown at a tap with its time and label", () => {
   const minute = (n: number) => new Date(Date.UTC(2030, 0, 1, 0, n)).toISOString();
   const line = (id: string, from: "owner" | "rivet", thread: string, n: number, text: string, extra: Partial<ChatMessage> = {}): ChatMessage => ({
     id,
@@ -637,8 +673,8 @@ describe("one chat: every line its own More and Reply, each run its label", () =
   const MESSAGES = (): ChatMessage[] => [
     line(UPDATES_ID, "rivet", UPDATES_ID, 0, "Updates from Rivet"),
     line("u1", "rivet", UPDATES_ID, 0, "Nightly: main green"),
-    line("a1", "owner", "a1", 1, "How is the demo ad going?"),
-    line("a2", "rivet", "a1", 2, "It is waiting on your approval.", { replyTo: "a1", quote: { from: "owner", text: "How is the demo ad going?" } }),
+    line("a1", "owner", "a1", 1, "How is the launch ad going?"),
+    line("a2", "rivet", "a1", 2, "It is waiting on your approval.", { replyTo: "a1", quote: { from: "owner", text: "How is the launch ad going?" } }),
     line("a3", "owner", "a1", 3, "Send me the stills"),
     line("a4", "rivet", "a1", 4, "Three stills are on the card."),
     line("p1", "owner", "p1", 5, "Is CI green?"),
@@ -648,12 +684,13 @@ describe("one chat: every line its own More and Reply, each run its label", () =
   ];
   const CONVERSATIONS = (): Record<string, FakeConversation> => ({
     [UPDATES_ID]: { title: "Updates" },
-    a1: { title: "Demo ad approval", ask: "a-12" },
+    a1: { title: "launch ad approval", ask: "a-12" },
     p1: { title: "CI on main" },
     b1: { title: "" },
   });
   let server: FakeServer;
-  const options = () => root.querySelector<HTMLButtonElement>(".chat-head .chat-options")!;
+  // The due clock and the magnifier share the options button's look.
+  const options = () => root.querySelector<HTMLButtonElement>('.chat-head .chat-options[data-use="chat.options"]')!;
   const run = (id: string) => bubble(id).closest<HTMLElement>(".chat-ex")!;
 
   async function onChat(): Promise<void> {
@@ -724,18 +761,160 @@ describe("one chat: every line its own More and Reply, each run its label", () =
     expect(bar().hidden).toBe(true);
   });
 
-  it("shows a grey label before Rivet's first line in each run, its ask and title when it has an ask", async () => {
+  it("names a Rivet line's conversation in its strip after the time, its ask and title when it has an ask; no grey label over a run", async () => {
     await onChat();
-    const label = bubble("a2").previousElementSibling as HTMLElement;
-    expect(label.matches("li.chat-label")).toBe(true);
-    expect(label.textContent).toBe("a-12 · Demo ad approval");
-    expect(bubble("a1").nextElementSibling).toBe(label);
-    expect(run("a2").querySelectorAll(".chat-label")).toHaveLength(1);
-    expect(run("p2").querySelector(".chat-label")!.textContent).toBe("CI on main");
-    // His waiting line alone has no Rivet line to label.
-    expect(run("b1").querySelector(".chat-label")).toBeNull();
+    expect(root.querySelector(".chat-label")).toBeNull();
+    const meta = (id: string) => strip(id).querySelector(":scope > p.chat-meta")!.textContent;
+    expect(meta("a2")).toBe(`${maybeWhen(minute(2))} · a-12 · launch ad approval`);
+    expect(meta("a4")).toBe(`${maybeWhen(minute(4))} · a-12 · launch ad approval`);
+    expect(meta("p2")).toBe(`${maybeWhen(minute(6))} · CI on main`);
+    // His own line has no label: its time, then how it went.
+    expect(meta("b1")).toBe(`${maybeWhen(minute(8))} · Sent`);
+    expect(root.textContent).not.toContain("Rivet · ");
     replyOn("a4").click();
-    expect(bar().querySelector(".chat-quote strong")!.textContent).toBe("a-12 · Demo ad approval");
+    expect(bar().querySelector(".chat-quote strong")!.textContent).toBe("a-12 · launch ad approval");
+  });
+
+  it("a tap on a line opens its strip, the time then More and Reply, and a second tap closes it", async () => {
+    await onChat();
+    const a2 = bubble("a2");
+    expect(a2.getAttribute("tabindex")).toBe("0");
+    // The line has no data-use of its own: a link in its words counts as the link, not as opening the line.
+    expect(a2.dataset.use).toBeUndefined();
+    expect(root.querySelector(".chat-msg.open")).toBeNull();
+    expect([...root.querySelectorAll<HTMLElement>(".chat-msg > .chat-msg-open")].every((one) => one.hidden)).toBe(true);
+    a2.querySelector<HTMLElement>(".chat-body")!.click();
+    expect(a2.classList.contains("open")).toBe(true);
+    expect(strip("a2").hidden).toBe(false);
+    expect([...strip("a2").children].map((one) => one.className)).toEqual(["chat-meta", "chat-msg-tools"]);
+    expect(strip("a2").querySelector(".chat-meta")!.textContent).toContain(maybeWhen(minute(2))!);
+    expect([...strip("a2").querySelectorAll(".chat-msg-tools > .chat-msg-tool")].map((one) => one.textContent)).toEqual(["More", "Reply"]);
+    a2.querySelector<HTMLElement>(".chat-body")!.click();
+    expect(a2.classList.contains("open")).toBe(false);
+    expect(strip("a2").hidden).toBe(true);
+  });
+
+  it("keeps one line open at a time, and a refresh keeps it open", async () => {
+    await onChat();
+    bubble("a2").click();
+    bubble("p2").click();
+    expect([...root.querySelectorAll<HTMLElement>(".chat-msg.open")].map((one) => one.dataset.id)).toEqual(["p2"]);
+    expect(strip("a2").hidden).toBe(true);
+    expect(strip("p2").hidden).toBe(false);
+    await chat.refresh();
+    await settle();
+    expect([...root.querySelectorAll<HTMLElement>(".chat-msg.open")].map((one) => one.dataset.id)).toEqual(["p2"]);
+    expect(strip("p2").hidden).toBe(false);
+  });
+
+  it("opens and closes a line with Enter or Space on it", async () => {
+    await onChat();
+    bubble("a4").dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    expect(strip("a4").hidden).toBe(false);
+    bubble("a4").dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true }));
+    expect(strip("a4").hidden).toBe(true);
+    bubble("a4").dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true, cancelable: true }));
+    expect(strip("a4").hidden).toBe(true);
+  });
+
+  it("Escape on an open line, or on its More, closes the strip only, and never reaches the page", async () => {
+    await onChat();
+    let reached = 0;
+    const page = (event: KeyboardEvent) => void (event.key === "Escape" && reached++);
+    document.addEventListener("keydown", page);
+    bubble("a4").dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    strip("a4").querySelector<HTMLElement>(".chat-msg-tool")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    expect(strip("a4").hidden).toBe(true);
+    expect(document.activeElement).toBe(bubble("a4"));
+    expect(reached).toBe(0);
+    // A closed line leaves Escape to the page.
+    bubble("a4").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    expect(reached).toBe(1);
+    document.removeEventListener("keydown", page);
+  });
+
+  it("a tap on a button inside a line does not open or close it", async () => {
+    await onChat();
+    // The quote over q1's words is a button of its own.
+    const quote = [...bubble("q1").querySelectorAll<HTMLButtonElement>("button")].find((one) => !one.closest(".chat-msg-open"))!;
+    quote.click();
+    expect(strip("q1").hidden).toBe(true);
+    expect(bubble("q1").classList.contains("open")).toBe(false);
+    bubble("q1").click();
+    expect(strip("q1").hidden).toBe(false);
+    quote.click();
+    strip("q1").querySelector<HTMLButtonElement>('[data-use="chat.msg.more"]')!.click();
+    expect(document.querySelector(".chat-more-sheet")).not.toBeNull();
+    expect(strip("q1").hidden).toBe(false);
+    expect(bubble("q1").classList.contains("open")).toBe(true);
+  });
+
+  it("stands Rivet's face by the last line of his run only, a run going on across two conversations", async () => {
+    await onChat();
+    const place = (id: string) => ({
+      first: bubble(id).classList.contains("run-first"),
+      last: bubble(id).classList.contains("run-last"),
+      face: bubble(id).querySelector(".chat-rivet") !== null,
+    });
+    // One Rivet line between two of his.
+    expect(place("a2")).toEqual({ first: true, last: true, face: true });
+    // p2 then q1, of two conversations, with nothing of his between them.
+    expect(place("p2")).toEqual({ first: true, last: false, face: false });
+    expect(place("q1")).toEqual({ first: false, last: true, face: true });
+    // His own lines never carry it.
+    expect(place("b1")).toEqual({ first: true, last: true, face: false });
+  });
+
+  it("heads a chunk with its time: the first line, a new local day and an hour's gap, never close lines", async () => {
+    // 00:00Z on 1 Jan 2030 is 11am in local: minute 780 is its midnight.
+    const lines = [
+      line("a1", "owner", "a1", 0, "How is the launch ad going?"),
+      line("d1", "rivet", "a1", 5, "It is waiting on your approval."),
+      line("d2", "rivet", "a1", 70, "Still waiting."),
+      line("d3", "rivet", "a1", 775, "The stills are up."),
+      line("d4", "rivet", "a1", 790, "And the video."),
+      line("d5", "rivet", "a1", 795, "Both are on the card."),
+    ];
+    server = fakeServer(lines, { a1: { title: "launch ad approval", ask: "a-12" } });
+    vi.stubGlobal("fetch", vi.fn(server.fetch));
+    await onChat();
+    const headings = [...root.querySelectorAll<HTMLElement>(".chat-thread p.chat-day")];
+    expect(headings.map((one) => one.textContent)).toEqual([0, 70, 775, 790].map((n) => maybeWhen(minute(n))));
+    // A heading is the first thing in its group, over the line that starts the chunk.
+    expect(headings.map((one) => [one.parentElement!.matches("li.chat-ex"), one.previousElementSibling, one.parentElement!.querySelector<HTMLElement>(".chat-msg")!.dataset.id])).toEqual([
+      [true, null, "a1"],
+      [true, null, "d2"],
+      [true, null, "d3"],
+      [true, null, "d4"],
+    ]);
+    expect(run("d1")).toBe(run("a1"));
+    expect(run("d5")).toBe(run("d4"));
+    // A heading ends a run: the face stands by the line before it.
+    expect(["d1", "d2", "d3", "d4", "d5"].map((id) => bubble(id).querySelector(".chat-rivet") !== null)).toEqual([true, true, true, false, true]);
+  });
+
+  it("says a line did not go under its words, with no tap; a sent line's status waits in its strip", async () => {
+    server = fakeServer(
+      [
+        ...MESSAGES(),
+        line("f1", "owner", "f1", 9, "and the copy", { status: "failed" }),
+        line("f2", "owner", "f2", 10, "never mind", { status: "cancelled" }),
+        line("f3", "owner", "f3", 11, "one more", { status: "unconfirmed" }),
+      ],
+      { ...CONVERSATIONS(), f1: { title: "" }, f2: { title: "" }, f3: { title: "" } },
+    );
+    vi.stubGlobal("fetch", vi.fn(server.fetch));
+    await onChat();
+    const state = (id: string) => bubble(id).querySelector<HTMLElement>(":scope > p.chat-state > span.chat-status");
+    expect([state("f1")!.className, state("f1")!.textContent]).toEqual(["chat-status failed", "Not delivered"]);
+    expect([state("f2")!.className, state("f2")!.textContent]).toEqual(["chat-status cancelled", "Cancelled"]);
+    expect([state("f3")!.className, state("f3")!.textContent]).toEqual(["chat-status unconfirmed", "Typed, not confirmed"]);
+    for (const id of ["f1", "f2", "f3"]) {
+      expect(strip(id).hidden, id).toBe(true);
+      expect(strip(id).querySelector(".chat-status"), id).toBeNull();
+    }
+    expect(state("b1")).toBeNull();
+    expect(strip("b1").querySelector(".chat-status.sent")!.textContent).toBe(" · Sent");
   });
 
   it("keeps the quote on a reply to a line Chat has not loaded", async () => {
@@ -786,7 +965,10 @@ describe("one chat: every line its own More and Reply, each run its label", () =
     chat.mount(root);
     await settle();
     expect(bar().hidden).toBe(true);
-    expect(bubble("t1").textContent).toContain("photo-album → monitor");
+    // A run's first line says who wrote to whom, over its words.
+    expect(bubble("t1").querySelector(":scope > p.chat-who")!.textContent).toBe("photo-album → monitor");
+    expect(bubble("t4").querySelector(":scope > p.chat-who")!.textContent).toBe("checkout-page → monitor");
+    expect(bubble("t2").querySelector(".chat-who")).toBeNull();
     // Only an agent's line names whom a reply in the room is for.
     expect(moreOn("t2")).not.toBeNull();
     expect(bubble("t2").querySelector('[data-use="chat.msg.reply"]')).toBeNull();
@@ -843,6 +1025,41 @@ describe("one chat: every line its own More and Reply, each run its label", () =
     await onChat();
     expect(document.documentElement.dataset.chatText).toBe("l");
     localStorage.removeItem("rivet.chat.textSize");
+  });
+
+  it("offers Short, Normal and Detailed replies in Chat's options, Normal at first, saved, and sent with every message", async () => {
+    localStorage.removeItem("rivet.chat.replyStyle");
+    await onChat();
+    options().click();
+    const styles = () => [...root.querySelectorAll<HTMLButtonElement>(".chat-menu .chat-style")];
+    expect(root.querySelector(".chat-menu [aria-label='Reply style'] .chat-size-title")!.textContent).toBe("Reply style");
+    expect(styles().map((one) => one.textContent)).toEqual(["Short", "Normal", "Detailed"]);
+    expect(styles().map((one) => one.getAttribute("aria-checked"))).toEqual(["false", "true", "false"]);
+    // Text size keeps its own three choices.
+    expect(root.querySelectorAll(".chat-menu .chat-size")).toHaveLength(3);
+    // Normal sends no field, so the line Rivet gets is as it was.
+    box().value = "normal one";
+    root.querySelector<HTMLButtonElement>(".chat-send")!.click();
+    await settle();
+    expect(server.posted.at(-1)).not.toHaveProperty("replyStyle");
+    styles()[0]!.click();
+    expect(localStorage.getItem("rivet.chat.replyStyle")).toBe("short");
+    expect(styles().map((one) => one.getAttribute("aria-checked"))).toEqual(["true", "false", "false"]);
+    box().value = "short one";
+    root.querySelector<HTMLButtonElement>(".chat-send")!.click();
+    await settle();
+    expect(server.posted.at(-1)).toMatchObject({ text: "short one", replyStyle: "short" });
+    // It survives a reload: Detailed is still picked when Chat mounts again.
+    styles()[2]!.click();
+    chat.unmount();
+    await onChat();
+    options().click();
+    expect(styles().map((one) => one.getAttribute("aria-checked"))).toEqual(["false", "false", "true"]);
+    box().value = "detailed one";
+    root.querySelector<HTMLButtonElement>(".chat-send")!.click();
+    await settle();
+    expect(server.posted.at(-1)).toMatchObject({ text: "detailed one", replyStyle: "detailed" });
+    localStorage.removeItem("rivet.chat.replyStyle");
   });
 
   it("shows Chat's head only on Chat, a conversation page keeping its own Read aloud", async () => {

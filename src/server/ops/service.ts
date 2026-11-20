@@ -45,7 +45,7 @@ import type { Store } from "../store.js";
 import { staleRecords } from "./auto-clear.js";
 import { briefingPayload, composeBriefing, currentSlot, PUSH_WINDOW_MS } from "./briefing.js";
 import { noCards, opsCardItems, syncOpsCards, type ScheduleFacts } from "./cards.js";
-import { backlogGreen, fixCard, fixResults, MAX_FIX_RESULTS } from "./fixes.js";
+import { backlogGreen, fixCard, fixResults, MAX_FIX_RESULTS, postsFixCard } from "./fixes.js";
 import { nextHealth, probeAll } from "./health.js";
 import { held, lateCardId, lateDue, lateKey, LATE_ASK_ACK_MS, type LateLog } from "./late.js";
 import { MachineHistory, macMachine } from "./machines.js";
@@ -431,7 +431,7 @@ export function createOps(deps: OpsDeps) {
     for (const { status, green } of fixResults(deps.store.listOpsStatuses(), readings, at, seenRed)) {
       const card = fixCard(status, readings);
       // The card first, then the record: a record set fixed whose card the board refused would never get it.
-      if (!posted.includes(card.id)) {
+      if (postsFixCard(status.kind) && !posted.includes(card.id)) {
         const added = deps.addUpdate(card);
         if (added.status !== 200 && added.status !== 409) {
           logger.error(`[ops] Fix result ${card.id} refused: ${added.error ?? added.status}`);

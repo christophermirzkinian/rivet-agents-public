@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { ANSWERED_KEEP_MS, answeredAsk, cardFromReply, DONE_ASK_STAGES, type Reopen } from "../shared/answered.js";
 import { type Ask, type AskStage } from "../shared/asks.js";
-import { FILE_TYPES, type Board, type BridgeAck, type Decision, type FileRef, type FileType, type Need, type PushRemoval, type PushRemovalReason, type Reply, type ReplyItem } from "../shared/board.js";
+import { FILE_TYPES, type Board, type BridgeAck, type Decision, type FileRef, type FileType, type Need, type PushRemoval, type PushRemovalReason, type Reply, type ReplyItem, type ReplyStyle } from "../shared/board.js";
 import { IMAGE_TYPES } from "../shared/command.js";
 import { NO_REPO } from "../shared/board.js";
 import type { OpsDismissal } from "../shared/ops-dismiss.js";
@@ -257,6 +257,7 @@ export interface NewReply {
   image?: string;
   images?: string[];
   files?: FileRef[];
+  replyStyle?: ReplyStyle;
   rev: string;
   item: ReplyItem;
 }
@@ -282,6 +283,7 @@ function toReply(row: Row): Reply {
   if (typeof row.image === "string") reply.image = row.image;
   if (typeof row.images === "string") reply.images = JSON.parse(row.images) as string[];
   if (typeof row.files === "string") reply.files = JSON.parse(row.files) as FileRef[];
+  if (row.reply_style === "short" || row.reply_style === "detailed") reply.replyStyle = row.reply_style;
   if (row.handled_at !== null) reply.handledAt = row.handled_at as string;
   if (typeof row.acted_at === "string") reply.actedAt = row.acted_at;
   if (row.delivery !== null) reply.delivery = JSON.parse(row.delivery as string) as Reply["delivery"];
@@ -366,6 +368,7 @@ export class Store {
     if (!columns("replies").has("image")) this.db.exec("ALTER TABLE replies ADD COLUMN image TEXT");
     if (!columns("replies").has("files")) this.db.exec("ALTER TABLE replies ADD COLUMN files TEXT");
     if (!columns("replies").has("images")) this.db.exec("ALTER TABLE replies ADD COLUMN images TEXT");
+    if (!columns("replies").has("reply_style")) this.db.exec("ALTER TABLE replies ADD COLUMN reply_style TEXT");
     if (!columns("usage_events").has("app_at")) this.db.exec("ALTER TABLE usage_events ADD COLUMN app_at INTEGER");
     // An event the app sent again after a lost answer is the same one by the app's clock; rows without it are all distinct.
     this.db.exec("CREATE UNIQUE INDEX IF NOT EXISTS usage_events_once ON usage_events (device, app_at, kind, ctl, screen, value)");
@@ -970,8 +973,8 @@ export class Store {
     const id = randomUUID();
     this.db
       .prepare(
-        `INSERT INTO replies (id, client_id, item_id, item_title, decision, choice, text, rev, at, item, image, files, images)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO replies (id, client_id, item_id, item_title, decision, choice, text, rev, at, item, image, files, images, reply_style)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -987,6 +990,7 @@ export class Store {
         input.image ?? null,
         input.files ? JSON.stringify(input.files) : null,
         input.images ? JSON.stringify(input.images) : null,
+        input.replyStyle ?? null,
       );
     const reply = this.getReply(id)!;
     for (const listener of this.replyListeners) listener(reply);

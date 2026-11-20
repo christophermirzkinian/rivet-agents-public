@@ -1761,6 +1761,22 @@ a {
   will-change: transform;
 }
 
+/* A long sheet scrolls its body only: the heading stays at the top and Close (or its foot) at the bottom, above the
+   safe area, in reach at any scroll. The tall sheet lays out its own. */
+.sheet:not(.is-tall) > :not(.sheet-body) {
+  flex: none;
+}
+
+/* The body's 4px of room inside its edge (and the margin giving it back) keeps a focus ring from being cut off. */
+.sheet:not(.is-tall) > .sheet-body {
+  flex: 0 1 auto;
+  min-height: 0;
+  margin: -4px;
+  padding: 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 .sheet-title {
   margin: 0;
   font-size: var(--fs-2xl);

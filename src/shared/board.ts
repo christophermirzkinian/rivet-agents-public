@@ -192,6 +192,13 @@ export const fileRefsSchema = z
   .refine((files) => new Set(files.map((file) => file.sha256)).size === files.length, "a file is attached twice");
 
 /**
+ * Chat's Reply style: how you want Rivet to answer a message or card answer. Normal, how Rivet writes now,
+ * travels as no field, so what goes to Rivet for it is unchanged.
+ */
+export const replyStyleSchema = z.enum(["short", "detailed"]);
+export type ReplyStyle = z.infer<typeof replyStyleSchema>;
+
+/**
  * A document on a card, such as a white paper or a log, saved or shared under `name`: a PDF named as pdfFileName
  * names one, any other document as attachmentName does, with its own type's extension.
  */
@@ -540,6 +547,8 @@ export const replyCreateSchema = z
     /** Documents you attached (POST /api/files); the server checks each is still stored and names it again. */
     files: fileRefsSchema.optional(),
     confirm: z.boolean().optional(),
+    /** Chat's Reply style when you answered; absent for Normal. */
+    replyStyle: replyStyleSchema.optional(),
   })
   .refine((value) => value.image === undefined || value.images === undefined, "send image or images, not both")
   .refine((value) => new Set(value.images).size === (value.images?.length ?? 0), "an image is attached twice");
@@ -610,6 +619,8 @@ export interface Reply {
   images?: string[];
   /** Documents you attached, served at /media/<sha256>; they go to the chat only, never to GitHub. */
   files?: FileRef[];
+  /** Chat's Reply style when you answered; absent for Normal. */
+  replyStyle?: ReplyStyle;
   /** The rev of the card the reply answered. */
   rev: string;
   at: string;

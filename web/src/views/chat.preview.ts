@@ -197,6 +197,20 @@ window.fetch = async (input, init) => {
   if (path === "/api/board") return json(board);
   if (path === "/api/workers") return json(workers);
   if (path === "/api/replies") return json({ replies: [] });
+  // One ask with a time, so the head's clock shows: ?late=1 makes it late (the clock turns amber).
+  if (path === "/api/asks")
+    return json({
+      asks: [
+        { id: "a-91", words: "Poster stills", short: "Poster stills", stage: "building", at: ago(60), dueAt: ago(new URLSearchParams(location.search).has("late") ? 12 : -27) },
+        { id: "a-92", words: "Promo video", short: "Promo video", stage: "building", at: ago(30), dueAt: ago(-55) },
+        // Done lately, for the clock's Done tab.
+        { id: "a-81", words: "Card poster", short: "Card poster", stage: "live", prs: [101], stageAt: ago(38) },
+        { id: "a-82", words: "Export rules", short: "Export rules", stage: "done", prs: [102], stageAt: ago(52) },
+        { id: "a-83", words: "Tables in more languages", short: "Tables in more languages", stage: "live", prs: [103], stageAt: ago(90) },
+        { id: "a-84", words: "Repo move", short: "Repo move", stage: "done", prs: [104], stageAt: ago(129) },
+        { id: "a-85", words: "Chat text size", short: "Chat text size", stage: "live", prs: [105], stageAt: ago(670) },
+      ],
+    });
   if (path === "/api/status")
     return json({ board: { version: 1, updatedAt: ago(0) }, bridge: { connected: true, lastSeenAt: ago(0) } });
   if (path === "/api/chat" && (init?.method ?? "GET") === "GET") return json({ messages: chatLines(), older: null });

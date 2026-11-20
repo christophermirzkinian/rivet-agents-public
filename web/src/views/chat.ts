@@ -80,7 +80,9 @@ import { closeLightbox } from "./lightbox.js";
 import { overlayTraversal } from "../overlay-history.js";
 import { createDraftLineage } from "../draft-lineage.js";
 import { chatSearch } from "./chat-search.js";
+import { swipeToReply } from "./chat-swipe.js";
 import { openMore } from "./chat-more.js";
+import { chatReplyStylePicker } from "./chat-reply-style.js";
 import { applyChatTextSize, chatTextSizePicker } from "./chat-text-size.js";
 import { registerSearchSource } from "./search-sources.js";
 import { askLine, dueLine } from "./due-line.js";
@@ -148,6 +150,42 @@ const CLOSE =
   '<svg viewBox="0 0 24 24"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>';
 const OPTIONS =
   '<svg viewBox="0 0 24 24"><path d="M4 7h9M19 7h1M4 17h3M13 17h7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><circle cx="16" cy="7" r="2.4" fill="none" stroke="currentColor" stroke-width="2.4"/><circle cx="10" cy="17" r="2.4" fill="none" stroke="currentColor" stroke-width="2.4"/></svg>';
+
+const FIND =
+  '<svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M15 15l5 5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>';
+
+/** A gap this long between two lines starts a new chunk, with its small heading: one hour. */
+export const CHUNK_GAP_MS = 60 * 60_000;
+
+/**
+ * Whether a line starts a chunk, which a small centred heading names: the first line, a new local day, or an hour
+ * since the line before.
+ */
+export function startsChunk(at: string | undefined, before: string | undefined): boolean {
+  const t = at ? Date.parse(at) : Number.NaN;
+  if (!Number.isFinite(t)) return false;
+  const b = before ? Date.parse(before) : Number.NaN;
+  if (!Number.isFinite(b)) return true;
+  return t - b >= CHUNK_GAP_MS || dayOf(t) !== dayOf(b);
+}
+
+/**
+ * A time's local day, kept: every render asks it of every line a few times over, and the calendar's formatter is
+ * slow enough to tell on a thread of a thousand lines.
+ */
+const days = new Map<number, string>();
+function dayOf(t: number): string {
+  let day = days.get(t);
+  if (day === undefined) {
+    if (days.size >= 5000) days.clear();
+    day = localDay(t);
+    days.set(t, day);
+  }
+  return day;
+}
+
+/** His line's states that show under it without a tap; the rest wait in the line's tapped-open strip. */
+const SHOWN_STATES: ReadonlySet<string> = new Set(["collecting", "unconfirmed", "failed", "cancelled"]);
 
 /** What the Chat tab shows: the one conversation with Rivet, or a thing's page. */
 type Screen = { kind: "rivet" } | { kind: "conversation"; id: string };
@@ -970,7 +1008,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     // Reduced motion: the bar moves on this tick alone. Otherwise the frame loop drains it, started again if it rested.
     if (stillMotion()) paintBar();
     else if (!collectFrame) drainCollect();
-    const line = ` · ${collectLine(left)}`;
+    const line = collectLine(left);
     for (const status of thread.querySelectorAll<HTMLElement>(".chat-status.collecting"))
       if (status.textContent !== line) status.textContent = line;
     // Not while a send is out: the window may be about to take that line too.
@@ -1211,6 +1249,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     { class: "chat-menu", attrs: { role: "menu", "aria-label": "Chat options" } },
     canSpeak() ? speakSwitch : null,
     chatTextSizePicker(),
+    chatReplyStylePicker(),
   );
   menu.hidden = true;
   /** The page the menu was last drawn for: "" is Chat. */
@@ -1246,11 +1285,34 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     document.removeEventListener("keydown", menuKey, true);
   }
 
+  // Search is a magnifier in the head: its bar shows under the head while it is on, and takes no room off it.
+  let finding = false;
+  const findBtn = h(
+    "button",
+    {
+      class: "icon-btn chat-options chat-find",
+      attrs: { type: "button", "aria-label": "Search chat", "aria-expanded": "false", "data-use": "chat.search.open" },
+      on: { click: () => setFinding(!finding) },
+    },
+    svg(FIND, "icon-btn-icon"),
+  );
+  /** Shows or puts away the search bar; put away, what was typed goes with it. `quiet` leaves the redraw to the caller. */
+  function setFinding(on: boolean, quiet = false): void {
+    if (finding === on) return;
+    finding = on;
+    findBtn.setAttribute("aria-expanded", String(on));
+    if (!on) search.clear(true);
+    if (quiet) return;
+    render(false);
+    if (on) search.focus();
+    else findBtn.focus();
+  }
+  const dueSlot = h("span", { class: "chat-due-slot" });
   const chatHead = h(
     "div",
     { class: "chat-head" },
     h("h1", { class: "chat-title" }, RIVET_NAME),
-    h("div", { class: "chat-tools" }, optionsBtn, menu),
+    h("div", { class: "chat-tools" }, dueSlot, findBtn, optionsBtn, menu),
   );
   const composeBox = h(
     "div",
@@ -1268,8 +1330,13 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   );
   // A title hit opens that thing on its newest; a message hit is brought up where it lives, in Chat or on its thing.
   const search = chatSearch(
-    (id, whole) => (whole ? openConversationNow(id) : openHit(id)),
+    (id, whole) => {
+      setFinding(false, true);
+      if (whole) openConversationNow(id);
+      else openHit(id);
+    },
     () => render(false),
+    () => setFinding(false),
   );
   // An ask is named as the grey label over its line names its conversation, when Chat holds that line.
   const due = dueLine(
@@ -1282,12 +1349,12 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       return (chatLabels.get(id) ?? summaryOf(id))?.title?.trim() || null;
     },
   );
+  dueSlot.replaceWith(due.el);
   const section = h(
     "section",
     { class: "chat", attrs: { "data-card-keys": "off" } },
     chatHead,
     headBox,
-    due.el,
     search.el,
     scroller,
     composeBox,
@@ -1546,11 +1613,13 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
    * A message's row, the one already drawn while nothing it shows has changed, so a 10 s refresh or a stream message no
    * longer rebuilds the whole thread. The key holds everything `bubble` reads.
    */
-  function row(message: ChatMessage, quoted: boolean, next: typeof rows): HTMLElement {
+  function row(message: ChatMessage, quoted: boolean, run: Run, next: typeof rows): HTMLElement {
     const card = cardOf(message);
     const key = JSON.stringify([
       message,
       quoted,
+      run,
+      labelOf([message]),
       shown.kind,
       shownId(),
       readOnly(),
@@ -1565,14 +1634,15 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     // A card's media is one element shared with the Feed and Answered, so another view may have taken it from the row.
     // Chat's own timeline shows a posted card as one line, without it.
     const media = message.posted && shown.kind !== "rivet" && card?.media ? cardMedia(card.id, card.media, card.title) : null;
-    const el = was?.key === key && (!media || was.el.contains(media)) ? was.el : bubble(message, quoted);
+    const el = was?.key === key && (!media || was.el.contains(media)) ? was.el : bubble(message, quoted, run);
     next.set(message.id, { key, el });
     return el;
   }
 
   /**
    * The messages in runs, oldest to newest. A conversation's page splits at each new question; Chat at another
-   * conversation's line too, so a run's label and Reply name its own conversation.
+   * conversation's line too, so a Reply names its own conversation. A chunk's first line starts one as well: its
+   * heading sits over it.
    */
   function exchangesOf(sorted: ChatMessage[]): ChatMessage[][] {
     const groups: ChatMessage[][] = [];
@@ -1581,7 +1651,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       let agent: string | undefined;
       for (const message of sorted) {
         const last = groups.at(-1);
-        if (last && (!message.team || agent === undefined || message.team.from === agent)) last.push(message);
+        if (last && (!message.team || agent === undefined || message.team.from === agent) && !startsChunk(message.at, last.at(-1)!.at)) last.push(message);
         else groups.push([message]);
         agent = message.team?.from ?? agent;
       }
@@ -1590,7 +1660,13 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     for (const message of sorted) {
       const last = groups.at(-1);
       const before = last?.at(-1);
-      if (last && before && !(message.from === "owner" && before.from !== "owner") && (shown.kind !== "rivet" || threadOf(message) === threadOf(before)))
+      if (
+        last &&
+        before &&
+        !(message.from === "owner" && before.from !== "owner") &&
+        (shown.kind !== "rivet" || threadOf(message) === threadOf(before)) &&
+        !startsChunk(message.at, before.at)
+      )
         last.push(message);
       else groups.push([message]);
     }
@@ -1607,7 +1683,34 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     return last.from === "owner" && !last.card && (last.status === "sent" || last.status === "typed");
   }
 
-  /** In Chat, the grey label over a run of Rivet's lines from one conversation; null elsewhere. */
+  /**
+   * Where a line sits in its run: lines from one side with no heading between them sit close, and only the run's last
+   * carries Rivet's face.
+   */
+  type Run = { first: boolean; last: boolean };
+
+  function sameRun(a: ChatMessage, b: ChatMessage): boolean {
+    return (a.from === "owner") === (b.from === "owner") && a.team?.from === b.team?.from && a.team?.to === b.team?.to && !startsChunk(b.at, a.at);
+  }
+
+  /** The line whose time, More and Reply are open under it: one at a time, opened by a tap on the line. */
+  let opened: string | null = null;
+
+  /** Opens a line's strip, or closes it at a second tap; the line that was open closes. */
+  function toggleOpen(id: string): void {
+    const atFoot = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 40;
+    opened = opened === id ? null : id;
+    for (const line of thread.querySelectorAll<HTMLElement>(".chat-msg")) {
+      const on = line.dataset.id === opened;
+      line.classList.toggle("open", on);
+      const strip = line.querySelector<HTMLElement>(":scope > .chat-msg-open");
+      if (strip) strip.hidden = !on && !line.classList.contains("held");
+    }
+    // The newest line's strip opens under it, in view.
+    if (atFoot) scroller.scrollTop = scroller.scrollHeight;
+  }
+
+  /** In Chat, the label of a line's conversation, "<ask id> · <title>", in its strip and on its Reply; null elsewhere. */
   function labelOf(group: ChatMessage[]): string | null {
     if (shown.kind !== "rivet") return null;
     const id = threadOf(group[0]!);
@@ -1652,20 +1755,19 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   }
 
   /**
-   * A run of lines. In Chat its Rivet lines carry the grey label of their conversation, over the first of them;
-   * each line carries its own More and Reply (bubble).
+   * A run of lines, under the small centred heading of its chunk when it starts one: the time today, the weekday or
+   * the date with it on an earlier day. Each line carries its own time, More and Reply, shown at a tap (bubble).
    */
-  function exchange(group: ChatMessage[], bubbles: HTMLElement[], next: typeof topicCards): HTMLElement {
+  function exchange(group: ChatMessage[], bubbles: HTMLElement[], heading: string | null, next: typeof topicCards): HTMLElement {
     const first = group[0]!.id;
     const thread = threadOf(group[0]!);
     const wait = waiting(group);
-    const label = labelOf(group);
-    const key = JSON.stringify([wait, label]);
+    const key = JSON.stringify([wait, heading]);
     const was = topicCards.get(first);
     const kept = was?.key === key ? was : null;
     const turns = was?.turns ?? h("ol", { class: "chat-ex-turns" });
-    const labelEl = kept?.chrome.find((one) => one.classList.contains("chat-label")) ?? (label ? h("li", { class: "chat-label" }, label) : null);
     const chrome = kept?.chrome ?? [
+      heading ? h("p", { class: "chat-day" }, heading) : null,
       turns,
       wait
         ? h(
@@ -1676,32 +1778,30 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
             `${RIVET_NAME} is working on it`,
           )
         : null,
-      labelEl,
     ].filter((one): one is HTMLElement => one !== null);
-    const at = group.findIndex((message) => message.from !== "owner");
-    placeChildren(turns, labelEl && at >= 0 ? [...bubbles.slice(0, at), labelEl, ...bubbles.slice(at)] : bubbles);
+    placeChildren(turns, bubbles);
     const el = was?.el ?? h("li", { class: "chat-ex", attrs: { "data-ex": first } });
     el.dataset.thread = thread;
-    placeChildren(
-      el,
-      chrome.filter((one) => one !== labelEl),
-    );
+    placeChildren(el, chrome);
     next.set(first, { key, el, turns, chrome });
     return el;
   }
 
-  function bubble(message: ChatMessage, quoted: boolean): HTMLElement {
+  function bubble(message: ChatMessage, quoted: boolean, run: Run): HTMLElement {
     const mine = message.from === "owner";
     const posted = message.posted;
+    // A line still collecting, or one that did not go, says so under its words without a tap.
+    const state = mine && message.status && SHOWN_STATES.has(message.status) ? message.status : null;
+    const label = mine ? null : labelOf([message]);
     // A card answer is his message too; its card opens from here while it is still on the board. Rivet's "Card: … ›"
     // line (say.mjs --card) opens its update card the same way, the line itself one tap; so does the line beside a
     // question card (a reply that asked him something) while that card is open, and a card Rivet posted here.
     const card = cardOf(message);
-    // His bubble needs no name: it is on the right of its topic card.
+    // A line's strip, opened by a tap on it: its time, in Chat its conversation's label, then how his line went.
+    // No name: his lines are on the right, Rivet's on the left by his face, an agent's under its own names.
     const said = [
-      mine
-        ? (timeOf(message.at) ?? "")
-        : `${message.team ? `${chatName(message.team.from)} → ${chatName(message.team.to)}` : "Rivet"} · ${timeOf(message.at) ?? ""}`,
+      timeOf(message.at) ?? "",
+      label ? ` · ${label}` : null,
       message.card && mine ? " · from a card" : null,
       mine && message.ack
         ? h(
@@ -1712,14 +1812,30 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
         : mine && message.status === "replied"
           ? // A small tick, not the word.
             [" · ", h("span", { class: "chat-status replied", attrs: { role: "img", "aria-label": STATUS_WORDS.replied, title: STATUS_WORDS.replied } }, svg(ICONS.yes, "chat-tick"))]
-          : mine && message.status
-          ? h(
-              "span",
-              { class: `chat-status ${message.status}` },
-              ` · ${message.status === "collecting" ? collectLine(collectLeft(messages.values())) : STATUS_WORDS[message.status]}`,
-            )
+          : mine && message.status && !state
+          ? h("span", { class: `chat-status ${message.status}` }, ` · ${STATUS_WORDS[message.status]}`)
           : null,
     ].flat();
+    const stateLine = state
+      ? h(
+          "p",
+          { class: "chat-state" },
+          h("span", { class: `chat-status ${state}` }, state === "collecting" ? collectLine(collectLeft(messages.values())) : STATUS_WORDS[state]),
+        )
+      : null;
+    // In Chat his card answer reads as the answer to its card: "You approved “…”".
+    const text = mine && message.card && shown.kind === "rivet" ? answerLine(answeredTitle(message), message.text) : message.text;
+    // A line with no plain words to tap (only a photo, a clip or a file, or Rivet's card line, whose words are the
+    // card's button) keeps its strip shown: a tap there opens the photo or the card, so it could never open the strip.
+    const held = !posted && (!text || Boolean(card && !mine));
+    /** True when the tap opened or closed the strip. */
+    const tap = (event: Event): boolean => {
+      const at = event.target instanceof Element ? event.target : null;
+      // A button, a link, a clip or the strip itself keeps its own tap; so does a drag that picked words out.
+      if (held || !at || at.closest("button, a, video, audio, .chat-msg-open") || window.getSelection()?.toString()) return false;
+      toggleOpen(message.id);
+      return true;
+    };
     const images = chatImages(message).map(mediaSrc);
     const alt = mine ? "Photo you sent" : "Photo";
     const meta = h("p", { class: "chat-meta" }, ...said);
@@ -1735,7 +1851,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
         )
       : null;
     const replyTo = message.replyTo;
-    // Every line has its own More and Reply, his own lines too: a reply
+    // Every line has its own More and Reply, in its strip, his own lines too: a reply
     // to his line goes to that line's conversation. None in the read-only Updates; none on his line while it still
     // collects (Cancel can take the line away from under the reply); and in the agents' room only on an agent's line
     // (`team`), the one that names whom the reply is for: not his own, nor the hourly summary or a say reply there.
@@ -1756,17 +1872,43 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
           )
         : null,
     );
-    // In Chat his card answer reads as the answer to its card: "You approved “…”".
-    const text = mine && message.card && shown.kind === "rivet" ? answerLine(answeredTitle(message), message.text) : message.text;
-    return h(
+    const strip = h("div", { class: "chat-msg-open" }, meta, tools);
+    strip.hidden = !held && message.id !== opened;
+    const line = h(
       "li",
       {
-        class: `chat-msg ${mine ? "mine" : "theirs"}${!mine && !message.team ? " has-rivet" : ""}${posted ? " posted" : ""}${message.id === lit ? " lit" : ""}`,
-        attrs: { "data-id": message.id },
+        class: `chat-msg ${mine ? "mine" : "theirs"}${!mine && !message.team ? " has-rivet" : ""}${posted ? " posted" : ""}${message.id === lit ? " lit" : ""}${run.first ? " run-first" : ""}${run.last ? " run-last" : ""}${message.id === opened ? " open" : ""}${held ? " held" : ""}`,
+        // A key reaches the line as a tap does: Enter or Space on it opens its strip. No data-use on the line: a tap
+        // on a link in its words is the link's, and the strip's opening is counted only when it opens or closes.
+        attrs: { "data-id": message.id, tabindex: "0" },
+        on: {
+          click: (event: Event) => {
+            if (tap(event)) useTap("chat.msg.open");
+          },
+          keydown: (event: Event) => {
+            const key = (event as KeyboardEvent).key;
+            const line = event.currentTarget as HTMLElement;
+            // Escape on an open line, or on its More or Reply, closes the strip only: Rivet's sheet closes on an
+            // Escape that reaches the page.
+            if (key === "Escape" && opened === message.id) {
+              event.preventDefault();
+              event.stopPropagation();
+              toggleOpen(message.id);
+              line.focus();
+              return;
+            }
+            if (held || event.target !== line || (key !== "Enter" && key !== " ")) return;
+            event.preventDefault();
+            useTap("chat.msg.open");
+            toggleOpen(message.id);
+          },
+        },
       },
-      // 28px is the smallest his front symbols stay legible at (rivet-symbols.test.ts).
-      !mine && !message.team ? rivet(moodOf(message.text), { size: 28, className: "chat-rivet" }) : null,
-      meta,
+      // Rivet's face stands by the last line of his run only. 28px is the smallest his front symbols stay legible at
+      // (rivet-symbols.test.ts).
+      !mine && !message.team && run.last ? rivet(moodOf(message.text), { size: 28, className: "chat-rivet" }) : null,
+      // In the agents' room a run's first line says who wrote to whom.
+      message.team && run.first ? h("p", { class: "chat-who" }, `${chatName(message.team.from)} → ${chatName(message.team.to)}`) : null,
       quoted && message.quote && replyTo
         ? h(
             "button",
@@ -1861,8 +2003,15 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
           : h("p", { class: "chat-body" }, ...linkify(text))
         : null,
       openCard ? h("div", { class: "chat-foot" }, h("div", { class: "chat-foot-tools" }, openCard)) : null,
-      tools,
+      stateLine,
+      strip,
     );
+    // Pulled right, a line replies as its Reply does, wherever it has a Reply.
+    if (replies) swipeToReply(line, () => {
+      useTap("chat.msg.reply");
+      replyToLine(messages.get(message.id) ?? message);
+    });
+    return line;
   }
 
   /** An app-only conversation stays in the app: nothing in it is offered to share. */
@@ -2041,8 +2190,9 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     const kind = shown.kind;
     paintSend();
     search.el.dataset.view = kind;
-    // On Chat under the topics bar; a wide window's pane keeps it on top (conversations.css).
-    search.el.hidden = kind !== "rivet";
+    // On Chat while the head's magnifier is on; a wide window's pane keeps it on top (conversations.css).
+    search.el.hidden = kind !== "rivet" || !finding;
+    findBtn.hidden = kind !== "rivet";
     // It hides the scroller, which then reads 0 everywhere: where Chat was is taken before, not measured after.
     const covers = search.active() && kind === "rivet";
     const wasCovered = section.classList.contains("searching");
@@ -2101,10 +2251,21 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     const nextCards: typeof topicCards = new Map();
     const groups = exchangesOf(sorted);
     cardGroups = new Map(groups.map((group) => [group[0]!.id, group]));
-    const bubbles = groups.map((group) => {
+    // Each line's place in its run, across the groups: a run of Rivet's lines may span two conversations.
+    const flat = groups.flat();
+    const runs = new Map<string, Run>(
+      flat.map((message, at) => {
+        const before = flat[at - 1];
+        const after = flat[at + 1];
+        return [message.id, { first: !before || !sameRun(before, message), last: !after || !sameRun(message, after) }];
+      }),
+    );
+    if (opened && !runs.has(opened)) opened = null;
+    const bubbles = groups.map((group, at) => {
       const ids = new Set(group.map((message) => message.id));
-      const turns = group.map((message) => row(message, !(message.replyTo && ids.has(message.replyTo)), next));
-      return exchange(group, turns, nextCards);
+      const turns = group.map((message) => row(message, !(message.replyTo && ids.has(message.replyTo)), runs.get(message.id)!, next));
+      const heading = startsChunk(group[0]!.at, groups[at - 1]?.at(-1)?.at) ? timeOf(group[0]!.at) : null;
+      return exchange(group, turns, heading, nextCards);
     });
     rows = next;
     topicCards = nextCards;
@@ -2295,6 +2456,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     // Anywhere else that opens a conversation (header search, a notification, a feed link) ends the panel's search.
     // Quietly: a redraw now would show (and mark read) the conversation being left.
     search.clear(true);
+    setFinding(false, true);
     const fresh = shownId() !== id;
     shown = { kind: "conversation", id };
     if (fresh) {
@@ -2833,6 +2995,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     // Results over this conversation give way to it.
     const searching = section.classList.contains("searching");
     search.clear(true);
+    setFinding(false, true);
     if (messages.has(id)) {
       if (searching) render(false);
       return jump(id);

@@ -64,12 +64,12 @@ function revise(itemId: string, tag: string): void {
   server.app.store.putBoard(board, null);
 }
 
-async function reply(clientId: string, decision = "approve"): Promise<{ id: string }> {
+async function reply(clientId: string, decision = "approve", extra: Record<string, unknown> = {}): Promise<{ id: string }> {
   revise("pr105-touch", clientId);
   const response = await fetch(`${server.base}/api/replies`, {
     method: "POST",
     headers: browser(cookie),
-    body: JSON.stringify({ clientId, itemId: "pr105-touch", decision, ...(decision === "reject" ? { text: "Fix the touch target" } : {}), rev: await revOf(server.base, cookie, "pr105-touch") }),
+    body: JSON.stringify({ clientId, itemId: "pr105-touch", decision, ...(decision === "reject" ? { text: "Fix the touch target" } : {}), rev: await revOf(server.base, cookie, "pr105-touch"), ...extra }),
   });
   expect(response.status).toBe(201);
   return (await response.json()) as { id: string };
@@ -107,6 +107,23 @@ describe("bridge SSE", () => {
     await stream.waitFor(3);
     expect(stream.events()[2]!.id).toBe(third.id);
     stream.abort();
+  });
+
+  it("streams a card answer with Chat's Reply style, kept with the reply; Normal is no field", async () => {
+    const short = await reply("client-2001", "approve", { replyStyle: "short" });
+    const normal = await reply("client-2002", "approve");
+    const stream = await connect();
+    await stream.waitFor(2);
+    expect(stream.events()[0]!.data).toMatchObject({ id: short.id, replyStyle: "short" });
+    expect((stream.events()[1]!.data as Record<string, unknown>).replyStyle).toBeUndefined();
+    stream.abort();
+    expect(server.app.store.getReply(short.id)?.replyStyle).toBe("short");
+    const refused = await fetch(`${server.base}/api/replies`, {
+      method: "POST",
+      headers: browser(cookie),
+      body: JSON.stringify({ clientId: "client-2003", itemId: "pr105-touch", decision: "approve", rev: await revOf(server.base, cookie, "pr105-touch"), replyStyle: "normal" }),
+    });
+    expect(refused.status).toBe(400);
   });
 
   it("holds complete option details through an older bridge and replays them after upgrade", async () => {
