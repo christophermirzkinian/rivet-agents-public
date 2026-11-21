@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import { checkNote, parseArgs } from "../../scripts/briefing-note.mjs";
 
-// say's `--text --stdin` sent the owner "--stdin" 14 times on 11 Nov; a briefing note is refused the same way.
+// say's `--text --stdin` once sent the owner "--stdin" 14 times; a briefing note is refused the same way.
 test("briefing-note refuses a note that starts with --, and keeps one with -- later on", () => {
   assert.deepEqual(parseArgs(["--text", "--stdin"]), { text: "--stdin" });
   assert.equal(checkNote("--stdin").error, '--text got "--stdin" as the note, a flag; give --text the note itself. Nothing was sent');

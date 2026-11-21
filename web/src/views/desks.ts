@@ -12,6 +12,7 @@ import { when } from "../../../src/shared/when.js";
 import type { Worker } from "../../../src/shared/workers.js";
 import { homeOf, projectName } from "../backlog-logic.js";
 import { STATE_WORDS } from "../crew-words.js";
+import { agentName } from "../cloud-agent.js";
 import { isDesk } from "../desk.js";
 import { IN_HAND, NEEDS_YOU, allMinimised, needYou, stageWord } from "../../../src/shared/words.js";
 import { isGotIt } from "../../../src/shared/answers.js";
@@ -418,10 +419,10 @@ export function mountDesks(): { el: HTMLElement; paint: () => void; stop: () => 
     // A tap on Rivet opens his sheet: Copy summary and his chat.
     const home = h(
       "button",
-      { class: "desk is-rivet", attrs: { type: "button", "data-use": "desks.rivet", "data-mood": mood, "aria-label": `Rivet, ${word}` }, on: { click: openRivetSummary } },
+      { class: "desk is-rivet", attrs: { type: "button", "data-use": "desks.rivet", "data-mood": mood, "aria-label": `${agentName()}, ${word}` }, on: { click: openRivetSummary } },
       rivet(mood, { size: crowded ? (isDesk() ? 80 : 47) : isDesk() ? 128 : 76, glow: true }),
       h("div", { class: "desk-slab" }, h("span", { class: "desk-screen" }, h("i"), h("i"), h("i"))),
-      h("span", { class: "desk-name" }, "Rivet's desk", h("span", { class: `desk-mood is-${mood}` }, word)),
+      h("span", { class: "desk-name" }, `${agentName()}'s desk`, h("span", { class: `desk-mood is-${mood}` }, word)),
     );
     const desks = busy.map((place) => {
       const team = byDesk.get(place) ?? [];

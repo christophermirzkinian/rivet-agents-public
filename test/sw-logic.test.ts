@@ -274,6 +274,21 @@ describe("sw.js", () => {
     expect(focus.opened).toEqual([]);
   });
 
+  it("a chat push's tap tells the open window the line it is about, so Chat opens on it", async () => {
+    const win = { id: "w1", visibilityState: "visible", focused: false };
+    const sw = boot(ANDROID, [win]);
+    await sw.click("/?conversation=k1&message=m7");
+    expect(sw.posted).toEqual([{ id: "w1", message: { type: "open-tab", tab: "chat", conversation: "k1", message: "m7" } }]);
+    // A push from an older server names no line: Chat opens on the conversation's newest.
+    const old = boot(ANDROID, [win]);
+    await old.click("/?conversation=k1");
+    expect(old.posted).toEqual([{ id: "w1", message: { type: "open-tab", tab: "chat", conversation: "k1" } }]);
+    // No window: a new one opens at the path, which names the line for main.ts.
+    const cold = boot(ANDROID, []);
+    await cold.click("/?conversation=k1&message=m7");
+    expect(cold.opened).toEqual(["/?conversation=k1&message=m7"]);
+  });
+
   it("on an iPhone shows the on-screen card silently instead of skipping it", async () => {
     const sw = boot(IPHONE_PWA, [{ id: "w1", visibilityState: "visible", focused: true }]);
     sw.report("w1", { tab: "feed", card: "c1", visible: true });

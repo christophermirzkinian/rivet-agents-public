@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { detailBody, EMPTY_LIST } from "./conversations-fake.js";
+import { EMPTY_LIST } from "./conversations-fake.js";
 import * as chat from "../web/src/views/chat.js";
 import { openImages, closeLightbox } from "../web/src/views/lightbox.js";
 import { openTallSheet, closeTallSheet } from "../web/src/views/sheet.js";
@@ -37,15 +37,11 @@ beforeEach(() => {
       posted.push(JSON.parse(String(init.body)));
       if (posted.length === 1) await new Promise<void>(resolve => { release = resolve; });
       body = { id: `message-${posted.length}`, conversation: "created-chat", at: "2030-01-01T00:00:00Z" };
-    } else if (String(input).includes("/api/conversations/")) {
-      const id = new URL(String(input), "http://test").pathname.slice("/api/conversations/".length);
-      body = detailBody(id, []);
     }
     return new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } });
   }));
   root = document.createElement("main");
   document.body.replaceChildren(root);
-  chat.showConversation("direct-chat");
 });
 afterEach(async () => {
   closeLightbox();
@@ -59,7 +55,7 @@ afterEach(async () => {
 
 it.each([
   ["lightbox", "back"], ["lightbox", "close"], ["sheet", "back"], ["sheet", "close"],
-])("keeps a direct-linked conversation when the %s closes with %s", async (overlay, method) => {
+])("keeps Chat when the %s closes with %s", async (overlay, method) => {
   chat.mount(root);
   await settle();
   expect(history.state).toBeNull();
@@ -78,11 +74,10 @@ it.each([
   expect(document.querySelector(".sheet.is-tall")).toBeNull();
   expect(box()).not.toBeNull();
   expect(box().closest("[hidden]")).toBeNull();
-  expect(chat.openConversation()).toBe("direct-chat");
+  expect(chat.openConversation()).toBeNull();
   send("still here");
   await settle();
-  // Typed on its page, it stays in that conversation (2026-11-17).
-  expect(posted[0]?.conversation).toBe("direct-chat");
+  expect(posted[0]?.conversation).toBeNull();
   release!();
   await settle();
 });
@@ -117,29 +112,10 @@ it("preserves Chat when an earlier sheet listener handles Back before the later-
   land(null);
   await settle();
   expect(box().closest("[hidden]")).toBeNull();
-  expect(chat.openConversation()).toBe("direct-chat");
-  send("still direct");
+  expect(chat.openConversation()).toBeNull();
+  send("still in Chat");
   await settle();
-  expect(posted[0]?.conversation).toBe("direct-chat");
-  release!();
-  await settle();
-});
-
-it.each(["lightbox", "sheet"])("honours a history jump past the %s to another conversation", async overlay => {
-  chat.mount(root);
-  await settle();
-  chat.showConversation("conversation-a");
-  const destination = history.state;
-  chat.showConversation("conversation-b");
-  await settle();
-  if (overlay === "lightbox") openImages(["/media/example.png"], 0);
-  else openSheet();
-  land(destination);
-  await settle();
-  expect(chat.openConversation()).toBe("conversation-a");
-  send("to A");
-  await settle();
-  expect(posted[0]?.conversation).toBe("conversation-a");
+  expect(posted[0]?.conversation).toBeNull();
   release!();
   await settle();
 });

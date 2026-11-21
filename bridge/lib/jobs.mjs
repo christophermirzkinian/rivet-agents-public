@@ -52,7 +52,7 @@ const plain = (v, max) => (typeof v === "string" && v.trim() !== "" && v.trim().
 /**
  * @typedef {{ script: string, where: "mac" | "remote", onRed: "card" | "look" } | { probe: "up", app: string, where: "mac", onRed: "card" }} JobCheck
  * @typedef {{ name: string, words: string, kind: "check" | "task", check?: JobCheck, cron: string }} JobActionSpec
- * @typedef {{ op: "create" | "pause" | "resume" | "run" | "remove", id: string, spec?: JobActionSpec }} JobAction
+ * @typedef {{ op: "create" | "pause" | "resume" | "run" | "remove", id: string, spec?: JobActionSpec, plan?: "claude" | "chatgpt" }} JobAction plan: run only, that one run's plan
  * @typedef {{ status: "succeeded" | "refused" | "failed", reason: string }} JobResult
  * @typedef {{ exec: import("./config.mjs").Exec, nodeBin: string, jobRun?: string,
  *   agentsDir?: string, logsDir?: string, uid?: number, macZone?: string, env?: NodeJS.ProcessEnv, sleep?: (ms: number) => Promise<void>,
@@ -66,9 +66,10 @@ const plain = (v, max) => (typeof v === "string" && v.trim() !== "" && v.trim().
  */
 export function validJobAction(raw) {
   if (!isRecord(raw)) return null;
-  const { op, id, spec } = /** @type {Record<string, unknown>} */ (raw);
+  const { op, id, spec, plan } = /** @type {Record<string, unknown>} */ (raw);
   if (typeof op !== "string" || !OPS.has(op) || typeof id !== "string" || !JOB_ID_RE.test(id)) return null;
   const action = /** @type {JobAction["op"]} */ (op);
+  if (plan !== undefined) return action === "run" && spec === undefined && (plan === "claude" || plan === "chatgpt") ? { op: action, id, plan } : null;
   if (action !== "create") return spec === undefined ? { op: action, id } : null;
   if (!isRecord(spec)) return null;
   const s = /** @type {Record<string, unknown>} */ (spec);
@@ -102,7 +103,7 @@ const rules = (read) => [
 ];
 
 /**
- * @typedef {{ name: string, words?: string, kind: "check" | "task", check?: JobCheck, line?: string }} ChatSpec line: a look check's red line
+ * @typedef {{ name: string, words?: string, kind: "check" | "task", check?: JobCheck, line?: string, plan?: string }} ChatSpec line: a look check's red line; plan: a limit card's one run on that plan
  * @typedef {{ rivet: string, logDir: string }} ChatPaths
  */
 
@@ -475,7 +476,7 @@ export async function runJobAction(deps, action, actionId) {
         fs.rmSync(agent.plist, { force: true });
         return { status: "succeeded", reason: there ? "Removed from the Mac." : "It was not on the Mac." };
       case "run":
-        return await runNow(deps, action.id, there, actionId);
+        return await runNow(deps, action.id, there, actionId, action.plan);
     }
   } catch (err) {
     deps.log("job-failed", { id: action.id, op: action.op, error: why(err) });
@@ -488,13 +489,15 @@ export async function runJobAction(deps, action, actionId) {
  * Run now. job-run --manual asks the server first, then runs the check or the task's chat on in the background, and
  * that reports itself.
  * @param {JobDeps} deps @param {string} id @param {boolean} there its LaunchAgent is on the Mac @param {string} [actionId]
+ * @param {JobAction["plan"]} [plan] a limit card's answer: this run's chat on that plan
  * @returns {Promise<JobResult>}
  */
-async function runNow(deps, id, there, actionId) {
+async function runNow(deps, id, there, actionId, plan) {
   const jobRun = deps.jobRun ?? JOB_RUN;
   if (!there) return { status: "failed", reason: GONE };
+  const args = [jobRun, "--manual", id, ...(actionId && ACTION_ID_RE.test(actionId) ? ["--action", actionId] : []), ...(plan ? ["--plan", plan] : [])];
   const started = await deps
-    .exec(deps.nodeBin, [jobRun, "--manual", id, ...(actionId && ACTION_ID_RE.test(actionId) ? ["--action", actionId] : [])], { timeout: MANUAL_TIMEOUT_MS, maxBuffer: 1024 * 1024 })
+    .exec(deps.nodeBin, args, { timeout: MANUAL_TIMEOUT_MS, maxBuffer: 1024 * 1024 })
     .then((out) => ({ ok: true, line: lastLine(out.stdout) }))
     .catch((err) => ({ ok: false, line: lastLine(String(/** @type {any} */ (err)?.stdout ?? "")) || why(err) }));
   if (!started.ok) return { status: "refused", reason: started.line || "The server said no." };

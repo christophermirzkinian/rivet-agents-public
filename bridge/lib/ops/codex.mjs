@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { iso } from "./common.mjs";
+import { iso, noReadingNote } from "./common.mjs";
 
 // OpenAI (Codex) plan usage for the Ops Usage tab: the signed-in account's windows and purchased credits. A Codex
 // app-server started under CODEX_HOME (~/.codex when unset) answers `account/rateLimits/read` and `account/read`. Only
@@ -17,8 +17,9 @@ export const CODEX_INTERVAL_MS = 5 * 60_000;
 export const CODEX_STALE_MS = 15 * 60_000;
 /** A home read within this is not read again: at most one app-server per home per five minutes. */
 export const CODEX_READ_TTL_MS = 5 * 60_000;
-/** A failed home's last good reading shows, marked stale, for this long; after it, "no reading". */
-const CODEX_KEEP_MS = 6 * 60 * 60_000;
+/** A failed home's last good reading shows, marked stale, for this long; after it, "no reading since HH:MM" with its figure
+ * dropped, as a Claude reading past 45 minutes is. It was 6 hours, a stale figure all that time. */
+export const CODEX_KEEP_MS = 45 * 60_000;
 const RPC_TIMEOUT_MS = 20_000;
 const MAX_ACCOUNTS = 4;
 const MASK_RE = /^[a-z0-9._-]{1,2}$/i;
@@ -97,8 +98,8 @@ function severityOf(percent) {
  * Usage rows, one per window per account, shortest window first. Every label names
  * its window ("5 hr", "week"), so a reset under a bar is that window's. The longest
  * window's row also carries the account's credits as fields (the Spend card reads
- * them). An account with no reply shows one "no reading" row; `note` ("stale", "signed out") rides on every label.
- * @param {{ mask: string, note?: string, limits: Limits | null }[]} accounts
+ * them). An account with no reply shows one "no reading" row (`unread`: "no reading since HH:MM" once it has read); `note` ("stale", "signed out") rides on every label.
+ * @param {{ mask: string, note?: string, limits: Limits | null, unread?: string }[]} accounts
  * @returns {Row[]}
  */
 export function codexRows(accounts) {
@@ -108,7 +109,7 @@ export function codexRows(accounts) {
     const n = i + 1;
     const active = account.note ?? "";
     if (!account.limits) {
-      rows.push({ kind: `codex_${n}`, label: `${account.mask} (${[active, "no reading"].filter(Boolean).join(", ")})`, percent: 0, severity: "normal", resetsAt: null, active: false });
+      rows.push({ kind: `codex_${n}`, label: `${account.mask} (${[active, account.unread ?? "no reading"].filter(Boolean).join(", ")})`, percent: 0, severity: "normal", resetsAt: null, active: false });
       return;
     }
     const windows = [...account.limits.windows].sort((a, b) => (a.mins ?? Infinity) - (b.mins ?? Infinity));
@@ -254,7 +255,7 @@ export async function collectCodex(deps) {
       const c = cache.get(id);
       const kept = c?.goodAt != null && t - c.goodAt < CODEX_KEEP_MS;
       const note = c?.signedIn === false ? "signed out" : kept && c.goodAt !== c.at ? "stale" : "";
-      return { mask: c?.mask ?? "?***", note, limits: kept ? c.limits : null };
+      return { mask: c?.mask ?? "?***", note, limits: kept ? c.limits : null, unread: noReadingNote(c?.signedIn === false ? null : c?.goodAt, t) };
     }),
   );
 }

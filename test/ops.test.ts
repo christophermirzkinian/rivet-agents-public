@@ -24,7 +24,7 @@ import { loadConfig, type HealthCheck } from "../src/server/config.js";
 import { createOps } from "../src/server/ops/service.js";
 import { alertSummary, buildOps, buildTimeline, deployAlerts, downAlerts } from "../src/server/ops/view.js";
 import { ALERT_BATCH, MAX_PUSH_ATTEMPTS, MAX_QUEUED_ALERTS, OpsStore, PUSH_RETRY_MS, type QueuedPush } from "../src/server/ops/store.js";
-import { PushService, TEST_PAYLOAD, type PushReport, type PushSender } from "../src/server/push.js";
+import { PushService, testPayload, type PushReport, type PushSender } from "../src/server/push.js";
 import { breaksThrough, DIGEST_GIVE_UP_MS, DIGEST_RETRY_MAX_MS, digestPayload, inQuiet, MAX_HELD, QuietStore } from "../src/server/quiet.js";
 import { Store, type PushSubscriptionRow } from "../src/server/store.js";
 import { ciOwnedItem, type OwnedItem } from "../src/shared/ops-owned.js";
@@ -723,7 +723,7 @@ describe("quiet hours", () => {
       expect(gate.holds("test", clock, "fyi")).toBe(true);
       expect(gate.holds("test", clock)).toBe(false);
       expect((await push.sendTest()).sent).toBe(1);
-      expect(sender.sent.map((p) => p.title)).toEqual([TEST_PAYLOAD.title]);
+      expect(sender.sent.map((p) => p.title)).toEqual([testPayload().title]);
     });
 
     it("flushes the digest before the first push after quiet hours", async () => {

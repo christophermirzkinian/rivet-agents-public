@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import { USAGE_BY_ID, USAGE_IDS, type UsageIdKind } from "../src/shared/usage-ids.js";
 
-// What you used (Sam, 27 Oct): every control in the app carries its registry id, and every id in the registry is
+// What you used: every control in the app carries its registry id, and every id in the registry is
 // attached to something, so "never used" is complete from day one. This reads web/src's own source with the TypeScript
 // parser, not the rendered DOM: mounting every view would miss controls only some states draw, while every control is
 // written as an `h("button" | "summary", …)` call, an `h(…)` whose attrs give role switch/tab/option, or a dom.ts
@@ -160,6 +160,10 @@ for (const file of files) {
       }
       if (callee === "watchDepth" && second) addTags(ts.isArrowFunction(second) && !ts.isBlock(second.body) ? second.body : second, at(node), "screen", false);
       else if (USAGE_CALLS.has(callee) && first) addTags(first, at(node), callee === "useTap" ? "control" : "screen", node.arguments[1] !== undefined);
+    }
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === "setAttribute") {
+      const [attr, value] = node.arguments;
+      if (attr && ts.isStringLiteral(attr) && attr.text === "data-use" && value) addTags(value, at(node), "control", false);
     }
     if (ts.isPropertyAssignment(node) && propName(node) === "use") addTags(node.initializer, at(node), screenUse(node) ? "screen" : "control", false);
     if (ts.isPropertyAssignment(node) && propName(node) === "closeUse") addTags(node.initializer, at(node), "control", false);

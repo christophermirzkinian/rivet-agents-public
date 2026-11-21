@@ -59,7 +59,7 @@ describe("autoplay", () => {
     expect(player.stop).toHaveBeenCalledTimes(1);
   });
 
-  // The owner, 20 Oct: every poll's redraw moved the open card's clip, the observer saw it leave and come back, and the
+  // Every poll's redraw moved the open card's clip, the observer saw it leave and come back, and the
   // clip paused, muted and re-buffered each time.
   it("leaves a playing clip alone when a redraw moves it and it comes straight back", async () => {
     vi.useFakeTimers();

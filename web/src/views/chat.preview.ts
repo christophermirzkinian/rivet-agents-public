@@ -1,5 +1,5 @@
-// Dev-only preview of the Chat tab and a thing's page (web/preview/chat.html), on made-up data with no sign-in.
-// ?thing=<id> opens that thing's page. Nothing imports this from the app, so the production build leaves it out.
+// Dev-only preview of the Chat tab (web/preview/chat.html), on made-up data with no sign-in.
+// ?thing=<id> opens Chat on that thing's newest line, &line=<id> on that line. Nothing imports this from the app, so the production build leaves it out.
 import "../styles.css";
 
 import type { BoardResponse, ServedNeed } from "../../../src/shared/board.js";
@@ -7,7 +7,7 @@ import type { ChatMessage } from "../../../src/shared/command.js";
 import { chatBadge, type ConversationDetail, type ConversationSummary } from "../../../src/shared/conversations.js";
 import type { WorkersResponse } from "../../../src/shared/workers.js";
 import { app } from "../state.js";
-import { showConversation } from "./chat.js";
+import { showLine } from "./chat.js";
 import { drawnStill, drawPreviewMedia, previewMediaFile } from "./media.preview.js";
 import { mountShell } from "./shell.js";
 
@@ -87,6 +87,12 @@ const messages: ChatMessage[] = [
   say("g4", "g1", 11, "Will do, 5pm."),
   mine("v1", "v1", 8, "Send me the quarterly report"),
   say("v2", "v1", 6, "Here it is, v2 with the summary table.", { files: [{ sha256: PDF_SHA, name: "Quarterly report (v2).pdf", bytes: 482_000 }] }),
+];
+/** Lines saved in the preview, newest saved first: Rivet's, a short one and one of his. */
+let savedIds = [
+  { id: "k4", at: ago(1) },
+  { id: "g4", at: ago(10) },
+  { id: "r7", at: ago(29) },
 ];
 
 const titles: Record<string, string> = { v1: "Quarterly report", j1: "Demo video",s1: "Top 10 note-taking apps research on iOS and Android", l1: "Lost asks", m1: "Morning", r1: "Colour picker", k1: "Checkout results row", g1: "CI" };
@@ -256,6 +262,21 @@ window.fetch = async (input, init) => {
     return found ? json(detail(conversationOf(found))) : json({ error: "no such conversation" }, 404);
   }
 
+  // Saved lines: kept here while the page is open, newest saved first.
+  if (path === "/api/chat/saved") {
+    const saved = savedIds.flatMap((one) => {
+      const found = messages.find((message) => message.id === one.id);
+      return found ? [{ ...found, conversation: conversationOf(found), savedAt: one.at }] : [];
+    });
+    return json({ saved });
+  }
+  const savedOne = /^\/api\/chat\/saved\/([^/]+)$/.exec(path);
+  if (savedOne) {
+    const id = decodeURIComponent(savedOne[1]!);
+    savedIds = savedIds.filter((one) => one.id !== id);
+    if (init?.method === "PUT") savedIds.unshift({ id, at: new Date().toISOString() });
+    return json({ ok: true });
+  }
   return json({ error: "not in the preview" }, 404);
 };
 
@@ -265,5 +286,6 @@ app.workersAt = Date.now();
 app.tab = "chat";
 drawPreviewMedia();
 const thing = new URLSearchParams(location.search).get("thing");
-if (thing) showConversation(thing);
+// &line=<id> is a notification's tap: Chat opens on that line.
+if (thing) showLine(thing, new URLSearchParams(location.search).get("line"));
 mountShell(document.getElementById("app")!);

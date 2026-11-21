@@ -1175,7 +1175,8 @@ async function unhold(o, d) {
           const v = await prTexts(d, repo, pr);
           const { holds } = readHolds(d.holdsFile);
           const left = [
-            ...holds.filter((h) => Number(h.pr) === pr).map((h) => `holds.json: ${sanitizeLine(String(h.reason), 160)}`),
+            // As fileHolds reads them: an entry past its `until` holds nothing.
+            ...holds.filter((h) => Number(h.pr) === pr && !(h.until && Date.parse(h.until) <= Date.now())).map((h) => `holds.json: ${sanitizeLine(String(h.reason), 160)}`),
             ...v.labels.filter((name) => isMergeHoldLabel(name)).map((name) => `label ${sanitizeLine(name, 60)}`),
             // Found as written; shown from the text redacted whole, as a line taken out loses a secret's header.
             ...(holdLine(v.body) !== null ? [`body: ${holdLine(redactKeepingLines(v.body)) ?? "[redacted]"}`] : []),

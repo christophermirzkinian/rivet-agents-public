@@ -44,9 +44,10 @@ import {
   type StatusResponse,
 } from "../shared/board.js";
 import { chatImages, imageFields, MAX_CHAT_IMAGE_BYTES, MAX_IMAGE_BYTES } from "../shared/command.js";
+import { PLAN_NAMES, type Plan } from "../shared/jobs.js";
 import { GITHUB_STALE_MS } from "../shared/ops.js";
 import { isStale } from "./ops/view.js";
-import { chatName, RIVET_NAME } from "../shared/names.js";
+import { chatName, STORED_NAME } from "../shared/names.js";
 import { workerSnapshotSchema, type WorkersResponse } from "../shared/workers.js";
 import { createAuth, type Auth } from "./auth.js";
 import { sha256, type Config } from "./config.js";
@@ -122,7 +123,7 @@ export function createApp(
   const quiet = new QuietStore(config.dataDir);
   const push = new PushService(store, config.vapid, logger, options.pushSender, quiet, options.now);
   const now = options.now ?? (() => new Date());
-  const schedules = new SchedulesStore(config.dataDir);
+  const schedules = new SchedulesStore(config.dataDir, config.origin);
   // A failing-schedule card's push quiet hours held leaves the digest once someone is on the schedule; never sent, its
   // card is filed and pushed again once nobody is.
   push.onDigestRelease((keys) =>
@@ -161,9 +162,15 @@ export function createApp(
   const cardThreadTitles = (lookup: (need: Need) => string[]) => {
     threadTitlesOf = lookup;
   };
+  // A job's run is sent from the job routes, which tell the reply route how to start one (jobRunsFrom).
+  // It gives why the run could not start, or null once it has.
+  let runJobOn: (id: string, plan: Plan, clientId: string) => string | null = () => "jobs do not run here";
+  const jobRunsFrom = (run: typeof runJobOn) => {
+    runJobOn = run;
+  };
   const workers = () => deriveWorkers(store.getWorkers(), openBoard(store, schedules, store.getBoard()?.board ?? null, now()), config.monitorChat, Date.now(), store.listAsks({ limit: ASK_PAGE_MAX, doneSince: new Date(Date.now() - ASK_LINK_DAYS * 86_400_000).toISOString() }));
   const titles = new ShortTitles(config.dataDir, now());
-  const router = createRouter({ config, store, bridge, requireSession, push, quiet, schedules, logger, now, addUpdate, refreshWaits, prs, ownerLines, cardThreadTitles, workers, titles, ops });
+  const router = createRouter({ config, store, bridge, requireSession, push, quiet, schedules, logger, now, addUpdate, refreshWaits, prs, ownerLines, cardThreadTitles, jobRunsFrom, workers, titles, ops });
   router.onClose(() => ops.close());
   router.onClose(() => titles.close());
   registerRoutes(router);
@@ -848,6 +855,11 @@ export function createApp(
     if (mergeRefusal) throw new HttpError(424, mergeRefusal);
     const dismissRefusal = body.decision === "dismiss" ? bridge.dismissRefusal() : null;
     if (dismissRefusal) throw new HttpError(424, dismissRefusal);
+    // A job's limit card: its "Use <other plan>" starts that one run, and only a run that started answers it; nothing
+    // else switches a plan.
+    const planRun = failing && body.decision === "choice" ? schedules.jobs.planSwitch(failing.scheduleId, body.choice) : null;
+    const planRefusal = planRun ? runJobOn(planRun.id, planRun.plan, `plan-${body.clientId}`) : null;
+    if (planRun && planRefusal) throw new HttpError(409, `It couldn't start on ${PLAN_NAMES[planRun.plan]}: ${planRefusal}.`);
 
     const detail: unknown = chosenOptions[0]?.detail;
     // Old stored cards can predate field validation. Omit malformed detail rather than losing the answer at the bridge.
@@ -1224,7 +1236,7 @@ export function withServerFields(stored: Board | null, board: unknown, at: strin
       const { comments: _sent, seen: _served, ...rest } = row;
       const repo = typeof row.repo === "string" ? row.repo : NO_REPO;
       const app = row.pr === undefined ? undefined : words(rows.find((coming) => coming?.pr === row.pr && repoOf(coming) === repo && words(coming.app))?.app);
-      const thread = row.thread === undefined ? (app ?? words(row.chat) ?? RIVET_NAME).trim().slice(0, 80) : row.thread;
+      const thread = row.thread === undefined ? (app ?? words(row.chat) ?? STORED_NAME).trim().slice(0, 80) : row.thread;
       const since = row.since === undefined ? (kept?.since ?? at) : row.since;
       return { ...rest, thread, since, ...(comments.length ? { comments } : {}) };
     }),

@@ -592,7 +592,13 @@ export function limitNotes(limit: ClaudeLimit): string[] {
 /** The row holds no current week: the bridge could not read it, or its reading is over 45 minutes old. */
 export function limitUnread(limit: ClaudeLimit): boolean {
   const notes = limitNotes(limit);
-  return notes.includes("no reading") || notes.includes("old");
+  return notes.some((note) => note === "no reading" || note.startsWith("no reading since ")) || notes.includes("old");
+}
+
+/** When an unread row's last good reading was ("08:04", "19 Nov 23:04"), from the bridge's "no reading since …" note; null with none. */
+export function unreadSince(limit: ClaudeLimit): string | null {
+  const note = limitNotes(limit).find((one) => one.startsWith("no reading since "));
+  return note ? note.slice("no reading since ".length) || null : null;
 }
 
 /** Account rows graded from their week, whatever an older bridge sent: warning from 80%, critical from 90%, unread normal. */

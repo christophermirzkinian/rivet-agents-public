@@ -5,6 +5,7 @@
 // A month's hours used up answers with the cap page's 503 and its day (x-rivet-capped-until), which the open app shows.
 // Outside Rivet Cloud nothing sends any of these, and the header is ignored.
 import { dayMonth } from "../../src/shared/when.js";
+import { agentNoun } from "./cloud-agent.js";
 
 const INPUT_MS = 3000;
 // A wake's own loads (the list, the open chat) can wait on the machine's boot: they still go as a visit.
@@ -87,7 +88,7 @@ function showCap(until: number | null): void {
   const heading = document.createElement("strong");
   heading.textContent = `You've used this month's 200${NBSP}hours.`;
   const when = document.createElement("div");
-  when.textContent = `Your Rivet wakes again ${day === null ? "at the start of next month" : `on ${day}`}.`;
+  when.textContent = `Your ${agentNoun()} wakes again ${day === null ? "at the start of next month" : `on ${day}`}.`;
   note.replaceChildren(heading, when);
 }
 

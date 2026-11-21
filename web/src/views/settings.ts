@@ -88,7 +88,9 @@ const PUSH_TEXT: Record<PushState, string> = {
   unconfigured: "Push is not set up on the server yet.",
   denied: `Notifications are blocked. Turn them on in Settings for ${APP_NAME}.`,
   off: "Get a ping when a new card lands.",
-  on: `On. ${RIVET_NAME} pings you when a new card lands.`,
+  get on() {
+    return `On. ${RIVET_NAME} pings you when a new card lands.`;
+  },
 };
 
 function notifications(): HTMLElement {

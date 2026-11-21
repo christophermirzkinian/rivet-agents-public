@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { CommandStore } from "../src/server/commandstore.js";
 import { RETENTION_LAST_KEY, retentionTick } from "../src/server/retention.js";
-import { AUDIT_KEEP_MS, CONVERSATION_KEEP_MS, UPDATES_ID } from "../src/shared/conversations.js";
+import { AUDIT_KEEP_MS, CONVERSATION_KEEP_MS, TEAM_ROOM_ID, UPDATES_ID } from "../src/shared/conversations.js";
 
 const MS = "example-org/example-repo";
 const NOW = new Date("2027-06-01T00:30:00.000Z");
@@ -101,6 +101,29 @@ describe("retention sweep", () => {
     expect(commands.sweepRetention(BEFORE, AUDIT_BEFORE, true, 500)).toMatchObject({ conversations: 1, messages: 2 });
     expect(present("queued") && commands.getAction("queued")!.text === "hello queued").toBe(true);
     expect(present("finished")).toBe(false);
+  });
+
+  it("keeps a conversation holding a saved line, as a pinned one is kept; a Team room line or a heading can't be saved", () => {
+    for (const id of ["kept", "gone"]) {
+      conversation(id, OLD);
+      commands.patchConversation(id, { closed: true }, OLD);
+    }
+    expect(commands.saveChat("kept-r", OLD)).toBe(true);
+    expect(commands.sweepRetention(BEFORE, AUDIT_BEFORE, false, 500)).toMatchObject({ conversations: 1, messages: 2 });
+    expect(commands.sweepRetention(BEFORE, AUDIT_BEFORE, true, 500)).toMatchObject({ conversations: 1, messages: 2 });
+    expect(present("kept") && present("kept-r")).toBe(true);
+    expect(present("gone")).toBe(false);
+    expect(commands.savedChat().map((line) => line.id)).toEqual(["kept-r"]);
+    commands.ensureTeamRoom(OLD);
+    commands.addChatMessage({ id: "room-a", from: "rivet", text: "old note", at: OLD, thread: TEAM_ROOM_ID });
+    commands.addChatMessage({ id: "room-b", from: "rivet", text: "older note", at: OLD, thread: TEAM_ROOM_ID });
+    // Chat never shows them, so the room keeps its week and the sweep its seeds.
+    expect(commands.saveChat("room-a", OLD)).toBe(false);
+    expect(commands.saveChat(TEAM_ROOM_ID, OLD)).toBe(false);
+    expect(commands.saveChat(UPDATES_ID, OLD)).toBe(false);
+    commands.pruneTeamRoom(BEFORE);
+    expect(present("room-a") || present("room-b")).toBe(false);
+    expect(commands.savedChat().map((line) => line.id)).toEqual(["kept-r"]);
   });
 
   it("count-only changes nothing: every table's rows and the media files are as they were, its two meta keys aside", () => {

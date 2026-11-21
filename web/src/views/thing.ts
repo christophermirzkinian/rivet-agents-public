@@ -1,24 +1,15 @@
-import { chatName } from "../../../src/shared/names.js";
 import "./thing.css";
 
 import { MERGE_READY } from "../../../src/shared/answers.js";
 import type { ServedNeed } from "../../../src/shared/board.js";
 import type { ChatMessage } from "../../../src/shared/command.js";
 import type { ConversationSummary } from "../../../src/shared/conversations.js";
-import { h, ICONS, svg } from "../dom.js";
 
-// The thing page: one page per piece of work, the conversation that
-// holds its cards. chat.ts draws it; this holds where the work stands and the page's own parts.
+// A thing: one piece of work, the conversation that holds its cards. It has no page of its own now; this holds where
+// the work stands, for its lines' More in Chat.
 
 export const THING_STEPS = ["plan", "building", "review", "look", "merged"] as const;
 export type ThingStep = (typeof THING_STEPS)[number];
-export const STEP_LABELS: Record<ThingStep, string> = {
-  plan: "Plan",
-  building: "Building",
-  review: "Review",
-  look: "Your look",
-  merged: "Merged",
-};
 
 const MEDIA_KINDS: ReadonlySet<string> = new Set(["video", "stills", "before-after"]);
 const SIZES = ["S", "M", "L"] as const;
@@ -178,92 +169,7 @@ export function thingFacts(
   return { cards, step, by, eta: thingEta(cards), size: thingSize(cards), lab: thingLab(cards), pr, chat };
 }
 
-/** One line under the title: PR, chat, size and the preview link, then the ETA. */
-export function thingMeta(facts: ThingFacts): HTMLElement | null {
-  const parts: (string | HTMLElement)[] = [];
-  if (facts.pr) parts.push(`PR ${facts.pr}`);
-  if (facts.chat) parts.push(`chat ${chatName(facts.chat)}`);
-  if (facts.size) parts.push(`size ${facts.size}`);
-  if (facts.lab) parts.push(h("a", { class: "thing-lab", attrs: { href: facts.lab, target: "_blank", rel: "noopener", "data-use": "chat.thing.link" } }, "Preview"));
-  if (facts.eta) parts.push(h("span", { class: "thing-eta" }, "ETA ", h("b", {}, facts.eta)));
-  if (!parts.length) return null;
-  return h("p", { class: "thing-meta" }, ...parts.flatMap((part, index) => (index ? [" · ", part] : [part])));
-}
-
-const BACK =
-  '<svg viewBox="0 0 24 24"><path d="M14.5 5.5L8 12l6.5 6.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-
-export interface ThingHeadInput {
-  title: string;
-  /** Where it stands, for the pill; null on Rivet's own conversations (Updates, Agent Chat). */
-  step: ThingStep | null;
-  facts: ThingFacts | null;
-  back: () => void;
-  /** The Read aloud toggle, Chat's own, kept in reach. */
-  speak: HTMLElement | null;
-  /** Opens the unanswered card it waits on, while that card is on the board. */
-  card: (() => void) | null;
-  closed: boolean;
-}
-
-/** Back to Chat, the title with where it stands, then PR, chat, size, preview link and ETA on one line. */
-export function thingHead(input: ThingHeadInput): HTMLElement {
-  return h(
-    "div",
-    { class: "thing-head" },
-    h(
-      "div",
-      { class: "thing-head-row" },
-      h(
-        "button",
-        { class: "icon-btn thing-back", attrs: { type: "button", "aria-label": "Back to Chat", "data-use": "chat.thing.back" }, on: { click: input.back } },
-        svg(BACK, "icon-btn-icon"),
-      ),
-      h("h2", { class: "thing-title" }, input.title),
-      input.speak,
-    ),
-    input.step || input.facts
-      ? h(
-          "div",
-          { class: "thing-head-facts" },
-          input.step ? h("span", { class: `thing-pill step-${input.step}` }, STEP_LABELS[input.step]) : null,
-          input.facts ? thingMeta(input.facts) : null,
-        )
-      : null,
-    input.closed ? h("p", { class: "thing-quiet" }, "Quiet for a while. A new message brings it back.") : null,
-    input.card ? h("button", { class: "btn thing-card-open", attrs: { type: "button", "data-use": "chat.thing.open-card" }, on: { click: input.card } }, "Open the card that needs you") : null,
-  );
-}
-
-export interface ThingButtons {
-  /** The card's own Share, or a reply's; null when there is nothing to share. */
-  share: HTMLElement | null;
-  stop: () => void;
-}
-
-/** Share, Open on Mac and Stop it, at the foot of the page. */
-export function thingButtons(input: ThingButtons): HTMLElement {
-  return h(
-    "div",
-    { class: "thing-buttons" },
-    input.share,
-    h("button", { class: "btn thing-btn thing-stop", attrs: { type: "button", "data-use": "chat.thing.stop" }, on: { click: input.stop } }, svg(ICONS.no, "btn-icon"), "Stop it"),
-  );
-}
-
 /** What Stop it says to Rivet, in the thing's conversation. */
 export function stopText(chat: string | null, title: string): string {
   return chat ? `Stop ${chat}: ${title}` : `Stop this: ${title}`;
-}
-
-let opener: ((id: string) => void) | null = null;
-
-/** chat.ts opens the page: on screen now when the chat is, else when it mounts. */
-export function onShowThing(open: (id: string) => void): void {
-  opener = open;
-}
-
-/** Opens thing `id` (any message of its conversation names it). */
-export function showThing(id: string): void {
-  opener?.(id);
 }

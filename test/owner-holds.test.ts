@@ -30,7 +30,7 @@ async function list(headers?: Record<string, string>): Promise<OwnerHold[]> {
   return ((await response.json()) as OwnerHoldsResponse).holds;
 }
 
-describe("Sam's own holds on the server (rivet hold, 2026-10-25)", () => {
+describe("Sam's own holds on the server (rivet hold)", () => {
   it("records his hold once, where the Ops pass reads it, and takes it away on unhold", async () => {
     const put = await send("PUT", "/api/ops/holds/6540", { reason: REASON });
     expect(put.status).toBe(201);

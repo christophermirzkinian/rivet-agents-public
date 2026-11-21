@@ -2,6 +2,7 @@ import type { BacklogIssueResponse, BacklogStart, IssueDetail } from "../../../s
 import { shortDate } from "../../../src/shared/when.js";
 import { closeBacklogIssue, getBacklogIssue, startBacklogIssue } from "../api.js";
 import { startedWords } from "../backlog-logic.js";
+import { agentName } from "../cloud-agent.js";
 import { h, ICONS, svg } from "../dom.js";
 import { app, changed as appChanged } from "../state.js";
 import { projectName } from "../backlog-logic.js";
@@ -74,7 +75,7 @@ export function openIssuePage(content: HTMLElement, list: HTMLElement[], open: I
   const md = h("div", { class: "backlog-md" });
   const body = h("div", { class: "home-sheet-body backlog-body backlog-issue-body" }, title, meta, chips, chat, md);
   const startButton = h("button", { class: "backlog-btn is-primary", attrs: { type: "button", "data-use": "backlog.issue.start" }, on: { click: () => void doStart() } }, "Start work");
-  const askButton = h("button", { class: "backlog-btn", attrs: { type: "button", "data-use": "backlog.issue.ask" }, on: { click: () => askRivet() } }, "Ask Rivet");
+  const askButton = h("button", { class: "backlog-btn", attrs: { type: "button", "data-use": "backlog.issue.ask" }, on: { click: () => askRivet() } }, `Ask ${agentName()}`);
   const closeButton = h("button", { class: "backlog-btn is-close", attrs: { type: "button", "data-use": "backlog.issue.close" }, on: { click: () => void doClose() } }, "Close issue");
   const note = h("p", { class: "backlog-issue-note" });
   note.hidden = true;

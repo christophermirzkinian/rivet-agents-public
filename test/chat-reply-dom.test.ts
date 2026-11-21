@@ -2,10 +2,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { quoteText, type ChatMessage } from "../src/shared/command.js";
-import { TEAM_ROOM_ID, UPDATES_ID } from "../src/shared/conversations.js";
+import { UPDATES_ID } from "../src/shared/conversations.js";
 import { maybeWhen } from "../src/shared/when.js";
-import { app } from "../web/src/state.js";
-import { detailBody, EMPTY_LIST, fakeServer, type FakeConversation, type FakeServer } from "./conversations-fake.js";
+import { probeCloud, resetCloud } from "../web/src/cloud-agent.js";
+import { app, resetSession } from "../web/src/state.js";
+import { EMPTY_LIST, fakeServer, type FakeConversation, type FakeServer } from "./conversations-fake.js";
 
 vi.mock("../web/src/voice.js", async (original) => ({
   ...(await original<typeof import("../web/src/voice.js")>()),
@@ -40,12 +41,13 @@ async function fakeFetch(input: RequestInfo | URL, init?: RequestInit): Promise<
     });
   }
   const path = new URL(String(input), "http://x").pathname;
-  if (readHeld && path.startsWith("/api/conversations/")) await readHeld;
-  return json(path.startsWith("/api/conversations/") ? detailBody("c1", history) : EMPTY_LIST);
+  if (readHeld && path === "/api/chat") await readHeld;
+  return json(path === "/api/chat" ? { messages: history, older: null, labels } : EMPTY_LIST);
 }
+let labels: Record<string, { title: string }>;
 
 let listeners: Record<string, ((event: { data: string }) => void)[]> = {};
-/** While set, a POST, or a read of the conversation, waits for it. */
+/** While set, a POST, or a read of Chat, waits for it. */
 let postHeld: Promise<void> | null = null;
 let readHeld: Promise<void> | null = null;
 
@@ -92,14 +94,14 @@ beforeEach(() => {
   postHeld = null;
   readHeld = null;
   history = [
-    { id: "c1", from: "owner", text: "What's live?", at: "2030-01-01T00:00:01.000Z", status: "replied" },
-    { id: "h2", from: "rivet", text: LONG, at: "2030-01-01T00:00:02.000Z", replyTo: "c1", quote: { from: "owner", text: "What's live?" } },
+    { id: "c1", from: "owner", text: "What's live?", at: "2030-01-01T00:00:01.000Z", status: "replied", threadId: "c1" },
+    { id: "h2", from: "rivet", text: LONG, at: "2030-01-01T00:00:02.000Z", threadId: "c1", replyTo: "c1", quote: { from: "owner", text: "What's live?" } },
   ];
+  labels = {};
   vi.stubGlobal("fetch", vi.fn(fakeFetch));
   vi.stubGlobal("EventSource", FakeSource);
   localStorage.clear();
-  // These tests are about the messages of one conversation: the tab opens on it.
-  chat.showConversation("c1");
+  chat.showRivetChat();
   root = document.createElement("main");
   document.body.replaceChildren(root);
 });
@@ -160,27 +162,6 @@ describe("a refresh redraws only what changed", () => {
     expect(ids).toContain("a-card");
     expect(ids.indexOf("c9")).toBeLessThan(ids.indexOf("a-card"));
     read();
-  });
-
-  it("redraws a posted card's row when another view has taken its media", async () => {
-    const stills = { kind: "stills" as const, stills: [{ sha256: "c".repeat(64), type: "image/png" as const }] };
-    app.board = { version: 1, updatedAt: null, board: { updatedAt: "", needs: [{ id: "upd", kind: "update", title: "Home stills", rev: "r1", media: stills }], coming: [], chats: [], shipped: [] } } as unknown as typeof app.board;
-    history = [...history, { id: "h3", from: "rivet", text: "", at: "2030-01-01T00:00:03.000Z", posted: { id: "upd", kind: "update", title: "Home stills" } }];
-    chat.mount(root);
-    await settle();
-    const block = bubble("h3").querySelector(".chat-posted > :not(span, strong, p, button)");
-    expect(block).not.toBeNull();
-    const h3 = bubble("h3");
-    await chat.refresh();
-    await settle();
-    expect(bubble("h3")).toBe(h3);
-    // The Feed shows the same card: the one media element moves there.
-    document.body.append(block!);
-    await chat.refresh();
-    await settle();
-    expect(bubble("h3")).not.toBe(h3);
-    expect(bubble("h3").contains(block)).toBe(true);
-    app.board = null;
   });
 
   it("keeps a posted card's row on Chat, a posted bubble with Open card and without its media", async () => {
@@ -294,7 +275,7 @@ describe("reply in chat", () => {
     expect(strip("h2").hidden).toBe(true);
   });
 
-  it("Reply shows who and the first line above the box on a conversation's page, focuses it, and × takes it back", async () => {
+  it("Reply on a line with no label shows who and the first line above the box, focuses it, and × takes it back", async () => {
     chat.mount(root);
     await settle();
     replyOn("h2").click();
@@ -331,7 +312,22 @@ describe("reply in chat", () => {
     expect(quote.querySelector(".chat-quote-text")!.textContent).toBe(quoteText({ text: LONG }));
   });
 
+  // Before any test gives c1 a label: Chat keeps the labels it has read for the session.
+  it("a tab switch keeps a reply to a line with no label too", async () => {
+    chat.mount(root);
+    await settle();
+    replyOn("h2").click();
+    chat.unmount();
+    root.replaceChildren();
+
+    chat.mount(root);
+    await settle();
+    expect(bar().hidden).toBe(false);
+    expect(bar().querySelector(".chat-quote-who")!.textContent).toBe("Rivet");
+  });
+
   it("a tab switch keeps the reply with the draft, and a send clears both", async () => {
+    labels = { c1: { title: "What's live" } };
     chat.mount(root);
     await settle();
     replyOn("h2").click();
@@ -344,7 +340,7 @@ describe("reply in chat", () => {
     await settle();
     expect(box().value).toBe("Send it");
     expect(bar().hidden).toBe(false);
-    expect(bar().querySelector(".chat-quote-who")!.textContent).toBe("Rivet");
+    expect(bar().querySelector(".chat-quote")!.textContent).toBe("Replying to What's live");
     root.querySelector<HTMLButtonElement>(".chat-send")!.click();
     await settle();
     expect(posted[0]).toMatchObject({ text: "Send it", replyTo: "h2" });
@@ -408,21 +404,50 @@ describe("reply in chat", () => {
     expect(bubble("h2").querySelector(".chat-quote")).toBeNull();
     expect(bubble("h4").querySelector(".chat-quote-text")!.textContent).toBe("What's live?");
   });
+
+  it("his own lines and quotes of them keep the old name as he typed it; a tap's line and Rivet's words read Rivet", async () => {
+    const { showRivetWords } = await import("../web/src/rivet-words.js");
+    history.push(
+      { id: "c3", from: "owner", text: "Clean up Rivet's mind", at: "2030-01-01T00:00:03.000Z", status: "replied", typed: true },
+      { id: "c5", from: "owner", text: "RIVET first?", at: "2030-01-01T00:00:03.500Z", status: "replied", typed: true },
+      { id: "h4", from: "rivet", text: "Rivet: on it.", at: "2030-01-01T00:00:04.000Z", replyTo: "c5", quote: { from: "owner", text: "RIVET first?" } },
+      { id: "c6", from: "owner", text: "Stop this: Rivet Ops cleanup", at: "2030-01-01T00:00:05.000Z", status: "replied" },
+      { id: "h7", from: "rivet", text: "Stopped.", at: "2030-01-01T00:00:06.000Z", replyTo: "c6", quote: { from: "owner", text: "Stop this: Rivet Ops cleanup" } },
+      // A line from before the typed mark, and a quote of his line that is not on the page.
+      { id: "c8", from: "owner", text: "Rivet, what's next?", at: "2030-01-01T00:00:07.000Z", status: "replied" },
+      { id: "h9", from: "rivet", text: "Next up.", at: "2030-01-01T00:00:08.000Z", replyTo: "long-gone", quote: { from: "owner", text: "Is Rivet Ops up?" } },
+    );
+    const stop = showRivetWords(root);
+    try {
+      chat.mount(root);
+      await settle();
+      expect(bubble("c3").querySelector(".chat-body")!.textContent).toBe("Clean up Rivet's mind");
+      expect(bubble("h4").querySelector(".chat-quote-text")!.textContent).toBe("RIVET first?");
+      expect(bubble("h4").querySelector(".chat-body")!.textContent).toBe("Rivet: on it.");
+      expect(bubble("c6").querySelector(".chat-body")!.textContent).toBe("Stop this: Rivet Ops cleanup");
+      expect(bubble("h7").querySelector(".chat-quote-text")!.textContent).toBe("Stop this: Rivet Ops cleanup");
+      expect(bubble("c8").querySelector(".chat-body")!.textContent).toBe("Rivet, what's next?");
+      expect(bubble("h9").querySelector(".chat-quote-text")!.textContent).toBe("Is Rivet Ops up?");
+    } finally {
+      stop();
+    }
+  });
 });
 
 describe("a chat whose read fails (review F4)", () => {
   it("says it couldn't load, never Loading… or the raw error, and Try again reads it again", async () => {
     chat.unmount();
+    // Chat's last page is kept for the session: a first read has none to show.
+    resetSession();
     let down = true;
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
-        down && new URL(String(input), "http://x").pathname.startsWith("/api/conversations/")
+        down && new URL(String(input), "http://x").pathname === "/api/chat"
           ? new Response(JSON.stringify({ error: "boom" }), { status: 500, headers: { "content-type": "application/json" } })
           : fakeFetch(input, init),
       ),
     );
-    chat.showConversation("c1");
     chat.mount(root);
     await settle();
     const failed = root.querySelector<HTMLElement>(".chat-empty.chat-failed")!;
@@ -437,16 +462,16 @@ describe("a chat whose read fails (review F4)", () => {
 
   it("Try again on a first read that failed hands its focus to the message box, never the page (review r6)", async () => {
     chat.unmount();
+    resetSession();
     let down = true;
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
-        down && new URL(String(input), "http://x").pathname.startsWith("/api/conversations/")
+        down && new URL(String(input), "http://x").pathname === "/api/chat"
           ? new Response(JSON.stringify({ error: "boom" }), { status: 500, headers: { "content-type": "application/json" } })
           : fakeFetch(input, init),
       ),
     );
-    chat.showConversation("c1");
     chat.mount(root);
     await settle();
     const again = root.querySelector<HTMLButtonElement>(".chat-failed button.chat-retry")!;
@@ -458,8 +483,8 @@ describe("a chat whose read fails (review F4)", () => {
     expect(document.activeElement).not.toBe(document.body);
     // A refresh that loads the chat, with no tap, takes the button away too: its keyboard moves on the same way (r7).
     chat.unmount();
+    resetSession();
     down = true;
-    chat.showConversation("c1");
     chat.mount(root);
     await settle();
     root.querySelector<HTMLButtonElement>(".chat-failed button.chat-retry")!.focus();
@@ -470,8 +495,8 @@ describe("a chat whose read fails (review F4)", () => {
     expect(document.activeElement).toBe(box());
     // With the message box hidden the chat itself takes it, and card keys pass it by.
     chat.unmount();
+    resetSession();
     down = true;
-    chat.showConversation("c1");
     chat.mount(root);
     await settle();
     box().disabled = true;
@@ -490,12 +515,11 @@ describe("a chat whose read fails (review F4)", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
-        down && new URL(String(input), "http://x").pathname.startsWith("/api/conversations/")
+        down && new URL(String(input), "http://x").pathname === "/api/chat"
           ? new Response(JSON.stringify({ error: "SQLITE_BUSY: database is locked" }), { status: 500, headers: { "content-type": "application/json" } })
           : fakeFetch(input, init),
       ),
     );
-    chat.showConversation("c1");
     chat.mount(root);
     await settle();
     expect(bubble("c1")).not.toBeNull();
@@ -518,12 +542,11 @@ describe("a chat whose read fails (review F4)", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
-        down && new URL(String(input), "http://x").pathname.startsWith("/api/conversations/")
+        down && new URL(String(input), "http://x").pathname === "/api/chat"
           ? new Response(JSON.stringify({ error: "SQLITE_BUSY: database is locked" }), { status: 500, headers: { "content-type": "application/json" } })
           : fakeFetch(input, init),
       ),
     );
-    chat.showConversation("c1");
     chat.mount(root);
     await settle();
     down = true;
@@ -543,12 +566,11 @@ describe("a chat whose read fails (review F4)", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
-        down && new URL(String(input), "http://x").pathname.startsWith("/api/conversations/")
+        down && new URL(String(input), "http://x").pathname === "/api/chat"
           ? new Response(JSON.stringify({ error: "SQLITE_BUSY: database is locked" }), { status: 500, headers: { "content-type": "application/json" } })
           : fakeFetch(input, init),
       ),
     );
-    chat.showConversation("c1");
     chat.mount(root);
     await settle();
     const fail = async () => {
@@ -576,12 +598,11 @@ describe("a chat whose read fails (review F4)", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
-        down && new URL(String(input), "http://x").pathname.startsWith("/api/conversations/")
+        down && new URL(String(input), "http://x").pathname === "/api/chat"
           ? new Response(JSON.stringify({ error: "boom" }), { status: 500, headers: { "content-type": "application/json" } })
           : fakeFetch(input, init),
       ),
     );
-    chat.showConversation("c1");
     chat.mount(root);
     await settle();
     down = true;
@@ -788,7 +809,7 @@ describe("one chat: every line its own More and Reply, shown at a tap with its t
     expect(strip("a2").hidden).toBe(false);
     expect([...strip("a2").children].map((one) => one.className)).toEqual(["chat-meta", "chat-msg-tools"]);
     expect(strip("a2").querySelector(".chat-meta")!.textContent).toContain(maybeWhen(minute(2))!);
-    expect([...strip("a2").querySelectorAll(".chat-msg-tools > .chat-msg-tool")].map((one) => one.textContent)).toEqual(["More", "Reply"]);
+    expect([...strip("a2").querySelectorAll(".chat-msg-tools > .chat-msg-tool")].map((one) => one.textContent)).toEqual(["More", "Reply", "Save"]);
     a2.querySelector<HTMLElement>(".chat-body")!.click();
     expect(a2.classList.contains("open")).toBe(false);
     expect(strip("a2").hidden).toBe(true);
@@ -932,56 +953,51 @@ describe("one chat: every line its own More and Reply, shown at a tap with its t
     expect(run("p1").querySelector(".chat-ex-wait")).toBeNull();
   });
 
-  it("offers More but no Reply on read-only Updates", async () => {
-    chat.showConversation(UPDATES_ID);
-    chat.mount(root);
-    await settle();
-    expect(moreOn("u1")).not.toBeNull();
-    expect(root.querySelector('[data-use="chat.msg.reply"]')).toBeNull();
+  describe("on a hosted machine", () => {
+    const host = async (name: string | null | undefined) => {
+      if (name !== undefined) vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(JSON.stringify({ name, setupDone: true, firstPlan: "claude" }), { status: 200, headers: { "content-type": "application/json" } }))));
+      await probeCloud();
+      server =fakeServer([...MESSAGES(), line("p3", "owner", "p1", 9, "And on the branch?", { ack: { text: "checking it, ~9:45", at: minute(10) } })], CONVERSATIONS());
+      vi.stubGlobal("fetch", vi.fn(server.fetch));
+    };
+
+    afterEach(() => resetCloud());
+
+    const said = async () => {
+      await onChat();
+      const working = run("b1").querySelector(".chat-ex-wait")!.textContent!;
+      openLine("p3");
+      const ack = bubble("p3").querySelector(".chat-status.acked")!.textContent;
+      return { working, ack, quote: bubble("q1").querySelector(".chat-quote-who")!.textContent };
+    };
+
+    it("names the agent in its working note, its acks and a quote of its line", async () => {
+      await host("Pip");
+      const { working, ack, quote } = await said();
+      expect([working.includes("Pip is working on it"), ack, quote]).toEqual([true, " · Pip: checking it · ~9:45", "Pip"]);
+    });
+
+    it("calls an agent with no name yet Agent", async () => {
+      await host(null);
+      const { working, ack, quote } = await said();
+      expect([working.includes("Agent is working on it"), ack, quote]).toEqual([true, " · Agent: checking it · ~9:45", "Agent"]);
+    });
+
+    it("is still Rivet on the owner's own machine", async () => {
+      await host(undefined);
+      const { working, ack, quote } = await said();
+      expect([working.includes("Rivet is working on it"), ack, quote]).toEqual([true, " · Rivet: checking it · ~9:45", "Rivet"]);
+    });
   });
 
-  it("in the agents' room, Reply on an agent's line answers that line and its agent; his own line has none", async () => {
-    const room = [
-      line("t1", "rivet", TEAM_ROOM_ID, 1, "board up", { team: { from: "photo-album", to: "monitor" } }),
-      line("t2", "owner", TEAM_ROOM_ID, 2, "looks good"),
-      line("t3", "rivet", TEAM_ROOM_ID, 3, "thanks, shipping it", { team: { from: "photo-album", to: "monitor" } }),
-      line("t4", "rivet", TEAM_ROOM_ID, 4, "video ready", { team: { from: "checkout-page", to: "monitor" } }),
-      // The hourly summary is Rivet's, with no agent on it.
-      line("team-summary-5", "rivet", TEAM_ROOM_ID, 5, "Last hour: 3 messages, 2 chats"),
-    ];
-    const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
-    vi.stubGlobal(
-      "fetch",
-      vi.fn((input: RequestInfo | URL) =>
-        Promise.resolve(json(new URL(String(input), "http://x").pathname.startsWith("/api/conversations/") ? detailBody(TEAM_ROOM_ID, room) : EMPTY_LIST)),
-      ),
-    );
-    // A kept reply in the room that names no agent (another tab, an older build) is not brought back.
-    localStorage.setItem(
-      "rivet.chat.reply",
-      JSON.stringify({ id: "team-summary-5", quote: { from: "rivet", text: "Last hour: 3 messages, 2 chats" }, conversation: TEAM_ROOM_ID }),
-    );
-    chat.showConversation(TEAM_ROOM_ID);
-    chat.mount(root);
+  it("opening read-only Updates shows Chat at its newest, with no Updates line and no page of its own", async () => {
+    await onChat();
+    chat.showConversation(UPDATES_ID);
     await settle();
-    expect(bar().hidden).toBe(true);
-    // A run's first line says who wrote to whom, over its words.
-    expect(bubble("t1").querySelector(":scope > p.chat-who")!.textContent).toBe("photo-album → monitor");
-    expect(bubble("t4").querySelector(":scope > p.chat-who")!.textContent).toBe("checkout-page → monitor");
-    expect(bubble("t2").querySelector(".chat-who")).toBeNull();
-    // Only an agent's line names whom a reply in the room is for.
-    expect(moreOn("t2")).not.toBeNull();
-    expect(bubble("t2").querySelector('[data-use="chat.msg.reply"]')).toBeNull();
-    expect(moreOn("team-summary-5")).not.toBeNull();
-    expect(bubble("team-summary-5").querySelector('[data-use="chat.msg.reply"]')).toBeNull();
-    replyOn("t1").click();
-    await settle();
-    expect(bar().textContent).toContain("board up");
-    expect(JSON.parse(localStorage.getItem("rivet.chat.reply")!)).toMatchObject({ id: "t1", owner: "photo-album" });
-    replyOn("t4").click();
-    await settle();
-    expect(bar().textContent).toContain("video ready");
-    expect(JSON.parse(localStorage.getItem("rivet.chat.reply")!)).toMatchObject({ id: "t4", owner: "checkout-page" });
+    expect(bubble("b1")).not.toBeNull();
+    expect(bubble("u1")).toBeNull();
+    expect(root.querySelector(".thing-head")).toBeNull();
+    expect(root.querySelector<HTMLElement>(".chat-head")!.hidden).toBe(false);
   });
 
   it("puts Read aloud alone in Chat's options, a switch that turns it on and off", async () => {
@@ -1062,35 +1078,25 @@ describe("one chat: every line its own More and Reply, shown at a tap with its t
     localStorage.removeItem("rivet.chat.replyStyle");
   });
 
-  it("shows Chat's head only on Chat, a conversation page keeping its own Read aloud", async () => {
+  it("a conversation opened before the mount shows Chat with its head and options, and no Read aloud outside the menu", async () => {
     chat.showConversation("a1");
     chat.mount(root);
     await settle();
-    expect(root.querySelector(".chat-speak:not(.chat-menu-item)")).not.toBeNull();
-    expect(root.querySelector<HTMLElement>(".chat-head")!.hidden).toBe(true);
-    root.querySelector<HTMLButtonElement>(".thing-back")!.click();
-    await settle();
+    expect(bubble("a4")).not.toBeNull();
+    expect(root.querySelector(".thing-head")).toBeNull();
+    expect(root.querySelector(".chat-speak:not(.chat-menu-item)")).toBeNull();
     expect(root.querySelector<HTMLElement>(".chat-head")!.hidden).toBe(false);
     expect(options().hidden).toBe(false);
   });
 
-  it("lets go of the keyboard when a conversation opens, or Chat unmounts, with the options open", async () => {
+  it("lets go of the keyboard when Chat unmounts with the options open", async () => {
     await onChat();
     options().click();
-    chat.showConversation("a1");
-    await settle();
-    expect(root.querySelector<HTMLElement>(".chat-menu")!.hidden).toBe(true);
-    expect(options().getAttribute("aria-expanded")).toBe("false");
     const heard = vi.fn();
     document.body.addEventListener("keydown", heard);
-    document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-    expect(heard).toHaveBeenCalledTimes(1);
-    root.querySelector<HTMLButtonElement>(".thing-back")!.click();
-    await settle();
-    options().click();
     chat.unmount();
     document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     document.body.removeEventListener("keydown", heard);
-    expect(heard).toHaveBeenCalledTimes(2);
+    expect(heard).toHaveBeenCalledTimes(1);
   });
 });

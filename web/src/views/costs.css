@@ -18,7 +18,7 @@
 
 .costs-figure {
   margin: 0;
-  font-size: 52px;
+  font-size: calc(52px * var(--text-scale));
   font-weight: 900;
   line-height: 1;
   letter-spacing: -0.02em;

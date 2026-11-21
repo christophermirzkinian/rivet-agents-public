@@ -388,6 +388,20 @@ test("a card owned by the monitor gets one line, typed as its own", async () => 
   assert.equal(h.acks[0].delivery.target, "chat");
 });
 
+test("a card answer ends its line with Chat's Reply style: Short and Detailed add one sentence, Normal and an unknown style none", async () => {
+  const lines = {};
+  for (const style of ["short", "detailed", undefined, "chatty"]) {
+    const h = harness();
+    assert.equal(await h.bridge.processReply(reply({ text: "use the larger button", ...(style ? { replyStyle: style } : {}) })), "delivered");
+    lines[String(style)] = h.sent[0].line;
+  }
+  assert.ok(lines.short.endsWith(" Reply style: Short — answer in 1–2 sentences."), lines.short);
+  assert.ok(lines.detailed.endsWith(" Reply style: Detailed — full answer, with the why and what's next."), lines.detailed);
+  assert.ok(!lines.undefined.includes("Reply style"), lines.undefined);
+  assert.equal(lines.chatty, lines.undefined, "a style this bridge does not know goes as Normal");
+  assert.equal(lines.short.replace(" Reply style: Short — answer in 1–2 sentences.", ""), lines.undefined);
+});
+
 test("a failed send is not delivered: no ack, no state; nor is a chat the runner could not start", async () => {
   const h = harness({ sendFail: ["website-dark-mode"] });
   assert.equal(await h.bridge.processReply(reply()), "delivery-failed");

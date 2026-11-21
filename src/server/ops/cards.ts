@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 import type { Need } from "../../shared/board.js";
-import { RIVET_NAME } from "../../shared/names.js";
+import { STORED_NAME } from "../../shared/names.js";
 import { cardBreaksQuiet, cardDownKey, cardId, cardKey, cardReason, CARD_REASON_WORDS, isMoneyText, recordDueAt, type CardEntry, type CardItem, type CardBook, type CardReason } from "../../shared/ops-cards.js";
 import { opsStatusKey, statusKeyRepo } from "../../shared/ops-status-key.js";
 import type { OpsStatus } from "../../shared/ops-status.js";
@@ -9,6 +9,7 @@ import type { OpsResponse } from "../../shared/ops.js";
 import { holdsPr, type OwnerHold } from "../../shared/owner-holds.js";
 import { NO_REPO } from "../../shared/repos.js";
 import type { Store } from "../store.js";
+import { PICKUP_BY } from "./pickup.js";
 import type { Alert } from "./view.js";
 
 // Ops cards (Ops reimagine, automation 7): the one place the server turns an Ops item into a Needs-you card, by the rule
@@ -86,7 +87,7 @@ export function opsCardItems(
       ...(schedule && isMoneyText(schedule.name, schedule.what) ? { money: true } : {}),
       down: app?.health.state === "down",
       // Rivet picked it up, on a record that began at `since`; its pick-up only opens a fix chat.
-      rivetRecordSince: app && status.by?.toLowerCase() === RIVET_NAME.toLowerCase() && (status.state === "in-progress" || status.state === "investigating") ? status.since : null,
+      rivetRecordSince: app && status.by?.toLowerCase() === PICKUP_BY && (status.state === "in-progress" || status.state === "investigating") ? status.since : null,
       ...target(status, view),
       ...(status.chat ? { chat: status.chat } : {}),
     };
@@ -129,7 +130,7 @@ function cardFor(item: CardItem & { generation?: number }, reason: CardReason): 
     ...(reason === "app-down" ? { push: "fyi" as const } : {}),
     options: held
       ? [{ label: "Release the hold", recommended: true }, { label: "Keep it held" }]
-      : [{ label: `Ask ${RIVET_NAME} to fix`, recommended: true }, { label: "Leave it" }],
+      : [{ label: `Ask ${STORED_NAME} to fix`, recommended: true }, { label: "Leave it" }],
     ...(item.pr !== undefined ? { pr: item.pr } : {}),
     ...(item.repo ? { repo: item.repo } : {}),
     ...(item.chat ? { chat: item.chat } : {}),

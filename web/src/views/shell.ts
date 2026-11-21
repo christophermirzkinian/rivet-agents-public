@@ -4,6 +4,7 @@ import { APP_NAME, RIVET_NAME } from "../../../src/shared/names.js";
 import { undoLast } from "./feed.js";
 import { DESK_QUERY, typing } from "../desk.js";
 import { forgetLayout, paneOpen, readLayout, toggleFocus, togglePane, WIDE_RAIL_QUERY, writeLayout, type Pane } from "../desk-layout.js";
+import { agentName } from "../cloud-agent.js";
 import * as cmd from "../command-api.js";
 import { h, ICONS, keepFocus, modalOpen, svg } from "../dom.js";
 import { useTap, watchDepth } from "../usage.js";
@@ -102,6 +103,7 @@ export function mountShell(root: HTMLElement): () => void {
     const refocus = [keepFocus(header), keepFocus(tabs), keepFocus(side)];
     renderHeader(header, desk, layout.focus, focus);
     renderTabs(tabs, desk, open("chat"), () => toggle("chat"), open("rail"), () => toggle("rail"));
+    side.setAttribute("aria-label", `Chat with ${agentName()}`);
     // The tab view swaps first: widening on the Chat tab must let go of chat before the side column mounts it, and so
     // must the home screen's Rivet sheet; on a phone the sheet opens over the home screen once it is there.
     if (desk) home.syncSheets(true);
@@ -316,7 +318,7 @@ function renderHeader(header: HTMLElement, desk: boolean, focusOn: boolean, focu
 function renderTabs(tabs: HTMLElement, desk: boolean, chatOpen: boolean, toggleChat: () => void, railOpen: boolean, toggleRail: () => void): void {
   // No tab bar on a phone: the home screen's dock, Decide N and Rivet.
   tabs.className = desk ? "tabs" : "home-dock";
-  tabs.setAttribute("aria-label", desk ? "Sections" : "Decide and Rivet");
+  tabs.setAttribute("aria-label", desk ? "Sections" : `Decide and ${agentName()}`);
   if (!desk) {
     tabs.replaceChildren(...home.dock());
     return;

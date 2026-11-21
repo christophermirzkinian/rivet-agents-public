@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { MAX_USAGE_EVENTS, MAX_USAGE_EVENTS_PER_DAY, USAGE_BATCHES_PER_MINUTE, USAGE_IDS, USAGE_KEEP_MS, usageBatchSchema, type UsageSummary } from "../src/shared/usage-ids.js";
 import { browser, fakeClock, ORIGIN, startServer, type TestServer } from "./helpers.js";
 
-// What you used (Sam, 27 Oct): the app's screens and taps go up by registry id only, are kept 90 days, and come back
+// What you used: the app's screens and taps go up by registry id only, are kept 90 days, and come back
 // as a count, a last use and a median per id.
 
 const DAY = 24 * 60 * 60 * 1000;

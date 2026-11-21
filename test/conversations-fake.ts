@@ -47,6 +47,8 @@ export interface FakeServer {
   posted: Record<string, unknown>[];
   patched: { id: string; body: Record<string, unknown> }[];
   requests: string[];
+  /** Saved line ids, newest saved first. */
+  saved: string[];
   /** While set, conversation detail GETs wait for `release`. */
   holdDetail: boolean;
   held: (() => void)[];
@@ -77,6 +79,7 @@ export function fakeServer(messages: ChatMessage[], conversations: Record<string
     posted: [],
     patched: [],
     requests: [],
+    saved: [],
     holdDetail: false,
     held: [],
     failWith: null,
@@ -276,6 +279,21 @@ export function fakeServer(messages: ChatMessage[], conversations: Record<string
         }),
       );
       return json({ messages: page, older, labels });
+    }
+    if (url.pathname === "/api/chat/saved") {
+      // As the server: newest saved first, and a line no longer in the chat left out.
+      const saved = server.saved.flatMap((id) => {
+        const found = server.messages.find((message) => message.id === id);
+        return found ? [{ ...found, conversation: conversationOf(found), savedAt: found.at }] : [];
+      });
+      return json({ saved });
+    }
+    if (url.pathname.startsWith("/api/chat/saved/")) {
+      const id = decodeURIComponent(url.pathname.slice("/api/chat/saved/".length));
+      if (method === "PUT" && !server.messages.some((message) => message.id === id)) return json({ error: "That message is not in the chat." }, 404);
+      server.saved = server.saved.filter((one) => one !== id);
+      if (method === "PUT") server.saved.unshift(id);
+      return json({ ok: true });
     }
     return json({});
   }

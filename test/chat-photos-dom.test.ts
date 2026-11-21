@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ChatMessage } from "../src/shared/command.js";
-import { detailBody, EMPTY_LIST } from "./conversations-fake.js";
+import { EMPTY_LIST } from "./conversations-fake.js";
 
 vi.mock("../web/src/voice.js", async (original) => ({
   ...(await original<typeof import("../web/src/voice.js")>()),
@@ -22,7 +22,7 @@ let listeners: Record<string, ((event?: { data: string }) => void)[]> = {};
 let root: HTMLElement;
 
 async function fakeFetch(input: RequestInfo | URL): Promise<Response> {
-  const body = new URL(String(input), "http://x").pathname.startsWith("/api/conversations/") ? detailBody("c1", history) : EMPTY_LIST;
+  const body = new URL(String(input), "http://x").pathname === "/api/chat" ? { messages: history, older: null, labels: {} } : EMPTY_LIST;
   return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
 }
 
@@ -44,7 +44,6 @@ beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn(fakeFetch));
   vi.stubGlobal("EventSource", FakeSource);
   localStorage.clear();
-  chat.showConversation("c1");
   root = document.createElement("main");
   document.body.replaceChildren(root);
 });

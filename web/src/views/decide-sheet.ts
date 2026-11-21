@@ -4,12 +4,12 @@ import { isGotIt, isUpdate, waitsOnYou } from "../../../src/shared/answers.js";
 import { asksOfChat } from "../../../src/shared/ask-stages.js";
 import type { Ask } from "../../../src/shared/asks.js";
 import type { ServedNeed } from "../../../src/shared/board.js";
-import { RIVET_NAME } from "../../../src/shared/names.js";
 import { NO_REPO } from "../../../src/shared/repos.js";
 import { allMinimised, answeredTab, NEEDS_YOU, NOTHING_NEEDS_YOU, openTab, showMinimised } from "../../../src/shared/words.js";
 import type { Worker } from "../../../src/shared/workers.js";
 import { chatFor, seedKey } from "../agents-logic.js";
 import { homeOf, projectName } from "../backlog-logic.js";
+import { agentName } from "../cloud-agent.js";
 import { isDesk, typing } from "../desk.js";
 import { FULL_SCREEN_EVENTS, fullScreenElement, h, ICONS, keepFocus, modalOpen, parkFocus, svg } from "../dom.js";
 import { watchOps } from "../ops-data.js";
@@ -399,7 +399,7 @@ function decideView(first: readonly string[], look: { answered?: boolean; untilR
     const project = projectName(homeOf({ repo, project: (app.workers?.workers ?? []).find((w) => w.repo === repo && w.chat === need.chat)?.project }));
     const place = shown.indexOf(at) + 1;
     count.textContent = inPane ? `Card ${place} of ${shown.length}` : `${place} of ${shown.length}`;
-    name.textContent = inPane ? `${RIVET_NAME} asks · ${project}` : project;
+    name.textContent = inPane ? `${agentName()} asks · ${project}` : project;
     // A dash a card while they fit the row; past that the words alone count them. The phone's bars run the sheet's
     // width, one a card, so they hold more.
     const dashes = (most: number) => (shown.length <= most ? shown.map((id) => h("i", { class: id === at ? "is-at" : "" })) : []);

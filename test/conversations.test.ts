@@ -667,9 +667,10 @@ describe("conversation routes", () => {
     const id = await owner("Night Batch results row", { conversation: null });
     const notify = vi.spyOn(server.app.push, "notify");
     const said = await rivet("Stills attached, ready for your OK", { replyTo: id });
-    const payload = rivetPayload("Stills attached, ready for your OK", { id, title: "Night Batch results row" });
+    const payload = rivetPayload("Stills attached, ready for your OK", { id, title: "Night Batch results row" }, said.id);
     expect(notify).toHaveBeenCalledWith(payload, "card", `rivet:${said.id}`);
-    expect(payload).toMatchObject({ title: "Night Batch results row", tag: `conv-${id}`, path: `/?conversation=${id}`, conversation: id, chat: id });
+    // A tap opens Chat on the line the push is about.
+    expect(payload).toMatchObject({ title: "Night Batch results row", tag: `conv-${id}`, path: `/?conversation=${id}&message=${said.id}`, conversation: id, chat: id });
     expect(payload.level).toBeUndefined();
     expect(rivetPayload("Nightly: green", { id: UPDATES_ID, title: "Updates" }).level).toBe("fyi");
     expect(rivetPayload("Shall I restart the workers?", { id: UPDATES_ID, title: "Updates" }).level).toBeUndefined();

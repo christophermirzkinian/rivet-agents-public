@@ -64,7 +64,7 @@ html.lightbox-open body {
   flex: none;
   min-width: var(--tap);
   padding: 4px 10px;
-  font-size: 24px;
+  font-size: calc(24px * var(--text-scale));
   line-height: 1;
 }
 
@@ -215,7 +215,7 @@ html.lightbox-open body {
   box-sizing: border-box;
   padding: 18px 18px 40px;
   color: var(--text);
-  font-size: 17px;
+  font-size: calc(17px * var(--text-scale));
   line-height: 1.55;
   overflow-wrap: anywhere;
   transform-origin: 0 0;
@@ -234,7 +234,7 @@ html.lightbox-open body {
 .lightbox-text pre {
   margin: 0;
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 15px;
+  font-size: calc(15px * var(--text-scale));
   line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -272,23 +272,23 @@ html.lightbox-open body {
 }
 
 .lightbox-text h1 {
-  font-size: 26px;
+  font-size: calc(26px * var(--text-scale));
 }
 
 .lightbox-text h2 {
   padding-bottom: 6px;
   border-bottom: 1px solid var(--line);
-  font-size: 22px;
+  font-size: calc(22px * var(--text-scale));
 }
 
 .lightbox-text h3 {
-  font-size: 19px;
+  font-size: calc(19px * var(--text-scale));
 }
 
 .lightbox-text h4,
 .lightbox-text h5,
 .lightbox-text h6 {
-  font-size: 17px;
+  font-size: calc(17px * var(--text-scale));
 }
 
 .lightbox-text > :first-child {
@@ -347,7 +347,7 @@ html.lightbox-open body {
 .lightbox-text table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 15px;
+  font-size: calc(15px * var(--text-scale));
 }
 
 .lightbox-text th,
@@ -369,7 +369,7 @@ html.lightbox-open body {
 
 .md-raw {
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 15px;
+  font-size: calc(15px * var(--text-scale));
   white-space: pre-wrap;
 }
 

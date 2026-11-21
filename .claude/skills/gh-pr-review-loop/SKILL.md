@@ -153,7 +153,7 @@ no findings.
   re-review that fix diff once. If that finds more, an auth or data finding, or a gate or
   CI finding that could let a merge pass wrongly, is fixed and goes back to all three
   lenses. Anything else ends the loop: file it or note it, and go to the gate.
-- **From round 5, only the finding's lens re-checks its fix.** On any tier, a round runs
+- **From round 3, only the finding's lens re-checks its fix.** On any tier, a round runs
   only the lenses that raised a finding fixed in the push it reviews, each briefed with
   that push's fix diff. A lens whose findings were all rejected, noted or deferred does
   not run. A fix for a finding no lens raised (CI, a human reviewer, the author's own)

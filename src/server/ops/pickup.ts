@@ -4,7 +4,7 @@ import { diskTone, GITHUB_STALE_MS, MAC_STALE_MS, type OpsResponse } from "../..
 import { diskOwnedItem, HANDLER_BY, isOwned, macOwnedItem, recordOf, underWay, type OwnedItem } from "../../shared/ops-owned.js";
 import { opsStatusKey, statusKeyRepo } from "../../shared/ops-status-key.js";
 import type { OpsStatus, OpsStatusKind } from "../../shared/ops-status.js";
-import { RIVET_NAME } from "../../shared/names.js";
+import { STORED_NAME } from "../../shared/names.js";
 import { isRepo, NO_REPO } from "../../shared/repos.js";
 import type { Worker } from "../../shared/workers.js";
 
@@ -28,7 +28,7 @@ export const PICKUP_ACK_MS = 10 * 60_000;
 /** A typed pick-up counts as a working chat until its chat is in the crew, or this long after the ack. */
 export const PICKUP_OPENING_MS = 15 * 60_000;
 export const PICKUP_BY = "rivet";
-export const PICKUP_NOTE = `${RIVET_NAME} picked this up on its own and is opening a chat on it.`;
+export const PICKUP_NOTE = `${STORED_NAME} picked this up on its own and is opening a chat on it.`;
 export const QUEUE_FULL = "queue full";
 export const CHAT_CLOSED = "chat closed";
 export const KEEPS_BREAKING_PREFIX = "keeps-breaking-";

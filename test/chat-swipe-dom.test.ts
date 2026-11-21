@@ -175,3 +175,72 @@ describe("pull a line right to reply", () => {
     expect(replied).toBe(0);
   });
 });
+
+describe("pull a line left to save", () => {
+  let saved = 0;
+
+  beforeEach(() => {
+    saved = 0;
+    line = document.createElement("li");
+    line.className = "chat-msg";
+    line.addEventListener("click", () => tapped++);
+    document.body.replaceChildren(line);
+    swipeToReply(line, () => replied++, () => saved++);
+  });
+
+  it("past the threshold, letting go saves once, with the same buzz, and springs back", () => {
+    const buzz = vi.fn();
+    Object.defineProperty(navigator, "vibrate", { value: buzz, configurable: true });
+    line.dispatchEvent(finger("pointerdown", 500, 300));
+    line.dispatchEvent(finger("pointermove", 470, 302));
+    expect(line.classList.contains("swipe-save")).toBe(true);
+    expect(line.style.transform).toBe("translateX(-30px)");
+    line.dispatchEvent(finger("pointermove", 500 - SWIPE_AT - 30, 304));
+    expect(buzz).toHaveBeenCalledWith(10);
+    line.dispatchEvent(finger("pointerup", 500 - SWIPE_AT - 30, 304));
+    expect([saved, replied]).toEqual([1, 0]);
+    expect(line.style.transform).toBe("");
+    expect(line.classList.contains("swipe-save")).toBe(false);
+  });
+
+  it("short of the threshold it springs back without saving", () => {
+    pull(500, 300, [[-20, 0], [-(SWIPE_AT - 10), 0]]);
+    expect(saved).toBe(0);
+  });
+
+  it("a pull right still replies", () => {
+    pull(100, 300, [[20, 0], [SWIPE_AT + 20, 0]]);
+    expect([replied, saved]).toEqual([1, 0]);
+  });
+
+  it("never starts at the screen's right edge, the other back gesture", () => {
+    pull(window.innerWidth - EDGE + 4, 300, [[-20, 0], [-120, 0]]);
+    expect(saved).toBe(0);
+    expect(line.style.transform).toBe("");
+    pull(window.innerWidth - EDGE - 4, 300, [[-20, 0], [-120, 0]]);
+    expect(saved).toBe(1);
+  });
+
+  it("a pull right from the right edge still replies", () => {
+    pull(window.innerWidth - EDGE + 4, 300, [[20, 0], [SWIPE_AT + 20, 0]]);
+    expect([replied, saved]).toEqual([1, 0]);
+  });
+
+  it("the bookmark reaches past the line's edge only as far as the line has moved in", () => {
+    line.dispatchEvent(finger("pointerdown", 500, 300));
+    line.dispatchEvent(finger("pointermove", 470, 300));
+    expect([line.style.transform, line.style.getPropertyValue("--swipe-px")]).toEqual(["translateX(-30px)", "30px"]);
+    line.dispatchEvent(finger("pointerup", 470, 300));
+    expect(line.style.getPropertyValue("--swipe-px")).toBe("");
+  });
+
+  it("a line with no Reply still pulls left to save, and a pull right does nothing", () => {
+    line = document.createElement("li");
+    document.body.replaceChildren(line);
+    swipeToReply(line, null, () => saved++);
+    pull(100, 300, [[20, 0], [SWIPE_AT + 20, 0]]);
+    expect(line.style.transform).toBe("");
+    pull(500, 300, [[-20, 0], [-(SWIPE_AT + 20), 0]]);
+    expect([saved, replied]).toEqual([1, 0]);
+  });
+});

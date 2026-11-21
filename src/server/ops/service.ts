@@ -4,7 +4,7 @@ import { MAX_ASKS } from "../../shared/asks.js";
 import { BACKLOG_AHEAD_MS, BACKLOG_STALE_MS, type BacklogSnapshot, type StoredBacklogRepo } from "../../shared/backlog.js";
 import { ID_PATTERN, type Need } from "../../shared/board.js";
 import { PICKUP_DUE_MINUTES, PICKUP_WHY } from "../../shared/command.js";
-import { RIVET_NAME } from "../../shared/names.js";
+import { STORED_NAME } from "../../shared/names.js";
 import { cardId, cardOfDownKey, cardReason, opsCardOfPushKey, type CardEntry, type CardItem } from "../../shared/ops-cards.js";
 import { foldDue, foldedDone } from "../../shared/ops-done.js";
 import { appOwnedItem, ciOwnedItem, isOwned, recordOf, scheduleOwnedItem, underWay, type OwnedItem } from "../../shared/ops-owned.js";
@@ -440,7 +440,7 @@ export function createOps(deps: OpsDeps) {
         posted.push(card.id);
         opsStore.put("fixResults", posted.slice(-MAX_FIX_RESULTS), at);
       }
-      if (green) deps.store.replaceOpsStatus({ ...status, state: "fixed", updatedAt: at.toISOString(), by: RIVET_NAME, version: deps.store.nextOpsStatusVersion() }, status.version);
+      if (green) deps.store.replaceOpsStatus({ ...status, state: "fixed", updatedAt: at.toISOString(), by: STORED_NAME, version: deps.store.nextOpsStatusVersion() }, status.version);
     }
     const after = [...seenRed];
     if (after.length !== before.length || after.some((failure, i) => failure !== before[i])) opsStore.put("fixSeenRed", after.slice(-MAX_FIX_RESULTS), at);
@@ -466,7 +466,7 @@ export function createOps(deps: OpsDeps) {
     const posted = opsStore.get("fixResults") ?? [];
     const seenRed = new Set(opsStore.get("fixSeenRed") ?? []);
     for (const { status, note } of stale) {
-      const cleared = { ...status, state: "fixed" as const, ...(note ? { note } : {}), updatedAt: at.toISOString(), by: RIVET_NAME, version: deps.store.nextOpsStatusVersion() };
+      const cleared = { ...status, state: "fixed" as const, ...(note ? { note } : {}), updatedAt: at.toISOString(), by: STORED_NAME, version: deps.store.nextOpsStatusVersion() };
       if (!deps.store.replaceOpsStatus(cleared, status.version)) continue;
       // A ci or schedule failure settleFixes saw red keeps its card: set fixed, settleFixes posts it (and retries one
       // the board refused) while the record is in its window and the item reads green.

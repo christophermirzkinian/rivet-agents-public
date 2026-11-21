@@ -12,6 +12,11 @@ vi.mock("../web/src/voice.js", async (original) => ({
   unlockOnTap: () => () => {},
   stopVoice: () => {},
 }));
+const flashed: string[] = [];
+vi.mock("../web/src/views/toast.js", async (original) => ({
+  ...(await original<typeof import("../web/src/views/toast.js")>()),
+  flash: (text: string) => flashed.push(text),
+}));
 
 const chat = await import("../web/src/views/chat.js");
 
@@ -78,7 +83,7 @@ afterEach(() => {
 });
 
 describe("the Team room", () => {
-  it("opens an empty room, not a gone one, before any agent has written there", async () => {
+  it("opens Chat at its newest, with nothing gone flashed, for the room before any agent has written there", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) =>
@@ -89,20 +94,22 @@ describe("the Team room", () => {
               status: 404,
               headers: { "content-type": "application/json" },
             })
-          : new Response(JSON.stringify(EMPTY_LIST), {
+          : new Response(JSON.stringify(new URL(String(input), "http://x").pathname === "/api/chat" ? { messages: [], older: null, labels: {} } : EMPTY_LIST), {
               status: 200,
               headers: { "content-type": "application/json" },
             }),
       ),
     );
-    chat.showConversation(TEAM_ROOM_ID);
+    chat.showLine(TEAM_ROOM_ID);
     chat.mount(root);
     await settle();
+    expect(flashed).toEqual([]);
+    expect(root.querySelector(".thing-head")).toBeNull();
     expect(root.querySelector(".chat-empty")?.textContent).toBe(
-      "No agent has written here yet.",
+      "Say anything to Rivet.",
     );
     expect(
       root.querySelector(".chat-compose-box")?.hasAttribute("hidden"),
-    ).toBe(true);
+    ).toBe(false);
   });
 });

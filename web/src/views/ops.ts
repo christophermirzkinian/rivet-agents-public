@@ -54,6 +54,7 @@ import { openSheet } from "./sheet.js";
 import { machinesTrend } from "./machines-trend.js";
 import { holdOf, holdReason, isHold } from "../../../src/shared/pr-holds.js";
 import * as api from "../api.js";
+import { agentName } from "../cloud-agent.js";
 import { accountLines, machinesHead, machinesWorstFirst, usageLead } from "../reading-figures.js";
 import { leadFigure, readingFrame, readingView } from "./reading.js";
 import { onSessionReset } from "../session.js";
@@ -698,7 +699,7 @@ function notices(ops: OpsResponse | null, on: OpsPage): HTMLElement | null {
   // A reading page says a failed read in its frame (reading.ts), never a server's own words.
   if (on === "plan" && opsData.error) add("Couldn't load Ops.", "bad");
   // app.notice is the feed's failure in the server's own words; Plan says it plainly.
-  if (on === "plan" && app.notice) add("Can't reach Rivet.", "bad");
+  if (on === "plan" && app.notice) add(`Can't reach ${agentName()}.`, "bad");
   if (ops) {
     if (!ops.bridge.connected) add("The Mac bridge is offline; GitHub and Mac data stop updating.", "warn");
     else {

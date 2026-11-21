@@ -24,7 +24,7 @@ import {
   TEAM_ROOM_ID,
   UPDATES_ID,
 } from "../../../src/shared/conversations.js";
-import { RIVET_NAME, chatName, rivetWords } from "../../../src/shared/names.js";
+import { chatName, rivetWords } from "../../../src/shared/names.js";
 import { rivet, type Mood } from "../rivet/rivet.js";
 
 /** Rivet's face beside what he says: a tick when it is done, dots while on it, ? when he asks, a cross when broken. */
@@ -37,6 +37,7 @@ function moodOf(text: string): Mood {
 }
 import { APP_ONLY_PROJECTS, type ThreadProject } from "../../../src/shared/threads.js";
 import { ApiError, serverClockSkew } from "../api.js";
+import { agentName } from "../cloud-agent.js";
 import * as cmd from "../command-api.js";
 import type { ChatMessage } from "../command-api.js";
 import { dictation, MIC, STOP } from "../dictation.js";
@@ -72,14 +73,12 @@ import {
   photosHold,
   photosPayload,
 } from "./attach.js";
-import { cardMedia } from "./card-media.js";
-import { cardShareButton } from "./card-share.js";
 import { showCard } from "./feed.js";
 import { holdFoot } from "./hold-foot.js";
 import { closeLightbox } from "./lightbox.js";
-import { overlayTraversal } from "../overlay-history.js";
 import { createDraftLineage } from "../draft-lineage.js";
 import { chatSearch } from "./chat-search.js";
+import { BOOKMARK, BOOKMARKED, chatSaved } from "./chat-saved.js";
 import { swipeToReply } from "./chat-swipe.js";
 import { openMore } from "./chat-more.js";
 import { chatReplyStylePicker } from "./chat-reply-style.js";
@@ -88,13 +87,14 @@ import { registerSearchSource } from "./search-sources.js";
 import { askLine, dueLine } from "./due-line.js";
 import { closeSheet, openSheet } from "./sheet.js";
 import { flash } from "./toast.js";
-import { onShowThing, showThing, stopText, thingButtons, thingFacts, thingHead } from "./thing.js";
-import { enterScreen, leaveScreen, useTap, watchDepth } from "../usage.js";
+import { stopText, thingFacts } from "./thing.js";
+import { useTap, watchDepth } from "../usage.js";
 import { fellAsleep, onCap, onWake } from "../rivet-sleep.js";
+import { TYPED } from "../rivet-words.js";
 
 // The Chat tab: one conversation with Rivet, like messaging one
-// person, and each piece of work's conversation as its thing page (thing.ts). Every send from Chat starts a server
-// conversation of its own, so a card Rivet files for it makes that one a thing; Chat reads them all as one.
+// person. Every send from Chat starts a server conversation of its own, so a card Rivet files for it makes that one a
+// thing; Chat reads them all as one, and a notification, link or search brings up a line in it.
 
 const POLL_MS = 10_000;
 /** Nearly two of the server's 25 s pings missed: the chat stream has stalled. */
@@ -110,6 +110,11 @@ const EARLIER_AT_PX = 160;
 const EARLIER_FAILED = "Couldn't load earlier messages.";
 /** A search hit's conversation loads at most this many earlier pages looking for it. */
 const EARLIER_PAGES_MAX = 20;
+/**
+ * A line brought up (a notification, link or hit) loads up to this many earlier pages to reach it: a busy day elsewhere
+ * can put a still-recent topic's line well over a thousand lines back.
+ */
+const REACH_PAGES_MAX = 200;
 /** The unsent message, kept on this device only so a tab switch, backgrounding or reload never loses it. */
 const DRAFT_KEY = "rivet.chat.draft";
 /** Changes on every draft save, so a send can tell its draft from an identical one another tab saved since. */
@@ -187,9 +192,6 @@ function dayOf(t: number): string {
 /** His line's states that show under it without a tap; the rest wait in the line's tapped-open strip. */
 const SHOWN_STATES: ReadonlySet<string> = new Set(["collecting", "unconfirmed", "failed", "cancelled"]);
 
-/** What the Chat tab shows: the one conversation with Rivet, or a thing's page. */
-type Screen = { kind: "rivet" } | { kind: "conversation"; id: string };
-
 /** What Chat knows of a line's conversation: ChatPage.labels, else its row in the list. */
 export type LabelSource = { title?: string; ask?: string; updates?: boolean };
 
@@ -202,15 +204,23 @@ export function chatLabel(source: LabelSource | null | undefined): string | null
   return title || null;
 }
 
-/** Kept for the session, so a tab switch comes back to it. */
-let shown: Screen = { kind: "rivet" };
+/** A line showLine asked for before Chat mounted: the next mount brings it up. */
+let pendingLine: { conversation: string; message: string | null } | null = null;
+/** Brings up a line in the chat on screen, if any. */
+let goLine: ((conversation: string, message: string | null) => void) | null = null;
 
-// A mounted chat switches itself: setting `shown` first would hide that it is another conversation, and the one on
-// screen would keep its messages under the new heading.
-onShowThing((id) => {
-  if (goConversation) goConversation(id);
-  else shown = { kind: "conversation", id };
-});
+/**
+ * Brings up a line in Chat, lit for a moment: `message` (any message of `conversation`), loading earlier pages to reach
+ * it, else the conversation's newest line Chat shows. One Chat leaves out (Updates, Agent Chat), or one gone, shows Chat
+ * at its newest. Notifications, Feed, Town and search all come here; before Chat mounts it waits for the mount.
+ */
+export function showLine(conversation: string, message: string | null = null): void {
+  if (goLine) goLine(conversation, message);
+  else pendingLine = { conversation, message };
+}
+
+/** Brings up conversation `id` (any message of it names it) at its newest line in Chat. */
+export const showConversation = (id: string): void => showLine(id);
 
 /**
  * Chat's line for a card answer, from the answer's text (`answerText`): the verb names the kind, so the card's title
@@ -240,12 +250,9 @@ export function answerLine(title: string | undefined, text: string): string {
   return notes.length ? `${head} · ${notes.join(" · ")}` : head;
 }
 
-/** Opens a thing's page (any message of its conversation names it): Feed, Town and notifications call it so. */
-export const showConversation = showThing;
-
 /**
- * Opens the thing a chat is working on: its newest conversation that links the chat, in its repo when given. A chat with
- * no thing yet opens Chat with Rivet on a draft naming it, so the owner can ask about it.
+ * Brings up the thing a chat is working on in Chat: its newest conversation that links the chat, in its repo when given.
+ * A chat with no thing yet opens Chat on a draft naming it, so the owner can ask about it.
  */
 export function showChatThing(chat: string, repo?: string | null): void {
   const current = sameSession();
@@ -255,25 +262,23 @@ export function showChatThing(chat: string, repo?: string | null): void {
 }
 
 /**
- * Opens the page of the thing a chat's work is on; false, and nothing opened, when no conversation names the chat. A
- * chat name recurs across repos: given its repo, a conversation that linked that name in another repo is not it.
+ * Brings up in Chat the newest line of the thing a chat's work is on; false, and nothing opened, when no conversation
+ * names the chat. A chat name recurs across repos: given its repo, a conversation that linked that name in another repo
+ * is not it.
  */
 export function openThingFor(chat: string, repo?: string | null): Promise<boolean> {
   return cmd.getConversations()
     .then((response) => {
       const row = response.conversations.find((item) => linksChat(item.links, chat, repo));
       if (!row) return false;
-      showThing(row.id);
-      // From the Feed or the Town the page is on the Chat tab (a mounted chat switched itself above).
+      showLine(row.id);
+      // From the Feed or the Town the line is on the Chat tab.
       app.tab = "chat";
       changed();
       return true;
     })
     .catch(() => false);
 }
-
-/** The Team room answered 404: no agent has written there yet. */
-let roomMissing = false;
 
 /**
  * One chat's lines in the Team room: what it sent or was sent, the owner's lines naming it, and untagged answers to those.
@@ -316,9 +321,9 @@ export function fromChat(
   });
 }
 
-/** The conversation open on screen, for the service worker: null under search results or with no chat mounted. */
+/** The conversation open on screen, for the service worker: none, as Chat has no conversation page. */
 export function openConversation(): string | null {
-  return teardown !== null && shown.kind === "conversation" && !document.querySelector(".chat.searching") ? shown.id : null;
+  return null;
 }
 
 /** Message times as shown, kept for the local day they were worked out on: each row asks on every render. */
@@ -389,11 +394,19 @@ function isAppOnly(project: unknown): boolean {
 
 /** How long a message the quote jumped to stays lit. */
 const LIT_MS = 1600;
+/** When a jump looks at its line again where a browser tells no scrollend: a long smooth scroll has ended by then. */
+const JUMP_SETTLE_MS = 900;
+/** A way in's line that Chat does not show after all: said, never nothing. */
+const NOT_IN_CHAT = "That message isn't in Chat.";
+/** How near its foot Chat counts as at it, and is held there (holdFoot). */
+const FOOT_NEAR = 40;
 
 const STATUS_WORDS: Record<NonNullable<ChatMessage["status"]>, string> = {
   collecting: "Collecting…",
   sent: "Sent",
-  typed: `Typed to ${RIVET_NAME}`,
+  get typed() {
+    return `Typed to ${agentName()}`;
+  },
   unconfirmed: "Typed, not confirmed",
   failed: "Not delivered",
   replied: "Replied",
@@ -589,10 +602,6 @@ function writeReply(target: ReplyTarget | null): void {
 }
 
 let teardown: (() => void) | null = null;
-/** Opens a conversation in the chat on screen, if any: the desktop pane stays mounted while the Feed asks for one. */
-let goConversation: ((id: string, record?: boolean) => void) | null = null;
-/** Brings the chat on screen back to the one conversation with Rivet, if any. */
-let goRivet: (() => void) | null = null;
 /** Why the chat on screen would not share `message`, or null when it may; null with no chat mounted. */
 let liveRefusal: ((message: ChatMessage) => string | null) | null = null;
 /**
@@ -700,18 +709,16 @@ export function startDraft(prefix: string): boolean {
   return true;
 }
 
-/** The Town's Rivet row: the conversation with him on the Chat tab, never the thing left open (review 2026-10-11). */
+/** The Town's Rivet row: the conversation with him on the Chat tab. */
 export function showRivetChat(): void {
   openRivet();
   app.tab = "chat";
   changed();
 }
 
-/** Started from elsewhere, it is about something else: Chat, never whichever thing was open last (on a desktop the chat stays open beside the other tabs). */
+/** Started from elsewhere, it is about something else: a reply saved while no chat was on screen is dropped. */
 function openRivet(): void {
-  if (goRivet) return goRivet();
-  shown = { kind: "rivet" };
-  writeReply(null);
+  if (teardown === null) writeReply(null);
 }
 
 export const SHARE_TOO_LONG =
@@ -727,14 +734,27 @@ export function receiveShare(share: Shared): void {
   putShare?.();
 }
 
+/**
+ * The words a tap sends as his (Stop it, Start it or Drop it from Coming, Fix it, Start work) and a card answer's: they
+ * carry agent-written titles, so they read as the rest of the page. Lines from before the typed mark (18 Nov) have no
+ * mark, so these words are how a tap's line is told from his own, as the server's Asked-before fill does.
+ */
+const TAP_WORDS = /^(?:Stop (?:this|[a-z0-9][a-z0-9-]*): |Start it \(from Coming\)|Drop it \(from Coming\)|Fix it: |Start work on |Approved\b|Dismissed\b|Rejected\b|Chose:|Comment\b|Seen$|Done$)/;
+
+/** His own words, left as he typed them (rivet-words.ts): typed in a box, or any line of his but a tap's or a card answer. */
+export function hisOwnWords(message: { text: string; typed?: true; card?: unknown }): boolean {
+  return message.typed === true || (!message.card && !TAP_WORDS.test(message.text.trimStart()));
+}
+
 function quoteParts(quote: ChatQuote): HTMLElement[] {
+  const typed = quote.from === "owner" && hisOwnWords({ text: quote.text });
   return [
     h(
       "span",
       { class: "chat-quote-who" },
-      quote.from === "owner" ? "You" : RIVET_NAME,
+      quote.from === "owner" ? "You" : agentName(),
     ),
-    h("span", { class: "chat-quote-text" }, quote.text),
+    h("span", { class: "chat-quote-text", attrs: typed ? { [TYPED]: "" } : {} }, quote.text),
   ];
 }
 
@@ -845,9 +865,8 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   unmount();
   forgetRetired();
   applyChatTextSize();
-  /** The open conversation's messages. */
+  /** Chat's messages. */
   let messages = new Map<string, ChatMessage>();
-  let detail: ConversationDetail | null = null;
   let detailTimer = 0;
   let detailTicket = 0;
   let list: ConversationsResponse | null = null;
@@ -857,11 +876,11 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   const readable = (row: ConversationSummary) => row.id !== TEAM_ROOM_ID && !(row.thing && row.markedUnread);
   /** Where Chat's held lines run unbroken from: a refresh keeps lines from before its page, past a gap. */
   let unbrokenFrom = "";
-  /** The open thing's first read failed, so its empty line says so and offers Try again rather than Loading… on. */
+  /** Chat's first read failed, so its empty line says so and offers Try again rather than Loading… on. */
   let loadFailed = false;
   let listTimer = 0;
   let listTicket = 0;
-  /** Whether the open conversation has messages before the earliest loaded; null until an earlier page loaded. */
+  /** Whether Chat has messages before the earliest loaded; null until its first page loaded. */
   let earlierMore: boolean | null = null;
   /** The first message of the earliest page loaded, in the server's order: the cursor for the page before it. */
   let earliestPage: string | null = null;
@@ -887,14 +906,20 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
    */
   let jumps = 0;
   let seeking = 0;
+  /** Counts ways into a line (lineNow), so only the newest one's read lands. */
+  let lineGen = 0;
+  /** The line a way in still waits to bring up: the next newest page to land, whoever asked for it, does. */
+  let wanted: string | null = null;
+  /** Summaries read when a way in fetched a topic the open list leaves out (an archived one). */
+  const fetchedSummaries = new Map<string, ConversationSummary>();
   let litTimer = 0;
-  /** Rivet messages that came into the open conversation since it was last marked read. */
-  let unseen = 0;
-  /** The newest message the open conversation was marked read up to. */
-  let marked: string | null = null;
+  /** Lets go of a jump's look back at its line once its scroll ends (jump). */
+  let unsettle: (() => void) | null = null;
   /** The thread waits for `later`; `heldStick`: a render while it waited asked to stick to the newest. */
-  let threadHeld = !!later && !app.chatFocus && !focusOnMount;
+  let threadHeld = !!later && !app.chatFocus && !focusOnMount && !pendingLine;
   let heldStick = false;
+  /** A way in's line asked for while the thread was held: brought up once it draws (bringUp). */
+  let heldLine: string | null = null;
 
   const thread = h("ol", {
     class: "chat-thread",
@@ -911,24 +936,20 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     earlierArmed = true;
     earlierRun = 0;
   }
-  const headBox = h("div", { class: "conv-head-box" });
-  /** A thing's Share, Open on Mac and Stop it, under its say-line. */
-  const thingFoot = h("div", { class: "thing-foot" });
   const scroller = h("div", { class: "chat-scroll" }, earlier, thread);
   watchDepth(scroller, () => "chat");
-  const foot = holdFoot(scroller, 40);
+  const foot = holdFoot(scroller, FOOT_NEAR);
   /** Where Chat was when search covered it, to put back when it goes. */
   let covered: { held: boolean; top: number } | null = null;
-  /** What the last render drew: a search over a conversation's page has no place of Chat's to keep. */
-  let drawn: Screen["kind"] | null = null;
-  let thingOnTop = false;
+  /** Chat has drawn its messages: a search over it before then has no place of Chat's to keep. */
+  let drawn = false;
   const text = h("textarea", {
     class: "chat-text",
     attrs: {
       rows: "1",
       maxlength: String(MAX_CHAT_TEXT),
       placeholder: "Message",
-      "aria-label": `Message ${RIVET_NAME}`,
+      "aria-label": `Message ${agentName()}`,
       enterkeyhint: "send",
     },
   });
@@ -1000,10 +1021,10 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     const left = collectLeft(messages.values());
     const words =
       left === null
-        ? `Sending to ${RIVET_NAME} soon`
+        ? `Sending to ${agentName()} soon`
         : left > 0
-          ? `Sending to ${RIVET_NAME} in\u00a0${left}s`
-          : `Sending to ${RIVET_NAME}…`;
+          ? `Sending to ${agentName()} in\u00a0${left}s`
+          : `Sending to ${agentName()}…`;
     if (collectWords.textContent !== words) collectWords.textContent = words;
     // Reduced motion: the bar moves on this tick alone. Otherwise the frame loop drains it, started again if it rested.
     if (stillMotion()) paintBar();
@@ -1089,8 +1110,6 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   }
   function putBack(back: ChatCancelled): void {
     cmd.tookBack(back);
-    // A page holds only its own lines: the cancelled ones on screen mean this page is where they (and their reply) were.
-    const theirPage = back.ids.some((id) => messages.has(id));
     for (const id of back.ids) {
       gone.add(id);
       messages.delete(id);
@@ -1103,30 +1122,13 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       writeDraft(text.value, true);
     }
     if (back.images.length || back.files.length) attach.put(back.images, back.files);
-    // A reply comes back as one: on the page it is put back on, or from Chat as it was picked there.
-    // The reply comes back in Chat, or on the cancelled lines' own page; never on a page opened while the Cancel was out
-    // (another conversation, read-only Updates), and in the agents' room only on an agent's line.
-    const replied = back.replyTo ? messages.get(back.replyTo) : undefined;
-    const here = shownId();
-    const fits = here === null || (theirPage && (here !== TEAM_ROOM_ID || Boolean(replied?.team?.from)));
-    if (back.replyTo && back.quote && fits) {
-      setReply(
-        {
-          id: back.replyTo,
-          quote: back.quote,
-          ...(here && !back.ids.includes(here) ? { conversation: here } : {}),
-          ...(here === TEAM_ROOM_ID && replied?.team?.from ? { owner: replied.team.from } : {}),
-        },
-        false,
-      );
-    }
+    // A reply comes back as one, as it was picked.
+    if (back.replyTo && back.quote) setReply({ id: back.replyTo, quote: back.quote }, false);
     hint.textContent =
       text.value.length > MAX_CHAT_TEXT
         ? "Cancelled. It's back in the box, too long to send as one: trim it first."
         : "Cancelled. It's back in the box to edit.";
-    // A page that was the cancelled line's own conversation has nothing left to show.
-    if (shown.kind === "conversation" && back.ids.includes(shown.id)) showRivet();
-    else render(false);
+    render(false);
     void loadList(true);
     text.focus();
   }
@@ -1186,17 +1188,6 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     onChange: () => (hint.textContent = ""),
     onSignedOut: () => signedOut("Your session ended. Sign in again."),
   });
-  /** Read aloud, on the list's head and on a conversation's: the two always agree. */
-  const speakBtns: HTMLButtonElement[] = [];
-  const speakButton = (): HTMLButtonElement => {
-    const one = h("button", {
-      class: "btn ghost chat-speak",
-      attrs: { type: "button", "aria-pressed": String(speak), "data-use": "chat.speak.toggle" },
-      on: { click: () => toggleSpeak() },
-    });
-    speakBtns.push(one);
-    return one;
-  };
   const toggleSpeak = () => {
     speak = !speak;
     writeSpeak(speak);
@@ -1217,7 +1208,6 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     } else stopVoice();
     renderSpeak();
   };
-  const headSpeak = speakButton();
   // Chat's head keeps one options button: Collapse all, Expand all, Mark all read, and Read aloud as a switch.
   const speakSwitch = h(
     "button",
@@ -1233,13 +1223,6 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   const renderSpeak = () => {
     speak = readSpeak();
     speakSwitch.setAttribute("aria-checked", String(speak));
-    for (const one of speakBtns) {
-      one.setAttribute("aria-pressed", String(speak));
-      one.replaceChildren(
-        svg(SPEAKER, "btn-icon"),
-        speak ? "Reading aloud" : "Read aloud",
-      );
-    }
   };
   renderSpeak();
   // Collapse all, Expand all and Mark all read moved to the topics bar over Chat. Read aloud, where the device can
@@ -1252,8 +1235,6 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     chatReplyStylePicker(),
   );
   menu.hidden = true;
-  /** The page the menu was last drawn for: "" is Chat. */
-  let menuView = "";
   const optionsBtn = h(
     "button",
     {
@@ -1300,6 +1281,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   function setFinding(on: boolean, quiet = false): void {
     if (finding === on) return;
     finding = on;
+    if (on) saved.close(false);
     findBtn.setAttribute("aria-expanded", String(on));
     if (!on) search.clear(true);
     if (quiet) return;
@@ -1307,13 +1289,38 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     if (on) search.focus();
     else findBtn.focus();
   }
+  // Saved lines: a bookmark in the head opens their list over Chat; a line's Save or a pull left keeps one.
+  const saved = chatSaved({
+    go: (line) => lineNow(line.conversation, line.id),
+    // A saved line Chat has not loaded replies from what the list holds of it.
+    reply: (line) => replyToLine(messages.get(line.id) ?? line),
+    // As the line's own Reply: none on his line while it still collects.
+    replies: (line) => !(line.from === "owner" && (messages.get(line.id) ?? line).status === "collecting"),
+    changed: () => {
+      if (alive) render(false);
+    },
+    // Quietly, as a way in does: a redraw between search and the list would show (and mark read) what search covered.
+    opening: () => {
+      search.clear(true);
+      setFinding(false, true);
+    },
+    signedOut: () => signedOut("Your session ended. Sign in again."),
+  });
   const dueSlot = h("span", { class: "chat-due-slot" });
+  const chatTitle = h("h1", { class: "chat-title" }, agentName());
   const chatHead = h(
     "div",
     { class: "chat-head" },
-    h("h1", { class: "chat-title" }, RIVET_NAME),
-    h("div", { class: "chat-tools" }, dueSlot, findBtn, optionsBtn, menu),
+    chatTitle,
+    h("div", { class: "chat-tools" }, dueSlot, saved.button, findBtn, optionsBtn, menu),
   );
+  // A hosted agent's name can come after Chat has mounted (cloud-agent.ts).
+  const paintName = () => {
+    if (chatTitle.textContent === agentName()) return;
+    chatTitle.textContent = agentName();
+    text.setAttribute("aria-label", `Message ${agentName()}`);
+    if (alive) render(false);
+  };
   const composeBox = h(
     "div",
     { class: "chat-compose-box" },
@@ -1328,11 +1335,11 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       sendBtn,
     ),
   );
-  // A title hit opens that thing on its newest; a message hit is brought up where it lives, in Chat or on its thing.
+  // A title hit brings up its conversation's newest line in Chat; a message hit, that message.
   const search = chatSearch(
     (id, whole) => {
       setFinding(false, true);
-      if (whole) openConversationNow(id);
+      if (whole) lineNow(id, null);
       else openHit(id);
     },
     () => render(false),
@@ -1354,14 +1361,14 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     "section",
     { class: "chat", attrs: { "data-card-keys": "off" } },
     chatHead,
-    headBox,
     search.el,
+    saved.el,
     scroller,
     composeBox,
-    thingFoot,
     hint,
   );
   el.replaceChildren(section);
+  saved.load();
 
   // A draft startDraft began for this mount (Discuss this) opens with the keyboard up, the caret after it.
   const started = focusOnMount;
@@ -1370,12 +1377,8 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   pendingDraft = null;
   if (text.value) fit();
   const kept = readReply();
-  // A reply belongs to the conversation it was picked in: kept until that one opens. One saved before conversations
-  // names none, so it is dropped.
-  if (kept && shown.kind === "conversation" && kept.conversation === shown.id)
-    setReply(kept, false);
-  else if (kept && kept.conversation === undefined && kept.label && shown.kind === "rivet") setReply(kept, false);
-  else if (kept && kept.conversation === undefined) writeReply(null);
+  // A reply comes back in Chat, one picked on a thing's old page too.
+  if (kept) setReply(kept, false);
   const box = { text, fit };
   draftBox = box;
   putShare = () => {
@@ -1408,7 +1411,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     }
   });
   scroller.addEventListener("scroll", () => {
-    markRead();
+    readChat();
     earlierAtTop();
   });
   // A Chat shorter than the screen never scrolls: dragging or wheeling it down at the top is his scroll away and back,
@@ -1458,16 +1461,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     for (const [el, top] of kept) if (el.scrollTop !== top) el.scrollTop = top;
   }
 
-  /** A piece of work's page: any conversation but Rivet's own (Updates, quote alerts, Agent Chat). */
-  function thingPage(): boolean {
-    const id = shownId();
-    return id !== null && !ownsNoCard(id) && !readOnly();
-  }
-
-  /**
-   * In Chat: every line of every conversation but the old Updates. A
-   * thing's lines stay on its page too.
-   */
+  /** In Chat: every line of every conversation but the old Updates. */
   function inChat(message: ChatMessage): boolean {
     return (message.threadId ?? message.id) !== UPDATES_ID;
   }
@@ -1484,44 +1478,8 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     return false;
   }
 
-  /** The old Updates conversation is read-only: opened by its id, or by any message of it once its detail says so. */
-  function readOnly(): boolean {
-    const id = shownId();
-    return (
-      id !== null &&
-      (id === UPDATES_ID ||
-        summaryOf(id)?.updates === true ||
-        (detail !== null && detail.conversation.updates))
-    );
-  }
-
-  function shownId(): string | null {
-    return shown.kind === "conversation" ? shown.id : null;
-  }
-
-  /**
-   * A server-owned room (quote alerts…) other than the Agent Chat room: a line typed there with no Reply
-   * starts a chat of its own, since the room files no card. A topic's page keeps its lines.
-   */
-  function roomStartsChat(id: string): boolean {
-    return ownsNoCard(id) && id !== TEAM_ROOM_ID;
-  }
-
   function paintPlaceholder(): void {
-    const id = shownId();
-    text.placeholder =
-      cappedWake !== null
-        ? `Asleep ${cappedWake}`
-        : id === TEAM_ROOM_ID
-        ? `Message ${RIVET_NAME} about a chat`
-        : id !== null && !replyingTo
-          ? // Short enough for one line beside the mic on a narrow phone (the box is about 100px of text there).
-            roomStartsChat(id)
-            ? "New chat"
-            : "Reply here"
-          : thingPage()
-            ? "Say something to this thing…"
-            : "Message";
+    text.placeholder = cappedWake !== null ? `Asleep ${cappedWake}` : "Message";
   }
 
   function setReply(target: ReplyTarget | null, focus = true): void {
@@ -1535,37 +1493,73 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     if (focus) text.focus();
   }
 
-  /** Hides the reply without forgetting it: it stays saved for its own conversation. */
-  function putReplyAway(): void {
-    replyingTo = null;
-    paintPlaceholder();
-    replyBar.hidden = true;
-    replyQuote.replaceChildren();
-  }
+  const drawnLine = (id: string): HTMLElement | undefined =>
+    [...thread.querySelectorAll<HTMLElement>(".chat-msg")].find((item) => item.dataset.id === id);
 
-  /** Brings the quoted message into view and lights it for a moment; one not loaded here is left alone. */
-  function jump(id: string): void {
-    const target = [...thread.querySelectorAll<HTMLElement>(".chat-msg")].find(
-      (item) => item.dataset.id === id,
-    );
-    if (!target) return;
+  /** Brings a drawn line into view and lights it for a moment. False, with nothing done, when the line is not drawn. */
+  function jump(id: string): boolean {
+    const target = drawnLine(id);
+    if (!target) return false;
     jumps++;
     thread.querySelector(".chat-msg.lit")?.classList.remove("lit");
     lit = id;
     target.classList.add("lit");
     // Setting the scroll ends a smooth one: the thread growing under it must not take it back to the foot.
-    foot.place(false);
-    target.scrollIntoView?.({
-      block: "center",
-      behavior: matchMedia("(prefers-reduced-motion: reduce)").matches
-        ? "auto"
-        : "smooth",
-    });
+    foot.place(false, true);
+    const behavior: ScrollBehavior = matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+    // A line taller than Chat shows from its start; centred, he would land mid-answer.
+    const tall = (line: HTMLElement) => line.getBoundingClientRect().height > scroller.clientHeight;
+    target.scrollIntoView?.({ block: tall(target) ? "start" : "center", behavior });
+    // Lines not drawn yet stand at a guessed height (content-visibility, command.css) and take their own as the scroll
+    // passes them, so it can end with the line short of the middle, under the head. Each time a scroll ends
+    // while it is lit, a line not wholly in view is brought to the middle again; his own touch lets it be.
+    unsettle?.();
+    const settle = () => {
+      const line = drawnLine(id);
+      if (!alive || lit !== id || !line) return unsettle?.();
+      const box = scroller.getBoundingClientRect();
+      const at = line.getBoundingClientRect();
+      const off = tall(line) ? at.top < box.top || at.top > box.bottom : at.top < box.top || at.bottom > box.bottom;
+      if (off) line.scrollIntoView?.({ block: tall(line) ? "start" : "center", behavior });
+    };
+    // A browser with no scrollend looks once, when a long smooth scroll has ended.
+    const late = window.setTimeout(settle, JUMP_SETTLE_MS);
+    let handOn = false;
+    const touched = () => {
+      handOn = true;
+      unsettle?.();
+    };
+    // His own scroll, by touch, wheel or keys, lets it be.
+    const his = ["pointerdown", "wheel", "touchstart", "keydown"];
+    scroller.addEventListener("scrollend", settle);
+    for (const kind of his) scroller.addEventListener(kind, touched, { passive: true });
+    unsettle = () => {
+      window.clearTimeout(late);
+      scroller.removeEventListener("scrollend", settle);
+      for (const kind of his) scroller.removeEventListener(kind, touched);
+      unsettle = null;
+    };
     window.clearTimeout(litTimer);
     litTimer = window.setTimeout(() => {
       lit = null;
+      unsettle?.();
       thread.querySelector(".chat-msg.lit")?.classList.remove("lit");
+      // A jump to a line at the foot moved nothing, so no scroll down took hold again: at the foot still, it holds,
+      // unless he has a hand on it.
+      if (!handOn && scroller.clientHeight > 0 && scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < FOOT_NEAR) foot.place(true);
     }, LIT_MS);
+    return true;
+  }
+
+  /** A way in's line: brought up, or, not drawn in Chat after all, a word that it is not here in place of nothing. */
+  function bringUp(id: string): void {
+    if (jump(id)) return;
+    // Nothing drawn yet (held for the home's first frame, or under a full-screen clip): brought up once Chat draws.
+    if (threadHeld || (document.fullscreenElement && thread.contains(document.fullscreenElement))) {
+      heldLine = id;
+      return;
+    }
+    flash(NOT_IN_CHAT, "warn");
   }
 
   /**
@@ -1620,43 +1614,26 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       quoted,
       run,
       labelOf([message]),
-      shown.kind,
-      shownId(),
-      readOnly(),
       message.id === lit,
       appOnly(message),
       card ? [card.id, card.rev, isUpdate(card)] : null,
       message.card ? answeredTitle(message) : null,
       timeOf(message.at),
       chatImages(message).map(mediaSrc),
+      saved.has(message.id),
     ]);
     const was = rows.get(message.id);
-    // A card's media is one element shared with the Feed and Answered, so another view may have taken it from the row.
-    // Chat's own timeline shows a posted card as one line, without it.
-    const media = message.posted && shown.kind !== "rivet" && card?.media ? cardMedia(card.id, card.media, card.title) : null;
-    const el = was?.key === key && (!media || was.el.contains(media)) ? was.el : bubble(message, quoted, run);
+    const el = was?.key === key ? was.el : bubble(message, quoted, run);
     next.set(message.id, { key, el });
     return el;
   }
 
   /**
-   * The messages in runs, oldest to newest. A conversation's page splits at each new question; Chat at another
-   * conversation's line too, so a Reply names its own conversation. A chunk's first line starts one as well: its
-   * heading sits over it.
+   * The messages in runs, oldest to newest: a new run at each new question and at another conversation's line, so a
+   * Reply names its own conversation. A chunk's first line starts one as well: its heading sits over it.
    */
   function exchangesOf(sorted: ChatMessage[]): ChatMessage[][] {
     const groups: ChatMessage[][] = [];
-    // In the agents' room each agent's run is its own card, so its Reply goes to that agent: only another agent's line starts one.
-    if (shownId() === TEAM_ROOM_ID) {
-      let agent: string | undefined;
-      for (const message of sorted) {
-        const last = groups.at(-1);
-        if (last && (!message.team || agent === undefined || message.team.from === agent) && !startsChunk(message.at, last.at(-1)!.at)) last.push(message);
-        else groups.push([message]);
-        agent = message.team?.from ?? agent;
-      }
-      return groups;
-    }
     for (const message of sorted) {
       const last = groups.at(-1);
       const before = last?.at(-1);
@@ -1664,7 +1641,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
         last &&
         before &&
         !(message.from === "owner" && before.from !== "owner") &&
-        (shown.kind !== "rivet" || threadOf(message) === threadOf(before)) &&
+        threadOf(message) === threadOf(before) &&
         !startsChunk(message.at, before.at)
       )
         last.push(message);
@@ -1710,9 +1687,8 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     if (atFoot) scroller.scrollTop = scroller.scrollHeight;
   }
 
-  /** In Chat, the label of a line's conversation, "<ask id> · <title>", in its strip and on its Reply; null elsewhere. */
+  /** The label of a line's conversation, "<ask id> · <title>", in its strip and on its Reply. */
   function labelOf(group: ChatMessage[]): string | null {
-    if (shown.kind !== "rivet") return null;
     const id = threadOf(group[0]!);
     return chatLabel(chatLabels.get(id) ?? summaryOf(id));
   }
@@ -1722,13 +1698,21 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   /** Each run's messages as last drawn: Reply reads them when tapped. */
   let cardGroups = new Map<string, ChatMessage[]>();
 
-  /** A line's More: Read aloud for Rivet's words, Copy, Share for a line that may leave the app, Open card. */
+  /**
+   * A line's More: Read aloud for Rivet's words, Copy, Share for a line that may leave the app, Open card, and on a
+   * thing's line Stop it.
+   */
   function moreOf(message: ChatMessage): void {
     const words = message.posted ? message.posted.title : message.card && message.from === "owner" ? answerLine(answeredTitle(message), message.text) : message.text;
     const card = cardOf(message);
     const theirs = message.from !== "owner";
+    const id = threadOf(message);
+    const summary = summaryOf(id);
+    const thing = !ownsNoCard(id) && summary?.updates !== true;
+    const facts = thing ? thingFacts([...messages.values()].filter((one) => threadOf(one) === id), allCards(), summary) : null;
+    const title = (summary?.title ?? chatLabels.get(id)?.title)?.trim() || "Conversation";
     openMore({
-      line: words.replace(/\s+/g, " ").trim() || (theirs ? RIVET_NAME : "Your line"),
+      line: words.replace(/\s+/g, " ").trim() || (theirs ? agentName() : "Your line"),
       listen: theirs && !message.team && !message.posted && message.text.trim() ? rivetWords(message.text) : null,
       copy: words.trim() || null,
       // Share sends text: a line that is only photos or a video has none to send, and a card is no answer.
@@ -1737,6 +1721,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
           ? () => openShare(message.text, () => (liveRefusal ? liveRefusal(message) : SHARE_CHECKING))
           : null,
       card: card ? () => showCard(card.id) : null,
+      stop: facts ? () => confirmStop(id, facts.chat, title) : null,
     });
   }
 
@@ -1744,12 +1729,9 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   function replyToLine(message: ChatMessage): void {
     const group = [...cardGroups.values()].find((one) => one.some((line) => line.id === message.id));
     const label = group ? labelOf(group) : null;
-    const owner = shownId() === TEAM_ROOM_ID ? message.team?.from : undefined;
     setReply({
       id: message.id,
       quote: { from: message.from, text: quoteText(message) },
-      ...(shownId() ? { conversation: shownId()! } : {}),
-      ...(owner ? { owner } : {}),
       ...(label ? { label } : {}),
     });
   }
@@ -1775,7 +1757,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
             { class: "chat-ex-wait", attrs: { role: "status" } },
             rivet("working", { size: 28, className: "chat-rivet" }),
             h("span", { class: "chat-ex-dots", attrs: { "aria-hidden": "true" } }, h("i"), h("i"), h("i")),
-            `${RIVET_NAME} is working on it`,
+            `${agentName()} is working on it`,
           )
         : null,
     ].filter((one): one is HTMLElement => one !== null);
@@ -1807,7 +1789,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
         ? h(
             "span",
             { class: "chat-status acked" },
-            ` · ${RIVET_NAME}: ${ackWords(message.ack.text)}`,
+            ` · ${agentName()}: ${ackWords(message.ack.text)}`,
           )
         : mine && message.status === "replied"
           ? // A small tick, not the word.
@@ -1824,7 +1806,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
         )
       : null;
     // In Chat his card answer reads as the answer to its card: "You approved “…”".
-    const text = mine && message.card && shown.kind === "rivet" ? answerLine(answeredTitle(message), message.text) : message.text;
+    const text = mine && message.card ? answerLine(answeredTitle(message), message.text) : message.text;
     // A line with no plain words to tap (only a photo, a clip or a file, or Rivet's card line, whose words are the
     // card's button) keeps its strip shown: a tap there opens the photo or the card, so it could never open the strip.
     const held = !posted && (!text || Boolean(card && !mine));
@@ -1852,10 +1834,10 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       : null;
     const replyTo = message.replyTo;
     // Every line has its own More and Reply, in its strip, his own lines too: a reply
-    // to his line goes to that line's conversation. None in the read-only Updates; none on his line while it still
-    // collects (Cancel can take the line away from under the reply); and in the agents' room only on an agent's line
-    // (`team`), the one that names whom the reply is for: not his own, nor the hourly summary or a say reply there.
-    const replies = !readOnly() && (shownId() === TEAM_ROOM_ID ? Boolean(message.team?.from) : !(mine && message.status === "collecting"));
+    // to his line goes to that line's conversation. None on his line while it still collects (Cancel can take the line
+    // away from under the reply).
+    const replies = !(mine && message.status === "collecting");
+    const kept = saved.has(message.id);
     const tools = h(
       "div",
       { class: "chat-msg-tools" },
@@ -1871,6 +1853,17 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
             "Reply",
           )
         : null,
+      // Every line can be saved, his own and one without Reply too.
+      h(
+        "button",
+        {
+          class: "chat-msg-tool chat-save",
+          attrs: { type: "button", "aria-pressed": String(kept), "data-use": "chat.msg.save" },
+          on: { click: () => toggleSaved(message) },
+        },
+        svg(kept ? BOOKMARKED : BOOKMARK, "chat-save-icon"),
+        kept ? "Saved" : "Save",
+      ),
     );
     const strip = h("div", { class: "chat-msg-open" }, meta, tools);
     strip.hidden = !held && message.id !== opened;
@@ -1919,7 +1912,8 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
                 "aria-label": "Go to the quoted message",
                 "data-use": "chat.msg.quote-jump",
               },
-              on: { click: () => jump(replyTo) },
+              // A quoted line older than the page loaded here is fetched and brought up as a search hit is.
+              on: { click: () => jump(replyTo) || openHit(replyTo) },
             },
             ...quoteParts(message.quote),
           )
@@ -1976,7 +1970,6 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
             posted.ask
               ? h("p", { class: "chat-posted-ask" }, posted.ask)
               : null,
-            card?.media && shown.kind !== "rivet" ? cardMedia(card.id, card.media, card.title) : null,
             card
               ? h(
                   "button",
@@ -2000,18 +1993,36 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
               },
               text,
             )
-          : h("p", { class: "chat-body" }, ...linkify(text))
+          : // His own line stays as he typed it (rivet-words.ts); a tap's line or a card answer carries agent-written words.
+            h("p", { class: "chat-body", attrs: mine && hisOwnWords(message) ? { [TYPED]: "" } : {} }, ...linkify(text))
         : null,
       openCard ? h("div", { class: "chat-foot" }, h("div", { class: "chat-foot-tools" }, openCard)) : null,
+      kept ? h("p", { class: "chat-mark" }, svg(BOOKMARKED, "chat-mark-icon"), "Saved") : null,
       stateLine,
       strip,
     );
-    // Pulled right, a line replies as its Reply does, wherever it has a Reply.
-    if (replies) swipeToReply(line, () => {
-      useTap("chat.msg.reply");
-      replyToLine(messages.get(message.id) ?? message);
-    });
+    // Pulled right, a line replies as its Reply does, wherever it has a Reply; pulled left, any line is saved or unsaved.
+    swipeToReply(
+      line,
+      replies
+        ? () => {
+            useTap("chat.msg.reply");
+            replyToLine(messages.get(message.id) ?? message);
+          }
+        : null,
+      () => {
+        useTap("chat.msg.save");
+        toggleSaved(message);
+      },
+    );
     return line;
+  }
+
+  function toggleSaved(message: ChatMessage): void {
+    // Its button is drawn again with the other word: the keyboard follows it to the new one.
+    const had = document.activeElement instanceof HTMLElement && document.activeElement.classList.contains("chat-save");
+    saved.toggle(message);
+    if (had) thread.querySelector<HTMLElement>(`.chat-msg[data-id="${CSS.escape(message.id)}"] .chat-save`)?.focus();
   }
 
   /** An app-only conversation stays in the app: nothing in it is offered to share. */
@@ -2024,98 +2035,16 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   }
 
   function summaryOf(id: string): ConversationSummary | null {
-    // The open conversation's detail is the freshest; off it, the rows a patch refreshes are.
-    if (detail?.id === id && shownId() === id) return detail.conversation;
-    return (
-      list?.conversations.find((row) => row.id === id) ??
-      (detail?.id === id ? detail.conversation : null)
-    );
+    return list?.conversations.find((row) => row.id === id) ?? fetchedSummaries.get(id) ?? null;
   }
 
-  /** Rivet's newest reply in the open conversation with text to share, or null. */
-  function shareable(): ChatMessage | null {
-    let latest: ChatMessage | null = null;
-    for (const message of messages.values())
-      if (
-        message.from === "rivet" &&
-        message.text &&
-        !message.posted &&
-        (!latest || byTime(message, latest) > 0)
-      )
-        latest = message;
-    return latest && !appOnly(latest) && !inRoom(latest) ? latest : null;
-  }
-
-  let paintedHead = "";
-  let paintedThing = "";
-  function paintHead(): void {
-    const id = shownId();
-    const summary = id ? summaryOf(id) : null;
-    // The card its Needs you names opens from here while it is on the board.
-    const waiting =
-      detail && detail.id === id && detail.statusCard
-        ? detail.statusCard
-        : null;
-    const card =
-      waiting && boardCards().some((need) => need.id === waiting)
-        ? waiting
-        : null;
-    const thing = thingPage();
-    const facts = thing ? thingFacts(messages.values(), allCards(), summary) : null;
-    const title = summary?.title ?? (thing && !loadFailed ? "Loading…" : "Conversation");
-    const key = JSON.stringify([title, summary?.closed, facts && { ...facts, cards: facts.cards.length }, card, headHosted()]);
-    if (key !== paintedHead || !headBox.firstChild) {
-      paintedHead = key;
-      const refocus = keepFocus(headBox);
-      headBox.replaceChildren(
-        thingHead({
-          title,
-          step: facts?.step ?? null,
-          facts,
-          back: () => back(),
-          speak: canSpeak() && !headHosted() ? headSpeak : null,
-          card: card ? () => showCard(card) : null,
-          closed: summary?.closed === true,
-        }),
-      );
-      refocus();
-    }
-    paintThing(facts, title);
-  }
-
-  /** A thing's foot: Share (its newest card with media, else Rivet's newest reply) and Stop it. */
-  function paintThing(facts: ReturnType<typeof thingFacts> | null, title: string): void {
-    // Nothing leaves an app-only thing: its media shares only once a line of Rivet's in it may.
-    const open = [...messages.values()].some((one) => one.from === "rivet" && !appOnly(one) && !inRoom(one));
-    const media = facts && open ? [...facts.cards].reverse().find((one) => one.need?.media)?.need : undefined;
-    const reply = facts && !media ? shareable() : null;
-    const key = JSON.stringify([facts && { ...facts, cards: facts.cards.length }, open, media && `${media.id}:${media.rev}`, reply?.id, title]);
-    if (key === paintedThing) return;
-    paintedThing = key;
-    if (!facts) return void thingFoot.replaceChildren();
-    const refocus = keepFocus(thingFoot);
-    thingFoot.replaceChildren(
-      thingButtons({
-        share: media
-          ? cardShareButton(media, "thing-btn", () => [...messages.values()].some((one) => one.from === "rivet" && !appOnly(one) && !inRoom(one)))
-          : reply
-            ? button([svg(SHARE, "btn-icon"), "Share"], () => openShare(`${title}\n\n${reply.text}`, () => (liveRefusal ? liveRefusal(reply) : SHARE_CHECKING)), "thing-btn thing-share", false, "chat.thing.share")
-            : null,
-        stop: () => confirmStop(facts.chat, title),
-      }),
-    );
-    refocus();
-  }
-
-  /** Stop it asks first, then tells Rivet in this thing's conversation; there is no stop of a chat but his. */
-  function confirmStop(chat: string | null, title: string): void {
-    const id = shownId();
-    if (!id) return;
+  /** Stop it asks first, then tells Rivet in thing `id`'s conversation; there is no stop of a chat but his. */
+  function confirmStop(id: string, chat: string | null, title: string): void {
     const words = stopText(chat, title);
     openSheet(
-      chat ? `Ask ${RIVET_NAME} to stop ${chatName(chat)}?` : `Ask ${RIVET_NAME} to stop this?`,
+      chat ? `Ask ${agentName()} to stop ${chatName(chat)}?` : `Ask ${agentName()} to stop this?`,
       {
-        mount: (body) => body.replaceChildren(h("p", { class: "sheet-hint" }, `Sends “${words}” to ${RIVET_NAME} here. He stops the chat and says so.`)),
+        mount: (body) => body.replaceChildren(h("p", { class: "sheet-hint" }, `Sends “${words}” to ${agentName()} in this line's conversation. He stops the chat and says so.`)),
         unmount: () => {},
       },
       "Cancel",
@@ -2123,7 +2052,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
         closeSheet();
         cmd.sendChat(words, [], [], undefined, id).then(
           (entry) => {
-            flash(`Asked ${RIVET_NAME} to stop it.`);
+            flash(`Asked ${agentName()} to stop it.`);
             // The stream's copy, when it came first, keeps its status, place and deadline (as send() does).
             const had = messages.get(entry.id);
             if (alive) arrived({ id: entry.id, from: "owner", text: words, at: entry.at, status: had?.status ?? (entry.status === "collecting" ? "collecting" : "sent"), ...(had?.seq !== undefined ? { seq: had.seq } : {}), ...(had?.sendsAt ? { sendsAt: had.sendsAt } : {}), threadId: typeof entry.conversation === "string" ? entry.conversation : id });
@@ -2132,7 +2061,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
             if (!authFail(error)) flash(describe(error), "error");
           },
         );
-      }, "primary big thing-stop-go", false, "chat.thing.stop-confirm"),
+      }, "primary big thing-stop-go", false, "chat.more.stop-confirm"),
       { use: "stop-confirm" },
     );
   }
@@ -2187,39 +2116,19 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
 
   /** True when it leaves the newest message on screen: stuck to the bottom, or already near it. */
   function render(stick: boolean): boolean {
-    const kind = shown.kind;
     paintSend();
-    search.el.dataset.view = kind;
     // On Chat while the head's magnifier is on; a wide window's pane keeps it on top (conversations.css).
-    search.el.hidden = kind !== "rivet" || !finding;
-    findBtn.hidden = kind !== "rivet";
+    search.el.hidden = !finding;
     // It hides the scroller, which then reads 0 everywhere: where Chat was is taken before, not measured after.
-    const covers = search.active() && kind === "rivet";
+    const covers = search.active() || saved.isOpen();
     const wasCovered = section.classList.contains("searching");
-    if (covers && !wasCovered && drawn === "rivet" && scroller.clientHeight > 0)
+    if (covers && !wasCovered && drawn && scroller.clientHeight > 0)
       covered = { held: foot.held(), top: scroller.scrollTop };
-    // Results stand in for Chat's messages while a search is typed.
+    // Results, or the Saved list, stand in for Chat's messages: nothing under them is on screen or read.
     section.classList.toggle("searching", covers);
-    section.classList.toggle("thing-page", thingPage());
-    if (thingPage() !== thingOnTop) {
-      thingOnTop = !thingOnTop;
-      if (thingOnTop) enterScreen("chat.thing");
-      else leaveScreen("chat.thing");
-    }
-    // In the Rivet sheet's head row it is the sheet's title, over a thing's page too.
-    chatHead.hidden = kind !== "rivet" && !headHosted();
-    // A page opened with no tap outside it (a search hit, a push) must not leave the menu, and its keys, held open.
-    if ((shownId() ?? "") !== menuView && !menu.hidden) closeMenu();
-    menuView = shownId() ?? "";
-    headBox.hidden = kind === "rivet";
-    due.setActive(kind === "rivet");
-    thingFoot.hidden = !thingPage();
-    // The server takes a room line once the room exists, with its first agent line.
-    composeBox.hidden = readOnly() || (roomMissing && shownId() === TEAM_ROOM_ID);
+    due.setActive(true);
     paintPlaceholder();
     tickCollect();
-    if (kind === "conversation") paintHead();
-    else paintThing(null, "");
     // Taking a clip out of the page ends its full screen: the conversation redraws once he leaves it (onFullscreen).
     if (
       document.fullscreenElement &&
@@ -2230,12 +2139,14 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       heldStick ||= stick;
       return false;
     }
-    drawn = kind;
+    drawn = true;
     // Nothing kept, as Chat had drawn nothing when they covered it: a hold taken under them still holds.
-    const back = covers || kind !== "rivet" ? null : (covered ?? (wasCovered && foot.held() ? { held: true, top: 0 } : null));
+    const back = covers ? null :(covered ?? (wasCovered && foot.held() ? { held: true, top: 0 } : null));
     if (!covers) covered = null;
+    // A line just brought up is still being scrolled to while it is lit: Chat measuring at its foot then is where the
+    // scroll began, and placing it at the foot would end that scroll short of the line.
     const atBottom =
-      !!back?.held || scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 40;
+      !!back?.held || (!lit && scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 40);
     // Updates' seed bubble ("Updates from Rivet") went with the conversation.
     const sorted = [...messages.values()]
       .filter((message) => !SEED_IDS.includes(message.id))
@@ -2279,17 +2190,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       : h(
       "li",
       { class: "chat-empty" },
-      kind === "rivet"
-        ? chatLoaded
-          ? `Say anything to ${RIVET_NAME}.`
-          : "Loading…"
-        : !detail
-          ? roomMissing && shownId() === TEAM_ROOM_ID
-            ? "No agent has written here yet."
-            : "Loading…"
-          : shownId() === TEAM_ROOM_ID
-            ? "No agent has written here yet."
-            : "Nothing here yet.",
+      chatLoaded ? `Say anything to ${agentName()}.` : "Loading…",
     );
     placeChildren(thread, bubbles.length ? bubbles : [empty]);
     refocus();
@@ -2300,7 +2201,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     if (stick || scroller.clientHeight > 0) foot.place(stick || atBottom);
     // Under search results nothing in the conversation is on screen, whatever the hidden scroller measures.
     const showsNewest = (stick || atBottom) && !section.classList.contains("searching");
-    if (showsNewest) markRead();
+    if (showsNewest) readChat();
     earlierAtTop();
     return showsNewest;
   }
@@ -2315,60 +2216,13 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       armEarlier();
       return;
     }
-    if (earlierArmed && loadingEarlier?.into !== messages && (earlierMore ?? detail?.more)) void loadEarlier();
+    if (earlierArmed && loadingEarlier?.into !== messages && earlierMore) void loadEarlier();
   }
 
   /** The keyboard a Try again held when it went: the message box, or on a touch screen or with the box hidden the chat. */
   function handFocus(): void {
     if (!window.matchMedia?.("(pointer: coarse)").matches) text.focus();
     if (document.activeElement !== text) parkFocus(section);
-  }
-
-  /** Marks the open conversation read up to its newest message, once that is on screen and anything is unread. */
-  function markRead(): void {
-    if (shown.kind === "rivet") return readChat();
-    const id = shownId();
-    if (
-      !alive ||
-      !id ||
-      !detail ||
-      detail.id !== id ||
-      document.visibilityState !== "visible" ||
-      coveredOver(section) ||
-      // Search results stand over the conversation on a desktop: what they hide is not seen.
-      section.classList.contains("searching")
-    )
-      return;
-    if (
-      scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight >=
-      40
-    )
-      return;
-    const latest = newest();
-    if (
-      !latest ||
-      latest.id === marked ||
-      (!countsUnread(detail.conversation) && unseen === 0)
-    )
-      return;
-    marked = latest.id;
-    unseen = 0;
-    const row = list?.conversations.find((item) => item.id === id);
-    if (row && countsUnread(row)) {
-      row.unread = 0;
-      row.markedUnread = false;
-      noteUnread();
-    }
-    cmd.patchConversation(id, { read: latest.id }).then(
-      (found) => {
-        if (alive && shownId() === found?.id && detail && found.conversation)
-          detail = { ...detail, conversation: found.conversation };
-      },
-      (error: unknown) => {
-        if (authFail(error)) return;
-        if (marked === latest.id) marked = null;
-      },
-    );
   }
 
   /**
@@ -2426,110 +2280,11 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     changed();
   }
 
-  /** The things whose page entry this chat pushed: only those have a Chat entry behind them to go back to. */
-  const pushed = new Set<string>();
-
-  /**
-   * An entry naming a chat screen keeps what else the entry carries: inside Rivet's sheet that is the sheet's own
-   * marker, without which the sheet reads Back to it as leaving the sheet and closes (sheet.ts onPop).
-   */
-  const withScreen = (screen: string) => ({ ...(history.state ?? {}), chatScreen: screen });
-  function withoutScreen(): object | null {
-    const { chatScreen: _, ...rest } = (history.state ?? {}) as Record<string, unknown>;
-    return Object.keys(rest).length ? rest : null;
-  }
-
-  /** Records a thing's page opening so the phone's back gesture goes back to Chat. */
-  function remember(screen: Screen): void {
-    if (screen.kind !== "conversation") return;
-    try {
-      // Only an entry this chat pushed counts: a page that replaced the first entry has no Chat behind it.
-      if (history.state?.chatScreen === screen.id) return;
-      history.pushState({ ...withScreen(screen.id), chatDepth: historyDepth() + 1 }, "");
-      pushed.add(screen.id);
-    } catch {}
-  }
-
-  function openConversationNow(id: string, focus: string | null = null, record = true): void {
-    // A seeded room's first message is never shown (a title hit names it): it opens on the newest, not hunting for it.
-    if (focus && SEED_IDS.includes(focus)) focus = null;
-    // Anywhere else that opens a conversation (header search, a notification, a feed link) ends the panel's search.
-    // Quietly: a redraw now would show (and mark read) the conversation being left.
-    search.clear(true);
-    setFinding(false, true);
-    const fresh = shownId() !== id;
-    shown = { kind: "conversation", id };
-    if (fresh) {
-      messages = new Map();
-      detail = null;
-      loadFailed = false;
-      earlierMore = null;
-      earliestPage = null;
-      armEarlier();
-      // The last view's page before, still coming, is dropped: it neither blocks nor disarms this one.
-      loadingEarlier = null;
-      earlier.hidden = true;
-      if (hint.textContent === EARLIER_FAILED) hint.textContent = "";
-      marked = null;
-      unseen = 0;
-      detailTicket++;
-    }
-    // Another conversation, or one opened by a message of it whose own id is not known yet: the reply is put away,
-    // not dropped, and comes back when its conversation shows.
-    if (replyingTo && replyingTo.conversation !== id) putReplyAway();
-    // A reply picked here before a reload waits in storage for its conversation to open.
-    if (!replyingTo) {
-      const saved = readReply();
-      if (saved?.conversation === id) setReply(saved, false);
-    }
-    if (record) remember(shown);
-    render(true);
-    void loadDetail(false, true, focus);
-  }
-
-  /**
-   * Back to Chat. From the button, through history when this chat pushed the page's entry, so back stays in step; a
-   * thing opened as the first screen (a notification's tap, a link) has no Chat entry behind it, and going back from it
-   * would leave the app, so Chat is shown in place (review 2026-10-11).
-   */
-  function back(): void {
-    if (shown.kind === "rivet") return;
-    if (history.state?.chatScreen === shown.id && pushed.has(shown.id)) {
-      history.back();
-      return;
-    }
-    try {
-      if (history.state?.chatScreen !== undefined) history.replaceState(withoutScreen(), "");
-    } catch {}
-    showRivet();
-  }
-
-  /** Chat: the one conversation with Rivet, on its newest, or brought to `focus` (a search hit) once it loads. */
+  /** Chat on its newest, or brought to `focus` (a search hit, a notification's line) once it loads. */
   function showRivet(focus: string | null = null): void {
-    const fresh = shown.kind !== "rivet";
-    shown = { kind: "rivet" };
-    if (fresh) {
-      detail = null;
-      earlierMore = null;
-      earliestPage = null;
-      armEarlier();
-      loadingEarlier = null;
-      earlier.hidden = true;
-      if (hint.textContent === EARLIER_FAILED) hint.textContent = "";
-      messages = new Map();
-      chatLoaded = false;
-      loadFailed = false;
-      window.clearTimeout(detailTimer);
-      detailTicket++;
-      seedChat();
-    }
-    if (replyingTo && replyingTo.conversation !== undefined) putReplyAway();
-    if (!replyingTo) {
-      const saved = readReply();
-      if (saved && saved.conversation === undefined) setReply(saved, false);
-    }
+    wanted = focus;
     render(true);
-    void loadDetail(false, true, focus);
+    void loadDetail(false, true);
   }
 
   /**
@@ -2537,52 +2292,103 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
    * is marked read from it and the newest page still sets where earlier pages start.
    */
   function seedChat(): void {
-    if (shown.kind !== "rivet" || chatLoaded || messages.size || !lastChat) return;
+    if (chatLoaded || messages.size || !lastChat) return;
     for (const message of lastChat) if (!gone.has(message.id)) messages.set(message.id, message);
   }
 
-  /** The Rivet sheet hosts Chat's head in its own row, beside his face and Close (home.ts). */
-  function headHosted(): boolean {
-    return !section.contains(chatHead);
+
+
+  /**
+   * Brings a line up in Chat, lit: a notification, a feed link or a search hit opens Chat at its line, never a page of
+   * its own. With no line, or one Chat never shows (a room's seed), it is the conversation's newest line in
+   * Chat; a conversation with none there opens Chat on its newest.
+   */
+  /**
+   * Reads a way in's topic for More: its summary names an archived topic's chat (Stop it), and its app-only word
+   * is what Share follows. Until a newer word lands (this read's, or the list's or stream's), and for good if
+   * none does, the topic and the line's own topic (which a merge or split may have moved) count as app-only: the word
+   * held from before may be out of date. Stamped, not dropped, so an older read still on its way cannot clear it.
+   */
+  function readTopic(conversation: string, line: string | null): Promise<ConversationDetail | null> {
+    // A message id names its conversation too (a hit, an old notification): its loaded line's topic is stamped as well.
+    const own = messages.get(line ?? conversation)?.threadId;
+    for (const id of new Set([conversation, ...(own ? [own] : [])])) heardProject(id, true, 0, false);
+    const asked = nextStamp();
+    return cmd.getConversation(conversation).then((found) => {
+      // Only the topic read speaks for itself: a line split or merged elsewhere waits for its own topic's word.
+      if (alive && found?.conversation) {
+        fetchedSummaries.set(found.id, found.conversation);
+        heardProject(found.id, found.conversation.appOnly, asked);
+      }
+      return found ?? null;
+    });
   }
 
-
-  /** A message hit: brought up in Chat when it is Chat's, else on its thing's page. */
-  function openHit(id: string): void {
-    if (shown.kind === "rivet" && messages.has(id)) {
-      app.chatFocus = id;
-      return seek();
+  function lineNow(conversation: string, message: string | null): void {
+    if (message && SEED_IDS.includes(message)) message = null;
+    // A newer way in outdates an older one's read still on its way.
+    const go = ++lineGen;
+    wanted = null;
+    heldLine = null;
+    // An earlier jump's look back at its line would pull Chat up to it as this one's redraw scrolls.
+    unsettle?.();
+    // Quietly: a redraw now would show (and mark read) what the search stood over.
+    const searching = section.classList.contains("searching");
+    search.clear(true);
+    setFinding(false, true);
+    // The Saved list goes too, whichever way in this is (its own Go, the alarm, the due clock); quietly, as search does,
+    // since it covers Chat as search does (`searching` above).
+    saved.close(false, true);
+    if (message && messages.has(message)) {
+      if (searching) render(false);
+      bringUp(message);
+      // Shown from the last visit's copy: whichever newest page lands next keeps the line in view.
+      if (!chatLoaded) {
+        wanted = message;
+        void loadDetail(false, true);
+      }
+      // Read even when a summary is held: whether the topic is app-only now is what More's Share follows.
+      readTopic(conversation, message).catch(() => {});
+      return;
     }
-    // Still seeking until the hit's own load starts, which outdates any refresh's load still in flight.
+    // Still seeking until the line's own load starts, which outdates any refresh's load still in flight.
     seeking++;
-    cmd.getConversation(id).then(
+    readTopic(conversation, message).then(
       (found) => {
         seeking--;
-        if (!alive) return;
-        // A hit Chat has not loaded: a thing's opens its page, which holds it, as Chat's paging back may not reach it.
-        if (found?.conversation && (found.conversation.thing || ownsNoCard(found.id))) openConversationNow(found.id, id);
-        else showRivet(id);
+        if (!alive || go !== lineGen) return;
+        const shows = !!found?.conversation && found.id !== TEAM_ROOM_ID && found.id !== UPDATES_ID && !found.conversation.updates;
+        const newestLine = shows
+          ? ((found.messages ?? [])
+              .filter((one) => inChat(one) && !inRoom(one) && !gone.has(one.id) && one.status !== "cancelled" && !SEED_IDS.includes(one.id))
+              .sort(byTime)
+              .at(-1)?.id ?? null)
+          : null;
+        // A line asked for that Chat never shows (the Team room's, one gone with its conversation) is said, not passed
+        // over. Updates' lines are its everyday notifications, which open Chat quietly as they always have.
+        const updates = found?.id === UPDATES_ID || !!found?.conversation?.updates;
+        if (message && !shows && !updates) flash(NOT_IN_CHAT, "warn");
+        showRivet(shows ? (message ?? newestLine) : null);
       },
       (error: unknown) => {
         seeking--;
-        if (!alive || authFail(error)) return;
-        flash(error instanceof ApiError && error.status === 404 ? "That message is gone." : describe(error), "error");
+        if (!alive || go !== lineGen || authFail(error)) return;
+        if (message) flash(error instanceof ApiError && error.status === 404 ? "That message is gone." : describe(error), "error");
+        showRivet();
       },
     );
   }
 
-  // Back and forward show the thing their entry names, or Chat.
-  const onPop = (event: PopStateEvent) => {
-    // Closing a viewer or the phone's menu keeps the screen under it.
-    if (overlayTraversal(event)) return;
-    const named: unknown = history.state?.chatScreen;
-    // "list" is a More topics entry saved before it went: Chat.
-    if (typeof named !== "string" || ["rivet", "list", "older", "new"].includes(named)) return showRivet();
-    if (named !== shownId()) openConversationNow(named, null, false);
-  };
-  window.addEventListener("popstate", onPop);
+  /** A message hit: its id is a conversation's id too, which the server finds it by. */
+  const openHit = (id: string): void => lineNow(id, id);
+
   const onFullscreen = () => {
-    if (!document.fullscreenElement) render(false);
+    if (document.fullscreenElement) return;
+    render(false);
+    // A way in's line asked for under a full-screen clip comes up now Chat draws again.
+    const line = heldLine;
+    heldLine = null;
+    if (line) bringUp(line);
   };
   document.addEventListener("fullscreenchange", onFullscreen);
 
@@ -2623,7 +2429,6 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   function loadDetail(
     soon = false,
     stick = false,
-    focus: string | null = null,
   ): Promise<boolean> {
     window.clearTimeout(detailTimer);
     if (!alive) return Promise.resolve(false);
@@ -2662,58 +2467,24 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     };
     const ticket = ++detailTicket;
     const gen = appOnlyGen;
-    if (shown.kind === "rivet") {
-      const into = messages;
-      return cmd.getChat(null, CHAT_PAGE, true).then(
-        (page) => {
-          if (!alive || ticket !== detailTicket || messages !== into) return false;
-          if (!page || !Array.isArray(page.messages)) {
-            return failed(!chatLoaded && !messages.size);
-          }
-          if (gen === appOnlyGen) appOnlyHeard = true;
-          lastChat = page.messages;
-          for (const [id, label] of Object.entries(page.labels ?? {})) chatLabels.set(id, label);
-          refreshed();
-          return showTimeline(page.messages, page.older, stick, focus);
-        },
-        (error: unknown) => {
-          if (!alive || ticket !== detailTicket || authFail(error)) return false;
+    // A way in since this read began owns the scroll: the page no longer sticks Chat to its bottom.
+    const way = lineGen;
+    const into = messages;
+    return cmd.getChat(null, CHAT_PAGE, true).then(
+      (page) => {
+        if (!alive || ticket !== detailTicket || messages !== into) return false;
+        if (!page || !Array.isArray(page.messages)) {
           return failed(!chatLoaded && !messages.size);
-        },
-      );
-    }
-    const id = shown.id;
-    const stamp = nextStamp();
-    return cmd.getConversation(id).then(
-      (found) => {
-        if (!alive || ticket !== detailTicket || shownId() !== id) return false;
-        if (id === TEAM_ROOM_ID) roomMissing = false;
-        if (!found || !Array.isArray(found.messages) || !found.conversation) {
-          return failed(!detail);
         }
-        heardProject(found.id, found.conversation.appOnly, stamp);
         if (gen === appOnlyGen) appOnlyHeard = true;
+        lastChat = page.messages;
+        for (const [id, label] of Object.entries(page.labels ?? {})) chatLabels.set(id, label);
         refreshed();
-        return showDetail(found, stick, focus);
+        return showTimeline(page.messages, page.older, stick && way === lineGen);
       },
       (error: unknown) => {
         if (!alive || ticket !== detailTicket || authFail(error)) return false;
-        // The room starts with its first agent line: until then it is empty, not gone.
-        if (
-          error instanceof ApiError &&
-          error.status === 404 &&
-          id === TEAM_ROOM_ID
-        ) {
-          roomMissing = true;
-          render(false);
-          return false;
-        }
-        if (error instanceof ApiError && error.status === 404) {
-          flash("That conversation is gone.", "error");
-          showRivet();
-          return false;
-        }
-        return failed(!detail);
+        return failed(!chatLoaded && !messages.size);
       },
     );
   }
@@ -2723,7 +2494,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
    * (a line that turned out to be a thing's) goes; earlier pages loaded stay. The first page replaces the last visit's
    * copy whole: what that held from before this page would sit above a gap, with Earlier loading the other side of it.
    */
-  function showTimeline(read: readonly ChatMessage[], olderCursor: string | null, stick: boolean, focus: string | null): boolean {
+  function showTimeline(read: readonly ChatMessage[], olderCursor: string | null, stick: boolean): boolean {
     const page = read.filter((message) => !gone.has(message.id));
     const from = olderCursor === null || !chatLoaded ? "" : (page[0]?.at ?? "");
     // Lines kept from before this page may sit above a gap, so they never prove a thing's replies were on screen.
@@ -2743,47 +2514,13 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     }
     chatLoaded = true;
     loadFailed = false;
+    // Whichever newest page lands first (a way in's own, or the stream's) takes the line still wanted, once.
+    const focus = wanted;
+    wanted = null;
     const shows = render(stick && !focus);
     if (focus) {
-      if (messages.has(focus)) jump(focus);
-      else void reach(focus);
-    }
-    return shows;
-  }
-
-  function showDetail(
-    found: ConversationDetail,
-    stick: boolean,
-    focus: string | null,
-  ): boolean {
-    // Opened by any message of it (a search hit, an old thread link): from here on it goes by its own id.
-    if (shownId() !== found.id) {
-      const before = shownId();
-      if (before !== null && pushed.has(before)) pushed.add(found.id);
-      shown = { kind: "conversation", id: found.id };
-      try {
-        history.replaceState(withScreen(found.id), "");
-      } catch {}
-      // A reply waiting in storage for this conversation, now that its own id is known.
-      const saved = replyingTo ? null : readReply();
-      if (saved?.conversation === found.id) setReply(saved, false);
-    }
-    detail = found;
-    loadFailed = false;
-    const page = found.messages.filter((message) => !gone.has(message.id));
-    // A collecting line of this conversation that a read no longer has once its window was due was cancelled elsewhere.
-    const ids = new Set(page.map((message) => message.id));
-    const from = page[0]?.at ?? "";
-    for (const [id, message] of messages)
-      if (message.status === "collecting" && !ids.has(id) && message.at >= from && (message.threadId ?? message.id) === found.id && message.sendsAt && Date.parse(message.sendsAt) <= serverNow())
-        messages.delete(id);
-    heardMessages(page);
-    take(page);
-    for (const message of page) messages.set(message.id, message);
-    const shows = render(stick && !focus);
-    if (focus) {
-      if (messages.has(focus)) jump(focus);
-      else void reach(focus);
+      if (messages.has(focus)) bringUp(focus);
+      else void reach(focus, lineGen);
     }
     return shows;
   }
@@ -2793,20 +2530,16 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
    * True while there are earlier ones still to load.
    */
   function loadEarlier(): Promise<boolean> {
-    const id = shownId();
     const into = messages;
     if (loadingEarlier?.into === into) return loadingEarlier.done;
     // The server pages in its own order, which a message's time need not follow.
-    const first = earliestPage ?? detail?.messages[0]?.id;
-    if (!alive || !first || (id === null && shown.kind !== "rivet")) return Promise.resolve(false);
-    const read =
-      id === null
-        ? cmd.getChat(first, CHAT_PAGE, true).then((page) => {
-            if (!Array.isArray(page?.messages)) return null;
-            for (const [id, label] of Object.entries(page.labels ?? {})) chatLabels.set(id, label);
-            return { messages: page.messages, more: page.older !== null };
-          })
-        : cmd.getConversationPage(id, first);
+    const first = earliestPage;
+    if (!alive || !first) return Promise.resolve(false);
+    const read = cmd.getChat(first, CHAT_PAGE, true).then((page) => {
+      if (!Array.isArray(page?.messages)) return null;
+      for (const [id, label] of Object.entries(page.labels ?? {})) chatLabels.set(id, label);
+      return { messages: page.messages, more: page.older !== null };
+    });
     /** Lines this page brought that were not loaded already: none when it was a page held before. */
     let added = 0;
     const done = read.then(
@@ -2866,21 +2599,22 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   }
 
   /** A search hit older than what shows: earlier pages load until it is in, then it is brought up. */
-  async function reach(id: string): Promise<void> {
+  async function reach(id: string, go: number): Promise<void> {
     const into = messages;
     seeking++;
     try {
       for (
         let pages = 0;
-        messages === into && !messages.has(id) && pages < EARLIER_PAGES_MAX;
+        messages === into && go === lineGen && !messages.has(id) && pages < REACH_PAGES_MAX;
         pages++
       )
         if (!(await loadEarlier())) break;
     } finally {
       seeking--;
     }
-    if (!alive || messages !== into) return;
-    if (messages.has(id)) jump(id);
+    // A newer way in (lineNow) outdates this one: its line is not taken back from under it.
+    if (!alive || messages !== into || go !== lineGen) return;
+    if (messages.has(id)) bringUp(id);
     else flash("That message is older than this shows.", "warn");
   }
 
@@ -2908,15 +2642,14 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       !counted.has(message.id) &&
       !inRoom(message);
     if (message.from === "rivet") counted.add(message.id);
-    const here = shown.kind === "rivet" ? !inRoom(message) && inChat(message) : conversation === shownId();
-    if (!here || shown.kind === "rivet") bump(message, conversation, fresh, streamed);
+    const here = !inRoom(message) && inChat(message);
+    bump(message, conversation, fresh, streamed);
     if (here) {
       const known = messages.has(message.id);
       messages.set(message.id, message);
-      if (fresh && !known) unseen++;
       render(!known && message.from === "owner");
     }
-    if (shown.kind === "rivet" || here) void loadDetail(true);
+    void loadDetail(true);
     take([message]);
     void loadList(true);
   }
@@ -2985,21 +2718,11 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     return latest;
   }
 
-  /** A search hit: opens the conversation the message is in, on that message. */
+  /** A search hit: Chat brought to that message. */
   function seek(): void {
     const id = app.chatFocus;
     if (!id || !alive) return;
     app.chatFocus = null;
-    // A seeded room's first message is never shown: its title hit opens it on the newest.
-    if (SEED_IDS.includes(id)) return openConversationNow(id);
-    // Results over this conversation give way to it.
-    const searching = section.classList.contains("searching");
-    search.clear(true);
-    setFinding(false, true);
-    if (messages.has(id)) {
-      if (searching) render(false);
-      return jump(id);
-    }
     openHit(id);
   }
 
@@ -3009,7 +2732,6 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   }
 
   async function sendNow(): Promise<void> {
-    const screen = shown;
     const body = text.value.trim();
     // A photo picked while this send is in flight is not this send's to drop.
     const photos = [...attached.photos];
@@ -3026,9 +2748,6 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     sendBtn.disabled = true;
     changed();
     const target = replyingTo;
-    // Typed on a topic's page (the Agent Chat room too), with or without Reply, it joins that topic, whatever its stage or
-    // a closed chat. Chat's own box, and a server-owned room's with no Reply, start a conversation of their own.
-    const conversation = screen.kind === "conversation" && (target || !roomStartsChat(screen.id)) ? screen.id : null;
     const sentBox = draftBox;
     const sentRev = readDraft().trim() === body ? readDraftRev() : null;
     const sentDraft = draftLineage.begin(sentRev);
@@ -3038,7 +2757,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
         images,
         files,
         target?.id,
-        conversation,
+        null,
         true,
       );
       // Clear the box on screen, and the stored draft that other open copies of the app share, only while each still
@@ -3061,12 +2780,12 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       // With no reply picked here, the stored reply may be another tab's.
       if (target && replyingTo === target) setReply(null);
       hint.textContent = "";
-      // Its answer names no thread for a Reply from Chat (it was typed in none); the server put it in the replied line's.
+      // Its answer names no thread for a Reply (it was typed in none); the server put it in the replied line's.
       const replied = target ? messages.get(target.id) : undefined;
       const id =
         typeof entry.conversation === "string"
           ? entry.conversation
-          : (conversation ?? (replied ? threadOf(replied) : entry.id));
+          : (replied ? threadOf(replied) : entry.id);
       const sent: ChatMessage = {
         id: entry.id,
         from: "owner",
@@ -3090,8 +2809,6 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
         typed: true,
         threadId: id,
       };
-      // Sent from a server-owned room with no Reply: that chat is new, so it opens to show where Rivet's answer lands.
-      if (alive && screen.kind === "conversation" && conversation === null && shown === screen) openConversationNow(id);
       if (alive) arrived(sent);
     } catch (error) {
       if (authFail(error)) return;
@@ -3126,6 +2843,14 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       } catch {}
     });
     source.addEventListener("ping", streamHeard);
+    // A line saved or unsaved, here or on another device: the marks and an open list follow.
+    source.addEventListener("saved", (event) => {
+      streamHeard();
+      try {
+        const { ids } = JSON.parse((event as MessageEvent<string>).data) as { ids?: unknown };
+        if (Array.isArray(ids)) saved.heard(ids.filter((id): id is string => typeof id === "string"));
+      } catch {}
+    });
     // Rivet Cloud's machine is going to sleep: no reconnect to wake it until the next tap (rivet-sleep.ts).
     source.addEventListener("asleep", () => {
       fellAsleep();
@@ -3142,12 +2867,6 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
         ).id;
         if (typeof changedId !== "string") return;
         void loadList(true);
-        if (shownId() === changedId) {
-          // A merge may have brought in older messages: Earlier pages again from the newest ones.
-          earlierMore = null;
-          earliestPage = null;
-          void loadDetail(true);
-        }
       } catch {}
     });
     // Rivet changed a conversation's status, project, title or steps.
@@ -3176,7 +2895,6 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
           messages.set(key, project ? { ...rest, project } : rest);
         }
         void loadList(true);
-        if (shownId() === changedThread.id) void loadDetail(true);
         // At once: a conversation just moved to personal loses its Share buttons before anything is fetched.
         render(false);
       } catch {}
@@ -3187,6 +2905,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       // Catches up on what was missed while it was down.
       void loadList(true);
       void loadDetail();
+      saved.load();
     });
     source.addEventListener("error", () => {
       forgetAppOnly();
@@ -3231,6 +2950,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       settleCancel();
       void loadList();
       void loadDetail();
+      saved.load();
     }, POLL_MS);
   }
 
@@ -3243,6 +2963,10 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       if (!alive || !threadHeld) return;
       threadHeld = false;
       render(heldStick);
+      const line = heldLine;
+      heldLine = null;
+      // One gone meanwhile is said, as bringUp says it.
+      if (line) bringUp(line);
     });
   void loadList();
   void loadDetail(false, true);
@@ -3258,17 +2982,15 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   const unfocus = subscribe(() => {
     seek();
     paintSend();
+    paintName();
   });
   seek();
-  goConversation = (id, record) => openConversationNow(id, null, record);
-  goRivet = () => {
-    if (shown.kind === "rivet" && history.state?.chatScreen === undefined) return render(false);
-    try {
-      if (history.state?.chatScreen !== undefined)
-        history.replaceState(withoutScreen(), "");
-    } catch {}
-    showRivet();
-  };
+  goLine = (conversation, message) => lineNow(conversation, message);
+  if (pendingLine) {
+    const line = pendingLine;
+    pendingLine = null;
+    lineNow(line.conversation, line.message);
+  }
   // A card answer's Open card shows while its card is on the board, and Rivet's Card: line's while its update card is;
   // a thing's step, media and Share read the board's cards: the page redraws when that changes.
   const openable = () =>
@@ -3310,7 +3032,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     if ((wake === null) !== (was === null)) requestAnimationFrame(() => (scroller.scrollTop = scroller.scrollHeight - scroller.clientHeight - fromBottom));
   });
   const onVisible = () => {
-    markRead();
+    readChat();
     // Hidden, the stream's pings would keep the phone's radio waking; back in front, a fresh one catches up as it opens.
     if (document.visibilityState === "hidden") {
       window.clearTimeout(idle);
@@ -3336,7 +3058,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   let wasCovered = coveredOver(section);
   const coverage = new MutationObserver(() => {
     const now = coveredOver(section);
-    if (wasCovered && !now) markRead();
+    if (wasCovered && !now) readChat();
     wasCovered = now;
   });
   coverage.observe(document.body, {
@@ -3348,17 +3070,15 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
 
   teardown = () => {
     alive = false;
-    if (thingOnTop) leaveScreen("chat.thing");
-    goConversation = null;
-    goRivet = null;
+    goLine = null;
     liveRefusal = null;
     unfocus();
     unboard();
     closeMenu();
+    unsettle?.();
     window.clearTimeout(litTimer);
     window.clearTimeout(listTimer);
     window.clearTimeout(detailTimer);
-    window.removeEventListener("popstate", onPop);
     document.removeEventListener("fullscreenchange", onFullscreen);
     document.removeEventListener("visibilitychange", onVisible);
     window.removeEventListener(AUTO_SPEAK_EVENT, renderSpeak);

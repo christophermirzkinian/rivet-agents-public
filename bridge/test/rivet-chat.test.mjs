@@ -115,3 +115,81 @@ test("a registry that cannot be parsed refuses every write", { skip }, async () 
   fs.writeFileSync(c.registry, "{not json");
   await assert.rejects(main(["new", "x", "--cwd", workdir], { ctx: c }), /cannot be parsed/);
 });
+
+test("launchFor with no agent file is the command line it always was; a hosted Codex chat asks as Claude's does", () => {
+  const env = { RIVET_CLAUDE_ARGS: "--model x", RIVET_CODEX_ARGS: "--model y", RIVET_CODEX_NO_SANDBOX: "1", TMUX_TMPDIR: os.tmpdir() };
+  const plain = runner.context({ env, socket: "unused" });
+  assert.deepEqual(runner.launchFor(plain, "claude", "hi"), { command: "claude", args: ["--model", "x", "--", "hi"] });
+  assert.deepEqual(runner.launchFor(plain, "codex", "hi"), { command: "codex", args: ["--model", "y", "--", "hi"] });
+  const hosted = runner.context({ env: { ...env, RIVET_AGENT_FILE: "/nonexistent/agent.json" }, socket: "unused" });
+  assert.deepEqual(runner.launchFor(hosted, "claude", "hi"), { command: "claude", args: ["--model", "x", "--", "hi"] });
+  const open = runner.launchFor(hosted, "codex", "hi").args;
+  assert.deepEqual(open.slice(-8), ["--sandbox", "danger-full-access", "--ask-for-approval", "on-request", "--model", "y", "--", "hi"]);
+  for (const setting of ["features.hooks=false", "features.computer_use=false", "features.multi_agent=false", "notify=[]"]) assert.ok(open.includes(setting), setting);
+  const sandboxed = runner.context({ env: { TMUX_TMPDIR: os.tmpdir(), RIVET_AGENT_FILE: "/nonexistent/agent.json" }, socket: "unused" });
+  assert.deepEqual(runner.launchFor(sandboxed, "codex").args.slice(-4), ["--sandbox", "read-only", "--ask-for-approval", "on-request"]);
+});
+
+test("a hosted agent's chat starts on its first plan and, at that plan's limit, asks once only when the other is signed in", { skip }, async () => {
+  const home = path.join(root, "home3");
+  fs.mkdirSync(home);
+  const agentFile = path.join(root, "agent.json");
+  fs.writeFileSync(agentFile, JSON.stringify({ firstPlan: "chatgpt" }));
+  const limited = path.join(root, "limited.sh");
+  fs.writeFileSync(limited, "#!/bin/sh\necho '■ You’ve hit your usage limit. Upgrade to Pro or try again at 3:05 PM.'\nwhile IFS= read -r line; do echo \"got:$line\"; done\n", { mode: 0o755 });
+  const c = runner.context({ env: { ...ctx.env, HOME: home, RIVET_AGENT_FILE: agentFile }, home, socket: "rivet-chat-test", bins: { claude: ctx.bins.claude, codex: limited } });
+  assert.equal(runner.create(c, { name: "plans", cwd: workdir }).provider, "codex");
+  await waitFor(() => /usage limit/.test(runner.read(c, "plans")));
+  const posts = [];
+  const post = (ask) => posts.push(ask);
+  assert.deepEqual(await runner.limitCheck(c, { post, status: () => ({ code: 0, lines: ['{"loggedIn": false}'] }) }), []);
+  assert.deepEqual(await runner.limitCheck(c, { post, status: () => ({ code: null, lines: [] }) }), [], "a status that could not be read is not signed in, and asks nothing");
+  assert.deepEqual(posts, []);
+  const statuses = [];
+  const signedIn = (_ctx, plan) => (statuses.push(plan), { code: 0, lines: ['{"loggedIn": true}'] });
+  const asked = await runner.limitCheck(c, { post, status: signedIn });
+  assert.deepEqual(statuses, ["claude"]);
+  assert.equal(asked.length, 1);
+  assert.deepEqual(posts, asked);
+  assert.equal(asked[0].text, "ChatGPT is at its limit until 3:05 pm. Chat plans waits for it. Claude is ready: ask your agent to start a new chat on Claude. New chats start on the plan that goes first: change it on the Plans page.");
+  const firstSeen = runner.readRegistry(c).chats.plans.limitSeen.at;
+  assert.equal(asked[0].since, firstSeen, "since is when the screen first showed this limit, before any ask");
+  assert.deepEqual(await runner.limitCheck(c, { post, status: signedIn }), [], "asked once");
+  // A post the board never took asks again with the same since, so the card it may have made is found, not doubled.
+  const fresh = runner.context({ env: c.env, home, socket: "rivet-chat-test", bins: c.bins, now: () => Date.now() + 86_400_000 });
+  runner.withRegistry(fresh, (doc) => void delete doc.chats.plans.limitAsked);
+  assert.deepEqual(await runner.limitCheck(fresh, { post: () => Promise.reject(new Error("not taken")), status: signedIn }), [], "a post that throws is logged, not thrown");
+  const again = await runner.limitCheck(fresh, { post, status: signedIn });
+  assert.equal(again[0].since, firstSeen, "the next day too");
+  // A limit that clears and comes back is a new one, with a new since, though it says the same.
+  runner.withRegistry(fresh, (doc) => void delete doc.chats.plans.limitSeen);
+  runner.withRegistry(fresh, (doc) => void delete doc.chats.plans.limitAsked);
+  const later = await runner.limitCheck(fresh, { post, status: signedIn });
+  assert.notEqual(later[0].since, firstSeen);
+  // A post that throws for one chat leaves the next to be asked, and its own chat is asked again next time.
+  fs.writeFileSync(agentFile, JSON.stringify({ firstPlan: "chatgpt", name: "Pip" }));
+  assert.equal(runner.create(c, { name: "plans2", cwd: workdir }).provider, "codex");
+  await waitFor(() => /usage limit/.test(runner.read(c, "plans2")));
+  runner.withRegistry(c, (doc) => void delete doc.chats.plans.limitAsked);
+  const tried = [];
+  const posted = await runner.limitCheck(c, {
+    post: (ask) => {
+      tried.push(ask.name);
+      if (ask.name === "plans") throw new Error("board down");
+    },
+    status: signedIn,
+  });
+  assert.deepEqual(tried.sort(), ["plans", "plans2"]);
+  assert.deepEqual(posted.map((ask) => ask.name), ["plans2"]);
+  assert.match(posted[0].text, /ask Pip to start a new chat on Claude/);
+  assert.equal(posted[0].chat, `plans2 ${runner.readRegistry(c).chats.plans2.started}`);
+  assert.equal(runner.readRegistry(c).chats.plans.limitAsked, undefined);
+  runner.close(c, "plans2");
+  assert.equal(runner.list(c).find((one) => one.name === "plans").provider, "codex", "never moved to the other plan");
+  runner.close(c, "plans");
+
+  const plain = runner.context({ env: { ...ctx.env, HOME: home }, home, socket: "rivet-chat-test", bins: { claude: limited, codex: limited } });
+  assert.equal(runner.create(plain, { name: "plain", cwd: workdir }).provider, "claude");
+  assert.deepEqual(await runner.limitCheck(plain, { post: () => assert.fail("no agent file posts nothing"), status: () => assert.fail("nor reads a status") }), []);
+  runner.close(plain, "plain");
+});

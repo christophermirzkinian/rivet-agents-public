@@ -1,6 +1,6 @@
-import { RIVET_NAME } from "../../../src/shared/names.js";
 import { when } from "../../../src/shared/when.js";
 import { NOTHING_NEEDS_YOU, allMinimised } from "../../../src/shared/words.js";
+import { agentName } from "../cloud-agent.js";
 import { type Mood } from "../rivet/rivet.js";
 import { h } from "../dom.js";
 import { freshPrs, opsData } from "../ops-data.js";
@@ -62,7 +62,13 @@ export function clearWords(minimised = summary()?.minimised ?? 0): { mood: Mood;
 }
 
 /** Rivet's words on the home screen before the board has loaded. */
-export const READ_WORDS = { reading: "Reading the home…", slow: "Still reading…", failed: `Can't reach ${RIVET_NAME}.` } as const;
+export const READ_WORDS = {
+  reading: "Reading the home…",
+  slow: "Still reading…",
+  get failed() {
+    return `Can't reach ${agentName()}.`;
+  },
+} as const;
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 

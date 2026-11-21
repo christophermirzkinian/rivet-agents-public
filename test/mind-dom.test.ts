@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { type MindNode, type MindPut, type MindResponse } from "../src/shared/mind.js";
 import { when } from "../src/shared/when.js";
+import { probeCloud, resetCloud } from "../web/src/cloud-agent.js";
 import { app } from "../web/src/state.js";
 import { endSession } from "../web/src/session.js";
 import { mountShell } from "../web/src/views/shell.js";

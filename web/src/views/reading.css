@@ -90,7 +90,7 @@
 
 .reading-foot .reading-btn {
   min-height: 44px;
-  font-size: 16px;
+  font-size: calc(16px * var(--text-scale));
 }
 
 .reading-at {
@@ -112,7 +112,7 @@
 
 .reading-lead-n {
   color: var(--tone, var(--text));
-  font-size: 48px;
+  font-size: calc(48px * var(--text-scale));
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
 }

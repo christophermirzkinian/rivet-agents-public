@@ -8,6 +8,7 @@ import { askMark, movingAsk, type MovingReadings } from "../../../src/shared/sum
 import { when } from "../../../src/shared/when.js";
 import { doneAt, NEEDS_YOU, noTimeYet, slipped, slippedTwice, stageWord } from "../../../src/shared/words.js";
 import { getAsks } from "../api.js";
+import { agentName } from "../cloud-agent.js";
 import { localDay } from "../day.js";
 import { button, h } from "../dom.js";
 import { freshPrs, opsData, watchOps } from "../ops-data.js";
@@ -392,7 +393,7 @@ function render(): void {
       rows.open.length ? h("ul", { class: "asks-rows" }, ...rows.open.map(rowEl)) : asks ? h("p", { class: "asks-empty" }, "Nothing in hand. Ask in Chat and it shows here.") : null,
       rows.still.length ? named(foldRow(`Not moving · ${rows.still.length}`, stillOpen, () => (stillOpen = !stillOpen), render), "still", rows.still) : null,
       stillOpen && rows.still.length ? h("ul", { class: "asks-rows" }, ...rows.still.map(rowEl)) : null,
-      rows.own.length ? named(foldRow(`Rivet's own · ${rows.own.length}`, ownOpen, () => (ownOpen = !ownOpen), render), "own", rows.own) : null,
+      rows.own.length ? named(foldRow(`${agentName()}'s own · ${rows.own.length}`, ownOpen, () => (ownOpen = !ownOpen), render), "own", rows.own) : null,
       ownOpen && rows.own.length ? h("ul", { class: "asks-rows" }, ...rows.own.map(rowEl)) : null,
       rows.finished.length ? h("h2", { class: "asks-head" }, `Done today · ${rows.finished.length}`) : null,
       rows.finished.length ? h("ul", { class: "asks-rows done-rows" }, ...rows.finished.map(rowEl)) : null,

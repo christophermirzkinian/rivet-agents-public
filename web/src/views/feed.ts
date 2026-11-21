@@ -7,6 +7,7 @@ import { canApprove, isGotIt, isPlan, isTodo, isUpdate, MERGE_READY, optionNeeds
 import { isToday, maybeWhen, when } from "../../../src/shared/when.js";
 import { NOTHING_NEEDS_YOU } from "../../../src/shared/words.js";
 import * as api from "../api.js";
+import { agentName } from "../cloud-agent.js";
 import { isDesk, pressesControl, typing } from "../desk.js";
 import { stopDictation, withMic } from "../dictation.js";
 import { button, type Child, describe, h, ICONS, isHttps, linkify, linksIn, modalOpen, svg } from "../dom.js";
@@ -54,7 +55,7 @@ import { cardAnswered, useTap } from "../usage.js";
 import { sending } from "./mac-wait.js";
 import { cardMedia, cardStage, stopCardMedia } from "./card-media.js";
 import { cardShareButton } from "./card-share.js";
-import { openThingFor, showConversation } from "./chat.js";
+import { openThingFor, showLine } from "./chat.js";
 import { rivet } from "../rivet/rivet.js";
 import { decideUp } from "./decide-sheet.js";
 import { closeLightbox } from "./lightbox.js";
@@ -160,7 +161,7 @@ export function offlineBar(): HTMLElement | null {
   return h(
     "div",
     { class: "feed-offline", attrs: { role: "status" } },
-    h("span", { class: "feed-offline-t" }, `${app.offline === "offline" ? "Offline" : `Can't reach ${RIVET_NAME}`} · ${asOf}`),
+    h("span", { class: "feed-offline-t" }, `${app.offline === "offline" ? "Offline" : `Can't reach ${agentName()}`} · ${asOf}`),
     button("Retry", () => void refresh(), "feed-retry", false, "cards.offline.retry"),
   );
 }
@@ -320,7 +321,7 @@ function topCard(need: ServedNeed, minimisable = false, sheet = false): HTMLElem
           )
         : null,
       card.error ? h("p", { class: "card-error box", attrs: { role: "alert" } }, card.error) : null,
-      phone ? null : h("div", { class: "card-tools" }, messageButton(need, `Message ${RIVET_NAME}`), keyed(cardShareButton(need, "card-share-top"), `share-${need.id}`), minimisable ? minimiseButton(need, "bottom") : null),
+      phone ? null : h("div", { class: "card-tools" }, messageButton(need, `Message ${agentName()}`), keyed(cardShareButton(need, "card-share-top"), `share-${need.id}`), minimisable ? minimiseButton(need, "bottom") : null),
     ),
     h("div", { class: "more-cue", attrs: { "aria-hidden": "true" } }, "More ↓"),
     card.confirm ? confirmOverlay(need, card) : null,
@@ -357,7 +358,7 @@ function setMinimised(key: string, rev: string, small: boolean): void {
 function messageButton(need: ServedNeed, word: string): HTMLElement | null {
   if (!need.chat) return null;
   const message = button([svg(ICONS.note, "card-message-icon"), h("span", { class: "card-message-word" }, word)], () => messageChat(need), "card-message", false, "cards.message-rivet");
-  message.setAttribute("aria-label", `Message ${RIVET_NAME}`);
+  message.setAttribute("aria-label", `Message ${agentName()}`);
   return message;
 }
 
@@ -382,7 +383,7 @@ export function cardMenu(need: ServedNeed): HTMLElement[] {
   const thread = app.cardThreads.get(need.id);
   const row = (icon: string, word: string, then: () => void, use: string, variant = "", aside?: string) =>
     button([svg(icon, "menu-icon"), h("span", { class: "menu-word" }, word), aside ? h("small", { class: "menu-aside" }, aside) : null], then, `decide-menu-row ${variant}`.trim(), false, use);
-  const message = messageButton(need, `Message ${RIVET_NAME}`);
+  const message = messageButton(need, `Message ${agentName()}`);
   message?.classList.add("decide-menu-row");
   return [
     message,
@@ -515,8 +516,8 @@ function planPoints(need: ServedNeed): HTMLElement[] {
 // Updates
 
 /**
- * An update's thread, from its Done today row or a link to any card in it (decision
- * ): its thing's page when a conversation holds its chat's work, as a pile's tap
+ * An update's thread, from its Done today row or a link to any card in it:
+ * its thing's page when a conversation holds its chat's work, as a pile's tap
  * did, else a sheet of the thread's update cards in full, newest first, with Say and Share, and Seen (Seen all N) while
  * any are new.
  */
@@ -675,7 +676,7 @@ function updateCard(need: ServedNeed, head?: string): HTMLElement {
         )
       : null,
     ...(need.comments ?? []).map((note) =>
-      h("p", { class: note.from === "rivet" ? "upd-note h" : "upd-note" }, h("b", {}, note.from === "rivet" ? `${RIVET_NAME}: ` : "You: "), ...linkify(note.text)),
+      h("p", { class: note.from === "rivet" ? "upd-note h" : "upd-note" }, h("b", {}, note.from === "rivet" ? `${agentName()}: ` : "You: "), ...linkify(note.text)),
     ),
     card.error ? h("p", { class: "card-error box", attrs: { role: "alert" } }, card.error) : null,
     keyed(cardShareButton(need, "upd-share-solo"), `share-${need.id}`),
@@ -695,7 +696,7 @@ function updText(text: string): Child[] {
 
 export function openConversation(id: string): void {
   leaveOverlays(() => {
-    showConversation(id);
+    showLine(id);
     app.tab = "chat";
     changed();
   });
@@ -1233,7 +1234,7 @@ export function recoverOutbox(): void {
     const need = onBoard.get(entry.itemId);
     if (!need || need.rev !== entry.rev) {
       outbox.forget(entry.clientId);
-      flash(`An earlier answer may not have reached ${RIVET_NAME}: ${entry.title}`, "warn", 6000);
+      flash(`An earlier answer may not have reached ${agentName()}: ${entry.title}`, "warn", 6000);
       continue;
     }
     const card = cardState(entry.itemId);
@@ -1252,7 +1253,7 @@ export function recoverOutbox(): void {
     card.text = entry.text ?? "";
     restorePhotos(card.attach, chatImages(entry), entry.files);
     card.pending = { key: answerKey(entry), clientId: entry.clientId };
-    card.error = `The app closed before ${RIVET_NAME} confirmed your answer (${entry.decision === "choice" ? (entry.choice ?? "") : VERBS[entry.decision]}). Answer the same way to send it; it will not arrive twice.`;
+    card.error = `The app closed before ${agentName()} confirmed your answer (${entry.decision === "choice" ? (entry.choice ?? "") : VERBS[entry.decision]}). Answer the same way to send it; it will not arrive twice.`;
     app.reopened.add(entry.itemId);
     app.front ??= entry.itemId;
   }

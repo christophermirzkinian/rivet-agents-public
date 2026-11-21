@@ -1,8 +1,8 @@
 import "./progress.css";
 import "./floor.css";
 
-import { RIVET_NAME } from "../../../src/shared/names.js";
 import { when } from "../../../src/shared/when.js";
+import { agentName } from "../cloud-agent.js";
 import { h, ICONS, keepFocus, svg } from "../dom.js";
 import { opsData, watchOps } from "../ops-data.js";
 import { rivet, setMood, type Mood } from "../rivet/rivet.js";
@@ -83,9 +83,11 @@ const readMood = (): Mood => (boardRead() === "loaded" ? "happy" : "thinking");
 
 /** The band's middle: Rivet's face and name. */
 export function title(): HTMLElement {
-  face ??= h("h1", { class: "home-title" }, rivet(readMood(), { size: 34, className: "home-title-face" }), h("span", {}, RIVET_NAME));
+  face ??= h("h1", { class: "home-title" }, rivet(readMood(), { size: 34, className: "home-title-face" }), h("span", {}, agentName()));
   const look = face.querySelector<HTMLElement>(".home-title-face")!;
   if (!look.classList.contains(`is-${readMood()}`)) setMood(look, readMood());
+  const name = face.lastElementChild!;
+  if (name.textContent !== agentName()) name.textContent = agentName();
   return face;
 }
 
@@ -115,7 +117,7 @@ function lineParts(now: number): Said[] {
 /** A read that failed after the cards loaded: the phone's line and the wide header show it. */
 export function alerts(): Said[] {
   if (app.loadedAt === null || boardRead() !== "loaded" || !(app.offline || app.notice)) return [];
-  const text = `${app.offline === "offline" ? "Offline" : `Can't reach ${RIVET_NAME}`} · cards as of ${when(app.loadedAt)}`;
+  const text = `${app.offline === "offline" ? "Offline" : `Can't reach ${agentName()}`} · cards as of ${when(app.loadedAt)}`;
   return [{ key: "offline", tone: "warn", lead: null, text, label: text, open: null }];
 }
 
@@ -231,11 +233,11 @@ export function dock(): HTMLElement[] {
       "button",
       {
         class: "home-rivet",
-        attrs: { type: "button", "data-key": "rivet", "data-use": "floor.dock.rivet", "aria-label": unread ? `${RIVET_NAME}, ${unread} unread` : RIVET_NAME },
+        attrs: { type: "button", "data-key": "rivet", "data-use": "floor.dock.rivet", "aria-label": unread ? `${agentName()}, ${unread} unread` : agentName() },
         on: { click: () => goSheet("chat") },
       },
       rivet(readMood(), { size: 30, className: "home-rivet-face" }),
-      h("span", {}, RIVET_NAME),
+      h("span", {}, agentName()),
       unread ? h("span", { class: "home-dot", attrs: { "aria-hidden": "true" } }) : null,
     ),
   ];
@@ -306,7 +308,7 @@ function openTabSheet(id: TabSheet): void {
 function openRivet(onClose: () => void): void {
   const host = h("div", { class: "home-chat" });
   openTallSheet(
-    RIVET_NAME,
+    agentName(),
     {
       mount(el) {
         // What the push watcher counts as on screen (push.ts watchViewing): the conversation open in here.

@@ -1,0 +1,4 @@
+{"type":"thread.started","thread_id":"thread-failed"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"error","message":"Model metadata for gpt-x not found"}}
+{"type":"turn.failed","error":{"message":"stream disconnected before completion"}}

@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Board, Reply, ServedNeed } from "../src/shared/board.js";
+import type { ChatMessage } from "../src/shared/command.js";
 import { when } from "../src/shared/when.js";
 import { answeredTab, NOTHING_NEEDS_YOU, openTab } from "../src/shared/words.js";
 import type { CardThread } from "../src/shared/threads.js";
@@ -92,6 +93,9 @@ function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
 }
 
+/** Chat's one line, in the Quiz app pace conversation. */
+const QUIZ: ChatMessage = { id: "t-quiz", from: "rivet", text: "Quiz app pace is up", at: "2026-10-28T00:30:00.000Z", threadId: "t-quiz" };
+
 function fakeFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
   const url = String(input);
   if (expired) return Promise.resolve(json({ error: "Sign in again" }, 401));
@@ -120,7 +124,8 @@ function fakeFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Re
   if (url === "/api/answered") return Promise.resolve(json({ cards: replies.map((one) => ({ card: { ...need(one.itemId, one.rev), title: one.itemTitle }, reply: one })), reopened: [] }));
   if (url === "/api/workers") return Promise.resolve(json({ at: null, workers }));
   if (url === "/api/card-threads") return Promise.resolve(json({ cards: cardLinks }));
-  if (url === "/api/conversations/t-quiz") return Promise.resolve(json(detailBody("t-quiz", [], { title: "Quiz app pace" })));
+  if (url === "/api/conversations/t-quiz") return Promise.resolve(json(detailBody("t-quiz", [QUIZ], { title: "Quiz app pace" })));
+  if (url.startsWith("/api/chat?")) return Promise.resolve(json({ messages: [QUIZ], older: null, labels: {} }));
   if (url === "/api/chat" && init.method === "POST") {
     chatPosts.push(JSON.parse(String(init.body)) as Record<string, unknown>);
     const answer = json({ id: `msg-${chatPosts.length}`, kind: "chat", status: "queued" }, 202);
@@ -281,6 +286,8 @@ function menuRow(use: string): HTMLButtonElement {
   if (!row) throw new Error(`no ${use} in ⋯`);
   return row;
 }
+
+const litLine = () => document.querySelector<HTMLElement>(".rivet-sheet .chat-msg.lit")?.dataset.id;
 
 function topId(): string | undefined {
   return root.querySelector<HTMLElement>(".card.top")?.dataset.need;
@@ -603,7 +610,10 @@ describe("writing on a card, the next cards, and risky cards", () => {
     window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
     await settle();
     if (destination === "card") expect(topId()).toBe("b");
-    else expect(openConversation()).toBe("t-quiz");
+    else {
+      expect(app.tab).toBe("chat");
+      expect(litLine()).toBe("t-quiz");
+    }
     back.mockRestore();
   });
 
@@ -1875,7 +1885,7 @@ describe("card PDFs", () => {
 describe("the crew on the feed", () => {
   const worker = (chat: string, state: Worker["state"]): Worker => ({ id: `w-${chat}`, name: chat, repo: "example-org/example-repo", chat, state, lastOutputAt: null });
 
-  it("puts the card's conversation and round on its top line, and opens the conversation from it", async () => {
+  it("puts the card's conversation and round on its top line, and opens Chat lit at the conversation's line from it", async () => {
     needs = [need("a", "a1"), need("b", "b1")];
     cardLinks = [{ card: "a", thread: "t-quiz", title: "Quiz app pace", round: 3 }];
     await signIn();
@@ -1884,13 +1894,34 @@ describe("the crew on the feed", () => {
     line.click();
     expect(app.tab).toBe("chat");
     await settle();
-    expect(openConversation()).toBe("t-quiz");
-    expect(document.querySelector(".rivet-sheet .thing-title")!.textContent).toBe("Quiz app pace");
+    expect(openConversation()).toBeNull();
+    expect(document.querySelector(".thing-head")).toBeNull();
+    expect(litLine()).toBe("t-quiz");
     // A card in no thread shows nothing there.
     needs = [need("b", "b1")];
     await signIn();
     expect(topId()).toBe("b");
     expect(root.querySelector(".card.top .card-thread")).toBeNull();
+  });
+
+  it.each([
+    ["Pip", "Pip"],
+    [null, "Agent"],
+  ])("on a hosted machine named %s, a card's Message row names the agent", async (name, said) => {
+    const { probeCloud, resetCloud } = await import("../web/src/cloud-agent.js");
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(JSON.stringify({ name, setupDone: true, firstPlan: "claude" }), { status: 200, headers: { "content-type": "application/json" } }))));
+    await probeCloud();
+    vi.stubGlobal("fetch", vi.fn(fakeFetch));
+    try {
+      workers = [worker("chat-a", "working")];
+      needs = [{ ...need("a", "a1"), chat: "chat-a" }, need("b", "b1")];
+      await signIn(true);
+      await settle(500);
+      const message = menuRow("cards.message-rivet");
+      expect([message.textContent, message.getAttribute("aria-label")]).toEqual([`Message ${said}`, `Message ${said}`]);
+    } finally {
+      resetCloud();
+    }
   });
 
   it("a card with a chat has a Message button that opens that chat's send box", async () => {

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { ID_PATTERN } from "./board.js";
 import type { ChatMessage } from "./command.js";
 import { MAX_THREAD_TITLE, type ThreadDetail } from "./threads.js";
-import { RIVET_NAME } from "./names.js";
+import { STORED_NAME } from "./names.js";
 import { NEEDS_YOU } from "./words.js";
 
 // Conversations: the Chat tab is a list of them. A conversation is a thread (src/shared/threads.ts) under a
@@ -15,7 +15,7 @@ import { NEEDS_YOU } from "./words.js";
 /** The Updates conversation's root message id: server-owned, never closed. */
 export const UPDATES_ID = "updates";
 export const UPDATES_TITLE = "Updates";
-export const UPDATES_ROOT_TEXT = `Updates from ${RIVET_NAME}`;
+export const UPDATES_ROOT_TEXT = `Updates from ${STORED_NAME}`;
 
 /**
  * Retention: a conversation closed or done, not pinned and quiet this long is

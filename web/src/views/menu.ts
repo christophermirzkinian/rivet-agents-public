@@ -1,5 +1,6 @@
 import "./menu.css";
 
+import { connectPlan, needsPlan } from "../cloud-agent.js";
 import { h, ICONS, keepFocus, svg } from "../dom.js";
 import { opsData, watchOps } from "../ops-data.js";
 import { app, changed, go, subscribe, type MorePage } from "../state.js";
@@ -18,6 +19,24 @@ export type MenuKey = "asks" | MorePage;
 function lit(key: MenuKey): boolean {
   if (key === "asks") return app.tab === "progress" || app.tab === "cards";
   return app.tab === "more" && app.morePage === key;
+}
+
+/** A hosted agent with no plan connected yet: the supervisor's connect page (cloud-agent.ts). */
+function connectRow(onPick: () => void): HTMLElement {
+  const connect = () => {
+    onPick();
+    connectPlan();
+  };
+  return h(
+    "button",
+    {
+      class: "menu-row is-connect",
+      attrs: { type: "button", "data-key": "connect", "data-use": "menu.row.connect", title: "Connect a plan" },
+      on: { click: connect },
+    },
+    svg(ICONS.forward, "menu-icon"),
+    h("span", { class: "menu-name" }, "Connect a plan"),
+  );
 }
 
 function row(key: MenuKey, icon: string, name: string, onPick: () => void): HTMLElement {
@@ -59,6 +78,7 @@ export function menuList(onPick: () => void = () => {}): HTMLElement {
     row("asks", ICONS.progress, "Home", onPick),
     ...READINGS.map(page),
     h("hr", { class: "menu-rule" }),
+    needsPlan() ? connectRow(onPick) : null,
     ...YOURS.map(page),
   );
 }

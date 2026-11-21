@@ -33,7 +33,7 @@
 
 .peek-title {
   margin: 0;
-  font-size: 19px;
+  font-size: calc(19px * var(--text-scale));
   font-weight: 800;
   line-height: 1.25;
   overflow-wrap: anywhere;

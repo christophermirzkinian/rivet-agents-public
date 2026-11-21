@@ -36,7 +36,7 @@ import { app, changed, go, networkChanged, refresh } from "../state.js";
 import { openBacklog } from "./backlog-sheet.js";
 import { planState } from "./ops-plan.js";
 import { takeShare } from "../share-target.js";
-import { receiveShare, showConversation, startDraft } from "./chat.js";
+import { receiveShare, showLine, startDraft } from "./chat.js";
 import { drawnClip, drawnStill, drawPreviewMedia, gameStill, previewMediaFile, previewMediaPage, tapPreviewThumb } from "./media.preview.js";
 import { answeredRoute } from "./answered.preview.js";
 import { mindPreview } from "./mind.preview.js";
@@ -1370,7 +1370,7 @@ window.fetch = async (input, init) => {
     return json({ messages: page, older: null, labels });
   }
   if (url.startsWith("/api/chat")) {
-    const body = JSON.parse(String(init?.body)) as { clientId: string; text?: string; conversation?: string | null; image?: string; images?: string[]; files?: ChatMessage["files"] };
+    const body = JSON.parse(String(init?.body)) as { clientId: string; text?: string; conversation?: string | null; image?: string; images?: string[]; files?: ChatMessage["files"]; typed?: true };
     const id = `c-${++seq}`;
     const conversation = body.conversation ? (conversationOf(body.conversation) ?? id) : id;
     if (!conversationFields[conversation]) conversationFields[conversation] = { title: (body.text ?? "").split("\n")[0]!.slice(0, 60) || "New conversation" };
@@ -1378,7 +1378,8 @@ window.fetch = async (input, init) => {
     conversationFields[conversation]!.closed = false;
     // Stamped now, not when the page loaded: the idle rule reads the clock.
     // What was attached goes with it, so a sent photo shows in its bubble.
-    const attached = { ...(body.image ? { image: body.image } : {}), ...(body.images ? { images: body.images } : {}), ...(body.files ? { files: body.files } : {}) };
+    // A typed line keeps its typed mark, as the server's read of it does.
+    const attached = { ...(body.image ? { image: body.image } : {}), ...(body.images ? { images: body.images } : {}), ...(body.files ? { files: body.files } : {}), ...(body.typed ? { typed: true as const } : {}) };
     const sent = mine(id, conversation, body.text ?? "", 0, { status: "sent", at: new Date().toISOString(), ...attached });
     messages.push(sent);
     setTimeout(() => messages.push(say(`h-${++seq}`, conversation, "On it. I'll tell its chat now.", 0, { at: new Date().toISOString() })), 1500);
@@ -1399,7 +1400,7 @@ const params = new URLSearchParams(location.search);
 const asked = params.get("tab") ?? "cards";
 go(asked === "more" ? (params.get("page") ?? "more") : asked);
 const openId = params.get("conversation");
-if (openId) showConversation(openId);
+if (openId) showLine(openId);
 else if (params.get("new") === "1") startDraft("");
 showRivetWords();
 mountShell(document.getElementById("app")!);

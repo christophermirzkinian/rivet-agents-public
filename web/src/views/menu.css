@@ -18,7 +18,7 @@
   background: none;
   color: var(--text);
   font: inherit;
-  font-size: 20px;
+  font-size: calc(20px * var(--text-scale));
   font-weight: 700;
   text-align: left;
   cursor: pointer;
@@ -32,6 +32,11 @@
 .menu-row.on {
   background: var(--panel);
   color: var(--apricot);
+}
+
+.menu-row.is-connect {
+  color: var(--apricot);
+  font-weight: 700;
 }
 
 .menu-row:focus-visible {
@@ -82,20 +87,20 @@
 
 .menu-tile-name {
   color: var(--muted);
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
   font-weight: 800;
   line-height: 1.15;
 }
 
 .menu-tile-n {
-  font-size: 22px;
+  font-size: calc(22px * var(--text-scale));
   font-weight: 900;
   line-height: 1.1;
 }
 
 .menu-tile-unit {
   color: var(--muted);
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
   font-weight: 800;
 }
 
@@ -151,13 +156,13 @@
 
 .sheet.menu-sheet > .sheet-title {
   padding: 0 14px;
-  font-size: 20px;
+  font-size: calc(20px * var(--text-scale));
 }
 
 .sheet.menu-sheet > .btn {
   min-height: 48px;
   margin-top: auto;
-  font-size: 18px;
+  font-size: calc(18px * var(--text-scale));
 }
 
 .sheet-backdrop.is-leaving > .sheet.menu-sheet {
@@ -214,7 +219,7 @@
 /* The computer's rail. */
 .desktop .tabs .menu-row {
   min-height: 48px;
-  font-size: 18px;
+  font-size: calc(18px * var(--text-scale));
 }
 
 .desktop .rail-icons .tabs .menu {

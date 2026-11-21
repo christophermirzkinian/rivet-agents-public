@@ -1,5 +1,5 @@
 import type { FileRef } from "../../src/shared/board.js";
-import type { AuditEntry, ChatCancelled, ChatMessage, ChatPage, LogsResponse } from "../../src/shared/command.js";
+import type { AuditEntry, ChatCancelled, ChatMessage, ChatPage, LogsResponse, SavedLine } from "../../src/shared/command.js";
 import { FINAL_STATUSES, imageFields } from "../../src/shared/command.js";
 import type { SearchItem } from "../../src/shared/search.js";
 import type { Worker } from "../../src/shared/workers.js";
@@ -95,6 +95,10 @@ export const patchConversation = (id: string, patch: ConversationPatch) => call<
 /** One action on several conversations at once: Chat marks its lines read this way. */
 export const batchConversations = (ids: readonly string[], action: ConversationAction) => call<BatchResponse>("POST", "/api/conversations/batch", { ids, action });
 export const searchChat = (query: string) => call<{ results: SearchItem[] }>("GET", `/api/chat/search?q=${encodeURIComponent(query)}`);
+/** The saved lines, newest saved first. */
+export const getSaved = () => call<{ saved: SavedLine[] }>("GET", "/api/chat/saved");
+export const saveLine = (id: string) => call<{ ok: true }>("PUT", `/api/chat/saved/${encodeURIComponent(id)}`);
+export const unsaveLine = (id: string) => call<{ ok: true }>("DELETE", `/api/chat/saved/${encodeURIComponent(id)}`);
 /**
  * `conversation`: the open conversation it is typed in, or null to start a new one; every caller picks. `typed`: he
  * typed it in a message box, rather than a tap sending it for him.
@@ -210,4 +214,4 @@ export function followAction(id: string, update: (entry: AuditEntry) => void, ev
 
 export const getAudit = (limit = 30) => call<{ entries: AuditEntry[] }>("GET", `/api/audit?limit=${limit}`);
 
-export type { AuditEntry, ChatMessage };
+export type { AuditEntry, ChatMessage, SavedLine };

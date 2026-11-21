@@ -8,7 +8,8 @@
 }
 
 .desktop .app {
-  --rail-w: 236px;
+  /* Wide enough for "Home Assistant" on one row at 18px. */
+  --rail-w: 252px;
   --strip-w: 56px;
 }
 
@@ -59,7 +60,7 @@
   border-radius: 6px;
   background: rgba(255, 240, 225, 0.06);
   color: var(--muted);
-  font: 700 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font: 700 calc(12px * var(--text-scale))/1 ui-monospace, SFMono-Regular, Menlo, monospace;
   white-space: nowrap;
 }
 
@@ -152,7 +153,7 @@
   position: static;
   margin-left: auto;
   min-width: 22px;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .desktop .rail-gap {
@@ -368,7 +369,7 @@
 }
 
 /* A decision where the home screen was (decide-sheet.ts pane): Decide's head with its switch and keys, then the open card at
-   a readable width, the column's full height with its answers and comment under it; Under way is scrolled to below. */
+   a readable width, the column's full height with its answers and comment under it. */
 .desktop .view.decide-pane {
   display: flex;
   flex-direction: column;
@@ -598,7 +599,7 @@
 }
 
 .desktop .desk-detail .card-media.pair .media-cap {
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
@@ -631,7 +632,7 @@
 .desktop .desk-detail .confirm::after {
   content: "Enter to confirm · Esc to cancel";
   color: var(--muted);
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 /* Answer bar */
@@ -745,7 +746,7 @@
   gap: 16px;
   margin: 0;
   color: var(--muted);
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
 }
 
 .desktop .reject-sheet .sheet-keys span {

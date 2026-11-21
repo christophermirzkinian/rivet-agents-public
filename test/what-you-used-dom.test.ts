@@ -283,7 +283,10 @@ describe("What you used", () => {
 
     const css = readFileSync("web/src/views/what-you-used.css", "utf8");
     expect(css).not.toMatch(/animation|transition|@keyframes/);
-    for (const [, px] of css.matchAll(/font-size:\s*(\d+)px/g)) expect(Number(px)).toBeGreaterThanOrEqual(13);
+    // At Medium: each size is calc(Npx * var(--text-scale)), so N is its Medium size (Small, picked to go smaller, may dip under).
+    const sizes = [...css.matchAll(/font-size:\s*(?:calc\()?(\d+)px/g)].map(([, px]) => Number(px));
+    expect(sizes.length).toBeGreaterThan(5);
+    for (const px of sizes) expect(px).toBeGreaterThanOrEqual(13);
     for (const name of ["used-device", "used-chip", "used-search", "used-toggle"]) expect(css).toMatch(new RegExp(`\\.${name} \\{[^}]*min-height: (var\\(--tap\\)|4[4-9]px)`));
     expect(css).toMatch(/\.used-fold-head \{[^}]*min-height: (4[4-9]|5\d)px/);
   });

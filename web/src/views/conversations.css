@@ -1,8 +1,7 @@
-/* The Chat tab (chat.ts): Chat with Rivet, its search, and the card lines in a thing's page. Nothing here under 14 px,
-   every tap target 44 px or more. A bubble's words are 14 px (`.chat-body` in command.css). */
+/* The Chat tab (chat.ts): Chat with Rivet, its search, and a thing's card lines. Nothing here under 14 px, every tap
+   target 44 px or more. A bubble's words are 14 px (`.chat-body` in command.css). */
 
 .chat-head[hidden],
-.conv-head-box[hidden],
 .chat-topics-row[hidden],
 .chat-topics[hidden],
 .chat-thread[hidden],

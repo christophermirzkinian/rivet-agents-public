@@ -121,7 +121,9 @@ export function readCookie(request: IncomingMessage, name: string): string | nul
   for (const part of header.split(";")) {
     const index = part.indexOf("=");
     if (index === -1) continue;
-    if (part.slice(0, index).trim() === name) return part.slice(index + 1).trim();
+    // Strip only HTTP whitespace: String.trim() also drops U+00A0, which would
+    // let a sibling-planted "\xa0__Host-…" cookie (no prefix protection) match.
+    if (part.slice(0, index).replace(/^[ \t]+|[ \t]+$/g, "") === name) return part.slice(index + 1).trim();
   }
   return null;
 }

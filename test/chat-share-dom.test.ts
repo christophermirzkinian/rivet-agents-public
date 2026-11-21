@@ -34,12 +34,18 @@ let listeners: Record<string, ((event?: { data: string }) => void)[]> = {};
 let root: HTMLElement;
 let share: ReturnType<typeof vi.fn> | null;
 let opened: ReturnType<typeof vi.fn>;
-/** What a read of the conversation says: a test that turns it personal sets this too, so the refresh that follows agrees. */
+/** What the conversations list says of c1: a test that turns it personal sets this too, so the read that follows agrees. */
 let serverAppOnly = false;
 
 async function fakeFetch(input: RequestInfo | URL): Promise<Response> {
-  // The conversation is not app-only: until a read of it says so, no reply offers Share.
-  const body = new URL(String(input), "http://x").pathname.startsWith("/api/conversations/") ? detailBody("c1", history, { appOnly: serverAppOnly }) : EMPTY_LIST;
+  const path = new URL(String(input), "http://x").pathname;
+  // Until a read of Chat lands, no reply offers Share.
+  const body =
+    path === "/api/chat"
+      ? { messages: history.map((message) => ({ ...message, threadId: "c1" })), older: null, labels: {} }
+      : path === "/api/conversations"
+        ? { ...EMPTY_LIST, conversations: [detailBody("c1", history, { appOnly: serverAppOnly }).conversation] }
+        : EMPTY_LIST;
   return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
 }
 
@@ -108,8 +114,6 @@ beforeEach(() => {
   vi.stubGlobal("EventSource", FakeSource);
   vi.spyOn(window, "open").mockImplementation(opened);
   localStorage.clear();
-  // These tests are about the messages of one conversation: the tab opens on it.
-  chat.showConversation("c1");
   root = document.createElement("main");
   document.body.replaceChildren(root);
 });
@@ -202,7 +206,7 @@ describe("share a reply", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
-        if (!new URL(String(input), "http://x").pathname.startsWith("/api/conversations/")) return fakeFetch(input);
+        if (new URL(String(input), "http://x").pathname !== "/api/chat") return fakeFetch(input);
         lists += 1;
         if (lists === 1) {
           await new Promise<void>((resolve) => (release = resolve));
@@ -349,8 +353,8 @@ describe("share a reply", () => {
     await settle();
     const tools = (id: string) =>
       [...root.querySelectorAll<HTMLButtonElement>(`.chat-msg[data-id="${id}"] > .chat-msg-open > .chat-msg-tools button`)].map((one) => one.textContent);
-    expect(tools("h2")).toEqual(["More", "Reply"]);
-    expect(tools("c1")).toEqual(["More", "Reply"]);
+    expect(tools("h2")).toEqual(["More", "Reply", "Save"]);
+    expect(tools("c1")).toEqual(["More", "Reply", "Save"]);
     expect(root.querySelector(".chat-ex-foot")).toBeNull();
     expect(root.querySelector(".chat-meta-tap")).toBeNull();
     const line = root.querySelector<HTMLElement>('.chat-msg[data-id="h2"]')!;

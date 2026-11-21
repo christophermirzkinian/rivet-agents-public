@@ -1,4 +1,4 @@
-import { sumCells, type UsageCell } from "../../src/shared/ops.js";
+import { sumCells, unreadSince, type UsageCell } from "../../src/shared/ops.js";
 
 // The figure each reading page leads with, kept apart from the DOM so the rules are tested on their own.
 
@@ -69,7 +69,11 @@ export interface AccountLine {
 export function accountLines(cells: readonly UsageCell[], resetsLabel: (at: string | null) => string | null): AccountLine[] {
   return cells.map((cell) => {
     const who = `${cell.who}${cell.active ? " · in use" : ""}`;
-    if (cell.unread) return { who, state: "unread", figure: "Not read", fill: null, tone: "idle", detail: "No reading yet" };
+    if (cell.unread) {
+      // An account read before says when: "No reading yet" is only true of one never read.
+      const since = cell.rows.map(unreadSince).find(Boolean);
+      return { who, state: "unread", figure: "Not read", fill: null, tone: "idle", detail: since ? `Not read since ${since}` : "No reading yet" };
+    }
     // Floored, so a row reading "90%" is always one the card, the menu and the bridge also call full (89.6 reads 89%).
     const used = Math.floor(Math.min(100, Math.max(0, cell.percent)));
     const full = cell.percent >= ACCOUNT_FULL_PCT;

@@ -40,9 +40,16 @@ test("the Mac takes only a job action the server would have made", () => {
   assert.deepEqual(validJobAction(UP), UP);
   assert.deepEqual(validJobAction(TASK), TASK);
   assert.deepEqual(validJobAction({ op: "pause", id: ID }), { op: "pause", id: ID });
+  assert.deepEqual(validJobAction({ op: "run", id: ID, plan: "chatgpt" }), { op: "run", id: ID, plan: "chatgpt" });
+  assert.deepEqual(validJobAction({ op: "run", id: ID, plan: "claude" }), { op: "run", id: ID, plan: "claude" });
   assert.deepEqual(validJobAction({ ...CHECK, spec: { ...CHECK.spec, check: { ...CHECK.spec.check, where: "mac" } } }), CHECK, "an older job's where is dropped");
   for (const bad of [
     null,
+    { op: "run", id: ID, plan: "gemini" },
+    { op: "run", id: ID, plan: null },
+    { op: "run", id: ID, plan: "chatgpt", spec: TASK.spec },
+    { op: "pause", id: ID, plan: "chatgpt" },
+    { ...TASK, plan: "chatgpt" },
     { op: "pause", id: ID, spec: CHECK.spec },
     { op: "merge", id: ID },
     { op: "run", id: "j-../../x" },
@@ -379,6 +386,8 @@ test("Run now asks the server through job-run first, and the task's chat or the 
     assert.deepEqual(task.calls, [[NODE, JOB_RUN, "--manual", ID]]);
     await runJobAction(bound.deps, { op: "run", id: ID }, "act-00000007");
     assert.deepEqual(bound.calls, [[NODE, JOB_RUN, "--manual", ID, "--action", "act-00000007"]]);
+    await runJobAction(bound.deps, { op: "run", id: ID, plan: "chatgpt" }, "act-00000008");
+    assert.deepEqual(bound.calls[1], [NODE, JOB_RUN, "--manual", ID, "--action", "act-00000008", "--plan", "chatgpt"]);
     assert.deepEqual(await runJobAction(skipped.deps, { op: "run", id: ID }), { status: "refused", reason: "skipped: usage high" });
     assert.deepEqual(skipped.launchctl(), []);
   } finally {
@@ -469,6 +478,26 @@ test("job-run: a card check starts, runs on in the background and opens no chat"
     assert.deepEqual(r.detached[1], ["--exec", ID, "r-run-0001", "--manual"]);
     assert.equal(r.out.at(-1), "background\n");
     for (const argv of [["--manual", ID, "--action"], ["--manual", ID, "--action", "a b"], ["--manual", ID, "--run", "x"], [ID, "--action", "act-1"]]) assert.equal(await main(argv, r.d), 2, argv.join(" "));
+  } finally {
+    r.cleanup();
+  }
+});
+
+test("job-run: a check card's plan answer runs the check once, and its look, if still red, on that plan", async () => {
+  const r = runner({ start: check(), result: { code: 1, lines: ["boom"], timedOut: false } });
+  fs.writeFileSync(path.join(r.home, "agent.json"), JSON.stringify({ setupDone: true, firstPlan: "claude" }));
+  r.d.env.RIVET_AGENT_FILE = path.join(r.home, "agent.json");
+  try {
+    assert.equal(await main(["--manual", ID, "--plan", "chatgpt"], r.d), 0);
+    assert.deepEqual(r.detached, [["--exec", ID, "r-run-0001", "--manual", "--plan", "chatgpt"]]);
+    assert.equal(await main(r.detached[0], r.d), 1);
+    assert.deepEqual(r.puts.map((one) => one.body.state), ["start", "start", "red", "look", "red"]);
+    const exec = r.ran.find((call) => call.args[0] === "exec");
+    assert.ok(exec?.args.includes("--sandbox"), "the look is a codex exec");
+    assert.ok(r.puts.at(-1).url.endsWith("/report"));
+    assert.equal(await main(["--exec", ID, "r-run-0001", "--manual"], r.d), 1);
+    assert.equal(r.puts.at(-1).body.state, "red", "without a plan a card check opens no look");
+    for (const argv of [["--exec", ID, "r-run-0001", "--manual", "--plan", "gemini"], ["--exec", ID, "r-run-0001", "--manual", "--plan"], ["--exec", ID, "r-run-0001", "--plan", "chatgpt"]]) assert.equal(await main(argv, r.d), 2, argv.join(" "));
   } finally {
     r.cleanup();
   }
@@ -681,6 +710,13 @@ test("job-run: a task goes on the server's word with no usage reading, Run now t
     assert.equal(task.detached.length, 2);
     assert.equal(task.puts[1].body.manual, true);
     assert.equal(Object.hasOwn(task.puts[1].body, "usage"), false);
+    assert.deepEqual(task.detached[1], task.detached[0], "no plan unless a limit card's answer names one");
+    assert.equal(await main(["--manual", ID, "--action", "act-00000007", "--plan", "chatgpt"], task.d), 0);
+    assert.deepEqual(task.detached[2], ["--chat", ID, "r-run-0002", JSON.stringify({ kind: "task", name: "Issues", words: "look over the open issues", plan: "chatgpt" })]);
+    assert.equal(await main(["--manual", ID, "--plan", "claude"], task.d), 0);
+    assert.equal(JSON.parse(task.detached[3][3]).plan, "claude");
+    for (const argv of [["--manual", ID, "--plan"], ["--manual", ID, "--plan", "gemini"], ["--manual", ID, "--plan", "claude", "--action", "act-00000007"], [ID, "--plan", "claude"]]) assert.equal(await main(argv, task.d), 2, argv.join(" "));
+    assert.equal(task.detached.length, 4);
     assert.equal(await main([ID, "--launchd", ON_TIME], paused.d), 1);
     assert.equal(paused.out.at(-1), "skipped: paused\n");
     assert.equal(await main(["--exec", "j-bad"], task.d), 2);

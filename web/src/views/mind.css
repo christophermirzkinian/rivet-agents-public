@@ -26,7 +26,7 @@
 
 .mind-note {
   margin: 8px 4px;
-  font-size: 16px;
+  font-size: calc(16px * var(--text-scale));
   color: var(--muted);
 }
 
@@ -41,7 +41,7 @@
 .mind-sub {
   min-width: 0;
   margin: 0;
-  font-size: 15px;
+  font-size: calc(15px * var(--text-scale));
   color: var(--muted);
 }
 
@@ -60,7 +60,7 @@
   border: 0;
   background: var(--panel);
   color: var(--text);
-  font: 700 15px var(--font);
+  font: 700 calc(15px * var(--text-scale)) var(--font);
   cursor: pointer;
 }
 
@@ -84,7 +84,7 @@
   border-radius: 12px;
   background: var(--panel);
   color: var(--text);
-  font: 600 16px var(--font);
+  font: 600 calc(16px * var(--text-scale)) var(--font);
 }
 
 .mind-q::placeholder {
@@ -99,7 +99,7 @@
 .mind-hits {
   position: absolute;
   right: 14px;
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
   font-weight: 700;
   color: var(--apricot);
   pointer-events: none;
@@ -128,7 +128,7 @@
   border-radius: 999px;
   background: var(--panel);
   color: var(--text);
-  font: 700 15px var(--font);
+  font: 700 calc(15px * var(--text-scale)) var(--font);
   cursor: pointer;
 }
 
@@ -208,7 +208,7 @@
   padding: 10px 14px;
   border-radius: 12px;
   background: rgba(31, 27, 49, 0.92);
-  font-size: 15px;
+  font-size: calc(15px * var(--text-scale));
   line-height: 1.35;
   pointer-events: none;
 }
@@ -237,7 +237,7 @@
   border-radius: 12px;
   background: rgba(31, 27, 49, 0.92);
   color: var(--text);
-  font: 700 22px var(--font);
+  font: 700 calc(22px * var(--text-scale)) var(--font);
   cursor: pointer;
 }
 
@@ -281,13 +281,13 @@
   border: 0;
   background: none;
   color: var(--muted);
-  font: 700 26px var(--font);
+  font: 700 calc(26px * var(--text-scale)) var(--font);
   cursor: pointer;
 }
 
 .mind-title {
   margin: 0 48px 8px 0;
-  font-size: 20px;
+  font-size: calc(20px * var(--text-scale));
   line-height: 1.25;
 }
 
@@ -305,7 +305,7 @@
   padding: 4px 10px;
   border-radius: 999px;
   background: var(--panel-2);
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
   font-weight: 600;
   color: var(--muted);
 }
@@ -317,7 +317,7 @@
 
 .mind-desc {
   margin: 0 0 10px;
-  font-size: 16px;
+  font-size: calc(16px * var(--text-scale));
   line-height: 1.45;
 }
 
@@ -329,7 +329,7 @@
   max-height: 9.5em;
   margin: 0 0 6px;
   overflow: hidden;
-  font-size: 15px;
+  font-size: calc(15px * var(--text-scale));
   line-height: 1.45;
   color: var(--muted);
   white-space: pre-wrap;
@@ -348,13 +348,13 @@
   border: 0;
   background: none;
   color: var(--apricot);
-  font: 700 15px var(--font);
+  font: 700 calc(15px * var(--text-scale)) var(--font);
   cursor: pointer;
 }
 
 .mind-lh {
   margin: 12px 0 8px;
-  font-size: 15px;
+  font-size: calc(15px * var(--text-scale));
   color: var(--muted);
 }
 
@@ -374,7 +374,7 @@
   border-radius: 12px;
   background: var(--panel-2);
   color: var(--text);
-  font: 600 14px var(--font);
+  font: 600 calc(14px * var(--text-scale)) var(--font);
   text-align: left;
   cursor: pointer;
 }
@@ -453,7 +453,7 @@
   border-radius: 12px;
   background: var(--panel);
   color: var(--text);
-  font: 700 16px var(--font);
+  font: 700 calc(16px * var(--text-scale)) var(--font);
   text-align: left;
   cursor: pointer;
 }
@@ -487,7 +487,7 @@
   border-bottom: 1px solid var(--line);
   background: none;
   color: var(--text);
-  font: 600 15px var(--font);
+  font: 600 calc(15px * var(--text-scale)) var(--font);
   text-align: left;
   cursor: pointer;
 }

@@ -89,7 +89,7 @@
   scroll-snap-align: center;
 }
 
-/* On a phone the project tiles stack down the home (Night Desk; the owner kept it, 2026-11-18): a tile is a list, not a
+/* On a phone the project tiles stack down the home (Night Desk): a tile is a list, not a
    desk, so the slab is Rivet's alone. A touch screen under the computer layout's 1080 stacks too (a phone turned
    sideways, a small tablet); a laptop window 700px and wider, or anything with the computer layout, keeps the row. */
 @media (max-width: 699.98px), (hover: none) and (pointer: coarse) and (max-width: 1079.98px) {
@@ -1067,8 +1067,9 @@ button.desk.is-rivet:focus-visible {
   z-index: 1;
   display: grid;
   place-items: center;
-  width: 20px;
-  height: 20px;
+  /* Grows with its "?", which follows Text size. */
+  width: calc(20px * var(--text-scale));
+  height: calc(20px * var(--text-scale));
   border: 2px solid var(--bg);
   border-radius: 50%;
   background: #ffc23d;

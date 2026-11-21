@@ -25,6 +25,7 @@ import {
   type PostedCard,
   type ChatPage,
   type MediaType,
+  type SavedLine,
 } from "../shared/command.js";
 import type { ModelPicks } from "../shared/models.js";
 import {
@@ -224,6 +225,8 @@ function migrate(db: DatabaseSync): void {
   // An older page's conversation for each issue (the page is gone and nothing adds to it): `root`
   // is a message of it, so a merge needs no rewrite. Kept: such a thread stays whole, out of splitPlan, until retention.
   db.exec("CREATE TABLE IF NOT EXISTS find_work_conversations (repo TEXT NOT NULL, issue INTEGER NOT NULL, root TEXT NOT NULL, PRIMARY KEY (repo, issue))");
+  // Saved chat lines, kept here so every device has them. A line deleted since is left out as it is read.
+  db.exec("CREATE TABLE IF NOT EXISTS chat_saved (message TEXT PRIMARY KEY, at TEXT NOT NULL)");
   fillThreads(db);
   const fresh = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'media_seen'").get() === undefined;
   db.exec(MEDIA_SEEN);
@@ -657,7 +660,12 @@ export class CommandStore {
       if (collecting.length) {
         this.db.prepare("UPDATE audit SET status = 'cancelled', updated_at = ? WHERE batch_id = ? AND status = 'collecting'").run(at, lead);
         const remove = this.db.prepare("DELETE FROM chat_messages WHERE id = ?");
-        for (const one of ids) remove.run(one);
+        // A cancelled line leaves the Saved list with it.
+        const unsave = this.db.prepare("DELETE FROM chat_saved WHERE message = ?");
+        for (const one of ids) {
+          remove.run(one);
+          unsave.run(one);
+        }
       }
       this.db.exec("COMMIT");
       const requests = rows.map(requestOf);
@@ -1435,7 +1443,8 @@ export class CommandStore {
    * message is gone, and a PR stage unchanged since `conversationsBefore` that no conversation links. `apply` true
    * deletes about `batch` rows of each, oldest first, in one transaction. False only reads: it counts all that is due,
    * those freed by the due conversations included, and writes nothing. A conversation with an action still unfinished
-   * (queued for the bridge, say) is never due: blanking its words would lose it.
+   * (queued for the bridge, say) is never due: blanking its words would lose it. Nor is one holding a saved line, which
+   * keeps its conversation as a pin does.
    */
   sweepRetention(conversationsBefore: string | null, auditBefore: string, apply: boolean, batch: number): RetentionCounts {
     const before = conversationsBefore ?? "";
@@ -1449,6 +1458,7 @@ export class CommandStore {
         AND ((t.closed_at IS NOT NULL AND t.closed_at IS NOT t.swept_at AND t.closed_at >= c.last)
           OR (t.done_at IS NOT NULL AND (c.last_owner IS NULL OR c.last_owner <= t.done_at)))
         AND c.root NOT IN (SELECT value FROM json_each($seeds))
+        AND c.root NOT IN (SELECT COALESCE(m.thread_id, m.id) FROM chat_saved s JOIN chat_messages m ON m.id = s.message)
         AND c.root NOT IN (SELECT COALESCE(m.thread_id, m.id) FROM audit a JOIN chat_messages m ON m.id = a.id
           WHERE a.status NOT IN (SELECT value FROM json_each($finals)))`;
     const seeds = JSON.stringify(SEED_IDS);
@@ -1837,6 +1847,32 @@ export class CommandStore {
       changed.push(...this.batchIds(id));
     }
     return changed;
+  }
+
+  /** The saved lines as Chat shows them (status, photos, files, card), newest saved first; one whose message has gone is left out. */
+  savedChat(): SavedLine[] {
+    const rows = this.db.prepare("SELECT message, at FROM chat_saved ORDER BY at DESC, rowid DESC").all() as Row[];
+    return rows.flatMap((row) => {
+      const message = this.getChatMessage(row.message as string);
+      return message ? [{ ...message, conversation: message.threadId ?? message.id, savedAt: row.at as string }] : [];
+    });
+  }
+
+  /** Saves a chat line; false when there is no such message. Saving it again keeps when it was first saved. */
+  saveChat(id: string, at: string): boolean {
+    // Only a line Chat shows: no seed heading, no Team room or Updates line.
+    const shown = this.db
+      .prepare(
+        `SELECT 1 FROM chat_messages WHERE id = ? AND id NOT IN (${SEED_IDS.map(() => "?").join(", ")}) AND COALESCE(thread_id, id) NOT IN (?, ?)`,
+      )
+      .get(id, ...SEED_IDS, TEAM_ROOM_ID, UPDATES_ID);
+    if (!shown) return false;
+    this.db.prepare("INSERT OR IGNORE INTO chat_saved (message, at) VALUES (?, ?)").run(id, at);
+    return true;
+  }
+
+  unsaveChat(id: string): void {
+    this.db.prepare("DELETE FROM chat_saved WHERE message = ?").run(id);
   }
 
   /** Case-insensitive substring search over both sides of the chat, newest first, with each one's conversation; a seed heading is no message. */

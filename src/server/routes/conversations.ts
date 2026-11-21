@@ -565,7 +565,7 @@ export function registerConversations(
         out.broadcast(message);
         // A reply pushes as say.mjs's does; only an ack is silent.
         const conversation = message.threadId ?? message.id;
-        if (conversation !== TEAM_ROOM_ID) void push.notify(rivetPayload(text, { id: conversation, title: commands.conversationTitle(conversation) }), "card", `rivet:${message.id}`).catch(() => {});
+        if (conversation !== TEAM_ROOM_ID) void push.notify(rivetPayload(text, { id: conversation, title: commands.conversationTitle(conversation) }, message.id), "card", `rivet:${message.id}`).catch(() => {});
       } catch (error) {
         logger.error(`[conversations] card note on ${card} not added to its conversation: ${error instanceof Error ? error.message : String(error)}`);
       }

@@ -146,7 +146,6 @@ const scrollTo = (box: HTMLElement, to: number) => {
 async function open(): Promise<void> {
   chat.mount(root);
   await settle();
-  root.querySelector<HTMLButtonElement>(".thing-back")?.click();
   await settle();
   expect(thread().textContent).toContain("Three things building.");
 }
@@ -250,55 +249,15 @@ describe("the chat opens on its newest message when the thread grows after it sc
   const withTopic = () =>
     vi.stubGlobal("fetch", vi.fn(fakeServer([...MESSAGES, ...LONG.slice(0, 5)].map((one) => ({ ...one })), { a: { title: "Long one" } }).fetch));
   const lit = () => root.querySelector(".chat-msg.lit")?.getAttribute("data-id");
-  /** Chat → a topic's page, at `at` on it (its foot when null) → Back to a saved More topics entry, which is Chat now. */
-  async function viaTopic(at: number | null): Promise<void> {
+
+  it("a topic shown in Chat lights its newest line there, with no page; a search hit after it lets go and growth leaves it there", async () => {
+    withTopic();
+    await open();
     chat.showConversation("a");
     await settle();
-    expect(root.querySelector('.chat-msg[data-id="a001"]')).not.toBeNull();
-    if (at !== null) scrollTo(scroller(), at);
-    // happy-dom does not walk session history: the state Back lands on.
-    history.replaceState({ chatScreen: "list" }, "");
-    window.dispatchEvent(new PopStateEvent("popstate", { state: history.state }));
-    await settle();
-    expect(chat.openConversation()).toBeNull();
-    expect(root.querySelector(".chat")!.classList.contains("topics")).toBe(false);
-  }
-
-  it("Back from a topic's page to a saved More topics entry keeps nothing of that page for Chat", async () => {
-    withTopic();
-    await open();
-    scrollTo(scroller(), 600);
-    await viaTopic(1200);
-    openTarget({ type: "message", id: "m1" });
-    expect(lit()).toBe("m1");
-    // Neither the topic's 1200 nor Chat's 600 from before it: Back showed Chat afresh, on its newest.
-    expect(top).toBe(3910 - SHOWN);
-    // The jump let go of it: growth moves nothing.
-    tall = 4185;
-    FakeResizeObserver.grew(thread());
-    expect(top).toBe(3910 - SHOWN);
-  });
-
-  it("from its newest through a topic and back, Chat is at its newest and holds it", async () => {
-    withTopic();
-    await open();
-    expect(gap()).toBe(0);
-    await viaTopic(null);
-    history.replaceState(null, "");
-    window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
-    await settle();
-    expect(root.querySelector(".chat")!.classList.contains("topics")).toBe(false);
+    expect(lit()).toBe("a004");
+    expect(root.querySelector(".thing-head")).toBeNull();
     expect(thread().textContent).toContain("Three things building.");
-    expect(gap()).toBe(0);
-    tall = 4185;
-    FakeResizeObserver.grew(thread());
-    expect(gap()).toBe(0);
-  });
-
-  it("held on a topic's foot, then Back and a search hit in Chat: the jump lets go and growth leaves it there", async () => {
-    withTopic();
-    await open();
-    await viaTopic(null);
     openTarget({ type: "message", id: "m1" });
     expect(lit()).toBe("m1");
     const at = top;
@@ -348,22 +307,74 @@ describe("the chat opens on its newest message when the thread grows after it sc
     expect(top).toBe(at);
   });
 
+  it("a jump from the foot as the box above the message box goes keeps its scroll: the foot's own last scroll, told late, does not take hold again", async () => {
+    // Go to that chat: the Asked-before strip going holds Chat at its foot, then the jump starts its smooth
+    // scroll from there. The browser tells of the foot's scroll a frame later, unmoved, and the height the strip gave
+    // back then reaches the observer: taken for a reader at the foot, it pinned Chat there and ended the jump's scroll.
+    await open();
+    scroller().scrollTop = scroller().scrollHeight;
+    const at = top;
+    openTarget({ type: "message", id: "m1" });
+    expect(line("m1").classList.contains("lit")).toBe(true);
+    scroller().dispatchEvent(new Event("scroll"));
+    tall = 4185;
+    FakeResizeObserver.grew(scroller());
+    expect(top).toBe(at);
+    // Or the strip's height given back clamps the scroll at the foot, told a frame later.
+    tall = 3800;
+    scrollTo(scroller(), tall - SHOWN);
+    const clamped = top;
+    tall = 4185;
+    FakeResizeObserver.grew(scroller());
+    expect(top).toBe(clamped);
+    // A reader who scrolls back down to the newest is followed again.
+    scrollTo(scroller(), tall - SHOWN - 10);
+    tall = 4300;
+    FakeResizeObserver.grew(thread());
+    expect(gap()).toBe(0);
+  });
+
+  it("a jump whose scroll ends short of its line (lines drawn on the way take their own height) brings it to the middle again, once it ends", async () => {
+    perMessage = 100;
+    const many = Array.from({ length: 20 }, (_, i) => message(`b${String(i).padStart(2, "0")}`, "b", i));
+    vi.stubGlobal("fetch", vi.fn(fakeServer(many.map((one) => ({ ...one }))).fetch));
+    chat.mount(root);
+    await settle();
+    await settle();
+    expect(line("b19")).not.toBeNull();
+    const into = vi.mocked(HTMLElement.prototype.scrollIntoView);
+    into.mockClear();
+    openTarget({ type: "message", id: "b02" });
+    expect(into).toHaveBeenCalledTimes(1);
+    // The smooth scroll ended with the line still above the scroller's top.
+    scroller().dispatchEvent(new Event("scrollend"));
+    expect(into).toHaveBeenCalledTimes(2);
+    expect(into.mock.contexts[1]).toBe(line("b02"));
+    // In view, it is left where it is; and a touch of his ends the looking.
+    scrollTo(scroller(), 0);
+    scroller().dispatchEvent(new Event("scrollend"));
+    expect(into).toHaveBeenCalledTimes(2);
+    scrollTo(scroller(), 1500);
+    scroller().dispatchEvent(new Event("touchstart"));
+    scroller().dispatchEvent(new Event("scrollend"));
+    expect(into).toHaveBeenCalledTimes(2);
+  });
+
   it("scrolling to the top keeps the place: the ones above come in by themselves and the reader stays on the message they were on", async () => {
     perMessage = 50;
     vi.stubGlobal("fetch", vi.fn(fakeServer(LONG.map((one) => ({ ...one })), { a: { title: "Long one" } }).fetch));
-    chat.showConversation("a");
     chat.mount(root);
     await settle();
-    expect(root.querySelectorAll(".chat-msg")).toHaveLength(300);
+    expect(root.querySelectorAll(".chat-msg")).toHaveLength(50);
     expect(gap()).toBe(0);
     expect(root.querySelector("button.conv-earlier")).toBeNull();
     scrollTo(scroller(), 0);
     await settle();
-    expect(root.querySelectorAll(".chat-msg")).toHaveLength(400);
-    // 100 messages more above: the one at the top stays at the top.
-    expect(top).toBe(100 * 50);
+    expect(root.querySelectorAll(".chat-msg")).toHaveLength(100);
+    // 50 messages more above: the one at the top stays at the top.
+    expect(top).toBe(50 * 50);
     FakeResizeObserver.grew(thread());
-    expect(top).toBe(100 * 50);
+    expect(top).toBe(50 * 50);
   });
 
   it("scrolled up on Chat, a line landing at the end leaves the line being read where it was", async () => {
@@ -373,7 +384,6 @@ describe("the chat opens on its newest message when the thread grows after it sc
     vi.stubGlobal("fetch", vi.fn(server.fetch));
     chat.mount(root);
     await settle();
-    root.querySelector<HTMLButtonElement>(".thing-back")?.click();
     await settle();
     scrollTo(scroller(), 100);
     expect(shownTop(line("a2"))).toBe(0);
@@ -384,7 +394,7 @@ describe("the chat opens on its newest message when the thread grows after it sc
     expect(shownTop(line("a2"))).toBe(0);
   });
 
-  it("on a topic's page, a line landing leaves the run he is reading where it was, its runs sharing one thread", async () => {
+  it("on Chat lit at a topic, a line landing leaves the run he is reading where it was, its runs sharing one thread", async () => {
     perMessage = 50;
     // Four runs of his question and three answers: each 200 px.
     const lines = Array.from({ length: 16 }, (_, i) => ({ ...message(`t${i}`, "t", i), from: i % 4 ? ("rivet" as const) : ("owner" as const) }));
@@ -417,7 +427,6 @@ describe("the chat opens on its newest message when the thread grows after it sc
     vi.stubGlobal("fetch", vi.fn(fakeServer(lines).fetch));
     chat.mount(root);
     await settle();
-    root.querySelector<HTMLButtonElement>(".thing-back")?.click();
     await settle();
     expect(root.querySelector('.chat-msg[data-id="a0"]')).toBeNull();
     // On a1 (0-50), 10 px of it above the screen.
@@ -436,7 +445,6 @@ describe("the chat opens on its newest message when the thread grows after it sc
     vi.stubGlobal("fetch", vi.fn(server.fetch));
     chat.mount(root);
     await settle();
-    root.querySelector<HTMLButtonElement>(".thing-back")?.click();
     await settle();
     await settle();
     const before = () => server.requests.filter((one) => one.includes("before=")).length;
@@ -465,7 +473,6 @@ describe("the chat opens on its newest message when the thread grows after it sc
     );
     chat.mount(root);
     await settle();
-    root.querySelector<HTMLButtonElement>(".thing-back")?.click();
     await settle();
     const before = () => server.requests.filter((one) => one.includes("before=")).length;
     expect(before()).toBe(1);
@@ -493,41 +500,6 @@ describe("the chat opens on its newest message when the thread grows after it sc
     expect(root.textContent).not.toContain("Couldn't load earlier messages.");
   });
 
-  it("a page before still coming from a topic's page neither holds up nor stops Chat's own after Back", async () => {
-    perMessage = 5;
-    const lines = Array.from({ length: 400 }, (_, i) => message(`a${i}`, "a", i));
-    const server = fakeServer(lines, { a: { title: "Long" } });
-    const held: (() => void)[] = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = String(input);
-        if (url.includes("/api/conversations/a") && url.includes("before=")) await new Promise<void>((go) => held.push(go));
-        return server.fetch(input, init);
-      }),
-    );
-    chat.showConversation("a");
-    chat.mount(root);
-    await settle();
-    scrollTo(scroller(), 0);
-    await settle();
-    expect(held).toHaveLength(1);
-    root.querySelector<HTMLButtonElement>(".thing-back")?.click();
-    await settle();
-    // Chat's newest 50 of a's lines stand 250 px, shorter than the screen: its pages before come at once.
-    const chatBefore = () => server.requests.filter((one) => one.startsWith("GET /api/chat") && one.includes("before=")).length;
-    const asked = chatBefore();
-    expect(asked).toBeGreaterThan(0);
-    for (const go of held) go();
-    await settle();
-    expect(root.querySelector<HTMLElement>(".conv-earlier")!.hidden).toBe(true);
-    // Chat's own state stands: scrolled away and back, it asks again if there is more.
-    scrollTo(scroller(), 400);
-    scrollTo(scroller(), 0);
-    await settle();
-    expect(chatBefore()).toBeGreaterThanOrEqual(asked);
-  });
-
   it("a page before that leaves him in the top band of a Chat he can scroll is the last one asked until he scrolls away and back", async () => {
     // z's 30 lines stand 20 px each, a's 1 px: Chat's first page (z and a's newest 20) scrolls, and a's 300 lines go
     // back six pages of 50 px, too little to take him past the top band.
@@ -541,7 +513,6 @@ describe("the chat opens on its newest message when the thread grows after it sc
     vi.stubGlobal("fetch", vi.fn(server.fetch));
     chat.mount(root);
     await settle();
-    root.querySelector<HTMLButtonElement>(".thing-back")?.click();
     await settle();
     const before = () => server.requests.filter((one) => one.includes("before=")).length;
     expect(before()).toBe(0);
@@ -567,7 +538,6 @@ describe("the chat opens on its newest message when the thread grows after it sc
     vi.stubGlobal("fetch", vi.fn(server.fetch));
     chat.mount(root);
     await settle();
-    root.querySelector<HTMLButtonElement>(".thing-back")?.click();
     await settle();
     expect(server.requests.filter((one) => one.includes("before=")).length).toBe(1);
     expect(line("b0")).toBeTruthy();
@@ -598,7 +568,6 @@ describe("One chat: Chat oldest to newest, no topics", () => {
     vi.stubGlobal("fetch", vi.fn(fakeServer(lines, { a: { title: "Topic a" }, b: { title: "Topic b" } }).fetch));
     chat.mount(root);
     await settle();
-    root.querySelector<HTMLButtonElement>(".thing-back")?.click();
     await settle();
   }
 

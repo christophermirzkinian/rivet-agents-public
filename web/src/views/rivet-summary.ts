@@ -1,3 +1,4 @@
+import { agentName } from "../cloud-agent.js";
 import { h } from "../dom.js";
 import { copyButtons } from "./agents.js";
 import { showRivetChat } from "./chat.js";
@@ -18,7 +19,7 @@ export function openRivetSummary(): void {
         },
       },
     },
-    "Rivet's chat",
+    `${agentName()}'s chat`,
   );
-  openSheet("Rivet", { mount: (el) => el.append(copyButtons()), unmount: () => {} }, "Close", chat, { className: "rivet-sum", use: "rivet-summary" });
+  openSheet(agentName(), { mount: (el) => el.append(copyButtons()), unmount: () => {} }, "Close", chat, { className: "rivet-sum", use: "rivet-summary" });
 }

@@ -38,13 +38,14 @@ import {
   type ChatMessage,
   type ChatPage,
   type FixCreate,
+  type SavedLine,
 } from "../../shared/command.js";
 import { APP_NAME } from "../../shared/names.js";
 import { REPO_RE } from "../../shared/repos.js";
 import type { SearchItem } from "../../shared/search.js";
 import { idLike, namedPrs, textWords, THREAD_WINDOW_MS, type PrRef } from "../../shared/threads.js";
 import { CommandStore, type ActionRequest } from "../commandstore.js";
-import { HttpError, json, readJson, requireBearer, requireSameOrigin } from "../httputil.js";
+import { decodeSegment, HttpError, json, readJson, requireBearer, requireSameOrigin } from "../httputil.js";
 import { LogLeases } from "../logs.js";
 import { allAsksByThread, noticeThreads, rowTitle } from "../threads.js";
 import { resolveConversation } from "../conversations.js";
@@ -72,6 +73,7 @@ const LOGS_BODY_MAX = 256 * 1024;
 /** Why an action the offline bridge never got failed; a retry of it answers 503 again. */
 const OFFLINE = "the Mac bridge is offline";
 const STREAM_PING_MS = 25_000;
+const SAVED_PREFIX = "/api/chat/saved/";
 const SWEEP_MS = 15_000;
 const BATCH_SWEEP_MS = 1_000;
 const OUTSTANDING_WINDOW_MS = 24 * 60 * 60_000;
@@ -427,6 +429,8 @@ export function register(router: Router): void {
         : new HttpError(409, result.outcome === "sent" ? `Too late: it's on its way to ${RIVET_NAME}.` : `A Fix it goes to ${RIVET_NAME} as it is.`);
     const cancelled = result.back;
     for (const id of cancelled.ids) broadcast({ id, from: "owner", text: "", at, status: "cancelled" });
+    // Its lines leave the Saved list too, on every device.
+    savedChanged();
     // A line that answered an ask waiting on you no longer does: its wait card comes back.
     router.deps.refreshWaits();
     json(response, 200, cancelled);
@@ -521,6 +525,39 @@ export function register(router: Router): void {
       open: { type: "message", id: hit.id },
     }));
     json(response, 200, { results: [...titles, ...said] });
+  });
+
+  // Saved lines: kept on the server so every device has them; a change goes out on the stream as the new id list.
+  router.on("GET", "/api/chat/saved", ({ request, response }) => {
+    requireSession(request);
+    json(response, 200, { saved: commands.savedChat() } satisfies { saved: SavedLine[] });
+  });
+
+  const savedId = (pathname: string): string => {
+    const id = decodeSegment(pathname.slice(SAVED_PREFIX.length), "That message is not in the chat.");
+    if (!ID_PATTERN.test(id)) throw new HttpError(400, "invalid message id");
+    return id;
+  };
+  const savedChanged = () => {
+    const frame = `event: saved\ndata: ${JSON.stringify({ ids: commands.savedChat().map((line) => line.id) })}\n\n`;
+    for (const stream of [...streams.keys()]) writeStream(stream, frame);
+  };
+
+  router.onPrefix("PUT", SAVED_PREFIX, ({ request, response, url }) => {
+    requireSameOrigin(request, config.origin);
+    requireSession(request);
+    const id = savedId(url.pathname);
+    if (!commands.saveChat(id, now().toISOString())) throw new HttpError(404, "That message is not in the chat.");
+    savedChanged();
+    json(response, 200, { ok: true });
+  });
+
+  router.onPrefix("DELETE", SAVED_PREFIX, ({ request, response, url }) => {
+    requireSameOrigin(request, config.origin);
+    requireSession(request);
+    commands.unsaveChat(savedId(url.pathname));
+    savedChanged();
+    json(response, 200, { ok: true });
   });
 
   router.on("GET", "/api/chat/stream", ({ request, response }) => {
@@ -669,7 +706,7 @@ export function register(router: Router): void {
     // A reply in the Team room never does: nothing there pushes.
     const conversation = message.threadId ?? message.id;
     if (conversation !== TEAM_ROOM_ID) void push
-      .notify(rivetPayload(text || quoteText(message), { id: conversation, title: commands.conversationTitle(conversation) }), "card", `rivet:${message.id}`)
+      .notify(rivetPayload(text || quoteText(message), { id: conversation, title: commands.conversationTitle(conversation) }, message.id), "card", `rivet:${message.id}`)
       .catch(() => {});
     json(response, 201, message);
   });

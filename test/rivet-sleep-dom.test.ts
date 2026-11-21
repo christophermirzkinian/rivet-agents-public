@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError, call } from "../web/src/api.js";
+import { probeCloud, resetCloud } from "../web/src/cloud-agent.js";
 import { fellAsleep, isAsleep, onCap, onWake, resetSleep, watchInput } from "../web/src/rivet-sleep.js";
 
 // Rivet Cloud: the app's own timed requests say they are background, and once the machine goes to sleep they stop
@@ -75,6 +76,18 @@ describe("rivet-sleep", () => {
     document.dispatchEvent(new Event("pointerdown"));
     await call("GET", "/api/status");
     expect(document.getElementById("rivet-cap")).toBeNull();
+  });
+
+  it("says your agent wakes again on a hosted machine", async () => {
+    answer = () => new Response(JSON.stringify({ name: "Pip", setupDone: true, firstPlan: "claude" }), { status: 200, headers: { "content-type": "application/json" } });
+    await probeCloud();
+    try {
+      answer = () => new Response("capped", { status: 503, headers: { "x-rivet-asleep": "1", "x-rivet-capped-until": String(Date.UTC(2026, 11, 1)) } });
+      await expect(call("GET", "/api/status")).rejects.toBeInstanceOf(ApiError);
+      expect(document.getElementById("rivet-cap")?.textContent).toMatch(/Your agent wakes again on 1\sDecember\./);
+    } finally {
+      resetCloud();
+    }
   });
 
   it("tells the composer the cap's day while capped, once per change, and null when it lifts", async () => {

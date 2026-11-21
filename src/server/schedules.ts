@@ -17,7 +17,8 @@ import {
   type SchedulesSnapshot,
   type Streak,
 } from "../shared/schedules.js";
-import { RIVET_NAME } from "../shared/names.js";
+import { PLANS_PATH } from "../shared/jobs.js";
+import { STORED_NAME } from "../shared/names.js";
 import { shortDate } from "../shared/when.js";
 import { JobsStore } from "./jobs.js";
 
@@ -91,12 +92,13 @@ export class SchedulesStore {
   /** Your own jobs: a red one's card is a failing-schedule card too. */
   readonly jobs: JobsStore;
 
-  constructor(dataDir: string) {
+  /** `origin`: the app's own, whose https Plans page a job's limit card links to. */
+  constructor(dataDir: string, origin?: string) {
     mkdirSync(dataDir, { recursive: true });
     this.db = new DatabaseSync(join(dataDir, "rivet.sqlite"));
     this.db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;");
     this.db.exec(SCHEMA);
-    this.jobs = new JobsStore(dataDir, (key) => this.owned(key));
+    this.jobs = new JobsStore(dataDir, (key) => this.owned(key), origin?.startsWith("https://") ? `${origin}${PLANS_PATH}` : null);
   }
 
   close(): void {
@@ -268,7 +270,7 @@ function failingCard(item: Schedule, streak: Streak, id: string): Need {
     ...(repo ? { repo } : {}),
     schedule: item.id,
     options: [
-      { label: `Ask ${RIVET_NAME} to fix`, recommended: true },
+      { label: `Ask ${STORED_NAME} to fix`, recommended: true },
       { label: "Leave it", detail: "No new card until it works again and then fails twice more." },
     ],
     ...(streak.newest.url ? { links: [{ label: "Open run", url: streak.newest.url, primary: true }] } : {}),

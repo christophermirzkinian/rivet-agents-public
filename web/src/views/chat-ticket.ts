@@ -5,6 +5,7 @@ import type { MediaRef, Reply, ServedNeed } from "../../../src/shared/board.js";
 import { chatName } from "../../../src/shared/names.js";
 import { when } from "../../../src/shared/when.js";
 import { stageWord } from "../../../src/shared/words.js";
+import { agentName } from "../cloud-agent.js";
 
 /**
  * The chat sheet as a ticket: what its Ticket and Activity tabs read, from what the app already has. Its ask, the ask's
@@ -23,7 +24,12 @@ export const WHO_CHIPS: readonly { key: Exclude<Who, "other"> | "all"; label: st
   { key: "you", label: "You" },
   { key: "chat", label: "Chat" },
   { key: "lenses", label: "Lenses" },
-  { key: "rivet", label: "Rivet" },
+  {
+    key: "rivet",
+    get label() {
+      return agentName();
+    },
+  },
 ];
 
 /** What a filter with no rows says; Lenses has none until review findings reach the app. */
@@ -32,7 +38,9 @@ export const WHO_EMPTY: Record<Exclude<Who, "other"> | "all", string> = {
   you: "No answers from you on this yet.",
   chat: "Nothing from its chat yet.",
   lenses: "Review findings don't come to this list yet.",
-  rivet: "Nothing from Rivet on this yet.",
+  get rivet() {
+    return `Nothing from ${agentName()} on this yet.`;
+  },
 };
 
 export interface ActivityRow {
@@ -140,7 +148,7 @@ const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
  */
 export function activityRows(ask: Ask | undefined, chat: string, cards: readonly TicketCard[], lastSaid: { text: string; at: string | null } | null): ActivityRow[] {
   const chatRow = { who: "chat" as const, name: chatName(chat), role: "chat" };
-  const rivetRow = { who: "rivet" as const, name: "Rivet", role: "main agent" };
+  const rivetRow = { who: "rivet" as const, name: agentName(), role: "main agent" };
   // `by` is free text: only the chat's own name or Rivet's is credited to them; anyone else keeps their own name.
   const byRow = (by: string | undefined): Pick<ActivityRow, "who" | "name" | "role"> =>
     !by ? { who: "other", name: "The ask", role: "no author" } : chat !== "" && by === chat ? chatRow : by.trim().toLowerCase() === "rivet" ? rivetRow : { who: "other", name: by, role: "on the ask" };
@@ -198,6 +206,6 @@ export function ticketMeta(ask: Ask | undefined): string {
 
 /** Who asked, as the Description's foot says it: `You · 8:12am`. */
 export function askedBy(ask: Ask): string {
-  const who = ask.who === "owner" ? "You" : "Rivet";
+  const who = ask.who === "owner" ? "You" : agentName();
   return `${who} · ${when(ask.createdAt)}`;
 }

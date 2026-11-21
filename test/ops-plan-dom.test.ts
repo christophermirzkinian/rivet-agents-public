@@ -13,7 +13,6 @@ import { clearWords, navMark, opsStatus } from "../web/src/views/progress-mark.j
 import * as ops from "../web/src/views/ops.js";
 import { fixedToday, nextBody, ownRows, planState, prRef } from "../web/src/views/ops-plan.js";
 import { statusParts } from "../web/src/views/status-line.js";
-import { onShowThing } from "../web/src/views/thing.js";
 import * as asks from "../web/src/views/your-asks.js";
 import { serveSummary } from "./summary-served.js";
 

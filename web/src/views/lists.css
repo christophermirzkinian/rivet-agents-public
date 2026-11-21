@@ -21,7 +21,7 @@
   background: none;
   color: var(--muted);
   font: inherit;
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
   font-weight: 700;
   cursor: pointer;
   touch-action: manipulation;
@@ -44,7 +44,7 @@
 }
 
 .cfilter-n {
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   font-variant-numeric: tabular-nums;
   opacity: 0.75;
 }
@@ -102,7 +102,7 @@ button.qc-coming:hover {
 
 .cs-title {
   margin: 0;
-  font-size: 15px;
+  font-size: calc(15px * var(--text-scale));
   font-weight: 700;
   overflow-wrap: anywhere;
 }
@@ -110,7 +110,7 @@ button.qc-coming:hover {
 .cs-what {
   margin: 0;
   color: var(--muted);
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
   overflow-wrap: anywhere;
 }
 
@@ -122,7 +122,7 @@ button.qc-coming:hover {
 
 .cs-stage {
   color: var(--stage);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   font-weight: 900;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -130,13 +130,13 @@ button.qc-coming:hover {
 
 .cs-pct {
   color: var(--muted);
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
   font-variant-numeric: tabular-nums;
 }
 
 .cs-quiet {
   color: var(--apricot);
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
   font-weight: 700;
 }
 
@@ -153,7 +153,7 @@ button.qc-coming:hover {
   grid-template-columns: auto minmax(0, 1fr);
   gap: 6px 16px;
   margin: 4px 0 0;
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
 }
 
 .cs-fact {
@@ -177,7 +177,7 @@ button.qc-coming:hover {
 .cs-hint {
   margin: 0;
   color: var(--muted);
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
 }
 
 .cs-actions {
@@ -208,7 +208,7 @@ button.qc-coming:hover {
 .cs-status {
   margin: 0;
   color: var(--muted);
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
 }
 
 .cs-status:empty {
@@ -240,7 +240,7 @@ button.qc-coming:hover {
 }
 
 .cstale-why {
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
   font-weight: 600;
 }
 

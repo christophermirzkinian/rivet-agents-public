@@ -16,6 +16,7 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { agentName, CHAT_PROVIDER, codexChatArgs, connected, FIRST_PLAN_UNREAD, firstPlan, limitWords, otherPlan, PLAN_NAMES, planOfProvider, plansOn, screenLimit, STATUS_ARGS } from "../bridge/lib/job-drivers.mjs";
 
 export const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 export const PROVIDERS = new Set(["claude", "codex"]);
@@ -242,7 +243,9 @@ const extraArgs = (value) => String(value ?? "").split(/\s+/).filter(Boolean);
 /** A chat's argv: the provider's program, the user's extra args (RIVET_CLAUDE_ARGS / RIVET_CODEX_ARGS), then its prompt. */
 export function launchFor(ctx, provider, prompt = null) {
   if (!PROVIDERS.has(provider)) throw new Error(`rivet-chat: --provider is claude or codex, not ${provider}`);
-  const args = extraArgs(provider === "codex" ? ctx.env.RIVET_CODEX_ARGS : ctx.env.RIVET_CLAUDE_ARGS);
+  const extra = extraArgs(provider === "codex" ? ctx.env.RIVET_CODEX_ARGS : ctx.env.RIVET_CLAUDE_ARGS);
+  // A hosted agent's Codex chat asks as its Claude chat does (bridge/lib/job-drivers.mjs codexChatArgs).
+  const args = provider === "codex" && plansOn(ctx.env) ? [...codexChatArgs(ctx.env), ...extra] : extra;
   // `--`: a prompt that names a subcommand (`logout`) or a flag must never run as one.
   return { command: ctx.bins[provider], args: prompt ? [...args, "--", prompt] : args };
 }
@@ -325,8 +328,19 @@ export function ps(ctx) {
   });
 }
 
-/** Starts a chat named `name` running `provider` in the existing directory `cwd`. */
-export function create(ctx, { name, cwd, provider = "claude", prompt = null }) {
+/** @param {NodeJS.ProcessEnv} env */
+function firstProvider(env) {
+  const plan = firstPlan(env);
+  if (!plan) throw new Error(`rivet-chat: ${FIRST_PLAN_UNREAD} (RIVET_AGENT_FILE), so no chat started`);
+  return CHAT_PROVIDER[plan];
+}
+
+/**
+ * Starts a chat named `name` running `provider` in the existing directory `cwd`. With no provider named, a hosted
+ * agent's chat runs on its first plan (RIVET_AGENT_FILE's firstPlan), any other on Claude; one whose agent file cannot
+ * be read starts none.
+ */
+export function create(ctx, { name, cwd, provider = plansOn(ctx.env) ? firstProvider(ctx.env) : "claude", prompt = null }) {
   if (!NAME_RE.test(name ?? "")) throw new Error(`rivet-chat: bad chat name ${JSON.stringify(name)}`);
   if (prompt != null && typeof prompt !== "string") throw new Error("rivet-chat: a prompt is text");
   const launch = launchFor(ctx, provider, prompt || null);
@@ -422,6 +436,82 @@ export function read(ctx, ref, { lines = 60 } = {}) {
   const r = tmux(ctx, ["capture-pane", "-p", "-J", "-t", entry.paneId, "-S", `-${n}`]);
   if (!r.ok) throw new Error(`rivet-chat: read of ${entry.session} failed (${r.stderr.trim().slice(0, 200)})`);
   return r.stdout.replace(/\s+$/, "").split("\n").slice(-n).join("\n");
+}
+
+/**
+ * A plan's sign-in status from its own CLI, in the environment a pane gets: { code, lines }, stdout then stderr (Codex
+ * says "Not logged in" on stderr). A CLI that would not start or ran out of time has code null.
+ */
+function signInStatus(ctx, plan) {
+  const env = Object.fromEntries(PANE_ENV.filter((name) => ctx.env[name] !== undefined).map((name) => [name, ctx.env[name]]));
+  const r = spawnSync(ctx.bins[CHAT_PROVIDER[plan]], [...STATUS_ARGS[plan]], { env, encoding: "utf8", timeout: 15_000, stdio: ["ignore", "pipe", "pipe"] });
+  if (r.error) return { code: null, lines: [] };
+  return { code: r.status, lines: plan === "claude" ? String(r.stdout ?? "").split("\n") : `${r.stdout ?? ""}\n${r.stderr ?? ""}`.split("\n") };
+}
+
+/**
+ * A hosted agent's chats whose screen ends on their plan's usage limit, each asked about once: when the other plan is
+ * signed in, `post` gets the card's words; no chat is ever moved to the other plan. A chat's mark goes once its screen no
+ * longer shows the limit, so a later limit asks again. Nothing is read on a machine with no agent file.
+ * The agent runtime's supervisor calls it once a minute and posts each ask as a board card.
+ * @param {ReturnType<typeof context>} ctx
+ * `since` is when the chat's screen first showed this limit, the same on every ask about it until the screen clears;
+ * `chat` is the chat itself, its name and start. A post that throws is logged and the next chat is asked.
+ * @param {{ post: (ask: { chat: string, name: string, plan: string, until: string | null, since: string, text: string }) => Promise<unknown> | unknown, status?: typeof signInStatus }} d
+ */
+export async function limitCheck(ctx, { post, status = signInStatus }) {
+  if (!plansOn(ctx.env)) return [];
+  const asked = [];
+  for (const entry of ps(ctx)) {
+    if (entry.state !== "alive") continue;
+    let lines;
+    try {
+      lines = read(ctx, entry.name, { lines: 40 }).split("\n");
+    } catch {
+      continue;
+    }
+    const plan = planOfProvider(entry.provider);
+    const hit = screenLimit(entry.provider, lines);
+    const mark = hit ? `${plan} ${hit.until ?? ""}` : null;
+    // When this limit was first seen on the chat's screen: it tells one limit from the next, whatever it says or the day.
+    const seen = !mark ? null : entry.limitSeen?.mark === mark ? entry.limitSeen : { mark, at: iso(ctx.now()) };
+    if ((entry.limitAsked ?? null) === mark && (entry.limitSeen ?? null) === seen) continue;
+    /** @param {string | null | undefined} asks the chat's asked mark, or undefined to leave it */
+    const remember = (asks) =>
+      withRegistry(ctx, (doc) => {
+        const e = doc.chats[entry.name];
+        if (!e || e.started !== entry.started) return;
+        if (seen) e.limitSeen = seen;
+        else delete e.limitSeen;
+        if (asks) e.limitAsked = asks;
+        else if (asks === null) delete e.limitAsked;
+      });
+    if (hit) {
+      if (entry.limitSeen !== seen) remember(undefined);
+      if ((entry.limitAsked ?? null) === mark) continue;
+      const other = otherPlan(plan);
+      if (connected(other, status(ctx, other)) !== true) continue;
+      const Other = PLAN_NAMES[other];
+      const ask = {
+        chat: `${entry.name} ${entry.started}`,
+        name: entry.name,
+        plan,
+        until: hit.until,
+        since: seen.at,
+        text: `${limitWords(plan, hit.until)}. Chat ${entry.name} waits for it. ${Other} is ready: ask ${agentName(ctx.env) ?? "your agent"} to start a new chat on ${Other}. New chats start on the plan that goes first: change it on the Plans page.`,
+      };
+      try {
+        await post(ask);
+      } catch (err) {
+        // One chat's post that fails leaves the others to be asked; this one is asked again next time.
+        process.stderr.write(`rivet-chat: limit card for ${entry.name} not posted (${err instanceof Error ? err.message : String(err)})\n`);
+        continue;
+      }
+      asked.push(ask);
+    }
+    remember(mark);
+  }
+  return asked;
 }
 
 /** Attaches this terminal to the chat. */

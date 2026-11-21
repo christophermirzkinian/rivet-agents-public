@@ -5,7 +5,7 @@
   height: auto;
   gap: 12px;
   padding: 4px 16px 24px;
-  font-size: 16px;
+  font-size: calc(16px * var(--text-scale));
 }
 
 .feed.v4 :is(.deck, .stack, .card-body) {
@@ -61,17 +61,17 @@
 }
 
 .feed.v4 .card-title {
-  font-size: 22px;
+  font-size: calc(22px * var(--text-scale));
   line-height: 1.2;
 }
 
 .feed.v4 .card-ask {
-  font-size: 16px;
+  font-size: calc(16px * var(--text-scale));
   line-height: 1.4;
 }
 
 .feed.v4 .card-meta {
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
 }
 
 .feed.v4 .deck > .actions {
@@ -96,7 +96,7 @@
 
 .card-kind.plan {
   color: var(--apricot);
-  font-size: 15px;
+  font-size: calc(15px * var(--text-scale));
   font-weight: 800;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -105,7 +105,7 @@
 .plan-points {
   margin: 0 0 12px;
   padding-left: 22px;
-  font-size: 16px;
+  font-size: calc(16px * var(--text-scale));
   line-height: 1.4;
 }
 
@@ -130,7 +130,7 @@
   border-radius: 999px;
   background: var(--panel-2);
   color: var(--muted);
-  font-size: 15px;
+  font-size: calc(15px * var(--text-scale));
 }
 
 .plan-chip b {
@@ -178,7 +178,7 @@
   top: 100%;
   left: 0;
   margin: 2px 0 0;
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
 }
 
 .say-text {
@@ -191,7 +191,7 @@
   background: none;
   color: var(--text);
   font: inherit;
-  font-size: 16px;
+  font-size: calc(16px * var(--text-scale));
   line-height: 1.4;
   resize: none;
   field-sizing: content;
@@ -220,7 +220,7 @@
   border-color: transparent;
   background: var(--apricot);
   color: #2a1606;
-  font-size: 16px;
+  font-size: calc(16px * var(--text-scale));
 }
 
 .say-line > .attach-preview:empty,
@@ -235,7 +235,7 @@
 
 .feed.v4 .btn.pick,
 .feed.v4 .btn.mini {
-  font-size: 16px;
+  font-size: calc(16px * var(--text-scale));
 }
 
 /* A plan's answers: one big Yes, go, then No. */
@@ -259,12 +259,12 @@
 }
 
 .plan-b {
-  font-size: 20px;
+  font-size: calc(20px * var(--text-scale));
   font-weight: 900;
 }
 
 .plan-s {
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
   font-weight: 700;
   opacity: 0.85;
 }
@@ -281,7 +281,7 @@
 }
 
 .update-sheet :is(.upd-tag, .upd-age, .upd-meta) {
-  font-size: max(14px, 1em);
+  font-size: max(calc(14px * var(--text-scale)), 1em);
 }
 
 /* Seen goes when nothing in the thread is new, and Close takes the row. */
@@ -312,7 +312,7 @@
 
 /* The lists and option details in the Feed read at 14px at least (no small text). */
 .feed.v4 :is(.choice-detail, .cfilter-n, .qc-stage, .qc-what, .fsec-n, .card-link) {
-  font-size: max(14px, 1em);
+  font-size: max(calc(14px * var(--text-scale)), 1em);
 }
 
 /* Minimise: a button at a card's top right and under its last line; minimised, a card is its title
@@ -329,7 +329,7 @@
   border-radius: 999px;
   background: transparent;
   color: var(--muted);
-  font-size: 28px;
+  font-size: calc(28px * var(--text-scale));
   font-weight: 700;
   line-height: 1;
 }
@@ -397,7 +397,7 @@
   flex: 1;
   min-width: 0;
   overflow: hidden;
-  font-size: 20px;
+  font-size: calc(20px * var(--text-scale));
   font-weight: 800;
   line-height: 1.2;
   overflow-wrap: anywhere;
@@ -426,7 +426,7 @@
   justify-content: space-between;
   margin: 2px 0 8px;
   color: var(--muted);
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
   font-weight: 800;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -507,11 +507,11 @@
 }
 
 .reject-sheet .sheet-title {
-  font-size: 22px;
+  font-size: calc(22px * var(--text-scale));
 }
 
 .reject-sheet .sheet-where {
-  font-size: 16px;
+  font-size: calc(16px * var(--text-scale));
   line-height: 1.35;
   overflow-wrap: anywhere;
 }
@@ -519,7 +519,7 @@
 .reject-sheet .sheet-text {
   min-height: 128px;
   max-height: 40dvh;
-  font-size: 17px;
+  font-size: calc(17px * var(--text-scale));
   line-height: 1.4;
   field-sizing: content;
 }
@@ -531,12 +531,12 @@
 }
 
 .reject-sheet .sheet-hint {
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
 }
 
 .reject-sheet .sheet-foot .btn {
   min-height: 52px;
-  font-size: 17px;
+  font-size: calc(17px * var(--text-scale));
 }
 
 .reject-sheet .btn.reject-send:disabled {
@@ -547,7 +547,7 @@
 .feed-fresh {
   margin: 6px 4px 0;
   color: var(--muted);
-  font-size: 15px;
+  font-size: calc(15px * var(--text-scale));
   font-weight: 600;
 }
 
@@ -566,7 +566,7 @@
   border-radius: 14px;
   background: #3a2419;
   color: var(--apricot);
-  font-size: 16px;
+  font-size: calc(16px * var(--text-scale));
   font-weight: 800;
 }
 
@@ -577,7 +577,7 @@
 .btn.feed-retry {
   flex: none;
   min-width: var(--tap);
-  font-size: 16px;
+  font-size: calc(16px * var(--text-scale));
 }
 
 /* New cards wait behind this pill so the list never moves under the owner. */
@@ -597,7 +597,7 @@
   border-radius: 999px;
   background: var(--apricot);
   color: #1b1317;
-  font-size: 16px;
+  font-size: calc(16px * var(--text-scale));
   font-weight: 800;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
 }
@@ -619,7 +619,7 @@
   align-items: baseline;
   gap: 10px;
   color: var(--text);
-  font-size: 16px;
+  font-size: calc(16px * var(--text-scale));
   font-weight: 700;
   line-height: 1.3;
   overflow-wrap: anywhere;

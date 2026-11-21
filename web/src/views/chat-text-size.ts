@@ -1,6 +1,6 @@
 // Chat's text size: Small, Medium or Large under the chat's options button, saved on this device and applied at once.
-// It sets the page's data-chat-text, and command.css sizes a line's words, its reply quote and the box he types in
-// from it.
+// It sets the page's data-chat-text: command.css sizes a line's words, its reply quote and the box he types in from it,
+// and styles.css's --text-scale sizes every other word in the app.
 import { h } from "../dom.js";
 
 export type ChatTextSize = "s" | "m" | "l";
@@ -32,6 +32,12 @@ export function readChatTextSize(): ChatTextSize {
 
 export function applyChatTextSize(size: ChatTextSize = readChatTextSize()): void {
   document.documentElement.dataset.chatText = size;
+}
+
+/** styles.css's --text-scale now (Medium 1), for text drawn by script where CSS cannot reach it: a canvas. */
+export function textScale(): number {
+  const scale = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--text-scale"));
+  return scale > 0 ? scale : 1;
 }
 
 export function setChatTextSize(size: ChatTextSize): void {

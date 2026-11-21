@@ -528,7 +528,7 @@ test("a hold or wait on the owner, his card, video or word holds, whatever word 
   assert.equal(holdLines([lifted]), lifted);
 });
 
-// #602: lines from PR bodies and comments that stopped clean PRs on 2026-10-20 and -21, verbatim.
+// #602: lines from PR bodies and comments that stopped clean PRs, verbatim.
 test("lines that describe holds, approvals before merge, waits elsewhere or another PR's hold are not holds", () => {
   for (const line of [
     // #608 body and comment: the feature is about PRs on hold.
@@ -707,7 +707,7 @@ test("this PR by number, approval still required before merge, waits in tables a
 const yes = "**Owner decision (via Rivet): CHOSE: Yes, put it on the site**\nItem: `x` \u2014 ship it?\n<!-- rivet-reply:abc decision=choice -->";
 const stale = { body: "Checkpoint\n- **Owner holds:** draft and HELD.", posted: "2026-10-20T04:14:00Z", changed: "2026-10-20T04:20:00Z", association: "OWNER" };
 
-// The monitor's rule (2026-10-21): a yes releases only if it can be tied to this PR's hold, else only "Hold released:".
+// A yes releases only if it can be tied to this PR's hold, else only "Hold released:".
 // A yes cannot be: what it means depends on the card's question, so no yes releases a hold.
 test("an owner's Rivet yes releases no hold, whatever its question, before or after ready for review", () => {
   const record = { body: yes, posted: "2026-10-20T04:56:34Z", changed: "2026-10-20T04:56:34Z", association: "OWNER" };
@@ -833,8 +833,8 @@ test("a verb \"hold:\" in prose is no hold; labels and real holds still hold", (
     assert.equal(prHold({ body, comments: [] }, OWNER), null, body);
   }
   for (const [body, line] of [
-    // #600, #658: real holds.
-    ["**Hold: the owner rejected 20 Oct; parked.** This PR stays a draft and does not merge.", "**Hold: the owner rejected 20 Oct; parked.** This PR stays a draft and does not merge."],
+    // Real holds.
+    ["**Hold: the owner rejected it; parked.** This PR stays a draft and does not merge.", "**Hold: the owner rejected it; parked.** This PR stays a draft and does not merge."],
     ["- Draft on purpose; do not merge. Label `notice:skip`.", "- Draft on purpose; do not merge. Label `notice:skip`."],
     // A label before "hold:": any word but the closed set, or too few clause words before a plural.
     ["The owner hold: the video is not approved yet.", "The owner hold: the video is not approved yet."],

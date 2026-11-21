@@ -7,7 +7,7 @@ import path from "node:path";
 import { PassThrough, Writable } from "node:stream";
 import test from "node:test";
 
-import { CODEX_READ_TTL_MS, codexHomes, codexRows, collectCodex, parseCodexAccountRead, parseCodexLimits, readCodexAccount } from "../lib/ops/codex.mjs";
+import { CODEX_KEEP_MS, CODEX_READ_TTL_MS, codexHomes, codexRows, collectCodex, parseCodexAccountRead, parseCodexLimits, readCodexAccount } from "../lib/ops/codex.mjs";
 
 const reply = (rateLimits) => ({ id: 2, result: { rateLimits } });
 const week = (usedPercent) => parseCodexLimits(reply({ primary: { usedPercent, windowDurationMins: 10080, resetsAt: null } }));
@@ -132,13 +132,15 @@ test("collectCodex reads each home under its own CODEX_HOME, at most once per TT
   };
   assert.deepEqual(labels(await pass()), ["cc***, week 7", "bb*** (signed out, no reading) 0"]);
 
-  // After six hours with no good reading, a stale home is "no reading".
+  // Past 45 minutes with no good reading, a stale home drops its figure and says when it last had one.
   t += CODEX_READ_TTL_MS;
+  const goodAt = t - CODEX_READ_TTL_MS;
   const unknown = async () => ({ limits: null, signedIn: null, email: null });
   answer = { "aaa-1": unknown, "bbb-2": unknown };
   assert.deepEqual(labels(await pass()), ["cc***, week (stale) 7", "bb*** (signed out, no reading) 0"]);
-  t += 6 * 60 * 60_000;
-  assert.deepEqual(labels(await pass()), ["cc*** (no reading) 0", "bb*** (signed out, no reading) 0"]);
+  t = goodAt + CODEX_KEEP_MS + 1;
+  const since = new Intl.DateTimeFormat("en-AU", { timeZone: "Pacific/Auckland", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(goodAt);
+  assert.deepEqual(labels(await pass()), [`cc*** (no reading since ${since}) 0`, "bb*** (signed out, no reading) 0"]);
 });
 
 test("collectCodex: a hung home times out on its own row and never stalls the pass or the other home", async () => {

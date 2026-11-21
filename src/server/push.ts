@@ -14,7 +14,7 @@ import type { VapidConfig } from "./config.js";
 import { needRev } from "./http.js";
 import { digestPayload, withUnsent } from "./quiet.js";
 import { MAX_PUSH_SUBSCRIPTIONS, pushHost, type PushSubscriptionRow, type Store } from "./store.js";
-import { APP_NAME, RIVET_NAME, rivetWords } from "../shared/names.js";
+import { appName, RIVET_NAME, rivetWords } from "../shared/names.js";
 
 /**
  * The SSRF boundary, checked when a subscription is stored and again before a
@@ -184,7 +184,7 @@ const TITLE_MAX = 80;
 const BODY_MAX = 140;
 const GONE = new Set([404, 410]);
 
-const FLAVOUR = [
+const flavour = (): string[] => [
   `${RIVET_NAME} is waiting for your word.`,
   `${RIVET_NAME} has one card that needs you.`,
   `${RIVET_NAME} has one for you.`,
@@ -257,7 +257,8 @@ export function cardPayload(need: Need, index = 0): PushPayload {
     };
   }
   const risk = need.risk ? `${need.risk[0]!.toUpperCase()}${need.risk.slice(1)} change. ` : "";
-    const ask = need.ask?.trim() ? need.ask : FLAVOUR[index % FLAVOUR.length]!;
+  const lines = flavour();
+  const ask = need.ask?.trim() ? need.ask : lines[index % lines.length]!;
   return {
     title: clip(need.title, TITLE_MAX),
     body: clip(`${risk}${ask}`, BODY_MAX),
@@ -320,9 +321,10 @@ function withSummarised(keys: readonly string[]): string[] {
  * A Rivet chat message's push, about its conversation: titled after it, collapsing only with that
  * conversation's own pushes, opening on it. Updates is FYI unless Rivet asks something. `chat` names the conversation,
  * as the app reports the one on screen, so only a push for that one is held back. One with no conversation says
- * "rivet", which no app reports any more: it always shows.
+ * "rivet", which no app reports any more: it always shows. `message` is the line the push is about: a tap opens Chat
+ * on it, not a page of its own.
  */
-export function rivetPayload(text: string, conversation?: { id: string; title: string | null }): PushPayload {
+export function rivetPayload(text: string, conversation?: { id: string; title: string | null }, message?: string): PushPayload {
   const body = clip(text, BODY_MAX);
   if (!conversation) return { title: RIVET_NAME, body, tag: "rivet-chat", path: "/?tab=chat", chat: "rivet" };
   const updates = conversation.id === UPDATES_ID;
@@ -330,19 +332,19 @@ export function rivetPayload(text: string, conversation?: { id: string; title: s
     title: conversation.title ?? RIVET_NAME,
     body,
     tag: `conv-${conversation.id}`,
-    path: `/?conversation=${encodeURIComponent(conversation.id)}`,
+    path: `/?conversation=${encodeURIComponent(conversation.id)}${message ? `&message=${encodeURIComponent(message)}` : ""}`,
     chat: conversation.id,
     conversation: conversation.id,
     ...(updates && !/\?\s*$/.test(text) ? { level: "fyi" as const } : {}),
   };
 }
 
-export const TEST_PAYLOAD: PushPayload = {
-  title: APP_NAME,
+export const testPayload = (): PushPayload => ({
+  title: appName(),
   body: `Hi! ${RIVET_NAME} will ping you here when a card needs you.`,
   tag: "rivet-test",
   path: "/",
-};
+});
 
 function webPushSender(vapid: VapidConfig): PushSender {
   webpush.setVapidDetails(vapid.subject, vapid.publicKey, vapid.privateKey);
@@ -452,7 +454,7 @@ export class PushService {
   }
 
   sendTest(): Promise<PushReport> {
-    return this.deliver(TEST_PAYLOAD, "test");
+    return this.deliver(testPayload(), "test");
   }
 
   /**

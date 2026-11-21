@@ -8,7 +8,8 @@ import { fileURLToPath } from "node:url";
 
 import { serverError } from "../bridge/lib/board-client.mjs";
 import { makeExec, readToken, resolveBin, serverOrigin, withoutRivetTokens } from "../bridge/lib/config.mjs";
-import { ACTION_ID_RE, APP_ID_RE, chatArgs, CHECK_SCRIPT_RE, JOB_ID_RE, launchdCron, MISSED_GRACE_MS, onTime, readCommand, TASK_MAX_MINUTES } from "../bridge/lib/jobs.mjs";
+import { codexSandboxDown, codexVerdict, codexWatch, connected, DRIVERS, FIRST_PLAN_UNREAD, firstPlan, isPlan, limitAsk, limitOf, limitWords, otherPlan, outsideNeed, plansOn, SANDBOX_DOWN_LINE, STATUS_ARGS, uncheckedLine } from "../bridge/lib/job-drivers.mjs";
+import { ACTION_ID_RE, APP_ID_RE, CHECK_SCRIPT_RE, JOB_ID_RE, launchdCron, MISSED_GRACE_MS, onTime, readCommand, TASK_MAX_MINUTES } from "../bridge/lib/jobs.mjs";
 import { redactLine, redactLines } from "../bridge/lib/redact.mjs";
 import { takeLock, tryLock } from "../bridge/lib/token-lock.mjs";
 import { defaultRepo } from "../src/shared/repos.ts";
@@ -19,9 +20,11 @@ const USAGE = `Runs one of the owner's scheduled jobs (a red one shows on Red jo
                                        its LaunchAgent's run: exits 0 when it started the run in the background, the check
                                        was green, or it came more than 10 minutes after its time and was left as missed (it
                                        reports nothing then), and not 0 on a red, skipped or refused run or an error
-  job-run.mjs --manual <job id> [--action <id>]
-                                       Run now from the app (--action: the Run now that asked): the check or the task's chat runs on in the background
-  job-run.mjs --exec <job id> <run id> a check's run in the background
+  job-run.mjs --manual <job id> [--action <id>] [--plan claude|chatgpt]
+                                       Run now from the app (--action: the Run now that asked; --plan: a limit card's
+                                       answer, this one run's chat on that plan): the check or the task's chat runs on in the background
+  job-run.mjs --exec <job id> <run id> [--manual [--plan claude|chatgpt]]
+                                       a check's run in the background, and with --plan its look on that plan if it is red
   job-run.mjs --chat <job id> <run id> <spec json>
                                        a task's chat, or a red look check's, in the background
   job-run.mjs job read gh issue|pr|run list|view … | git log|show|diff|status …
@@ -32,8 +35,9 @@ const USAGE = `Runs one of the owner's scheduled jobs (a red one shows on Red jo
 A check runs only \`pnpm <script>\` from the default repo's package.json, in its own clone (~/.rivet-agents/jobs/repo,
 made from the first repo in RIVET_REPOS the first time it is needed). An up check asks the app's URL in RIVET_HEALTH_URLS
 once. A task's chat (and a red look check's) is \`claude -p\` on Opus in the jobs clone with read-only tools only
-(bridge/lib/jobs.mjs chatArgs), stopped after ${TASK_MAX_MINUTES} minutes; a run its chat never reported goes red. It never
-runs anything else.
+(bridge/lib/jobs.mjs chatArgs), stopped after ${TASK_MAX_MINUTES} minutes; a run its chat never reported goes red. A hosted
+agent (RIVET_AGENT_FILE) runs it on its first plan instead, which may be ChatGPT through \`codex exec --json\`
+(bridge/lib/job-drivers.mjs). It never runs anything else.
 `;
 
 /** A look check runs in the foreground before its chat, so it is held to less than a background check. */
@@ -56,13 +60,24 @@ const NO_REPO = { state: /** @type {const} */ ("skipped"), line: "skipped: no re
  * @typedef {{ code: number | null, lines: string[], timedOut: boolean }} Ran lines: the output already redacted (outputCollector), its last KEEP_LINES;
  *   with raw, stdout alone, whole and untouched, for a machine read that is never reported or logged
  * @typedef {{ env: NodeJS.ProcessEnv, home: string, now: () => number, fetch: typeof fetch, token: () => Promise<string>,
- *   run: (bin: string, args: string[], opts: { cwd: string, timeoutMs: number, raw?: boolean, env?: NodeJS.ProcessEnv }) => Promise<Ran>,
+ *   run: (bin: string, args: string[], opts: { cwd: string, timeoutMs: number, raw?: boolean, env?: NodeJS.ProcessEnv, watch?: (stream: "stdout" | "stderr", line: string) => void }) => Promise<Ran>,
  *   detach: (args: string[]) => void, bin: (name: string) => string, stdout: (s: string) => void }} Deps
  * @typedef {{ script: string, onRed: "card" | "look" } | { probe: "up", app: string, onRed: "card" }} Check
  * @typedef {{ state: "green" | "red" | "skipped", line: string, log?: string[], ran?: boolean }} Outcome ran: the script itself ran and failed
  */
 
 export const newRunId = () => `r${Date.now().toString(36)}${randomBytes(4).toString("hex")}`;
+
+/**
+ * What a start or look asks to start on: a hosted agent's plan for this run (a limit card's answer, else its first
+ * plan), which says whose state holds it; nothing on any other machine, where every chat is Claude's.
+ * @param {Deps} d @param {string | undefined} onPlan
+ */
+function runPlan(d, onPlan) {
+  if (!plansOn(d.env)) return {};
+  const plan = isPlan(onPlan) ? onPlan : firstPlan(d.env);
+  return plan ? { plan } : {};
+}
 
 /** @param {Deps} d @param {string} id @param {Record<string, unknown>} body @param {"runs" | "report"} to */
 async function send(d, id, body, to) {
@@ -297,7 +312,8 @@ async function syncForChat(d, repo) {
 /**
  * A task's chat, or a red look check's, through \`claude -p\` with read-only tools in the jobs clone, stopped after
  * TASK_MAX_MINUTES. Its report closes the run; one that never came makes the run red, and the server, which knows
- * whether it came, refuses that once it has.
+ * whether it came, refuses that once it has. Only a limit card's answer (spec.plan) runs it once on the other
+ * plan; nothing switches by itself.
  * @param {Deps} d @param {string} id @param {string} run @param {import("../bridge/lib/jobs.mjs").ChatSpec} spec
  * @returns {Promise<number>}
  */
@@ -311,18 +327,79 @@ export async function chat(d, id, run, spec) {
   }
   if (task) await syncForChat(d, repo);
   let why;
+  /** @type {{ plan: import("../bridge/lib/job-drivers.mjs").Plan, until?: string } | null} */
+  let limit = null;
+  /** @type {{ plan: import("../bridge/lib/job-drivers.mjs").Plan, until?: string, connected: boolean } | null} the plan a look stopped on */
+  let lookLimit = null;
+  /** @type {{ state: "green" | "red", line: string } | null} a Codex chat's own verdict */
+  let verdict = null;
   if (!fs.existsSync(path.join(repo, ".git"))) why = "the jobs clone ~/.rivet-agents/jobs/repo is missing, so the chat never started";
   else {
     const paths = { rivet: self, logDir: path.join(d.home, ".rivet-agents", "jobs", "logs") };
-    const ran = await d.run(d.bin("claude"), chatArgs(id, run, spec, paths), { cwd: repo, timeoutMs: TASK_MAX_MINUTES * 60_000, env: withoutRivetTokens(d.env) });
-    why = ran.timedOut ? `stopped after ${TASK_MAX_MINUTES} minutes: the chat never reported` : `the chat never reported${ran.code ? ` (claude exited ${ran.code})` : ""}`;
+    const plan = isPlan(spec.plan) && plansOn(d.env) ? spec.plan : firstPlan(d.env);
+    // On a hosted agent a CLI not on PATH is a chat that cannot start and a status that cannot be checked, never a run
+    // with no report; with no agent file claude throws as it always has.
+    const bin = (/** @type {string} */ name) => {
+      if (!plansOn(d.env)) return d.bin(name);
+      try {
+        return d.bin(name);
+      } catch {
+        return null;
+      }
+    };
+    const driver = plan ? DRIVERS[plan] : null;
+    const exe = driver ? bin(driver.bin) : null;
+    if (!plan || !driver) why = `${FIRST_PLAN_UNREAD.toLowerCase()}, so the chat never started`;
+    else if (!exe) why = `${driver.bin} is not installed on this machine, so the chat never started`;
+    else {
+      const env = withoutRivetTokens(d.env);
+      // A Codex chat has no network to report with: it writes its verdict as its last message, which this run reports.
+      const scratch = plan === "chatgpt" ? fs.mkdtempSync(path.join(os.tmpdir(), "job-codex-")) : null;
+      try {
+        const where = { repo, lastMessage: scratch ? path.join(scratch, "last-message.txt") : "" };
+        const watch = scratch ? codexWatch() : null;
+        const ran = await d.run(exe, driver.args(id, run, spec, paths, where), { cwd: repo, timeoutMs: TASK_MAX_MINUTES * 60_000, env, ...(watch ? { watch: watch.line } : {}) });
+        const read = driver.read(ran.lines);
+        const hit = !ran.timedOut && plansOn(d.env) ? limitOf(plan, ran, read.error) : null;
+        if (hit) {
+          const other = otherPlan(plan);
+          const statusBin = bin(DRIVERS[other].bin);
+          // Codex says "Not logged in" on stderr, which only a run that is not raw keeps.
+          const status = statusBin ? await d.run(statusBin, [...STATUS_ARGS[other]], { cwd: repo, timeoutMs: 15_000, raw: other === "claude", env }) : null;
+          const signedIn = status ? connected(other, status) : null;
+          // A look's limit is the look's alone: its check's red stands, with Fix it, and asks for the other plan only when that one is connected.
+          if (!task) lookLimit = { plan, ...(hit.until ? { until: hit.until } : {}), connected: signedIn === true, first: firstPlan(d.env) ?? undefined };
+          else if (signedIn) {
+            const outside = other === "chatgpt" ? outsideNeed(spec.words ?? "") : null;
+            limit = { plan, ...(hit.until ? { until: hit.until } : {}), ...(outside ? { outside } : {}) };
+          }
+          why = limit?.outside
+            ? `${limitWords(plan, hit.until)}, so the job did not run. ChatGPT can't check ${limit.outside} from here.`
+            : limit
+              ? limitAsk(plan, hit.until)
+              : `${limitWords(plan, hit.until)}${task ? ", so the job did not run" : ""}${signedIn === null ? `. ${uncheckedLine(other)}` : ""}`;
+        } else if (scratch && !ran.timedOut) {
+          // A sandbox that would not start wins over whatever the chat said: it read nothing.
+          const down = codexSandboxDown(watch?.lines() ?? [], read.error);
+          verdict = down ? null : codexVerdict(fs.existsSync(where.lastMessage) ? fs.readFileSync(where.lastMessage, "utf8") : "", task, spec.words, watch?.lines() ?? []);
+          why = down ? SANDBOX_DOWN_LINE : `the chat never reported a verdict${ran.code ? ` (codex exited ${ran.code}${read.error ? `: ${read.error}` : ""})` : ""}`;
+        } else
+          why = ran.timedOut
+            ? `stopped after ${TASK_MAX_MINUTES} minutes: the chat never reported`
+            : `the chat never reported${ran.code ? ` (${driver.bin} exited ${ran.code}${read.error ? `: ${read.error}` : ""})` : ""}`;
+      } finally {
+        if (scratch) fs.rmSync(scratch, { recursive: true, force: true });
+      }
+    }
   }
-  const line = clip(task ? `${why[0].toUpperCase()}${why.slice(1)}.` : `${spec.line ?? "Red."} The look into it: ${why}.`);
-  const res = await send(d, id, { run, state: "red", line }, "report");
+  const look = lookLimit ? `The check didn't run: ${why}.` : `The look into it: ${why}.`;
+  const line = clip(verdict ? verdict.line : task ? (limit ? why : `${why[0].toUpperCase()}${why.slice(1)}.`) : `${spec.line ?? "Red."} ${look}`);
+  const state = verdict?.state ?? "red";
+  const res = await send(d, id, { run, state, line, ...(limit ? { limit } : lookLimit ? { limit: lookLimit } : {}) }, "report");
   if (res.status === 409) return 0;
   if (!res.ok) throw new Error(await serverError(res, { issues: true }));
-  d.stdout(`red: ${line}\n`);
-  return 1;
+  d.stdout(`${state}: ${line}\n`);
+  return state === "green" ? 0 : 1;
 }
 
 /**
@@ -378,38 +455,43 @@ export async function main(argv, d) {
     return chat(d, id, run, JSON.parse(raw));
   }
   if (first === "--exec") {
-    const [id, run, manual] = rest;
-    if (!id || !JOB_ID_RE.test(id) || !run || !RUN_ID.test(run)) return usage(d);
-    const start = await put(d, id, { run, state: "start" });
+    const [id, run, manual, planFlag, onPlan] = rest;
+    if (!id || !JOB_ID_RE.test(id) || !run || !RUN_ID.test(run) || (planFlag !== undefined && (planFlag !== "--plan" || !isPlan(onPlan)))) return usage(d);
+    const start = await put(d, id, { run, state: "start", ...runPlan(d, onPlan) });
     if (!start.go || start.job?.kind !== "check") return 1;
     const outcome = await checkAndReport(d, id, run, start.job.check, CHECK_BUDGET_MS, manual === "--manual");
+    // A limit card's answer runs the check once on the other plan: its look, if it is still red, is on that plan.
+    const look = onPlan && outcome.state === "red" && outcome.ran ? await put(d, id, { run, state: "look", ...runPlan(d, onPlan) }) : null;
+    if (look?.go) await chat(d, id, run, { kind: "check", name: start.job.name, check: start.job.check, line: outcome.line, plan: onPlan });
     return outcome.state === "red" ? 1 : 0;
   }
   const manual = first === "--manual";
   const launchd = !manual && rest.length === 2 && rest[0] === "--launchd";
   const id = manual ? rest[0] : first;
   const action = manual && rest[1] === "--action" ? rest[2] : undefined;
-  if (!(manual || launchd) || !id || !JOB_ID_RE.test(id) || (manual && rest.length !== (action === undefined ? 1 : 3)) || (action !== undefined && !ACTION_ID_RE.test(action))) return usage(d);
+  const planAt = action === undefined ? 1 : 3;
+  const onPlan = manual && rest[planAt] === "--plan" ? rest[planAt + 1] : undefined;
+  if (!(manual || launchd) || !id || !JOB_ID_RE.test(id) || (manual && rest.length !== planAt + (onPlan === undefined ? 0 : 2)) || (action !== undefined && !ACTION_ID_RE.test(action)) || (onPlan !== undefined && !isPlan(onPlan))) return usage(d);
   if (launchd && !launchdCron(rest[1])) return usage(d);
   if (launchd && !onTime(rest[1], d.now())) {
     d.stdout(`late: launchd started it more than ${MISSED_GRACE_MS / 60_000} minutes after its time, so it is left as missed\n`);
     return 0;
   }
   const run = newRunId();
-  const start = await put(d, id, { run, state: "start", ...(manual ? { manual: true } : {}), ...(action ? { action } : {}) });
+  const start = await put(d, id, { run, state: "start", ...runPlan(d, onPlan), ...(manual ? { manual: true } : {}), ...(action ? { action } : {}) });
   if (!start.go) {
     d.stdout(`skipped: ${start.note}\n`);
     return 1;
   }
   const check = /** @type {Check | undefined} */ (start.job.check);
   if (start.job.kind === "task" || manual || check?.onRed === "card") {
-    d.detach(start.job.kind === "task" ? ["--chat", id, start.run, JSON.stringify({ kind: "task", name: start.job.name, words: start.job.words })] : ["--exec", id, start.run, ...(manual ? ["--manual"] : [])]);
+    d.detach(start.job.kind === "task" ? ["--chat", id, start.run, JSON.stringify({ kind: "task", name: start.job.name, words: start.job.words, ...(onPlan ? { plan: onPlan } : {}) })] : ["--exec", id, start.run, ...(manual ? ["--manual"] : []), ...(onPlan ? ["--plan", onPlan] : [])]);
     d.stdout("background\n");
     return 0;
   }
   const outcome = await checkAndReport(d, id, start.run, /** @type {Check} */ (check), LOOK_BUDGET_MS, false);
   // Only a script that ran and failed has a cause to look for; the chat is a task run, so the server holds it to those limits.
-  const look = outcome.state === "red" && outcome.ran ? await put(d, id, { run: start.run, state: "look" }) : null;
+  const look = outcome.state === "red" && outcome.ran ? await put(d, id, { run: start.run, state: "look", ...runPlan(d, undefined) }) : null;
   if (look?.go) d.detach(["--chat", id, start.run, JSON.stringify({ kind: "check", name: start.job.name, check, line: outcome.line })]);
   d.stdout(`${outcome.state}: ${outcome.line}${look && !look.go ? ` (no chat: ${look.note})` : ""}\n`);
   return outcome.state === "green" ? 0 : 1;
@@ -449,9 +531,24 @@ export function outputCollector() {
 }
 
 /** @param {NodeJS.ProcessEnv} env @returns {Deps["run"]} */
-export const spawnRun = (env) => (bin, args, { cwd, timeoutMs, raw = false, env: runEnv = env }) =>
+export const spawnRun = (env) => (bin, args, { cwd, timeoutMs, raw = false, env: runEnv = env, watch }) =>
   new Promise((resolve) => {
     const out = outputCollector();
+    // `watch` sees each whole line as it came, each stream on its own, before any redaction; nothing it sees is kept here.
+    const watched = Object.fromEntries(
+      /** @type {const} */ (["stdout", "stderr"]).map((stream) => {
+        let partial = "";
+        return [stream, (/** @type {Buffer | string | null} */ chunk) => {
+          const parts = (partial + (chunk?.toString() ?? "\n")).split(/\r?\n/);
+          partial = parts.pop() ?? "";
+          for (const line of parts) watch?.(stream, line);
+        }];
+      }),
+    );
+    const take = (/** @type {"stdout" | "stderr"} */ stream) => (/** @type {Buffer} */ chunk) => {
+      if (watch) watched[stream](chunk);
+      out.take(chunk);
+    };
     /** @type {Buffer[]} */
     const stdout = [];
     const lines = (/** @type {string[]} */ more = []) => (raw ? Buffer.concat(stdout).toString("utf8").split("\n") : out.end(more));
@@ -471,8 +568,8 @@ export const spawnRun = (env) => (bin, args, { cwd, timeoutMs, raw = false, env:
       kill("SIGTERM");
       setTimeout(() => kill("SIGKILL"), 10_000).unref();
     }, timeoutMs);
-    child.stdout.on("data", raw ? (/** @type {Buffer} */ chunk) => void stdout.push(chunk) : out.take);
-    child.stderr.on("data", raw ? () => {} : out.take);
+    child.stdout.on("data", raw ? (/** @type {Buffer} */ chunk) => void stdout.push(chunk) : take("stdout"));
+    child.stderr.on("data", raw ? () => {} : take("stderr"));
     child.on("error", (err) => {
       clearTimeout(timer);
       if (pid) held.children.delete(pid);
@@ -481,6 +578,7 @@ export const spawnRun = (env) => (bin, args, { cwd, timeoutMs, raw = false, env:
     child.on("close", (code) => {
       clearTimeout(timer);
       if (pid) held.children.delete(pid);
+      if (watch) for (const flush of Object.values(watched)) flush(null);
       resolve({ code, lines: lines(), timedOut });
     });
   });

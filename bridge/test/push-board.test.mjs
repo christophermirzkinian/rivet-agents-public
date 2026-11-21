@@ -47,7 +47,7 @@ const server = http.createServer((req, res) => {
     if (req.method === "GET" && req.url === "/api/replies/r_01") return res.end(JSON.stringify(RECORD));
     if (req.method === "GET" && req.url?.startsWith("/api/replies/")) return res.writeHead(404).end('{"error":"not found"}');
     if (req.method === "PUT" && req.url?.startsWith("/api/bridge/media/")) {
-      setTimeout(() => res.writeHead(201).end("{}"), MEDIA_DELAY_MS);
+      setTimeout(() => res.writeHead(201).end("{}"), mediaDelayMs);
       return;
     }
     if (req.method === "GET" && req.url === "/api/board") {
@@ -78,7 +78,8 @@ before(async () => {
 });
 after(() => server.close());
 
-const MEDIA_DELAY_MS = 600;
+const SLOW_MEDIA_MS = 600;
+let mediaDelayMs = 0;
 /** Runs every AbortSignal.timeout in the script 100 times faster: 30 s is 300 ms, 300 s is 3 s. */
 const FAST_TIMEOUTS = `data:text/javascript,${encodeURIComponent("const t = AbortSignal.timeout.bind(AbortSignal); AbortSignal.timeout = (ms) => t(ms / 100);")}`;
 
@@ -128,7 +129,8 @@ test("--media gives each upload and the board PUT after them their own timeouts"
   fs.writeFileSync(after, Buffer.from("89504e470d0a1a0a0002", "hex"));
   serve(6, null);
   // Two uploads of 600 ms each outlast the 300 ms a single up-front signal would allow the board PUT.
-  const out = await run(["--media", "pr2022-staging", "--before", before, "--after", after, board], ["--import", FAST_TIMEOUTS]);
+  mediaDelayMs = SLOW_MEDIA_MS;
+  const out = await run(["--media", "pr2022-staging", "--before", before, "--after", after, board], ["--import", FAST_TIMEOUTS]).finally(() => (mediaDelayMs = 0));
   assert.equal(out.code, 0, out.stderr);
   assert.equal(out.stdout, "version 7\n");
   assert.equal(seen.filter((r) => r.url?.startsWith("/api/bridge/media/")).length >= 2, true);

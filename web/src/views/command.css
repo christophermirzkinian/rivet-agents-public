@@ -34,13 +34,13 @@
 .chat-tools {
   position: relative;
   display: flex;
-  /* Three buttons (the clock, search, the options): 6px keeps them clear of Close on a narrow phone. */
+  /* Four buttons (the clock, saved, search, the options): 6px keeps them clear of Close on a narrow screen. */
   gap: 6px;
 }
 
 /* Chat's one options button: Collapse all, Expand all, Mark all read and Read aloud under it. */
 .chat-options {
-  /* A full tap each: the head holds three of them beside Close. */
+  /* A full tap each: the head holds four of them beside Close. */
   width: var(--tap);
   min-width: var(--tap);
   height: var(--tap);
@@ -153,7 +153,7 @@
 
 /* Reply style's names all at one size: only the text size row shows its choices at their own. */
 .chat-style {
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
 }
 
 .chat-size[aria-checked="true"],
@@ -260,9 +260,9 @@
   margin-bottom: 0;
 }
 
-/* On narrow phones (360 and 375 wide too, once text is scaled up) the name, three full-tap buttons and Close leave no
-   room for the face: the name stays and the face goes, so no button runs under Close. */
-@media (max-width: 379px) {
+/* On narrow screens (up to 393 wide, and wider once text is scaled up) the name, four full-tap buttons and Close leave
+   no room for the face: the name stays and the face goes, so no button runs under Close. */
+@media (max-width: 399px) {
   .home-sheet-head:has(> .chat-head) > .home-sheet-face {
     display: none;
   }
@@ -912,6 +912,11 @@
   font-weight: 600;
 }
 
+.chat-more-stop strong,
+.chat-more-stop .chat-more-icon {
+  color: var(--no);
+}
+
 .chat-reply {
   color: var(--apricot);
 }
@@ -953,12 +958,22 @@ button.chat-quote {
   overflow-wrap: anywhere;
 }
 
+/* A line brought up (a notification, a search hit) is tinted, not ringed: no edge round it. */
 .chat-msg {
-  transition: box-shadow 0.3s ease;
+  transition: background-color 0.3s ease;
 }
 
 .chat-msg.lit {
-  box-shadow: 0 0 0 3px var(--apricot);
+  background: color-mix(in srgb, var(--apricot) 26%, var(--panel));
+}
+
+.chat-ex .chat-msg.theirs.lit {
+  background: color-mix(in srgb, var(--apricot) 26%, var(--panel-2));
+}
+
+.chat-msg.mine.lit,
+.chat-ex .chat-msg.mine.lit {
+  background: color-mix(in srgb, var(--apricot) 26%, #3b3566);
 }
 
 .chat-replying {
@@ -1578,7 +1593,7 @@ button.chat-quote {
 
 /* Show raw: the redacted terminal lines as they are. */
 .cmd-log.is-raw {
-  font: 16px/1.35 ui-monospace, "SF Mono", Menlo, monospace;
+  font: calc(16px * var(--text-scale))/1.35 ui-monospace, "SF Mono", Menlo, monospace;
   white-space: pre-wrap;
 }
 
@@ -1673,7 +1688,7 @@ button.chat-quote {
   border-radius: 999px;
   background: var(--panel);
   color: var(--muted);
-  font-size: 16px;
+  font-size: calc(16px * var(--text-scale));
   font-weight: 800;
 }
 
@@ -1870,7 +1885,7 @@ button.chat-quote {
 
 .media-audio-label {
   overflow: hidden;
-  font-size: 18px;
+  font-size: calc(18px * var(--text-scale));
   font-weight: 800;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1889,7 +1904,7 @@ button.chat-quote {
 .media-audio-time {
   min-width: 40px;
   color: var(--muted);
-  font-size: 16px;
+  font-size: calc(16px * var(--text-scale));
   font-variant-numeric: tabular-nums;
 }
 

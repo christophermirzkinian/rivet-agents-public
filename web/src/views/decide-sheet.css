@@ -175,12 +175,9 @@ html.desktop .decide-sheet > .sheet-handle {
   min-height: 0;
 }
 
-/* The phone's bars, one a card, the one on screen lit. */
+/* No bars over the card: one lit bar across its top reads as a thick coloured edge. */
 .decide-bars {
-  display: flex;
-  flex: none;
-  gap: 5px;
-  padding: 10px 16px 0;
+  display: none;
 }
 
 .decide-bars:empty {
@@ -346,7 +343,7 @@ html.desktop .decide-sheet > .sheet-handle {
 
 .decide-sheet .decide-card .card-body > .card-title {
   margin: 0 0 8px;
-  font-size: 24px;
+  font-size: calc(24px * var(--text-scale));
   letter-spacing: -0.01em;
   line-height: 1.15;
 }
@@ -993,7 +990,7 @@ body:has(.decide-sheet) .toasts {
 }
 
 .decide-card .card-body > .card-title {
-  font-size: clamp(19px, 5vw, 21px);
+  font-size: calc(clamp(19px, 5vw, 21px) * var(--text-scale));
   letter-spacing: -0.01em;
   line-height: 1.12;
 }
@@ -1007,6 +1004,6 @@ body:has(.decide-sheet) .toasts {
 /* On a narrow phone the title closes up. */
 @media (max-width: 359px) {
   .decide-sheet .decide-card .card-body > .card-title {
-    font-size: 21px;
+    font-size: calc(21px * var(--text-scale));
   }
 }

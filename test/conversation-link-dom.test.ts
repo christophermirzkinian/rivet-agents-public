@@ -25,6 +25,7 @@ class FakeSource {
 const settle = async () => {
   for (let i = 0; i < 30; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
 };
+const lit = () => [...document.querySelectorAll<HTMLElement>(".chat-msg.lit")].map((line) => line.dataset.id);
 
 async function start(address: string): Promise<typeof import("../web/src/views/chat.js")> {
   history.replaceState(null, "", address);
@@ -63,21 +64,32 @@ afterEach(async () => {
 });
 
 describe("a link into a conversation", () => {
-  it("/?conversation=<id> opens Chat on that conversation, and the address is left clean", async () => {
+  it("/?conversation=<id> opens Chat lit at that conversation's newest line, with no page of its own, and the address is left clean", async () => {
     const chat = await start("/?conversation=k1");
-    expect(chat.openConversation()).toBe("k1");
-    expect(document.querySelector(".thing-title")!.textContent).toBe("Results row");
+    expect(chat.openConversation()).toBeNull();
+    expect(document.querySelector(".thing-head")).toBeNull();
+    expect(lit()).toEqual(["k2"]);
+    expect(document.querySelector('.chat-msg[data-id="g1"]')).not.toBeNull();
     expect(location.search).toBe("");
   });
 
   it("/?tab=chat&conversation=<id> does the same", async () => {
     const chat = await start("/?tab=chat&conversation=g1");
-    expect(chat.openConversation()).toBe("g1");
+    expect(chat.openConversation()).toBeNull();
+    expect(document.querySelector(".thing-head")).toBeNull();
+    expect(lit()).toEqual(["g1"]);
   });
 
-  it("an old Threads link opens the conversation its message is in", async () => {
+  it("a notification's &message=<id> lights that line in Chat", async () => {
+    await start("/?conversation=k1&message=k1");
+    expect(document.querySelector(".thing-head")).toBeNull();
+    expect(lit()).toEqual(["k1"]);
+  });
+
+  it("an old Threads link lights the conversation its message is in, in Chat", async () => {
     const chat = await start("/?tab=chat&thread=k2");
-    expect(chat.openConversation()).toBe("k1");
+    expect(chat.openConversation()).toBeNull();
+    expect(lit()).toEqual(["k2"]);
     expect(server.requests).toContain("GET /api/conversations/k2");
   });
 

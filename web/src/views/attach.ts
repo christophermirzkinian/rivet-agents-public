@@ -1,6 +1,7 @@
 import { FILE_EXTENSIONS, fileTypeOf, isAvType, isBigType, MAX_AV_BYTES, MAX_CHAT_FILES, type FileRef } from "../../../src/shared/board.js";
 import { MAX_CHAT_IMAGES, MAX_FILE_BYTES, type ChatFile } from "../../../src/shared/command.js";
 import { ApiError, uploadFile, uploadImage } from "../api.js";
+import { agentNoun } from "../cloud-agent.js";
 import { button, describe, h, keepFocus, svg } from "../dom.js";
 import { prepareImage } from "../image.js";
 import { fetchDocument, fileSize, openDocument, previewKind } from "./documents.js";
@@ -167,7 +168,7 @@ export function photosControl(state: PhotosState, options: { onChange(): void; o
 
   function pick(files: File[], extra: readonly string[] = []): void {
     if (locked) {
-      state.notice = [...extra, "Nothing can be attached while your Rivet is asleep."].join(" ");
+      state.notice = [...extra, `Nothing can be attached while your ${agentNoun()} is asleep.`].join(" ");
       update();
       return;
     }

@@ -18,9 +18,13 @@ import {
   jobSpecSchema,
   runReportSchema,
   lastRunTimes,
+  MAX_TASK_RUNS_A_DAY,
   nextRunTime,
+  OVERNIGHT_OFF_NOTE,
+  PLANS_PATH,
   runTimes,
   dayTimeWords,
+  taskReportSchema,
   whenWords,
   type JobSpec,
   type RunReport,
@@ -278,6 +282,279 @@ describe("JobsStore", () => {
     expect(skipped.map((run) => run.line)).toEqual(["skipped: 6 task runs today already", "skipped: usage high"]);
     // The next local day starts again.
     expect(start("j-dddddddd", new Date(SAT_7AM.getTime() + 20 * HOUR), { usage: 40 })?.go).toBe(true);
+  });
+
+  it("cards a task that stopped on its plan's limit as the question of using the other plan, and only a red keeps it", () => {
+    store.create("j-llllllll", task(), SAT_7AM);
+    const begun = start("j-llllllll", SAT_7AM, { usage: 10 });
+    if (!begun?.go) throw new Error("no start");
+    const limit = taskReportSchema.parse({ run: begun.run, state: "red", line: "Claude is at its limit until 3 pm. Use ChatGPT for this job?", limit: { plan: "claude", until: "3 pm" } }).limit;
+    const done = store.report("j-llllllll", begun.run, "red", "Claude is at its limit until 3 pm. Use ChatGPT for this job?", undefined, SAT_7AM, limit);
+    expect(done.outcome?.fresh).toEqual([
+      expect.objectContaining({
+        kind: "decision",
+        title: `${task().name}: Claude is at its limit`,
+        ask: "Claude is at its limit until 3 pm. Use ChatGPT for this job?",
+        schedule: "job-j-llllllll",
+        options: [expect.objectContaining({ label: "Use ChatGPT" }), expect.objectContaining({ label: "Wait for Claude" })],
+      }),
+    ]);
+    // No https origin given: no link to a Plans page.
+    expect(done.outcome?.fresh[0]).not.toHaveProperty("links");
+    expect(store.list(SAT_7AM).jobs[0]!.lastRun).toMatchObject({ result: "red", limit: { plan: "claude", until: "3 pm" } });
+    expect(store.failing()[0]!.detail).toContain("Nothing switched without asking");
+    expect(store.failing()[0]!.detail).toContain("ChatGPT is connected");
+    // Only the switch answer on this job's card asks for a run, once, on the other plan.
+    expect(store.planSwitch("job-j-llllllll", "Use ChatGPT")).toEqual({ id: "j-llllllll", plan: "chatgpt" });
+    expect(store.planSwitch("job-j-llllllll", "Wait for Claude")).toBeNull();
+    expect(store.planSwitch("job-j-llllllll", undefined)).toBeNull();
+    expect(store.planSwitch("job-j-llllllll", "Use Claude")).toBeNull();
+    expect(store.planSwitch("job-j-zzzzzzzz", "Use ChatGPT")).toBeNull();
+    // The next red is an ordinary one, and the card says so; its answers start nothing on another plan.
+    const day = new Date(SAT_7AM.getTime() + 24 * HOUR);
+    const next = start("j-llllllll", day, { usage: 10 });
+    if (!next?.go) throw new Error("no start");
+    store.report("j-llllllll", next.run, "red", "it failed", undefined, day);
+    expect(store.failing()[0]!.need).toMatchObject({ title: `${task().name} is red`, options: [{ label: "Fix it" }, { label: "Leave it" }] });
+    expect(JSON.stringify(store.failing()[0]!.need)).not.toMatch(/Use ChatGPT/);
+    expect(store.planSwitch("job-j-llllllll", "Use ChatGPT")).toBeNull();
+
+    store.create("j-mmmmmmmm", task({ name: "Other task" }), SAT_7AM);
+    const green = start("j-mmmmmmmm", SAT_7AM, { usage: 10 });
+    if (!green?.go) throw new Error("no start");
+    store.report("j-mmmmmmmm", green.run, "green", "fine", undefined, SAT_7AM, { plan: "chatgpt" });
+    expect(store.list(SAT_7AM).jobs.find((job) => job.id === "j-mmmmmmmm")!.lastRun).not.toHaveProperty("limit");
+
+    expect(taskReportSchema.safeParse({ run: begun.run, state: "red", line: "x", limit: { plan: "gemini" } }).success).toBe(false);
+    expect(taskReportSchema.safeParse({ run: begun.run, state: "red", line: "x", limit: { plan: "claude", extra: 1 } }).success).toBe(false);
+  });
+
+  it("keeps Fix it for a real failure when a limit run joins its streak; the limit card is only for a streak of limits", () => {
+    const LIMIT_LINE = "Claude is at its limit until 3 pm. Use ChatGPT for this job?";
+    store.create("j-ssssssss", task(), SAT_7AM);
+    const failed = start("j-ssssssss", SAT_7AM, { usage: 10 });
+    if (!failed?.go) throw new Error("no start");
+    store.report("j-ssssssss", failed.run, "red", "issue 12 is stale", "https://github.com/o/r/actions/runs/1", SAT_7AM);
+    const day = new Date(SAT_7AM.getTime() + 24 * HOUR);
+    const limited = start("j-ssssssss", day, { usage: 10 });
+    if (!limited?.go) throw new Error("no start");
+    store.report("j-ssssssss", limited.run, "red", LIMIT_LINE, undefined, day, { plan: "claude", until: "3 pm" });
+    const red = store.failing()[0]!;
+    expect(red.need).toMatchObject({ title: `${task().name} is red`, options: [{ label: "Fix it" }, { label: "Leave it" }], links: [{ url: "https://github.com/o/r/actions/runs/1" }] });
+    expect(red.need.ask).toMatch(/^issue 12 is stale \(.+\)\. Red 2 runs in a row\. Its newest run did not run: Claude is at its limit until 3 pm\.$/);
+    expect(JSON.stringify(red.need)).not.toMatch(/Use ChatGPT/);
+    expect(red.detail).toContain("issue 12 is stale");
+    expect(red.detail).toContain("Its newest run did not run: Claude is at its limit until 3 pm.");
+    expect(red.url).toBe("https://github.com/o/r/actions/runs/1");
+
+    store.create("j-tttttttt", task({ name: "Limits only" }), SAT_7AM);
+    for (const at of [SAT_7AM, day]) {
+      const run = start("j-tttttttt", at, { usage: 10 });
+      if (!run?.go) throw new Error("no start");
+      store.report("j-tttttttt", run.run, "red", LIMIT_LINE, undefined, at, { plan: "claude", until: "3 pm" });
+    }
+    expect(store.failing().find((one) => one.scheduleId === "job-j-tttttttt")!.need).toMatchObject({ title: "Limits only: Claude is at its limit", ask: LIMIT_LINE, options: [{ label: "Use ChatGPT" }, { label: "Wait for Claude" }] });
+  });
+
+  it("keeps a real red check's Fix it when its look hits a limit, and asks to use the other plan only when that one is connected", () => {
+    const LOOK = { check: { script: "memory:lint", where: "mac", onRed: "look" } } as const;
+    const looked = (id: string, limit: { plan: "claude"; until: string; connected: boolean; first?: "claude" | "chatgpt" }) => {
+      store.create(id, check({ ...LOOK, name: `Lint ${id}` }), SAT_7AM);
+      const red = start(id, SAT_7AM);
+      if (!red?.go) throw new Error("did not start");
+      finish(id, red.run, "red", SAT_7AM, "3 tests failed.");
+      expect(store.look(id, { run: red.run, state: "look", usage: 10 }, SAT_7AM)?.go).toBe(true);
+      const line = "3 tests failed. The check didn't run: Claude is at its limit until 3 pm.";
+      expect(store.report(id, red.run, "red", line, undefined, SAT_7AM, taskReportSchema.parse({ run: red.run, state: "red", line, limit }).limit).status).toBe(200);
+      const run = store.list(SAT_7AM).jobs.find((job) => job.id === id)!.lastRun!;
+      // The check ran and failed: the limit is its look's, never the check run's own, and the line stays the check's.
+      expect(run).toMatchObject({ result: "red", line: "3 tests failed.", lookLimit: limit });
+      expect(run).not.toHaveProperty("limit");
+      return store.failing().find((one) => one.scheduleId === `job-${id}`)!;
+    };
+    const asks = looked("j-kkkkkkkk", { plan: "claude", until: "3 pm", connected: true, first: "claude" });
+    expect(asks.need).toMatchObject({
+      title: "Lint j-kkkkkkkk is red",
+      options: [{ label: "Use ChatGPT" }, { label: "Fix it", detail: "The fix chat starts on ChatGPT." }, { label: "Wait for Claude" }],
+    });
+    expect(asks.need.ask).toBe(`3 tests failed (${dayTimeWords(SAT_7AM)}). The check didn't run: Claude is at its limit until 3 pm. Use ChatGPT for this job?`);
+    expect(asks.detail).toContain("To fix it: rivet fix schedule job-j-kkkkkkkk");
+    expect(asks.detail, "the fix chat it starts is on the plan that is not at its limit").toContain("Start its fix chat on ChatGPT.");
+    // ChatGPT goes first and Claude hit the limit: a fix chat starts on ChatGPT anyway, the plan that goes first.
+    const second = looked("j-ffffffff", { plan: "claude", until: "3 pm", connected: true, first: "chatgpt" });
+    expect(second.need.options?.find((option) => option.label === "Fix it")?.detail).toBe("The fix chat starts on ChatGPT, the plan that goes first.");
+    expect(second.detail).not.toContain("Start its fix chat on");
+    expect(asks.detail).toContain("The check didn't run: Claude is at its limit until 3 pm.");
+    expect(store.planSwitch("job-j-kkkkkkkk", "Use ChatGPT")).toEqual({ id: "j-kkkkkkkk", plan: "chatgpt" });
+
+    const waits = looked("j-wwwwwwww", { plan: "claude", until: "3 pm", connected: false });
+    expect(waits.need).toMatchObject({ title: "Lint j-wwwwwwww is red", options: [{ label: "Fix it", recommended: true, detail: "The fix chat starts on the plan that goes first." }, { label: "Leave it" }] });
+    expect(waits.need.ask).toBe(`3 tests failed (${dayTimeWords(SAT_7AM)}). The check didn't run: Claude is at its limit until 3 pm.`);
+    expect(JSON.stringify(waits.need)).not.toMatch(/Use ChatGPT/);
+    expect(store.planSwitch("job-j-wwwwwwww", "Use ChatGPT")).toBeNull();
+  });
+
+  it("builds a plain red card as before, whatever the look said, when no limit came with its report", () => {
+    store.create("j-pppppppp", check({ check: { script: "memory:lint", where: "mac", onRed: "look" } }), SAT_7AM);
+    const red = start("j-pppppppp", SAT_7AM);
+    if (!red?.go) throw new Error("did not start");
+    finish("j-pppppppp", red.run, "red", SAT_7AM, "3 tests failed");
+    expect(store.look("j-pppppppp", { run: red.run, state: "look", usage: 10 }, SAT_7AM)?.go).toBe(true);
+    expect(store.report("j-pppppppp", red.run, "red", "3 tests failed The look into it: the parser went.", undefined, SAT_7AM).outcome?.fresh).toEqual([]);
+    expect(store.failing()[0]!.need).toEqual({
+      id: store.failing()[0]!.need.id,
+      kind: "decision",
+      title: `${check().name} is red`,
+      ask: `3 tests failed The look into it: the parser went. (${dayTimeWords(SAT_7AM)}). Its last lines are on the Red jobs sheet.`,
+      since: SAT_7AM.toISOString(),
+      schedule: "job-j-pppppppp",
+      options: [{ label: "Fix it", recommended: true }, { label: "Leave it", detail: "No new card until it goes green and then red again." }],
+    });
+  });
+
+  it("refuses a limit card's switch by the rules a run starts by, before it is sent", () => {
+    for (let n = 0; n < MAX_TASK_RUNS_A_DAY; n += 1) {
+      store.create(`j-q${n}qqqqqq`, task({ name: `Busy ${n}` }), SAT_7AM);
+      const run = start(`j-q${n}qqqqqq`, SAT_7AM, { usage: 10 });
+      if (!run?.go) throw new Error("no start");
+      store.report(`j-q${n}qqqqqq`, run.run, "green", "fine", undefined, SAT_7AM);
+    }
+    store.create("j-llllllll", task(), SAT_7AM);
+    store.create("j-kkkkkkkk", check({ check: { script: "memory:lint", where: "mac", onRed: "look" } }), SAT_7AM);
+    expect(store.switchRefusal("j-llllllll", "chatgpt", SAT_7AM)).toBe(`${MAX_TASK_RUNS_A_DAY} task runs today already`);
+    expect(store.switchRefusal("j-kkkkkkkk", "chatgpt", SAT_7AM)).toBe(`${MAX_TASK_RUNS_A_DAY} task runs today already`);
+    expect(store.switchRefusal("j-zzzzzzzz", "chatgpt", SAT_7AM)).toBe("it is no longer there");
+    const tomorrow = new Date(SAT_7AM.getTime() + 24 * HOUR);
+    expect(store.switchRefusal("j-llllllll", "chatgpt", tomorrow)).toBeNull();
+    store.setOvernight({ on: false }, tomorrow);
+    expect(store.switchRefusal("j-llllllll", "chatgpt", tomorrow), "an own Run now starts with overnight jobs off").toBeNull();
+    expect(store.switchRefusal("j-kkkkkkkk", "chatgpt", tomorrow), "but a check's look does not").toBe(OVERNIGHT_OFF_NOTE);
+  });
+
+  it("holds a run by the state of the plan it starts on: Claude's usage on Claude, ChatGPT's known limit on ChatGPT", () => {
+    store.create("j-llllllll", task(), SAT_7AM);
+    store.create("j-mmmmmmmm", task({ name: "Other" }), SAT_7AM);
+    // Claude's usage is high, and "Use ChatGPT" starts the run on ChatGPT, which that usage never holds.
+    expect(start("j-llllllll", SAT_7AM, { usage: 95 })).toMatchObject({ go: false, note: "usage high" });
+    expect(start("j-llllllll", SAT_7AM, { usage: 95, plan: "claude" })).toMatchObject({ go: false, note: "usage high" });
+    expect(store.switchRefusal("j-llllllll", "chatgpt", SAT_7AM)).toBeNull();
+    const onChatGpt = start("j-llllllll", SAT_7AM, { usage: 95, plan: "chatgpt" });
+    expect(onChatGpt?.go).toBe(true);
+    // ChatGPT then reports its limit: in the next half hour no run starts on it, and none is offered a switch to it.
+    if (!onChatGpt?.go) throw new Error("no start");
+    store.report("j-llllllll", onChatGpt.run, "red", "ChatGPT is at its limit until 3 pm. Use Claude for this job?", undefined, SAT_7AM, { plan: "chatgpt", until: "3 pm" });
+    const soon = new Date(SAT_7AM.getTime() + 10 * 60_000);
+    expect(start("j-mmmmmmmm", soon, { usage: 10, plan: "chatgpt" })).toMatchObject({ go: false, note: "ChatGPT is at its limit until 3 pm" });
+    expect(store.switchRefusal("j-mmmmmmmm", "chatgpt", soon)).toBe("ChatGPT is at its limit until 3 pm");
+    expect(store.switchRefusal("j-mmmmmmmm", "claude", soon)).toBeNull();
+    expect(start("j-mmmmmmmm", soon, { usage: 10, plan: "claude" })?.go).toBe(true);
+    const later = new Date(SAT_7AM.getTime() + HOUR);
+    expect(store.switchRefusal("j-llllllll", "chatgpt", soon)).toBe("ChatGPT is at its limit until 3 pm");
+    expect(store.switchRefusal("j-llllllll", "chatgpt", later), "a limit older than half an hour is not known now").toBeNull();
+  });
+
+  it("asks a task that needs what ChatGPT can't see to wait for Claude, with no switch", () => {
+    store.create("j-llllllll", task(), SAT_7AM);
+    const run = start("j-llllllll", SAT_7AM, { usage: 10 });
+    if (!run?.go) throw new Error("no start");
+    const line = "Claude is at its limit until 3 pm, so the job did not run. ChatGPT can't check GitHub from here.";
+    store.report("j-llllllll", run.run, "red", line, undefined, SAT_7AM, { plan: "claude", until: "3 pm", outside: "GitHub" });
+    const card = store.failing().find((one) => one.scheduleId === "job-j-llllllll")!;
+    expect(card.need.ask).toBe("Claude is at its limit until 3 pm. ChatGPT can't check GitHub from here, so this job waits for Claude.");
+    expect(card.need.options?.map((option) => option.label)).toEqual(["Wait for Claude"]);
+    expect(JSON.stringify(card.need)).not.toMatch(/Use ChatGPT/);
+    expect(store.planSwitch("job-j-llllllll", "Use ChatGPT")).toBeNull();
+    expect(card.detail).toContain("ChatGPT can't check GitHub from here");
+  });
+
+  it("links a check's red card to the Plans page when its look hit a limit with the other plan not connected", () => {
+    const dir2 = mkdtempSync(join(tmpdir(), "rivet-jobs-"));
+    const schedules = new SchedulesStore(dir2, "https://agent.example");
+    const jobs = schedules.jobs;
+    try {
+      jobs.create("j-kkkkkkkk", check({ check: { script: "memory:lint", where: "mac", onRed: "look" } }), SAT_7AM);
+      const look = (at: Date, line: string, limit?: { plan: "claude"; until: string; connected: boolean }) => {
+        const red = jobs.start("j-kkkkkkkk", { run: runId(), state: "start" }, at);
+        if (!red?.go) throw new Error("did not start");
+        jobs.finish("j-kkkkkkkk", { run: red.run, state: "red", line: "3 tests failed" }, at);
+        expect(jobs.look("j-kkkkkkkk", { run: red.run, state: "look", usage: 10 }, at)?.go).toBe(true);
+        return jobs.report("j-kkkkkkkk", red.run, "red", line, undefined, at, limit).outcome!;
+      };
+      look(SAT_7AM, "3 tests failed The check didn't run: Claude is at its limit until 3 pm.", { plan: "claude", until: "3 pm", connected: false });
+      expect(schedules.failing(SAT_7AM)[0]!.need.links).toEqual([{ label: "Plans", url: `https://agent.example${PLANS_PATH}` }]);
+      expect(schedules.failing(SAT_7AM)[0]!.need.options?.map((option) => option.label)).toEqual(["Fix it", "Leave it"]);
+    } finally {
+      schedules.close();
+      rmSync(dir2, { recursive: true, force: true });
+    }
+  });
+
+  it("asks afresh when an answered limit card's job then makes another card, and never for an answered red card", () => {
+    const LOOK = check({ check: { script: "memory:lint", where: "mac", onRed: "look" } });
+    const at = (hours: number) => new Date(SAT_7AM.getTime() + hours * HOUR);
+    const cardOf = (id: string) => store.failing().find((one) => one.scheduleId === `job-${id}`)!;
+    const answer = (id: string, when: Date) => store.answer(id, cardOf(id).need.id, when);
+
+    // A task: limit, then "Use ChatGPT", then a real red on ChatGPT: a fresh card with Fix it, unanswered.
+    store.create("j-llllllll", task(), SAT_7AM);
+    const limited = start("j-llllllll", at(0), { usage: 10 });
+    if (!limited?.go) throw new Error("no start");
+    store.report("j-llllllll", limited.run, "red", "Claude is at its limit until 3 pm. Use ChatGPT for this job?", undefined, at(0), { plan: "claude", until: "3 pm" });
+    const limitCard = cardOf("j-llllllll").need.id;
+    answer("j-llllllll", at(1));
+    expect(cardOf("j-llllllll").answered).toBe(true);
+    const onChatGpt = start("j-llllllll", at(2), { usage: 10, manual: true });
+    if (!onChatGpt?.go) throw new Error("no start");
+    const real = store.report("j-llllllll", onChatGpt.run, "red", "issue 12 is stale", undefined, at(2));
+    expect(real.outcome?.fresh).toEqual([expect.objectContaining({ title: `${task().name} is red`, options: [expect.objectContaining({ label: "Fix it" }), expect.objectContaining({ label: "Leave it" })] })]);
+    expect(cardOf("j-llllllll")).toMatchObject({ answered: false });
+    expect(cardOf("j-llllllll").need.id).not.toBe(limitCard);
+    // That red card answered, more reds bring no new card.
+    answer("j-llllllll", at(3));
+    const again = start("j-llllllll", at(4), { usage: 10, manual: true });
+    if (!again?.go) throw new Error("no start");
+    expect(store.report("j-llllllll", again.run, "red", "issue 12 is still stale", undefined, at(4)).outcome?.fresh).toEqual([]);
+    expect(cardOf("j-llllllll").answered).toBe(true);
+
+    // A check: its look's limit card, answered "Wait for Claude", covers only that card. The next red run is a real
+    // failure the answer never saw: a fresh card with Fix it, which shows the look's limit again if the look hits it.
+    store.create("j-kkkkkkkk", LOOK, SAT_7AM);
+    // The next day, so the day's task runs the task used leave room for the looks.
+    const look = (later: number, line: string, limit?: { plan: "claude"; until: string; connected: boolean }) => {
+      const hours = 24 + later;
+      const red = start("j-kkkkkkkk", at(hours));
+      if (!red?.go) throw new Error("did not start");
+      const finished = finish("j-kkkkkkkk", red.run, "red", at(hours), "3 tests failed");
+      expect(store.look("j-kkkkkkkk", { run: red.run, state: "look", usage: 10 }, at(hours))?.go).toBe(true);
+      return { finished: finished.outcome!.fresh, reported: store.report("j-kkkkkkkk", red.run, "red", line, undefined, at(hours), limit).outcome!.fresh };
+    };
+    const LIMITED = "3 tests failed The check didn't run: Claude is at its limit until 3 pm.";
+    const CONNECTED = { plan: "claude", until: "3 pm", connected: true } as const;
+    expect(look(0, LIMITED, CONNECTED).finished).toHaveLength(1);
+    expect(cardOf("j-kkkkkkkk").need.options?.map((option) => option.label)).toEqual(["Use ChatGPT", "Fix it", "Wait for Claude"]);
+    const lookCard = cardOf("j-kkkkkkkk").need.id;
+    answer("j-kkkkkkkk", at(25));
+    expect(store.planSwitch("job-j-kkkkkkkk", "Use ChatGPT"), "the answer reads the card as it was shown").toEqual({ id: "j-kkkkkkkk", plan: "chatgpt" });
+    const next = look(2, LIMITED, CONNECTED);
+    expect(next.finished).toEqual([expect.objectContaining({ title: `${check().name} is red`, options: [expect.objectContaining({ label: "Fix it" }), expect.objectContaining({ label: "Leave it" })] })]);
+    expect(next.finished[0]!.id).not.toBe(lookCard);
+    // The card shown as a plain red keeps that kind: its look's limit is a new card with a new id, so an answer to the
+    // plain red card can never be read as one to the limit card.
+    expect(next.reported).toEqual([expect.objectContaining({ options: [expect.objectContaining({ label: "Use ChatGPT" }), expect.objectContaining({ label: "Fix it" }), expect.objectContaining({ label: "Wait for Claude" })] })]);
+    expect(next.reported[0]!.id).not.toBe(next.finished[0]!.id);
+    expect(cardOf("j-kkkkkkkk")).toMatchObject({ answered: false, need: { id: next.reported[0]!.id } });
+    expect(cardOf("j-kkkkkkkk").need.options?.map((option) => option.label), "its look hit the limit again").toEqual(["Use ChatGPT", "Fix it", "Wait for Claude"]);
+    const found = look(3, "3 tests failed The look into it: the lint config lost its parser.");
+    expect(found.finished).toEqual([expect.objectContaining({ options: [expect.objectContaining({ label: "Fix it" }), expect.objectContaining({ label: "Leave it" })] })]);
+    expect(found.finished[0]!.id).not.toBe(next.reported[0]!.id);
+    expect(found.reported).toEqual([]);
+    expect(cardOf("j-kkkkkkkk")).toMatchObject({ answered: false, need: { id: found.finished[0]!.id, options: [{ label: "Fix it" }, { label: "Leave it" }] } });
+    expect(store.planSwitch("job-j-kkkkkkkk", "Use ChatGPT")).toBeNull();
+
+    // An answered plain red card is never asked again by a look that later hits a limit.
+    answer("j-kkkkkkkk", at(28));
+    expect(look(5, LIMITED, CONNECTED)).toEqual({ finished: [], reported: [] });
+    expect(cardOf("j-kkkkkkkk").answered).toBe(true);
   });
 
   it("starts a task's run once, with its name and words for the chat, and never joins another launch to it", () => {
@@ -545,6 +822,25 @@ describe("SchedulesStore with jobs", () => {
       schedules.close();
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("links a task's limit card to the Plans page on an https origin only", () => {
+    const red = (origin: string) => {
+      const dir = mkdtempSync(join(tmpdir(), "rivet-jobs-"));
+      const schedules = new SchedulesStore(dir, origin);
+      try {
+        schedules.jobs.create("j-pppppppp", task(), SAT_7AM);
+        const begun = schedules.jobs.start("j-pppppppp", { run: "run-pppppppp", state: "start", usage: 10 }, SAT_7AM);
+        if (!begun?.go) throw new Error("no start");
+        schedules.jobs.report("j-pppppppp", begun.run, "red", "Claude is at its limit. Use ChatGPT for this job?", undefined, SAT_7AM, { plan: "claude" });
+        return schedules.failing(SAT_7AM)[0]!.need;
+      } finally {
+        schedules.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    };
+    expect(red("https://agent.example")).toMatchObject({ ask: "Claude is at its limit. Use ChatGPT for this job?", links: [{ label: "Plans", url: `https://agent.example${PLANS_PATH}` }] });
+    expect(red("http://localhost:8787")).not.toHaveProperty("links");
   });
 });
 

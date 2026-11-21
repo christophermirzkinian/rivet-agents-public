@@ -11,6 +11,7 @@ import { call } from "../web/src/api.js";
 import * as cmd from "../web/src/command-api.js";
 import { endSession } from "../web/src/session.js";
 import { ApiError } from "../web/src/api.js";
+import { probeCloud, resetCloud } from "../web/src/cloud-agent.js";
 import { heardAnswer, resetSleep } from "../web/src/rivet-sleep.js";
 import { app, changed } from "../web/src/state.js";
 import { localItems } from "../web/src/views/search.js";
@@ -44,8 +45,6 @@ const FILE_SHA = "f".repeat(64);
 let fileUploads: string[] = [];
 let posts: { url: string; body: Record<string, unknown> }[] = [];
 let messages: ChatMessage[] = [];
-/** Reads and changes of the open conversation, in order. */
-let patches: { url: string; method: string; body: unknown }[] = [];
 let actions: Record<string, AuditEntry> = {};
 let root: HTMLElement;
 /** Answers GET /api/chat by its before cursor; the default serves `messages` as one page. */
@@ -78,7 +77,6 @@ function fakeFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Re
     return uploadAnswer();
   }
   if (url.startsWith("/api/conversations/")) {
-    patches.push({ url, method, body: init.body ? JSON.parse(String(init.body)) : null });
     return Promise.resolve(json(detailBody("c1", messages)));
   }
   if (url.startsWith("/api/conversations")) return Promise.resolve(json(EMPTY_LIST));
@@ -109,10 +107,7 @@ function fakeFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Re
 }
 
 beforeEach(() => {
-  // These tests are about the messages of one conversation: the tab opens on it.
-  chat.showConversation("c1");
   posts = [];
-  patches = [];
   uploads = [];
   fileUploads = [];
   chatAnswer = null;
@@ -235,6 +230,29 @@ describe("chat tab", () => {
     expect(sent.querySelector(".chat-body")!.textContent).toBe("deploy rivet");
     expect(sent.textContent).toContain("Sent");
     expect(sent.closest(".chat-ex")!.querySelector(":scope > .chat-day")).not.toBeNull();
+  });
+
+  it.each([
+    ["Pip", "Pip"],
+    [null, "Agent"],
+  ])("a hosted agent named %s is who a typed line and a collecting one are sent to", async (name, said) => {
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(json({ name, setupDone: true, firstPlan: "claude" }))));
+    await probeCloud();
+    vi.stubGlobal("fetch", vi.fn(fakeFetch));
+    try {
+      messages = [{ id: "c", from: "owner", text: "OK", at: "2026-09-28T01:02:00.000Z", status: "typed" }];
+      chatAnswer = (id) => Promise.resolve(json(entry(id, "chat", "collecting"), 202));
+      chat.mount(root);
+      await settle();
+      expect(root.querySelector(".chat-msg")!.textContent).toContain(`Typed to ${said}`);
+      root.querySelector<HTMLTextAreaElement>(".chat-text")!.value = "ship the new page";
+      root.querySelector<HTMLButtonElement>(".chat-send")!.click();
+      await settle();
+      await settle();
+      expect(root.querySelector(".chat-collecting-when")!.textContent).toBe(`Sending to ${said} soon`);
+    } finally {
+      resetCloud();
+    }
   });
 
   it("a message waiting for follow-ups reads Collecting…, with a banner above the box until the window goes", async () => {
@@ -494,30 +512,6 @@ describe("chat tab", () => {
     text.dispatchEvent(new Event("input"));
   });
 
-  it("a cancelled reply does not come back on another conversation's page opened while the Cancel was out", async () => {
-    messages = [
-      { id: "msg-1", from: "owner", text: "yes", at: new Date().toISOString(), status: "collecting", sendsAt: new Date(Date.now() + 5_000).toISOString(), threadId: "c1", replyTo: "h1" } as ChatMessage,
-    ];
-    chat.mount(root);
-    await settle();
-    let answer!: () => void;
-    const held = new Promise<void>((resolve) => (answer = resolve));
-    cancelAnswer = () => held.then(() => json({ ids: ["msg-1"], clientIds: [], text: "yes", images: [], files: [], replyTo: "h1", quote: { from: "rivet", text: "Ship it?" } }));
-    root.querySelector<HTMLButtonElement>(".chat-collecting-cancel")!.click();
-    messages = [];
-    chat.showConversation("c2");
-    await settle();
-    answer();
-    await settle();
-    await settle();
-    expect(root.querySelector<HTMLElement>(".chat-replying")!.hidden).toBe(true);
-    expect(localStorage.getItem("rivet.chat.reply")).toBeNull();
-    const text = root.querySelector<HTMLTextAreaElement>(".chat-text")!;
-    expect(text.value).toBe("yes");
-    text.value = "";
-    text.dispatchEvent(new Event("input"));
-  });
-
   it("Cancel forgets only its own lines' sends: another lost send with the same words keeps its clientId", async () => {
     const tried: string[] = [];
     const lost = (clientId: string) => {
@@ -579,7 +573,7 @@ describe("chat tab", () => {
     expect(posts.filter((p) => p.url === "/api/chat")).toHaveLength(1);
   });
 
-  it("after a reconnect, reads the open conversation again and shows what came in while the stream was down", async () => {
+  it("after a reconnect, reads Chat again and shows what came in while the stream was down", async () => {
     const listeners: Record<string, (() => void)[]> = {};
     class FakeSource {
       static CLOSED = 2;
@@ -594,7 +588,7 @@ describe("chat tab", () => {
     messages = [msg("m1"), msg("m2")];
     chat.mount(root);
     await settle();
-    const reads = () => patches.filter((one) => one.method === "GET").length;
+    const reads = () => vi.mocked(fetch).mock.calls.filter(([input, init]) => String(input).startsWith("/api/chat?") && (init?.method ?? "GET") === "GET").length;
     const before = reads();
     messages = [msg("m1"), msg("m2"), msg("n3"), msg("n4")];
     for (const fn of listeners.open ?? []) fn();
@@ -618,7 +612,7 @@ describe("chat tab", () => {
     messages = [{ id: "m1", from: "rivet", text: "text m1", at: "2026-09-28T01:00:01.000Z", threadId: "c1" }];
     vi.stubGlobal(
       "fetch",
-      vi.fn((input: RequestInfo | URL, init?: RequestInit) => (String(input).startsWith("/api/conversations/") ? Promise.resolve(json({ error: "slow" }, 503)) : fakeFetch(input, init))),
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => (String(input).startsWith("/api/chat?") ? Promise.resolve(json({ error: "slow" }, 503)) : fakeFetch(input, init))),
     );
     chat.mount(root);
     await settle();
@@ -816,7 +810,7 @@ describe("chat files", () => {
     root.querySelector<HTMLButtonElement>(".chat-send")!.click();
     await settle();
     await settle();
-    expect(posts.map((post) => post.body)).toEqual([{ clientId: expect.any(String), files: [{ sha256: FILE_SHA, name: "Server report.pdf" }], conversation: "c1", typed: true }]);
+    expect(posts.map((post) => post.body)).toEqual([{ clientId: expect.any(String), files: [{ sha256: FILE_SHA, name: "Server report.pdf" }], conversation: null, typed: true }]);
     const link = root.querySelector<HTMLAnchorElement>(".chat-files .chat-file")!;
     expect(link.getAttribute("href")).toBe(`/media/${FILE_SHA}?name=Server%20report.pdf`);
     expect(link.getAttribute("rel")).toBe("noopener");
@@ -1219,7 +1213,7 @@ describe("chat attachments", () => {
     await send("");
     expect(posts).toHaveLength(0);
     await send("just text");
-    expect(posts.map((post) => post.body)).toEqual([{ clientId: expect.any(String), text: "just text", conversation: "c1", typed: true }]);
+    expect(posts.map((post) => post.body)).toEqual([{ clientId: expect.any(String), text: "just text", conversation: null, typed: true }]);
   });
 
   it("while Rivet Cloud's cap holds, removing a photo leaves the composer off, and when it lifts the mic is as it was", async () => {
@@ -1259,6 +1253,24 @@ describe("chat attachments", () => {
     expect(preview().querySelector(".attach-thumb")).toBeNull();
     expect(preview().querySelector(".attach-notice")!.textContent).toBe("Nothing can be attached while your Rivet is asleep.");
     resetSleep();
+  });
+
+  it("on a hosted machine, says nothing can be attached while your agent is asleep", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(json({ name: "Pip", setupDone: true, firstPlan: "claude" }))));
+    await probeCloud();
+    vi.stubGlobal("fetch", vi.fn(fakeFetch));
+    try {
+      chatAnswer = () => Promise.resolve(new Response("capped", { status: 503, headers: { "x-rivet-asleep": "1", "x-rivet-capped-until": String(Date.UTC(2026, 11, 1)) } }));
+      chat.mount(root);
+      await settle();
+      await send("Are you there?");
+      pickPhoto(root);
+      await settle();
+      expect(preview().querySelector(".attach-notice")!.textContent).toBe("Nothing can be attached while your agent is asleep.");
+    } finally {
+      resetSleep();
+      resetCloud();
+    }
   });
 
   it("shows the server's refusal and sends nothing for the photo", async () => {
@@ -1375,7 +1387,7 @@ describe("chat attachments", () => {
       expect(revoked).toEqual(["blob:preview"]);
 
       await send("Two views");
-      expect(posts.map((post) => post.body)).toEqual([{ clientId: expect.any(String), text: "Two views", images: ["1".repeat(64), "3".repeat(64)], conversation: "c1", typed: true }]);
+      expect(posts.map((post) => post.body)).toEqual([{ clientId: expect.any(String), text: "Two views", images: ["1".repeat(64), "3".repeat(64)], conversation: null, typed: true }]);
       expect(preview().hidden).toBe(true);
       const sent = root.querySelector(".chat-msg.mine:last-child")!;
       expect([...sent.querySelectorAll(".chat-images .chat-image-tile")].map((img) => [img.getAttribute("src"), img.getAttribute("alt")])).toEqual([
@@ -1428,7 +1440,7 @@ describe("chat attachments", () => {
       expect(uploads).toHaveLength(2);
       expect(note()).toBe("Photo attached");
       await send("the second one");
-      expect(posts.map((post) => post.body)).toEqual([{ clientId: expect.any(String), text: "the second one", image: "b".repeat(64), conversation: "c1", typed: true }]);
+      expect(posts.map((post) => post.body)).toEqual([{ clientId: expect.any(String), text: "the second one", image: "b".repeat(64), conversation: null, typed: true }]);
     });
 
     it("takes up to 10: the rest are left out with a note, and the button still takes files", async () => {

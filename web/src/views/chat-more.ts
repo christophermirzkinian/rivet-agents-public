@@ -1,5 +1,7 @@
-// A line's More: the line on top, then Read aloud, Copy, Share and Open card, on the shared bottom sheet.
-import { h, svg } from "../dom.js";
+// A line's More: the line on top, then Read aloud, Copy, Share and Open card, on the shared bottom sheet; a thing's
+// line adds Stop it, which its own page had before Chat took the page's place.
+import { agentName } from "../cloud-agent.js";
+import { h, ICONS, svg } from "../dom.js";
 import { say } from "../voice.js";
 import { copyText } from "./agents-copy.js";
 import { closeSheet, openSheet } from "./sheet.js";
@@ -24,6 +26,8 @@ export interface MoreFor {
   share: (() => void) | null;
   /** Opens the line's card; null when it has none on the board. */
   card: (() => void) | null;
+  /** Asks first, then tells Rivet to stop its thing; null off a thing. */
+  stop: (() => void) | null;
 }
 
 function row(icon: string, title: string, sub: string, use: string, go: () => void): HTMLElement {
@@ -45,7 +49,7 @@ function row(icon: string, title: string, sub: string, use: string, go: () => vo
 }
 
 export function openMore(more: MoreFor): void {
-  const { listen, copy, share, card } = more;
+  const { listen, copy, share, card, stop } = more;
   openSheet(
     more.line,
     {
@@ -60,6 +64,7 @@ export function openMore(more: MoreFor): void {
               : null,
             share ? row(SHARE, "Share", "Share this line", "chat.more.share", share) : null,
             card ? row(CARD, "Open card", "Open the card it came with", "chat.more.card", card) : null,
+            stop ? row(ICONS.no, "Stop it", `Asks first, then tells ${agentName()} to stop`, "chat.more.stop", stop) : null,
           ].filter((one): one is HTMLElement => one !== null),
         ),
       unmount: () => {},

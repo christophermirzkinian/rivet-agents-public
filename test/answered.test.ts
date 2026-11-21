@@ -104,7 +104,7 @@ describe("Answered and Reopen", () => {
     }
     // A card still raised is not refused as retired, one named late- included: no answer yet, so the Reopen's own rule answers.
     expect(((await (await reopen("plan-6586", await revOf(server.base, cookie, "plan-6586"))).json()) as { error: string }).error).not.toMatch(/no longer asks/);
-    expect(((await reopen("late-release-choice", "r1")).json() as Promise<{ error: string }>).then((body) => body.error)).resolves.not.toMatch(/no longer asks/);
+    await expect(((await reopen("late-release-choice", "r1")).json() as Promise<{ error: string }>).then((body) => body.error)).resolves.not.toMatch(/no longer asks/);
   });
 
   it("marks the answered cards whose work is finished: its PR shipped, or the ask naming it live or done; never parked or the others", async () => {

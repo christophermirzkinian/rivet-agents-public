@@ -3,10 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ServedNeed } from "../src/shared/board.js";
 import type { ChatMessage } from "../src/shared/command.js";
-import { answerText, UPDATES_ID } from "../src/shared/conversations.js";
+import { answerText, TEAM_ROOM_ID, UPDATES_ID } from "../src/shared/conversations.js";
+import { stopText } from "../web/src/views/thing.js";
 import { fakeServer, type FakeConversation, type FakeServer } from "./conversations-fake.js";
 
-// The Chat tab: one conversation with Rivet, and a page per thing.
+// The Chat tab: one conversation with Rivet, with no page per thing.
 
 const said: string[] = [];
 vi.mock("../web/src/voice.js", async (original) => ({
@@ -93,7 +94,7 @@ const replyUnder = (id: string) => {
 };
 const searchBar = () => root.querySelector<HTMLElement>(".chat-search")!;
 const magnifier = () => root.querySelector<HTMLButtonElement>(".chat-head .chat-tools > button.chat-find")!;
-const title = () => root.querySelector(".thing-title")?.textContent;
+const litId = () => root.querySelector(".chat-msg.lit")?.getAttribute("data-id");
 const box = () => root.querySelector<HTMLTextAreaElement>(".chat-text")!;
 const sheet = () => document.querySelector<HTMLElement>(".sheet");
 const board = (needs: ServedNeed[]) => {
@@ -112,20 +113,18 @@ const fire = (type: string, data?: unknown) => {
   for (const fn of listeners[type] ?? []) fn(data === undefined ? undefined : { data: JSON.stringify(data) });
 };
 
-/** Mounts Chat on Chat: it reopens on the screen it was left on, and Back takes it to Chat. */
 async function onChat(): Promise<void> {
   chat.startDraft("");
   chat.mount(root);
   await settle();
-  root.querySelector<HTMLButtonElement>(".thing-back")?.click();
-  await settle();
 }
 
-async function onThing(id: string): Promise<void> {
-  chat.showConversation(id);
-  chat.mount(root);
-  await settle();
-}
+/** Opens line `id`'s More sheet. */
+const moreOn = (id: string): HTMLElement => {
+  root.querySelector<HTMLElement>(`.chat-msg[data-id="${id}"]`)!.click();
+  root.querySelector<HTMLButtonElement>(`.chat-msg[data-id="${id}"] > .chat-msg-open [data-use="chat.msg.more"]`)!.click();
+  return document.querySelector<HTMLElement>(".chat-more-sheet")!;
+};
 
 beforeEach(() => {
   server = fakeServer(MESSAGES(), CONVERSATIONS());
@@ -146,6 +145,9 @@ afterEach(() => {
   closeSheet();
   chat.unmount();
   app.board = null;
+  app.status = null;
+  app.workers = null;
+  app.workersAt = null;
   vi.unstubAllGlobals();
 });
 
@@ -183,7 +185,7 @@ describe("Chat", () => {
     expect(chat.answerLine(undefined, "Dismissed")).toBe("You dismissed a card");
   });
 
-  it("a card answer in Chat is his bubble reading You answered “card”: the answer; on its page it is the plain answer", async () => {
+  it("a card answer in Chat is his bubble reading You answered “card”: the answer", async () => {
     server.messages.push(owner("ga", "g1", 41, { text: "Chose: Yes, put it on the site", card: "card-g", status: "sent" }));
     server.messages.push(owner("gb", "g1", 42, { text: "Chose: Not yet", card: "card-old", cardTitle: "Old pricing card", status: "sent" }));
     await onChat();
@@ -195,12 +197,6 @@ describe("Chat", () => {
     expect(body("ga")).toBe("You answered a card: Yes, put it on the site");
     board([{ id: "card-g", kind: "decision", title: "quote form live?", ask: "Live?", rev: "r1" }]);
     expect(body("ga")).toBe("You answered “quote form live?”: Yes, put it on the site");
-    chat.showConversation("k1");
-    await settle();
-    expect(chat.openConversation()).toBe("k1");
-    expect(shownIds()).toEqual(["k1", "kp", "ka", "k2"]);
-    expect(root.querySelector('.chat-msg[data-id="ka"]')!.textContent).toContain("from a card");
-    expect(body("ka")).toBe("Approved: Plan\nYes");
   });
 
   it("a card answer leaves other Chat lines as they were and shows once; Rivet's follow-up under it shows in Chat", async () => {
@@ -222,48 +218,23 @@ describe("Chat", () => {
     expect(shownIds()).toEqual(["w1", "w2", "k1", "kp", "ka", "kr", "kb", "g1", "g2", "k2", "g3"]);
   });
 
-  it("a thing's page: title, where it stands, its facts, all its talk and Stop it; Back goes to Chat", async () => {
-    await onChat();
-    chat.showConversation("k1");
-    await settle();
-    expect(chat.openConversation()).toBe("k1");
-    expect(history.state).toMatchObject({ chatScreen: "k1" });
-    expect(title()).toBe("Results row");
-    // The plan card is answered: it is building.
-    expect(root.querySelector(".thing-pill")!.textContent).toBe("Building");
-    // The stage list is gone: the pill says where it stands, and the talk starts under the head.
-    expect(root.querySelector(".thing-steps")).toBeNull();
-    expect(root.querySelector(".thing-meta")!.textContent).toBe("PR #341 · chat results-row · size M");
-    expect(shownIds()).toEqual(["k1", "kp", "ka", "k2"]);
-    expect(root.querySelector<HTMLElement>(".chat-head")!.hidden).toBe(true);
-    expect(box().placeholder).toBe("Reply here");
-    expect(root.querySelector(".thing-stop")).not.toBeNull();
-    // No live chat on the Mac: no Open on Mac.
-    expect(root.querySelector(".thing-mac")).toBeNull();
-    root.querySelector<HTMLButtonElement>(".thing-back")!.click();
-    await settle();
-    expect(chat.openConversation()).toBeNull();
-    expect(root.querySelector('.chat-msg[data-id="kp"]')).not.toBeNull();
-    expect(root.querySelector<HTMLElement>(".thing-foot")!.hidden).toBe(true);
-  });
-
-  it("a thing opened as the first screen (a notification's tap) has no Chat behind it: Back shows Chat in place, never leaves the app", async () => {
+  it("a notification's tap before Chat mounts opens Chat at its line, lit, with no page and no history entry", async () => {
     const went = vi.spyOn(history, "back").mockImplementation(() => undefined);
-    // Opened by its plan card's message id before Chat mounts, as a notification's tap at launch opens it (main.ts).
-    chat.showConversation("kp");
+    // Its plan card's line, asked for before Chat mounts, as a notification's tap at launch asks (main.ts).
+    chat.showLine("k1", "kp");
     chat.mount(root);
     await settle();
-    expect(chat.openConversation()).toBe("k1");
-    expect(history.state).toMatchObject({ chatScreen: "k1" });
-    root.querySelector<HTMLButtonElement>(".thing-back")!.click();
-    await settle();
-    expect(went).not.toHaveBeenCalled();
+    expect(litId()).toBe("kp");
+    expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalled();
+    expect(shownIds()).toEqual(["w1", "w2", "k1", "kp", "ka", "g1", "g2", "k2", "g3"]);
+    expect(root.querySelector(".thing-head")).toBeNull();
     expect(chat.openConversation()).toBeNull();
     expect(history.state?.chatScreen).toBeUndefined();
+    expect(went).not.toHaveBeenCalled();
     went.mockRestore();
   });
 
-  it("a message from Chat starts a conversation of its own; one typed on a topic's page stays in that topic, Reply or not", async () => {
+  it("every message typed in Chat goes with no conversation, after a line was brought up too; a Reply names the line it answers", async () => {
     await onChat();
     const sent = () => server.posted.filter((body) => "text" in body);
     send("Add a leaderboard to the quiz app");
@@ -274,44 +245,30 @@ describe("Chat", () => {
     send("and a weekly reset");
     await settle();
     expect(sent().at(-1)).toMatchObject({ conversation: null });
-    chat.showConversation("k1");
+    chat.showLine("k1");
     await settle();
-    expect(box().placeholder).toBe("Reply here");
-    // k1's PR is open (in review). The send waits in the delayed-send window ("Sending to Rivet in Ns": the server
-    // answers collecting) and keeps k1, and so does a second line typed while it collects.
+    expect(box().placeholder).toBe("Message");
     send("bigger still");
     await settle();
-    expect(sent().at(-1)).toMatchObject({ text: "bigger still", conversation: "k1" });
+    expect(sent().at(-1)).toMatchObject({ text: "bigger still", conversation: null });
     expect(sent().at(-1)).not.toHaveProperty("replyTo");
-    send("and bolder");
-    await settle();
-    expect(sent().at(-1)).toMatchObject({ text: "and bolder", conversation: "k1" });
-    expect(sent().at(-1)).not.toHaveProperty("replyTo");
-    // No new conversation opens: the page stays on k1 and the line shows in its thread.
-    expect(chat.openConversation()).toBe("k1");
-    expect(title()).toBe("Results row");
-    expect(shownIds()).toContain("c9-3");
-    expect(server.messages.find((one) => one.id === "c9-3")!.threadId).toBe("k1");
     replyUnder("k2")!.click();
-    expect(box().placeholder).not.toBe("Reply here");
     send("yes, merge it");
     await settle();
-    expect(sent().at(-1)).toMatchObject({ text: "yes, merge it", replyTo: "k2", conversation: "k1" });
-    expect(chat.openConversation()).toBe("k1");
+    expect(sent().at(-1)).toMatchObject({ text: "yes, merge it", replyTo: "k2", conversation: null });
+    // The server puts a Reply in the replied line's conversation.
+    expect(server.messages.find((one) => one.id === "c9-4")!.threadId).toBe("k1");
+    expect(shownIds()).toContain("c9-4");
   });
 
-  it("a line typed on a closed topic's page (its chat closed, its PR closed) stays in that topic", async () => {
-    server.conversations.set("k1", { ...server.conversations.get("k1"), closed: true, stage: "closed" });
-    await onThing("k1");
-    expect(box().placeholder).toBe("Reply here");
-    send("the export still fails on the second page");
+  it("a Reply in Chat to a server-owned room's line (Agent Chat) names that line, with no conversation of its own", async () => {
+    server.messages.push(rivet("s1", TEAM_ROOM_ID, 4, { text: "The build is green" }));
+    await onChat();
+    expect(shownIds()).toContain("s1");
+    replyUnder("s1")!.click();
+    send("why did it fail?");
     await settle();
-    const last = server.posted.filter((body) => "text" in body).at(-1)!;
-    expect(last).toMatchObject({ text: "the export still fails on the second page", conversation: "k1" });
-    expect(last).not.toHaveProperty("replyTo");
-    expect(chat.openConversation()).toBe("k1");
-    expect(shownIds()).toContain("c9-1");
-    expect(server.conversations.get("k1")!.closed).toBe(false);
+    expect(server.posted.filter((body) => "text" in body).at(-1)).toMatchObject({ text: "why did it fail?", replyTo: "s1", conversation: null });
   });
 
   it("Chat at its newest reads its own lines and a thing's unread reply, which it shows", async () => {
@@ -323,11 +280,6 @@ describe("Chat", () => {
     expect(server.posted).toContainEqual({ ids: ["g1", "k1", "w1"], action: "read" });
     expect(server.conversations.get("k1")!.unread).toBe(0);
     expect(app.chatUnread).toBe(0);
-    // Its page, opened first, reads it there.
-    chat.unmount();
-    server.conversations.get("k1")!.unread = 1;
-    await onThing("k1");
-    expect(server.patched).toContainEqual({ id: "k1", body: { read: "k2" } });
   });
 
   it("Chat at its newest leaves a thing whose newest line it has not loaded unread", async () => {
@@ -384,7 +336,7 @@ describe("Chat", () => {
     expect(server.conversations.get("k1")!.markedUnread).toBe(true);
   });
 
-  it("a stream message shows in Chat, a thing's too and on its page", async () => {
+  it("a stream message shows in Chat, a thing's too, and stays once its conversation is brought up", async () => {
     await onChat();
     fire("message", rivet("g7", "g1", 51, { text: "Done" }));
     await settle();
@@ -394,7 +346,7 @@ describe("Chat", () => {
     fire("message", k7);
     await settle();
     expect(shownIds().at(-1)).toBe("k7");
-    chat.showConversation("k1");
+    chat.showLine("k1");
     await settle();
     expect(shownIds()).toContain("k7");
   });
@@ -419,7 +371,7 @@ describe("Chat", () => {
     expect(shownIds()).toEqual(["w1", "w2", "k1", "kp", "ka", "g1", "g2", "k2", "g3", "k8", "k9", "kq", "k10"]);
   });
 
-  it("searches every conversation's messages from Chat and opens a hit on Chat, never on a topic's page; there is no More topics", async () => {
+  it("searches every conversation's messages from Chat and opens a hit on Chat, lit, with no page; there is no More topics", async () => {
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
       new URL(String(input), "http://x").pathname === "/api/chat/search"
         ? Promise.resolve(new Response(JSON.stringify({ results: [{ kind: "message", key: "message:g2", title: "Rivet g2", open: { type: "message", id: "g2" } }] }), { status: 200, headers: { "content-type": "application/json" } }))
@@ -446,17 +398,19 @@ describe("Chat", () => {
     expect(searchBar().hidden).toBe(true);
     expect(input.value).toBe("");
     expect(magnifier().getAttribute("aria-expanded")).toBe("false");
-    chat.showConversation("k1");
+    expect(root.querySelector(".thing-head")).toBeNull();
+    // A conversation brought up stays on Chat, its magnifier still there.
+    chat.showLine("k1");
     await settle();
     expect(searchBar().hidden).toBe(true);
-    expect(magnifier().hidden).toBe(true);
+    expect(magnifier().hidden).toBe(false);
   });
 
   it("keeps search behind a magnifier in the head: a tap shows the bar with the caret in it, a second tap puts it away and clears it", async () => {
     await onChat();
     const tools = [...root.querySelector(".chat-head .chat-tools")!.children];
-    // The due clock, the magnifier, then the options and their menu.
-    expect(tools.map((one) => one.className.split(" ").at(-1))).toEqual(["chat-due", "chat-find", "chat-options", "chat-menu"]);
+    // The due clock, the saved lines' bookmark, the magnifier, then the options and their menu.
+    expect(tools.map((one) => one.className.split(" ").at(-1))).toEqual(["chat-due", "chat-saved-open", "chat-find", "chat-options", "chat-menu"]);
     expect(magnifier().dataset.use).toBe("chat.search.open");
     expect(magnifier().getAttribute("aria-label")).toBe("Search chat");
     expect(magnifier().getAttribute("aria-expanded")).toBe("false");
@@ -501,150 +455,84 @@ describe("Chat", () => {
 
 });
 
-describe("a thing's page", () => {
-  it("Stop it asks first, then asks Rivet in the thing's conversation", async () => {
-    await onThing("k1");
-    root.querySelector<HTMLButtonElement>(".thing-stop")!.click();
+describe("a thing's lines in Chat", () => {
+  it("a thing's line's More has Stop it, which asks first, then asks Rivet in the line's conversation", async () => {
+    server.messages.push(rivet("s1", TEAM_ROOM_ID, 4, { text: "The build is green" }));
+    await onChat();
+    // A server-owned room's line has no thing to stop.
+    expect(moreOn("s1").querySelector('[data-use="chat.more.stop"]')).toBeNull();
+    closeSheet();
+    moreOn("k2").querySelector<HTMLButtonElement>('[data-use="chat.more.stop"]')!.click();
     expect(sheet()!.textContent).toContain("Ask Rivet to stop results-row?");
     const sent = () => server.posted.filter((body) => "text" in body);
     expect(sent()).toEqual([]);
-    sheet()!.querySelector<HTMLButtonElement>(".thing-stop-go")!.click();
+    sheet()!.querySelector<HTMLButtonElement>('[data-use="chat.more.stop-confirm"]')!.click();
     await settle();
-    expect(sent()).toEqual([expect.objectContaining({ text: "Stop results-row: Results row", conversation: "k1" })]);
-    expect(root.querySelector('.chat-msg[data-id="c9-1"] .chat-body')!.textContent).toBe("Stop results-row: Results row");
+    const words = stopText("results-row", "Results row");
+    expect(sent()).toEqual([expect.objectContaining({ text: words, conversation: "k1" })]);
+    expect(root.querySelector('.chat-msg[data-id="c9-1"] .chat-body')!.textContent).toBe(words);
   });
 
-  it("its newest card with stills is its Share, and the step is Your look", async () => {
-    server.messages.push(rivet("ks", "k1", 50, { text: "Card: Stills", posted: { id: "stills-k", kind: "decision", title: "Results row at 400" } }));
-    // Before it has media its Share is Rivet's reply, never the card's.
-    await onThing("k1");
-    expect(root.querySelector(".thing-buttons .card-share")).toBeNull();
-    chat.unmount();
-    board([
-      { id: "plan-k", kind: "plan", title: "Plan: results row", ask: "Bigger row.", rev: "r1" } as unknown as ServedNeed,
-      {
-        id: "stills-k",
-        kind: "decision",
-        title: "Results row at 400",
-        ask: "Look?",
-        rev: "r1",
-        media: { kind: "stills", stills: [{ sha256: "a".repeat(64), type: "image/jpeg" }] },
-        eta: "2:30pm",
-      } as unknown as ServedNeed,
-    ]);
-    chat.mount(root);
-    await settle();
-    expect(root.querySelector(".thing-buttons .card-share.thing-btn")).not.toBeNull();
-    expect(root.querySelector(".thing-pill")!.textContent).toBe("Your look");
-    expect(root.querySelector(".thing-meta")!.textContent).toContain("ETA 2:30pm");
-  });
-
-  it("Read aloud is on its head, and turning it on there reads its latest Rivet message", async () => {
-    await onThing("k1");
-    const speak = root.querySelector<HTMLButtonElement>(".thing-head .chat-speak")!;
-    expect(speak.closest("[hidden]")).toBeNull();
-    expect(speak.textContent).toBe("Read aloud");
-    speak.click();
-    expect(said).toEqual(["PR #341 is up\nstills attached"]);
-    expect(speak.textContent).toBe("Reading aloud");
-    // Chat's options menu has the same setting as a switch.
-    expect(root.querySelector(".chat-head .chat-menu .chat-speak")!.getAttribute("aria-checked")).toBe("true");
-    speak.click();
-  });
-
-  it("a Rivet message that lands under a sheet is marked read only once the sheet closes", async () => {
-    await onThing("g1");
+  it("Chat that loads under a sheet marks its conversations read only once the sheet closes", async () => {
     openSheet("Search", { mount: () => {}, unmount: () => {} });
-    // An id no earlier test sent: a message is counted once per page load.
-    fire("message", rivet("g8", "g1", 51));
-    await settle();
-    const marks = () => server.patched.filter((one) => one.id === "g1" && one.body.read === "g8");
+    await onChat();
+    expect(shownIds()).toContain("g3");
+    const marks = () => server.posted.filter((body) => body.action === "read").flatMap((body) => body.ids as string[]);
     expect(marks()).toEqual([]);
     closeSheet();
     // happy-dom delivers the sheet's removal to the coverage observer on a timer of its own.
-    await vi.waitFor(() => expect(marks()).toEqual([{ id: "g1", body: { read: "g8" } }]));
+    await vi.waitFor(() => expect(marks()).toContain("g1"));
   });
 
-  it("a reply picked before a reload waits for its thing to open", async () => {
+  it("a reply picked before a reload, to a thing's line, comes back in Chat on mount", async () => {
     await onChat();
     chat.unmount();
     const quote = { from: "rivet", text: "PR #341 is up" };
     localStorage.setItem("rivet.chat.reply", JSON.stringify({ id: "k2", quote, conversation: "k1" }));
     chat.mount(root);
     await settle();
-    expect(localStorage.getItem("rivet.chat.reply")).not.toBeNull();
-    chat.showConversation("k1");
-    await settle();
     expect(root.querySelector<HTMLElement>(".chat-replying")!.hidden).toBe(false);
     send("yes, merge it");
     await settle();
-    expect(server.posted.find((body) => "text" in body)).toMatchObject({ replyTo: "k2", conversation: "k1" });
-
-    // Opened by another message of it (a search hit), it still comes back once the conversation is known.
-    chat.unmount();
-    localStorage.setItem("rivet.chat.reply", JSON.stringify({ id: "k2", quote, conversation: "k1" }));
-    chat.showConversation("k2");
-    chat.mount(root);
-    await settle();
-    expect(chat.openConversation()).toBe("k1");
-    expect(root.querySelector<HTMLElement>(".chat-replying")!.hidden).toBe(false);
+    expect(server.posted.find((body) => "text" in body)).toMatchObject({ replyTo: "k2", conversation: null });
   });
 
-  it("a notification for another thing, with one open, shows only the other one's messages", async () => {
-    await onThing("g1");
-    expect(shownIds()).toContain("g3");
-    chat.showConversation("k1");
+  it("a notification naming only a conversation lights its newest line in Chat, after another one's was lit", async () => {
+    await onChat();
+    chat.showLine("g1");
     await settle();
-    expect(title()).toBe("Results row");
-    expect(shownIds().filter((id) => id?.startsWith("g"))).toEqual([]);
-    send("on Results");
+    expect(litId()).toBe("g3");
+    chat.showLine("k1");
     await settle();
-    expect(server.posted.find((body) => "text" in body)).toMatchObject({ text: "on Results", conversation: "k1" });
+    expect(litId()).toBe("k2");
+    expect(root.querySelectorAll(".chat-msg.lit")).toHaveLength(1);
+    expect(shownIds()).toEqual(["w1", "w2", "k1", "kp", "ka", "g1", "g2", "k2", "g3"]);
+    expect(root.querySelector(".thing-head")).toBeNull();
   });
 
-  it("names the open thing for the viewing report, and nothing on Chat or once Chat is left", async () => {
-    await onThing("k1");
-    expect(chat.openConversation()).toBe("k1");
-    root.querySelector<HTMLButtonElement>(".thing-back")!.click();
+  it("names no open conversation for the viewing report, after a line is brought up too", async () => {
+    await onChat();
+    chat.showLine("k1");
     await settle();
     expect(chat.openConversation()).toBeNull();
-    chat.showConversation("k1");
-    await settle();
     chat.unmount();
     expect(chat.openConversation()).toBeNull();
   });
 
-  it("the old Updates conversation opened by one of its messages (Search, a link) is read-only: no composer, no seed bubble, no thing chrome", async () => {
-    await onThing("u1");
-    expect(chat.openConversation()).toBe(UPDATES_ID);
-    expect(title()).toBe("Updates");
-    expect(root.querySelector<HTMLElement>(".chat-compose-box")!.hidden).toBe(true);
+  it("the old Updates conversation, asked for by one of its messages (Search, a link), shows Chat at its newest with its composer", async () => {
+    await onChat();
+    chat.showLine(UPDATES_ID, "u1");
+    await settle();
+    expect(shownIds()).not.toContain("u1");
+    expect(shownIds().at(-1)).toBe("g3");
     expect(root.querySelector(`.chat-msg[data-id="${UPDATES_ID}"]`)).toBeNull();
-    expect(root.querySelector<HTMLElement>(".thing-foot")!.hidden).toBe(true);
-    expect(replyUnder("u1")).toBeNull();
-    chat.showConversation("g1");
-    await settle();
     expect(root.querySelector<HTMLElement>(".chat-compose-box")!.hidden).toBe(false);
-  });
-
-  it("a quiet thing says so, and comes back when you writes in it", async () => {
-    server.conversations.get("g1")!.closed = true;
-    await onThing("g1");
-    expect(root.querySelector(".thing-quiet")).not.toBeNull();
-    // His own lines carry a Reply too, to the same conversation.
-    expect(replyUnder("g3")).not.toBeNull();
-    replyUnder("g2")!.click();
-    send("one more thing");
-    await settle();
-    expect(server.posted.find((body) => "text" in body)).toMatchObject({ replyTo: "g2", conversation: "g1" });
-    await chat.refresh();
-    await settle();
-    expect(root.querySelector(".thing-quiet")).toBeNull();
+    expect(root.querySelector(".thing-head")).toBeNull();
   });
 
   it("a card answer says so, with Open card while the card is on the board", async () => {
     server.messages.push(owner("a1", "g1", 45, { text: "Approved: merge?\nship it", card: "card-k", status: "sent" }));
-    await onThing("g1");
+    await onChat();
     const bubble = () => root.querySelector<HTMLElement>('.chat-msg[data-id="a1"]')!;
     expect(bubble().textContent).toContain("from a card");
     expect(bubble().querySelector(".chat-card-open")).toBeNull();
@@ -655,7 +543,7 @@ describe("a thing's page", () => {
 
   it("Rivet's Card: line (say.mjs --card) opens its update card, which is in no deck; it says no 'from a card'", async () => {
     server.messages.push(rivet("h9", "g1", 45, { text: "Card: Billing deployed ›", card: "upd-1" }));
-    await onThing("g1");
+    await onChat();
     const bubble = () => root.querySelector<HTMLElement>('.chat-msg[data-id="h9"]')!;
     expect(bubble().textContent).not.toContain("from a card");
     board([{ id: "upd-1", kind: "update", title: "Billing deployed", thread: "Billing", rev: "r1", since: at(45) } as unknown as ServedNeed]);
@@ -677,21 +565,9 @@ describe("a thing's page", () => {
     expect(app.tab).toBe("progress");
   });
 
-  it("a thing whose Needs you names a card on the board opens that card from its head", async () => {
-    server.conversations.get("k1")!.statusCard = "card-k";
-    await onThing("k1");
-    expect(root.querySelector(".thing-card-open")).toBeNull();
-    board([{ id: "card-k", kind: "approval", title: "Merge?", ask: "Merge?", rev: "r1" }]);
-    await settle();
-    const open = root.querySelector<HTMLButtonElement>(".thing-head .thing-card-open")!;
-    expect(open.textContent).toBe("Open the card that needs you");
-    open.click();
-    expect(app.tab).toBe("cards");
-  });
-
   it("a card Rivet posted shows as a card bubble, with Open card while it is on the board, and is never read aloud", async () => {
     server.messages.push(rivet("p2", "k1", 46, { text: "PR ready", posted: { id: "card-m", kind: "merge-ready", title: "PR ready" } }));
-    await onThing("k1");
+    await onChat();
     const bubble = root.querySelector<HTMLElement>('.chat-msg[data-id="kp"]')!;
     expect(bubble.classList.contains("posted")).toBe(true);
     expect(bubble.querySelector(".chat-posted-kind")!.textContent).toBe("Plan");
@@ -705,13 +581,14 @@ describe("a thing's page", () => {
     expect(open.textContent).toBe("Open card");
 
     // Read aloud on: a posted card on the stream says nothing; Rivet's next words do.
-    root.querySelector<HTMLButtonElement>(".thing-head .chat-speak")!.click();
+    const speak = root.querySelector<HTMLButtonElement>(".chat-menu-item.chat-speak")!;
+    speak.click();
     said.length = 0;
     fire("message", rivet("p3", "k1", 47, { text: "Card title", posted: { id: "card-x", kind: "update", title: "Card title" } }));
     fire("message", rivet("p4", "k1", 48, { text: "Spoken words" }));
     await settle();
     expect(said).toEqual(["Spoken words"]);
-    root.querySelector<HTMLButtonElement>(".thing-head .chat-speak")!.click();
+    speak.click();
     open.click();
     expect(app.tab).toBe("cards");
   });

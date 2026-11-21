@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { AREA_TABLE, areaMatches, FOLD_IDS, USAGE_AREAS, USAGE_IDS, usageArea } from "../src/shared/usage-ids.js";
 
-// What you used's folds (Sam, 3 Nov): every registry id lands in exactly one area, from the one table.
+// What you used's folds: every registry id lands in exactly one area, from the one table.
 
 describe("What you used's areas", () => {
   it("puts every registry id in exactly one area, and every removed one in Removed", () => {

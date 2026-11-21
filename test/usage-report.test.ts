@@ -9,7 +9,7 @@ import { createUsageAsks, readable, reworkOf, usageReport } from "../src/server/
 import { FOLD_IDS, LISTED_IDS, UNDO_IDS, type UsageDevice, type UsageReport } from "../src/shared/usage-ids.js";
 import { browser, fakeClock, ORIGIN, startServer, type TestServer } from "./helpers.js";
 
-// More › What you used (Sam, 27 Oct): the counts, the never-used list and its 30-day rules, Rework?, Keep for 90 days,
+// More › What you used: the counts, the never-used list and its 30-day rules, Rework?, Keep for 90 days,
 // and the Monday pass's at most 3 Retire? cards a week from Mon 30 Nov.
 
 const DAY = 24 * 60 * 60 * 1000;

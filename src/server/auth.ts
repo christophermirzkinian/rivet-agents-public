@@ -14,7 +14,7 @@ import { z } from "zod";
 import { sha256, type Config } from "./config.js";
 import { clientIp, HttpError, json, readCookie, readJson, requireSameOrigin } from "./httputil.js";
 import type { Store } from "./store.js";
-import { APP_NAME } from "../shared/names.js";
+import { appName } from "../shared/names.js";
 
 export const SESSION_COOKIE = "__Host-rivet";
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -138,7 +138,7 @@ export function createAuth(config: Config, store: Store): Auth {
     if (!body.success) throw new HttpError(400, "invalid request");
     const grant = grantFor(request, body.data.code);
     const options = await generateRegistrationOptions({
-      rpName: APP_NAME,
+      rpName: appName(),
       rpID: config.rpId,
       userName: "owner",
       userDisplayName: "you",

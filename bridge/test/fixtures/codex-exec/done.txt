@@ -1,0 +1,13 @@
+{"type":"thread.started","thread_id":"thread-done"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_0","type":"command_execution","command":"bash -lc 'git log --oneline -3'","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_0","type":"command_execution","command":"bash -lc 'git log --oneline -3'","aggregated_output":"1fdecff add tests\n","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_1","type":"reasoning","text":"**Reading the log**"}}
+{"type":"item.updated","item":{"id":"item_2","type":"todo_list","items":[{"text":"Read the log","completed":true},{"text":"Report","completed":false}]}}
+{"type":"item.completed","item":{"id":"item_2","type":"todo_list","items":[{"text":"Read the log","completed":true},{"text":"Report","completed":true}]}}
+{"type":"item.completed","item":{"id":"item_3","type":"mcp_tool_call","server":"docs","tool":"search","arguments":{"q":"x"},"result":null,"error":{"message":"not found"},"status":"failed"}}
+{"type":"item.completed","item":{"id":"item_4","type":"web_search","id":"ws_1","query":"codex exec json","action":{"type":"search"}}}
+{"type":"item.completed","item":{"id":"item_5","type":"file_change","changes":[{"path":"notes.md","kind":"add"}],"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_6","type":"command_execution","command":"bash -lc 'rm -rf build'","aggregated_output":"","exit_code":null,"status":"declined"}}
+{"type":"item.completed","item":{"id":"item_7","type":"agent_message","text":"Three commits since yesterday.\nAll green."}}
+{"type":"turn.completed","usage":{"input_tokens":24763,"cached_input_tokens":24448,"cache_write_input_tokens":0,"output_tokens":122,"reasoning_output_tokens":64}}

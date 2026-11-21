@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { BoardResponse, Reply } from "../src/shared/board.js";
 import type { AuditEntry } from "../src/shared/command.js";
-import type { JobsResponse } from "../src/shared/jobs.js";
+import { MAX_TASK_RUNS_A_DAY, type JobsResponse } from "../src/shared/jobs.js";
 import { bearer, BOARD_TOKEN, BRIDGE_TOKEN, browser, fakeClock, putBoard, startServer, type TestServer } from "./helpers.js";
 
 // 7:00am Saturday 24 Oct 2026 local time.
@@ -414,6 +414,74 @@ describe("run reports", () => {
     const { replies } = (await (await fetch(`${server.base}/api/replies?handled=false`, { headers: bearer(BOARD_TOKEN) })).json()) as { replies: Reply[] };
     expect(replies.find((reply) => reply.itemId === card.id)).toMatchObject({ choice: "Fix it", item: { ask: expect.stringContaining(`rivet fix schedule job-${id}`) } });
     expect((await board()).needs.filter((need) => need.id.startsWith("schedule-job-"))).toEqual([]);
+  });
+
+  it("leaves a limit card unanswered, says why and sends nothing when its switch answer's run cannot start", async () => {
+    const id = await madeJob({ name: "Issues", words: "look over the open site issues", kind: "task", when: { every: "day", at: "07:00" }, cards: "red" });
+    const mac = await connectBridge();
+    await report(id, { run: "run-00000001", state: "start", usage: 10 });
+    await send("PUT", `/api/bridge/jobs/${id}/report`, { run: "run-00000001", state: "red", line: "Claude is at its limit until 3 pm. Use ChatGPT for this job?", limit: { plan: "claude", until: "3 pm" } }, bearer(BRIDGE_TOKEN));
+    const card = (await board()).needs.find((need) => need.schedule === `job-${id}`)!;
+    // Its next run is going when the answer comes.
+    await report(id, { run: "run-00000002", state: "start", usage: 10 });
+    const refused = await send("POST", "/api/replies", { clientId: clientId(), itemId: card.id, decision: "choice", choice: "Use ChatGPT", rev: card.rev }, browser(cookie));
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toMatchObject({ error: "It couldn't start on ChatGPT: it is running now." });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(mac.events().filter((one) => one.event === "job" && (one.data.job as { op?: string } | undefined)?.op === "run")).toEqual([]);
+    expect((await board()).needs.find((need) => need.schedule === `job-${id}`)).toMatchObject({ id: card.id, rev: card.rev });
+    const { replies } = (await (await fetch(`${server.base}/api/replies?handled=false`, { headers: bearer(BOARD_TOKEN) })).json()) as { replies: Reply[] };
+    expect(replies.filter((reply) => reply.itemId === card.id)).toEqual([]);
+    mac.abort();
+  });
+
+  it("refuses a limit card's switch at the day's task runs, as a start would be, and relays nothing", async () => {
+    const id = await madeJob({ name: "Issues", words: "look over the open site issues", kind: "task", when: { every: "day", at: "07:00" }, cards: "red" });
+    const mac = await connectBridge();
+    for (let n = 1; n <= MAX_TASK_RUNS_A_DAY; n += 1) {
+      const run = `run-0000000${n}`;
+      await report(id, { run, state: "start", usage: 10 });
+      await send("PUT", `/api/bridge/jobs/${id}/report`, { run, state: "red", line: "Claude is at its limit until 3 pm. Use ChatGPT for this job?", limit: { plan: "claude", until: "3 pm" } }, bearer(BRIDGE_TOKEN));
+    }
+    const card = (await board()).needs.find((need) => need.schedule === `job-${id}`)!;
+    expect(card.options?.map((option) => option.label)).toEqual(["Use ChatGPT", "Wait for Claude"]);
+    const refused = await send("POST", "/api/replies", { clientId: clientId(), itemId: card.id, decision: "choice", choice: "Use ChatGPT", rev: card.rev }, browser(cookie));
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toMatchObject({ error: `It couldn't start on ChatGPT: ${MAX_TASK_RUNS_A_DAY} task runs today already.` });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(mac.events().filter((one) => one.event === "job" && (one.data.job as { op?: string } | undefined)?.op === "run")).toEqual([]);
+    expect((await board()).needs.find((need) => need.schedule === `job-${id}`)).toMatchObject({ id: card.id, rev: card.rev });
+    const { replies } = (await (await fetch(`${server.base}/api/replies?handled=false`, { headers: bearer(BOARD_TOKEN) })).json()) as { replies: Reply[] };
+    expect(replies.filter((reply) => reply.itemId === card.id)).toEqual([]);
+    mac.abort();
+  });
+
+  it("sends the Mac one Run now on the other plan for a limit card's switch answer, and nothing for Wait or a plain red", async () => {
+    const TASK = { name: "Issues", words: "look over the open site issues", kind: "task", when: { every: "day", at: "07:00" }, cards: "red" };
+    const [switched, left, plain] = [await madeJob(TASK), await madeJob({ ...TASK, name: "PRs", words: "look over the open PRs" }), await madeJob({ ...TASK, name: "Runs", words: "look over the failed runs" })];
+    // The newest bridge connection is the one the server sends to.
+    const mac = await connectBridge();
+    const jobRuns = () => mac.events().filter((one) => one.event === "job" && (one.data.job as { op?: string } | undefined)?.op === "run");
+    const red = async (id: string, run: string, limit?: Record<string, string>) => {
+      await report(id, { run, state: "start", usage: 10 });
+      await send("PUT", `/api/bridge/jobs/${id}/report`, { run, state: "red", line: limit ? "Claude is at its limit. Use ChatGPT for this job?" : "it broke", ...(limit ? { limit } : {}) }, bearer(BRIDGE_TOKEN));
+      return (await board()).needs.find((need) => need.schedule === `job-${id}`)!;
+    };
+    const answer = (card: { id: string; rev: string }, choice: string) => send("POST", "/api/replies", { clientId: clientId(), itemId: card.id, decision: "choice", choice, rev: card.rev }, browser(cookie));
+
+    const card = await red(switched, "run-00000001", { plan: "claude" });
+    expect(card.options?.map((option) => option.label)).toEqual(["Use ChatGPT", "Wait for Claude"]);
+    expect((await answer(card, "Use ChatGPT")).status).toBe(201);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(jobRuns().map((one) => one.data.job)).toEqual([{ op: "run", id: switched, plan: "chatgpt" }]);
+
+    expect((await answer(await red(left, "run-00000002", { plan: "claude" }), "Wait for Claude")).status).toBe(201);
+    const plainCard = await red(plain, "run-00000003");
+    expect(plainCard.options?.map((option) => option.label)).toEqual(["Fix it", "Leave it"]);
+    expect((await answer(plainCard, "Fix it")).status).toBe(201);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(jobRuns()).toHaveLength(1);
+    mac.abort();
   });
 });
 

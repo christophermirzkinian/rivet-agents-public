@@ -1,4 +1,5 @@
 import { chatName } from "../../../src/shared/names.js";
+import { agentName } from "../cloud-agent.js";
 import "./ops-status.css";
 
 import type { PushConfigResponse } from "../../../src/shared/board.js";
@@ -464,7 +465,7 @@ function statusDetail(item: FailedItem, status: OpsStatus | null, sheet: { retur
     h("div", { class: "ops-status-top" }, face(status, held, dismissed(item)), h("span", { class: "ops-status-key" }, `Key: ${item.kind} ${item.key}`)),
     ...field("What happened", ...item.what.map((line) => h("p", {}, line))),
     nobody
-      ? h("div", { class: "ops-status-note box t-info" }, h("p", { class: "ops-status-text" }, "Rivet is picking this up"))
+      ? h("div", { class: "ops-status-note box t-info" }, h("p", { class: "ops-status-text" }, `${agentName()} is picking this up`))
       : h(
           "div",
           { class: `ops-status-note box t-${STATE_TONE[state]}` },
@@ -472,14 +473,14 @@ function statusDetail(item: FailedItem, status: OpsStatus | null, sheet: { retur
           h(
             "p",
             { class: "ops-status-text" },
-            held ? `${held} has this PR's branch checked out.` : (status?.why ?? status?.note ?? (status ? "No note yet." : "No update yet: Rivet is picking this up.")),
+            held ? `${held} has this PR's branch checked out.` : (status?.why ?? status?.note ?? (status ? "No note yet." : `No update yet: ${agentName()} is picking this up.`)),
           ),
         ),
     ...field("Failing since", started ? when(started) : "Not known"),
     ...(nobody
       ? []
       : [
-          ...field("Who", ...(onIt.length ? [h("div", { class: "ops-status-who" }, ...onIt)] : ["Rivet, picking it up"])),
+          ...field("Who", ...(onIt.length ? [h("div", { class: "ops-status-who" }, ...onIt)] : [`${agentName()}, picking it up`])),
           ...field("Done by", status && underWay(status) ? (status.dueAt ? when(status.dueAt) : status.eta?.trim() ? etaWords(status.eta, status.updatedAt) : noTimeYet()) : noTimeYet()),
           ...field("Last updated", status ? `${when(status.updatedAt)}${status.by ? ` by ${status.by}` : ""}` : "Never"),
         ]),

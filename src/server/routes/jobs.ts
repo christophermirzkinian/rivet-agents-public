@@ -108,6 +108,17 @@ export function registerJobs(router: Router, commands: CommandStore, deps: JobRo
     json(response, 200, jobs.setOvernight(parsed.data, now()));
   });
 
+  // A limit card's "Use <other plan>" (http.ts): one Run now on that plan, the card's answer standing in for the tap.
+  router.deps.jobRunsFrom((id, plan, clientId) => {
+    const at = now();
+    const refusal = jobs.switchRefusal(id, plan, at);
+    if (refusal) return refusal;
+    const sent = deps.dispatch("job", clientId, { job: { op: "run", id, plan } }, at.toISOString());
+    if (sent.status !== 202) return "it couldn't be sent to run just now";
+    jobs.ownRun(sent.entry.id, at);
+    return null;
+  });
+
   const timer = setInterval(sweep, SWEEP_MS);
   timer.unref();
   router.onClose(() => clearInterval(timer));
@@ -225,7 +236,7 @@ export function registerJobs(router: Router, commands: CommandStore, deps: JobRo
     sweep();
     if (report) {
       const body = parse(taskReportSchema, raw, "job report");
-      const done = jobs.report(id, body.run, body.state, body.line, body.url, now());
+      const done = jobs.report(id, body.run, body.state, body.line, body.url, now(), body.limit);
       if (done.status !== 200) throw new HttpError(done.status, done.error ?? "refused");
       publish(done.outcome);
       json(response, 200, { ok: true });

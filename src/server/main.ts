@@ -1,7 +1,9 @@
 import { loadConfig } from "./config.js";
+import { followHostedName } from "./hosted-name.js";
 import { createApp } from "./http.js";
 
 const config = loadConfig();
+followHostedName();
 const app = createApp(config);
 
 app.server.listen(config.port, () => {

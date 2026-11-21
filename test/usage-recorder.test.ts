@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MAX_USAGE_EVENTS, USAGE_KEEP_MS } from "../src/shared/usage-ids.js";
 import type { Where } from "../web/src/usage.js";
 
-// What you used (Sam, 27 Oct): the app's recorder batches ids and numbers, sends them when the app is hidden or 50
+// What you used: the app's recorder batches ids and numbers, sends them when the app is hidden or 50
 // wait, keeps a failed batch for the next send, drops one the server can never take, and never sends any text.
 
 type Recorder = typeof import("../web/src/usage.js");

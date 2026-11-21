@@ -1,5 +1,5 @@
 // Rivet's sheet with the keyboard up (the visual viewport shrunk to what a keyboard leaves), a photo attached and a long
-// message typed key by key: More topics and the composer must not move while you type.
+// message typed key by key: the topics bar and the composer must not move while you type.
 // Usage, from rivet/: node web/preview/typing-jump.mjs --photo <png> [--shots <dir>]
 import { mkdirSync } from "node:fs";
 import { createRequire } from "node:module";

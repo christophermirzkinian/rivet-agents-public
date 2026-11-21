@@ -67,21 +67,33 @@
   --radius: 16px;
   /* Normal phone-app density (Gmail/Slack): Rivet is the owner's alone, not sized for small phones.
      Body 14, secondary 12; buttons and taps 44, never bigger. */
-  --fs-xs: 12px;
-  --fs-s: 12px;
-  --fs-m: 13px;
-  --fs-body: 14px;
-  --fs-l: 15px;
-  --fs-xl: 16px;
-  --fs-2xl: 17px;
-  --fs-3xl: 18px;
-  --fs-4xl: 20px;
-  --fs-5xl: 22px;
-  --fs-6xl: 26px;
+  /* Text size (chat-text-size.ts, on <html> as data-chat-text): every word in the app scales by --text-scale, Medium 1.
+     Size text with an --fs-* token or calc(Npx * var(--text-scale)); text-size-scale.test.ts fails on a bare px size. */
+  --text-scale: 1;
+  --fs-xs: calc(12px * var(--text-scale));
+  --fs-s: calc(12px * var(--text-scale));
+  --fs-m: calc(13px * var(--text-scale));
+  --fs-body: calc(14px * var(--text-scale));
+  --fs-l: calc(15px * var(--text-scale));
+  --fs-xl: calc(16px * var(--text-scale));
+  --fs-2xl: calc(17px * var(--text-scale));
+  --fs-3xl: calc(18px * var(--text-scale));
+  --fs-4xl: calc(20px * var(--text-scale));
+  --fs-5xl: calc(22px * var(--text-scale));
+  --fs-6xl: calc(26px * var(--text-scale));
   --tap: 44px;
   --tap-big: 44px;
   --font: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   color-scheme: dark;
+}
+
+/* Small and Large: the chat bubble's own 12/14 and 17/14 steps (command.css --chat-fs), so a panel moves with Chat. */
+:root[data-chat-text="s"] {
+  --text-scale: 0.8572;
+}
+
+:root[data-chat-text="l"] {
+  --text-scale: 1.2143;
 }
 
 * {
@@ -235,7 +247,7 @@ a {
 
 .gate-name {
   margin: 4px 0 0;
-  font-size: 30px;
+  font-size: calc(30px * var(--text-scale));
   font-weight: 800;
   letter-spacing: -0.02em;
 }
@@ -2494,4 +2506,32 @@ html:has(> #rivet-cap) :is(.sheet-backdrop, .scene-sheet-backdrop) {
 #rivet-cap strong {
   display: block;
   color: var(--apricot);
+}
+
+/* A hosted agent with no plan connected (cloud-agent.ts): a thin band over the app, which takes the rest of the screen. */
+body:has(> #cloud-connect) {
+  display: flex;
+  flex-direction: column;
+}
+
+body:has(> #cloud-connect) > .app.signed-in {
+  flex: 1 1 0;
+  min-height: 0;
+  height: auto;
+}
+
+/* The band already clears the notch. */
+body:has(> #cloud-connect) .topbar {
+  padding-top: 4px;
+}
+
+#cloud-connect {
+  flex: none;
+  padding: max(8px, env(safe-area-inset-top)) 16px 8px;
+  border-block-end: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--apricot);
+  font-weight: 700;
+  text-align: center;
+  text-decoration: none;
 }

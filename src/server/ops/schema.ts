@@ -198,6 +198,8 @@ export const claudeUsageSnapshotSchema = z
             // Codex rows only: the account's credit balance, on its longest window's row.
             credits: z.number().min(0).max(1e9).nullable().optional(),
             unlimited: z.boolean().optional(),
+            // Google rows only: when Google's usage was read.
+            readAt: iso.optional(),
           })
           .strict(),
       )

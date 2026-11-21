@@ -8,7 +8,7 @@ import { CHAT_PATTERN, fileRefsSchema, ID_PATTERN, MAX_CHAT_IMAGES, PDF_NAME_PAT
 export type { ReplyStyle } from "./board.js";
 import type { JobAction } from "./jobs.js";
 import { modelPicksSchema, type ModelPicks } from "./models.js";
-import { RIVET_NAME } from "./names.js";
+import { STORED_NAME } from "./names.js";
 import { OPS_STATUS_KEY_PATTERN } from "./ops-status.js";
 import { isKnownRepo, NO_REPO } from "./repos.js";
 import { SCHEDULE_ID_PATTERN } from "./schedules.js";
@@ -400,6 +400,12 @@ export interface PostedCard {
   ask?: string;
 }
 
+/** A saved chat line; `conversation` is its thread, so Chat can bring it up. */
+export interface SavedLine extends ChatMessage {
+  conversation: string;
+  savedAt: string;
+}
+
 /** Messages oldest first. */
 export interface ChatPage {
   messages: ChatMessage[];
@@ -448,7 +454,7 @@ export const FIX_KINDS = ["ci", "pr", "app", "schedule", "machine", "runner", "d
 /** Who a Fix it tap's status record says set it. */
 export const FIX_IT_BY = "owner-fix-it";
 /** Its note, until Rivet's fix chat says more. */
-export const FIX_IT_NOTE = `You tapped Fix it on Feed; ${RIVET_NAME} is opening a chat on it.`;
+export const FIX_IT_NOTE = `You tapped Fix it on Feed; ${STORED_NAME} is opening a chat on it.`;
 const fixLine = z.string().min(1).max(200).regex(/^[^\x00-\x1f\x7f-\x9f]+$/, "one line").refine((text) => text.trim() !== "", "must not be blank");
 /** Feed's Fix it on one red item: its status kind and key, its name, what is wrong and its GitHub link. */
 export const fixCreateSchema = z

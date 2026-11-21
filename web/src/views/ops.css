@@ -71,6 +71,10 @@
   --accent: #3fd0c9;
 }
 
+.usage-hero[data-section="google"] {
+  --accent: #5b8def;
+}
+
 .usage-hero-head {
   display: flex;
   align-items: center;
@@ -205,13 +209,6 @@
   .usage-col {
     gap: 16px;
   }
-}
-
-.usage-more-title {
-  margin: 10px 2px 0;
-  color: var(--muted);
-  font-size: var(--fs-xl);
-  font-weight: 900;
 }
 
 .usage-card {
@@ -1010,8 +1007,8 @@
 }
 
 .mdl-icon {
-  font-size: 22px;
-  line-height: 26px;
+  font-size: calc(22px * var(--text-scale));
+  line-height: calc(26px * var(--text-scale));
   text-align: center;
 }
 

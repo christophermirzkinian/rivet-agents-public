@@ -174,6 +174,12 @@ export const jobRemoveSchema = z.object({ clientId }).strict();
 export const RUN_RESULTS = ["running", "green", "red", "skipped", "missed"] as const;
 export type RunResult = (typeof RUN_RESULTS)[number];
 
+/** The plans a hosted agent's job chat runs on (bridge/lib/job-drivers.mjs PLANS). */
+export const PLANS = ["claude", "chatgpt"] as const;
+export type Plan = (typeof PLANS)[number];
+export const PLAN_NAMES: Record<Plan, string> = { claude: "Claude", chatgpt: "ChatGPT" };
+export const otherPlan = (plan: Plan): Plan => (plan === "claude" ? "chatgpt" : "claude");
+
 /** The bridge's run report: `start` asks whether the run may go; the rest finish it. */
 export const runReportSchema = z
   .object({
@@ -186,6 +192,8 @@ export const runReportSchema = z
     action: z.string().regex(ID_PATTERN).optional(),
     /** Claude usage now, the higher of session and week, or null when it is not known; Rivet reads none, so its runner sends none. */
     usage: z.number().min(0).max(100).nullable().optional(),
+    /** A hosted agent's start or look: the plan its chat runs on. None is Claude. */
+    plan: z.enum(PLANS).optional(),
     line: plain(MAX_JOB_LINE).optional(),
     log: z.array(z.string().max(MAX_JOB_LOG_LINE)).max(JOB_LOG_LINES).optional(),
     url: z
@@ -199,6 +207,21 @@ export const runReportSchema = z
   .strict();
 export type RunReport = z.infer<typeof runReportSchema>;
 
+/**
+ * A chat that stopped on its plan's usage limit. A task's comes only while the other plan is connected; a look's comes
+ * either way, with `connected` saying whether its check's card can ask to use the other plan and `first` the plan that
+ * goes first, which a fix chat opens on. `outside`: what a task's words need that a ChatGPT job run can't see, so its
+ * card doesn't offer ChatGPT.
+ */
+export const planLimitSchema = z
+  .object({ plan: z.enum(PLANS), until: plain(40).optional(), connected: z.boolean().optional(), first: z.enum(PLANS).optional(), outside: plain(40).optional() })
+  .strict();
+export type PlanLimit = z.infer<typeof planLimitSchema>;
+/** The limit card's option that runs the job once on the other plan (bridge/lib/job-drivers.mjs limitAsk asks it). */
+export const planSwitchLabel = (limited: Plan): string => `Use ${PLAN_NAMES[otherPlan(limited)]}`;
+/** The hosted agent's page where its plans are connected and the first one picked (rivet-agents runtime). */
+export const PLANS_PATH = "/cloud/plans";
+
 /** `rivet job report`: the job's own chat closes the run it was opened for, once. */
 export const taskReportSchema = z
   .object({
@@ -206,6 +229,8 @@ export const taskReportSchema = z
     state: z.enum(["green", "red"]),
     line: plain(MAX_JOB_LINE),
     url: runReportSchema.shape.url,
+    /** Only job-run's own red, when the chat stopped on its plan's usage limit. */
+    limit: planLimitSchema.optional(),
   })
   .strict();
 
@@ -218,6 +243,9 @@ export interface JobRun {
   line?: string;
   log?: string[];
   url?: string;
+  limit?: PlanLimit;
+  /** A red check's: the plan its look stopped on. */
+  lookLimit?: PlanLimit;
 }
 
 /** "removing": Delete went to the Mac, and the job stays until the Mac says its LaunchAgent is gone. */
@@ -329,6 +357,8 @@ export interface JobAction {
   id: string;
   /** create only: what the LaunchAgent is made from. */
   spec?: Pick<JobSpec, "name" | "words" | "kind" | "check"> & { cron: string };
+  /** run only: this one run's chat on this plan, from its limit card's answer; later runs take the first plan. */
+  plan?: Plan;
 }
 
 /** "Sat 24 Oct 7:00am", through when.ts: a card's text is read on any day, so it names its date. */

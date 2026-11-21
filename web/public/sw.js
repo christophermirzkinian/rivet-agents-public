@@ -99,12 +99,14 @@ self.addEventListener("notificationclick", (event) => {
 async function openApp(path) {
   const card = new URL(path, self.location.origin).searchParams.get("card");
   const conversation = new URL(path, self.location.origin).searchParams.get("conversation");
+  // The line the push is about: Chat opens on it.
+  const message = new URL(path, self.location.origin).searchParams.get("message");
   const tab = conversation ? "chat" : new URL(path, self.location.origin).searchParams.get("tab");
   const windows = await within(self.clients.matchAll({ type: "window", includeUncontrolled: true }), CLIENT_WAIT_MS, []);
   for (const client of windows) {
     if ("focus" in client) {
       if (card) client.postMessage({ type: "open-card", id: card });
-      else if (tab) client.postMessage(conversation ? { type: "open-tab", tab: tab, conversation: conversation } : { type: "open-tab", tab: tab });
+      else if (tab) client.postMessage(conversation ? { type: "open-tab", tab: tab, conversation: conversation, ...(message ? { message: message } : {}) } : { type: "open-tab", tab: tab });
       // A slow focus may still land, so a second window is never opened for it; waitUntil just stops waiting.
       return within(client.focus(), CLIENT_WAIT_MS, null);
     }

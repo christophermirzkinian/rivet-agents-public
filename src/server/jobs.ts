@@ -15,7 +15,11 @@ import {
   MAX_ACTIVE_JOBS,
   MAX_TASK_RUNS_A_DAY,
   nextRunTime,
+  otherPlan,
   OVERNIGHT_OFF_NOTE,
+  PLAN_NAMES,
+  PLANS,
+  planSwitchLabel,
   RUN_EARLY_MS,
   dayTimeWords,
   TASK_USAGE_LIMIT,
@@ -26,6 +30,8 @@ import {
   type JobState,
   type JobsResponse,
   type OvernightChange,
+  type Plan,
+  type PlanLimit,
   type OvernightSettings,
   type RunReport,
   type RunResult,
@@ -99,6 +105,7 @@ export const JOB_CARD_PREFIX = "schedule-job-";
 export const JOB_NOTE_PREFIX = "jobnote-";
 const RUNS_SHOWN = 10;
 const RUNS_KEPT_MS = 30 * 86_400_000;
+const PLAN_LIMIT_KNOWN_MS = 30 * 60_000;
 
 /** A Seen update the server adds about a job. */
 export interface JobNote {
@@ -135,6 +142,8 @@ interface RunRow {
   line: string | null;
   log: string | null;
   url: string | null;
+  plan_limit: string | null;
+  look_limit: string | null;
 }
 
 interface CardRow {
@@ -142,6 +151,8 @@ interface CardRow {
   card_id: string;
   shown_at: string;
   answered_at: string | null;
+  /** cardKind of the card as last shown; null on a row from before kinds, which was a red card. */
+  kind: string | null;
 }
 
 interface Stored {
@@ -158,15 +169,24 @@ interface Stored {
 export class JobsStore {
   private readonly db: InstanceType<typeof DatabaseSync>;
 
-  /** `owned`: someone is on this job's schedule key, by its Ops record (SchedulesStore's test). */
+  /**
+   * `owned`: someone is on this job's schedule key, by its Ops record (SchedulesStore's test). `plansUrl`: a hosted
+   * agent's Plans page, the limit card's link; null where cards take no link to it (http, or not given).
+   */
   constructor(
     dataDir: string,
     private readonly owned: (key: string) => boolean = () => false,
+    private readonly plansUrl: string | null = null,
   ) {
     mkdirSync(dataDir, { recursive: true });
     this.db = new DatabaseSync(join(dataDir, "rivet.sqlite"));
     this.db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;");
     this.db.exec(SCHEMA);
+    const runColumns = new Set((this.db.prepare("PRAGMA table_info(job_runs)").all() as { name: string }[]).map((column) => column.name));
+    if (!runColumns.has("plan_limit")) this.db.exec("ALTER TABLE job_runs ADD COLUMN plan_limit TEXT");
+    if (!runColumns.has("look_limit")) this.db.exec("ALTER TABLE job_runs ADD COLUMN look_limit TEXT");
+    const cardColumns = new Set((this.db.prepare("PRAGMA table_info(job_cards)").all() as { name: string }[]).map((column) => column.name));
+    if (!cardColumns.has("kind")) this.db.exec("ALTER TABLE job_cards ADD COLUMN kind TEXT");
   }
 
   close(): void {
@@ -346,10 +366,48 @@ export class JobsStore {
   }
 
   /**
+   * What holds a chat on `plan` (a task's run, a check's look, a limit card's switch) from starting now; `own` is one of
+   * The owner's own Run nows. Claude's usage holds only a chat on Claude: `usage` is the Mac's reading, null when not known,
+   * and undefined for a switch, whose run reads it when it asks to start. A chat on ChatGPT is held by ChatGPT's known
+   * limit instead.
+   */
+  private chatHold(now: Date, own: boolean, plan: Plan, usage?: number | null): string | null {
+    if (!own && !this.overnight().on) return OVERNIGHT_OFF_NOTE;
+    if (this.tasksToday(now) >= MAX_TASK_RUNS_A_DAY) return `${MAX_TASK_RUNS_A_DAY} task runs today already`;
+    if (plan !== "claude") {
+      const limit = this.knownLimit(plan, now);
+      return limit ? limitWords(limit).replace(/\.$/, "") : null;
+    }
+    if (usage != null && usage >= TASK_USAGE_LIMIT) return "usage high";
+    return null;
+  }
+
+  /** The newest usage limit a run met on `plan` within PLAN_LIMIT_KNOWN_MS: a limit's until is words, not a time. */
+  private knownLimit(plan: Plan, now: Date): PlanLimit | null {
+    const rows = this.db
+      .prepare("SELECT plan_limit, look_limit FROM job_runs WHERE finished_at >= ? AND (plan_limit IS NOT NULL OR look_limit IS NOT NULL) ORDER BY finished_at DESC")
+      .all(new Date(now.getTime() - PLAN_LIMIT_KNOWN_MS).toISOString()) as unknown as Pick<RunRow, "plan_limit" | "look_limit">[];
+    const limits = rows.flatMap((row) => [row.plan_limit, row.look_limit].flatMap((text) => (text ? [JSON.parse(text) as PlanLimit] : [])));
+    return limits.find((limit) => limit.plan === plan) ?? null;
+  }
+
+  /**
+   * Why a limit card's "Use <other plan>" can't start its one run on `plan` now, by the rule start and look hold it
+   * with: it goes as an own Run now, and a check's switch is for its look.
+   */
+  switchRefusal(jobId: string, plan: Plan, now: Date): string | null {
+    const job = this.get(jobId);
+    if (!job) return "it is no longer there";
+    if (job.state !== "active") return job.state === "paused" ? "it is paused" : "it is being deleted";
+    if (this.isRunning(jobId)) return "it is running now";
+    return this.chatHold(now, job.spec.kind === "task", plan);
+  }
+
+  /**
    * A run asks to start. Over a limit it is kept as skipped with the note and never queued: a task over the day's
-   * runs, or while a reported usage is high (unknown usage holds none), or one while overnight jobs are off unless it is a
-   * Run now you tapped in the app (a Run now sent with the board token is held like a scheduled run); a check while its
-   * last run is still going. A task's start is one
+   * runs, or on Claude while a reported usage is high (unknown usage holds none), or on ChatGPT at its known limit,
+   * or one while overnight jobs are off unless it is a Run now you tapped in the app (a Run now sent with the board
+   * token is held like a scheduled run); a check while its last run is still going. A task's start is one
    * chat, which job-run.mjs starts itself.
    */
   start(jobId: string, report: RunReport, now: Date): RunStart | null {
@@ -366,9 +424,8 @@ export class JobsStore {
     };
     if (running) return skip("the last run is still going");
     if (job.spec.kind === "task") {
-      if (!this.takeOwnRun(report) && !this.overnight().on) return skip(OVERNIGHT_OFF_NOTE);
-      if (this.tasksToday(now) >= MAX_TASK_RUNS_A_DAY) return skip(`${MAX_TASK_RUNS_A_DAY} task runs today already`);
-      if (report.usage != null && report.usage >= TASK_USAGE_LIMIT) return skip("usage high");
+      const held = this.chatHold(now, this.takeOwnRun(report), report.plan ?? "claude", report.usage ?? null);
+      if (held) return skip(held);
     }
     this.insertRun(job, { id: report.run, at: now, result: "running", manual: report.manual, action: report.manual ? report.action : undefined });
     return go;
@@ -376,7 +433,7 @@ export class JobsStore {
 
   /**
    * A look check's red run asks to open its chat. The chat is a task run: the overnight switch, the day's task runs and
-   * Claude usage hold it, and it counts as one. Once per red run.
+   * its plan's state hold it, and it counts as one. Once per red run.
    */
   look(jobId: string, report: RunReport, now: Date): RunStart | null {
     const job = this.get(jobId);
@@ -385,15 +442,14 @@ export class JobsStore {
     if (job.state !== "active") return { go: false, note: stateNote(job.state) };
     if (this.run(jobId, report.run)?.result !== "red") return { go: false, note: "that run is not red" };
     if (this.db.prepare("SELECT 1 FROM job_looks WHERE job_id = ? AND run_id = ?").get(jobId, report.run)) return { go: false, note: "a chat looked into that run already" };
-    if (!this.overnight().on) return { go: false, note: OVERNIGHT_OFF_NOTE };
-    if (this.tasksToday(now) >= MAX_TASK_RUNS_A_DAY) return { go: false, note: `${MAX_TASK_RUNS_A_DAY} task runs today already` };
-    if (report.usage != null && report.usage >= TASK_USAGE_LIMIT) return { go: false, note: "usage high" };
+    const held = this.chatHold(now, false, report.plan ?? "claude", report.usage ?? null);
+    if (held) return { go: false, note: held };
     this.db.prepare("INSERT INTO job_looks (job_id, run_id, at) VALUES (?, ?, ?)").run(jobId, report.run, now.toISOString());
     return { go: true, run: report.run, job: { id: job.id, kind: job.spec.kind, name: job.spec.name, words: job.spec.words, check: job.spec.check } };
   }
 
   /** The bridge finishes a run it started (or skips one it could not start). */
-  finish(jobId: string, report: RunReport, now: Date): { status: 200 | 404 | 409; error?: string; outcome?: JobOutcome } {
+  finish(jobId: string, report: RunReport, now: Date, limit?: PlanLimit): { status: 200 | 404 | 409; error?: string; outcome?: JobOutcome } {
     const job = this.get(jobId);
     if (!job) return { status: 404, error: "no such job" };
     if (job.state === "removing") return { status: 409, error: stateNote(job.state) };
@@ -408,8 +464,8 @@ export class JobsStore {
       return { status: 409, error: run.result === "missed" ? "too late: it was counted as missed" : "that run already finished" };
     }
     this.db
-      .prepare("UPDATE job_runs SET result = ?, finished_at = ?, line = ?, log = ?, url = ? WHERE job_id = ? AND id = ?")
-      .run(report.state, now.toISOString(), report.line ?? null, report.log ? JSON.stringify(report.log) : null, report.url ?? null, jobId, report.run);
+      .prepare("UPDATE job_runs SET result = ?, finished_at = ?, line = ?, log = ?, url = ?, plan_limit = ? WHERE job_id = ? AND id = ?")
+      .run(report.state, now.toISOString(), report.line ?? null, report.log ? JSON.stringify(report.log) : null, report.url ?? null, limit && report.state === "red" ? JSON.stringify(limit) : null, jobId, report.run);
     return { status: 200, outcome: this.settle(job, report.run, now) };
   }
 
@@ -417,17 +473,21 @@ export class JobsStore {
    * `rivet job report` from the job's own chat, for the run it was opened for, once: a task's running run finishes;
    * a look check's red run (the check finished it) takes the chat's line, the cause.
    */
-  report(jobId: string, runId: string, state: "green" | "red", line: string, url: string | undefined, now: Date): { status: 200 | 404 | 409; error?: string; outcome?: JobOutcome } {
+  report(jobId: string, runId: string, state: "green" | "red", line: string, url: string | undefined, now: Date, limit?: PlanLimit): { status: 200 | 404 | 409; error?: string; outcome?: JobOutcome } {
     const job = this.get(jobId);
     if (!job) return { status: 404, error: "no such job" };
     if (job.state === "removing") return { status: 409, error: stateNote(job.state) };
     const run = this.run(jobId, runId);
     if (!run) return { status: 404, error: "no such run" };
-    if (job.spec.kind === "task" && run.result === "running") return this.finish(jobId, { run: runId, state, line, ...(url ? { url } : {}) }, now);
+    if (job.spec.kind === "task" && run.result === "running") return this.finish(jobId, { run: runId, state, line, ...(url ? { url } : {}) }, now, limit);
     const looked = state === "red" && this.db.prepare("UPDATE job_looks SET reported_at = ? WHERE job_id = ? AND run_id = ? AND reported_at IS NULL").run(now.toISOString(), jobId, runId).changes > 0;
     if (looked) {
-      this.db.prepare("UPDATE job_runs SET line = ?, url = COALESCE(?, url) WHERE job_id = ? AND id = ?").run(line, url ?? null, jobId, runId);
-      return { status: 200, outcome: { fresh: [], notes: [] } };
+      // The check ran and failed: a limit its look hit is the look's, never the check run's limit, so its card keeps Fix it
+      // and the check's own line, which the card tells the look's limit after.
+      if (limit) this.db.prepare("UPDATE job_runs SET url = COALESCE(?, url), look_limit = ? WHERE job_id = ? AND id = ?").run(url ?? null, JSON.stringify(limit), jobId, runId);
+      else this.db.prepare("UPDATE job_runs SET line = ?, url = COALESCE(?, url), look_limit = NULL WHERE job_id = ? AND id = ?").run(line, url ?? null, jobId, runId);
+      const card = limit ? this.card(job, runId, this.counted(jobId), now) : null;
+      return { status: 200, outcome: { fresh: card ? [card] : [], notes: [] } };
     }
     return { status: 409, error: run.result === "missed" ? "too late: it was counted as missed" : "that run is not waiting for a report" };
   }
@@ -504,17 +564,31 @@ export class JobsStore {
       else if (job.spec.cards === "every") note(`${job.spec.name}: green`, `${run.line ?? "It passed."} (${at}).`);
       return outcome;
     }
+    const card = this.card(job, run.id, runs, now);
+    if (card) outcome.fresh.push(card);
+    else if (job.spec.cards === "every") note(`${job.spec.name}: still red`, `${runLine(run)} (${at}).`);
+    return outcome;
+  }
+
+  /**
+   * A red streak's card when it is to be shown: its first, or a fresh one when the card answered was a limit card and
+   * the streak now makes another (a real failure after a limit, or the other plan's limit after a switch). An answer
+   * covers only the card it answered; an answered red card stays answered until the job goes green. A card still
+   * waiting keeps the kind it was shown with: a streak that now makes another kind gets a new card, with a new id.
+   */
+  private card(job: Stored, runId: string, runs: JobRun[], now: Date): Need | null {
     const streak = redStreak(runs);
     const row = this.cardRow(job.id);
-    const key = jobScheduleKey(job.id);
-    if (!row && !this.owned(key) && streak.length) {
-      const cardId = jobCardId(job.id, streak[streak.length - 1]!.id);
-      this.db.prepare("INSERT INTO job_cards (job_id, card_id, shown_at) VALUES (?, ?, ?)").run(job.id, cardId, now.toISOString());
-      outcome.fresh.push(redCard(job, streak, cardId));
-    } else if (job.spec.cards === "every") {
-      note(`${job.spec.name}: still red`, `${runLine(run)} (${at}).`);
-    }
-    return outcome;
+    if (this.owned(jobScheduleKey(job.id)) || !streak.length) return null;
+    const kind = cardKind(streak);
+    if (row && !row.answered_at && (row.kind ?? "red") === kind) return null;
+    if (row && row.answered_at && ((row.kind ?? "red") === "red" || row.kind === kind)) return null;
+    // A waiting card's run can be this run (a check's look reports on the run it carded), so its new id takes the kind too.
+    const cardId = !row ? jobCardId(job.id, streak[streak.length - 1]!.id) : row.answered_at ? jobCardId(job.id, runId) : jobCardId(job.id, `${runId}\n${kind}`);
+    this.db
+      .prepare("INSERT INTO job_cards (job_id, card_id, shown_at, kind) VALUES (?, ?, ?, ?) ON CONFLICT (job_id) DO UPDATE SET card_id = excluded.card_id, shown_at = excluded.shown_at, answered_at = NULL, kind = excluded.kind")
+      .run(job.id, cardId, now.toISOString(), kind);
+    return redCard(job, streak, cardId, this.plansUrl);
   }
 
   private cardRow(jobId: string): CardRow | null {
@@ -538,8 +612,17 @@ export class JobsStore {
       const row = this.cardRow(job.id);
       const cardId = row?.card_id ?? jobCardId(job.id, streak[streak.length - 1]!.id);
       const key = jobScheduleKey(job.id);
-      return [{ scheduleId: key, need: redCard(job, streak, cardId), detail: redDetail(job, streak[0]!), url: streak[0]!.url ?? null, answered: !!row?.answered_at, answeredAt: row?.answered_at ?? null, owned: this.owned(key), held: false }];
+      return [{ scheduleId: key, need: redCard(job, streak, cardId, this.plansUrl), detail: streakDetail(job, streak), url: (streak.find((run) => !run.limit) ?? streak[0]!).url ?? null, answered: !!row?.answered_at, answeredAt: row?.answered_at ?? null, owned: this.owned(key), held: false }];
     });
+  }
+
+  /** The one run a limit card's answer asks for, on the other plan, read from the card as shown; null for any other answer or card. */
+  planSwitch(key: string, choice: string | undefined): { id: string; plan: Plan } | null {
+    const job = this.all().find((one) => jobScheduleKey(one.id) === key);
+    if (!job) return null;
+    const row = this.cardRow(job.id);
+    const limited = switchPlan(row ? (row.kind ?? "red") : cardKind(redStreak(this.counted(job.id))));
+    return limited && choice === planSwitchLabel(limited) ? { id: job.id, plan: otherPlan(limited) } : null;
   }
 
   /**
@@ -571,8 +654,8 @@ export class JobsStore {
   /** You answered the red card (Leave it too): no card again until it goes green, then red. */
   answer(jobId: string, cardId: string, at: Date): void {
     this.db
-      .prepare("INSERT INTO job_cards (job_id, card_id, shown_at, answered_at) VALUES (?, ?, ?, ?) ON CONFLICT (job_id) DO UPDATE SET answered_at = excluded.answered_at")
-      .run(jobId, cardId, at.toISOString(), at.toISOString());
+      .prepare("INSERT INTO job_cards (job_id, card_id, shown_at, answered_at, kind) VALUES (?, ?, ?, ?, ?) ON CONFLICT (job_id) DO UPDATE SET answered_at = excluded.answered_at")
+      .run(jobId, cardId, at.toISOString(), at.toISOString(), cardKind(redStreak(this.counted(jobId))));
   }
 
   /** A red card whose push never went: its row goes, so the next red run pushes it again. */
@@ -627,6 +710,8 @@ function toRun(row: RunRow): JobRun {
     ...(row.line ? { line: row.line } : {}),
     ...(row.log ? { log: JSON.parse(row.log) as string[] } : {}),
     ...(row.url ? { url: row.url } : {}),
+    ...(row.plan_limit ? { limit: JSON.parse(row.plan_limit) as PlanLimit } : {}),
+    ...(row.look_limit ? { lookLimit: JSON.parse(row.look_limit) as PlanLimit } : {}),
   };
 }
 
@@ -654,22 +739,113 @@ function runLine(run: JobRun): string {
   return run.line ?? (run.result === "missed" ? "It did not run." : "It failed.");
 }
 
-function redCard(job: Stored, streak: readonly JobRun[], id: string): Need {
+/** A red check's look that stopped on its plan's limit, when its run is the streak's newest. */
+function lookLimit(streak: readonly JobRun[]): PlanLimit | undefined {
+  return streak[0] && !streak[0].limit ? streak[0].lookLimit : undefined;
+}
+
+/**
+ * Which card a streak makes (redCard), stored with the card when it is shown: `limit <plan>` for a task's limit card,
+ * `look <plan>` for a check's look limit card that offers the other plan, or `red`.
+ */
+function cardKind(streak: readonly JobRun[]): string {
+  if (!streak.length) return "red";
+  if (!streak.some((run) => !run.limit)) return `${streak[0]!.limit!.outside ? "wait" : "limit"} ${streak[0]!.limit!.plan}`;
+  const look = lookLimit(streak);
+  return look?.connected ? `look ${look.plan}` : "red";
+}
+
+/** The plan a card of this kind offers to switch from. */
+function switchPlan(kind: string): Plan | undefined {
+  const [what, plan] = kind.split(" ");
+  return (what === "limit" || what === "look") && PLANS.includes(plan as Plan) ? (plan as Plan) : undefined;
+}
+
+function limitWords(limit: PlanLimit): string {
+  return `${PLAN_NAMES[limit.plan]} is at its limit${limit.until ? ` until ${limit.until}` : ""}.`;
+}
+
+/** A limit card's answer that switches nothing: the job waits for its plan. */
+const waitLabel = (limited: Plan): string => `Wait for ${PLAN_NAMES[limited]}`;
+const WAIT_DETAIL = "Nothing switches: it runs at its next time, on the plan that goes first. The Plans page changes which plan that is.";
+
+/**
+ * The red card. Only a streak of nothing but a task's limit runs is the limit card: a real failure in it keeps Fix it,
+ * from its newest real failure, with the limit line added when the newest run hit one. A check's look that stopped on
+ * its plan's limit keeps Fix it too, and asks to use the other plan when that one is connected.
+ */
+function redCard(job: Stored, streak: readonly JobRun[], id: string, plansUrl: string | null): Need {
   const newest = streak[0]!;
   const first = streak[streak.length - 1]!;
   const where = job.spec.check && !isUpCheck(job.spec.check) ? " Its last lines are on the Red jobs sheet." : "";
+  const plans = plansUrl ? [{ label: "Plans", url: plansUrl }] : [];
+  const failed = streak.find((run) => !run.limit);
+  if (!failed) {
+    const limit = newest.limit!;
+    const other = PLAN_NAMES[otherPlan(limit.plan)];
+    const wait = { label: waitLabel(limit.plan), detail: WAIT_DETAIL };
+    return {
+      id,
+      kind: "decision",
+      title: `${job.spec.name}: ${PLAN_NAMES[limit.plan]} is at its limit`,
+      ask: limit.outside ? `${limitWords(limit)} ${other} can't check ${limit.outside} from here, so this job waits for ${PLAN_NAMES[limit.plan]}.` : `${limitWords(limit)} Use ${other} for this job?`,
+      since: first.finishedAt ?? first.at,
+      schedule: jobScheduleKey(job.id),
+      options: limit.outside ? [{ ...wait, recommended: true }] : [{ label: planSwitchLabel(limit.plan), detail: `It runs once now on ${other}. Its next run is on the plan that goes first again.` }, wait],
+      ...(plans.length ? { links: plans } : {}),
+    };
+  }
+  const link = failed.url ? [{ label: failed.url.includes("/pull/") ? "Open PR" : "Open log", url: failed.url, primary: true }] : [];
+  const look = lookLimit(streak);
+  if (look) return lookCard(job, streak, id, look, [...link, ...plans]);
   return {
     id,
     kind: "decision",
     title: `${job.spec.name} is red`,
-    ask: `${runLine(newest)} (${dayTimeWords(newest.at)}).${streak.length > 1 ? ` Red ${streak.length} runs in a row.` : ""}${where}`,
+    ask: `${runLine(failed)} (${dayTimeWords(failed.at)}).${streak.length > 1 ? ` Red ${streak.length} runs in a row.` : ""}${where}${newest.limit ? ` Its newest run did not run: ${limitWords(newest.limit)}` : ""}`,
     since: first.finishedAt ?? first.at,
     schedule: jobScheduleKey(job.id),
     options: [
       { label: "Fix it", recommended: true },
       { label: "Leave it", detail: "No new card until it goes green and then red again." },
     ],
-    ...(newest.url ? { links: [{ label: newest.url.includes("/pull/") ? "Open PR" : "Open log", url: newest.url, primary: true }] } : {}),
+    ...(link.length ? { links: link } : {}),
+  };
+}
+
+/** The plan a look limit card's Fix it opens its chat on when the plan that goes first is the one at its limit. */
+function fixOn(look: PlanLimit): Plan | undefined {
+  return look.connected && look.first === look.plan ? otherPlan(look.plan) : undefined;
+}
+
+/**
+ * A red check whose look into it stopped on its plan's limit: the check's own line, then the look's limit, and the
+ * other plan offered when it is connected. Fix it opens a chat on the plan that goes first, or on the other plan when
+ * the first is the one at its limit, so it says which.
+ */
+function lookCard(job: Stored, streak: readonly JobRun[], id: string, look: PlanLimit, links: NonNullable<Need["links"]>): Need {
+  const failed = streak[0]!;
+  const first = streak[streak.length - 1]!;
+  const other = PLAN_NAMES[otherPlan(look.plan)];
+  const fix = { label: "Fix it", detail: fixOn(look) ? `The fix chat starts on ${other}.` : `The fix chat starts on ${look.first ? `${PLAN_NAMES[look.first]}, ` : ""}the plan that goes first.` };
+  return {
+    id,
+    kind: "decision",
+    title: `${job.spec.name} is red`,
+    ask: `${runLine(failed).replace(/\.$/, "")} (${dayTimeWords(failed.at)}).${streak.length > 1 ? ` Red ${streak.length} runs in a row.` : ""} The check didn't run: ${limitWords(look)}${look.connected ? ` Use ${other} for this job?` : ""}`,
+    since: first.finishedAt ?? first.at,
+    schedule: jobScheduleKey(job.id),
+    options: look.connected
+      ? [
+          { label: planSwitchLabel(look.plan), detail: `It runs once now on ${other}: the check, and the look into it if it is still red.` },
+          fix,
+          { label: waitLabel(look.plan), detail: WAIT_DETAIL },
+        ]
+      : [
+          { ...fix, recommended: true },
+          { label: "Leave it", detail: "No new card until it goes green and then red again." },
+        ],
+    ...(links.length ? { links } : {}),
   };
 }
 
@@ -679,8 +855,24 @@ function streakWords(job: Stored, streak: JobRun[]): string[] {
   return [job.spec.name, job.spec.words, ...streak.flatMap((run) => [run.line ?? "", ...(run.log ?? [])])];
 }
 
+/** What Rivet gets for a red streak: its newest real failure's detail, or the limit's when the streak is only limits. */
+function streakDetail(job: Stored, streak: readonly JobRun[]): string {
+  const newest = streak[0]!;
+  const failed = streak.find((run) => !run.limit);
+  const look = lookLimit(streak);
+  const on = look && fixOn(look);
+  if (look) return `${redDetail(job, newest)} The check didn't run: ${limitWords(look)}${on ? ` Start its fix chat on ${PLAN_NAMES[on]}.` : ""}`.slice(0, 2000);
+  if (!failed || !newest.limit) return redDetail(job, failed ?? newest);
+  return `${redDetail(job, failed)} Its newest run did not run: ${limitWords(newest.limit)}`.slice(0, 2000);
+}
+
 function redDetail(job: Stored, newest: JobRun): string {
   const what = job.spec.check ? `a check, ${checkWords(job.spec.check)}` : "a task";
   const log = newest.log?.slice(-5).join(" | ");
+  if (newest.limit) {
+    const other = PLAN_NAMES[otherPlan(newest.limit.plan)];
+    if (newest.limit.outside) return `${RIVET_NAME} job ${job.id} "${job.spec.name}" did not run: ${PLAN_NAMES[newest.limit.plan]} is at its usage limit${newest.limit.until ? ` until ${newest.limit.until}` : ""} and ${other} can't check ${newest.limit.outside} from here, so it waits for its next time. Nothing switched.`.slice(0, 2000);
+    return `${RIVET_NAME} job ${job.id} "${job.spec.name}" did not run: ${PLAN_NAMES[newest.limit.plan]} is at its usage limit${newest.limit.until ? ` until ${newest.limit.until}` : ""} and ${other} is connected. The answer "${planSwitchLabel(newest.limit.plan)}" starts it once on ${other} by itself; "${waitLabel(newest.limit.plan)}" leaves it for its next time on the plan that goes first. Nothing switched without asking.`.slice(0, 2000);
+  }
   return `${RIVET_NAME} job ${job.id} "${job.spec.name}" (${what}; the owner's words: "${job.spec.words}"). Newest red run ${dayTimeWords(newest.at)}: ${runLine(newest)}${log ? ` Last lines: ${log}` : ""}${newest.url ? ` Link: ${newest.url}` : ""}. To fix it: rivet fix schedule ${jobScheduleKey(job.id)}.`.slice(0, 2000);
 }

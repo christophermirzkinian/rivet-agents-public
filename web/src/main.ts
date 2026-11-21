@@ -1,8 +1,9 @@
-import { APP_NAME } from "../../src/shared/names.js";
+import { appName } from "../../src/shared/names.js";
 import "./styles.css";
 
 import * as api from "./api.js";
 import { dismissBoot } from "./boot.js";
+import { hostedPage, leaveCloud, ownMachineAfterEnrol, readCloud, readServedApp } from "./cloud-agent.js";
 import { DESK_QUERY, isDesk } from "./desk.js";
 import { button, describe, h } from "./dom.js";
 import { watchNewBuild } from "./new-build.js";
@@ -14,15 +15,19 @@ import { endSession } from "./session.js";
 import { takeShare } from "./share-target.js";
 import { openedVia, startUsage, usageHidden, usageShown } from "./usage.js";
 import { app, changed, go, navStamp, networkChanged, refresh, resetSession, settleOpening, whenSignedOut } from "./state.js";
-import { openConversation, receiveShare, refresh as refreshChat, showConversation } from "./views/chat.js";
+import { openConversation, receiveShare, refresh as refreshChat, showLine } from "./views/chat.js";
 import { dropLeave, leaveOverlays } from "./views/navigation.js";
 import { decideShown, showPushed } from "./views/decide-sheet.js";
 import { closeSheet, closeTallSheet } from "./views/sheet.js";
 import { cardsSegment, flushHeld, recoverOutbox, resetFeed } from "./views/feed.js";
 import { mountShell } from "./views/shell.js";
 import { catchStrayDrops } from "./views/attach.js";
+import { applyChatTextSize } from "./views/chat-text-size.js";
 
+// The saved Text size on <html> before anything mounts, so every screen opens at it with no flash of Medium.
+applyChatTextSize();
 watchInput();
+readServedApp();
 
 const POLL_MS = 15_000;
 const root = document.getElementById("app")!;
@@ -31,8 +36,9 @@ let signedIn = false;
 let unmountShell: (() => void) | null = null;
 /** The tab a link asked for, an old tab id included (state.ts landing). */
 let startTab: string | null = null;
-/** The conversation a link or a notification opens on. */
+/** The conversation a link or a notification opens Chat on, and the line in it a notification is about. */
 let startConversation: string | null = null;
+let startMessage: string | null = null;
 /** The card a `?card=` link asked for: opened on purpose, so on a phone a minimised one opens in full. */
 let startCard: string | null = null;
 
@@ -70,6 +76,7 @@ function gate(lede: string, ...children: (Node | null)[]): void {
   dropLeave();
   closeTallSheet();
   closeSheet();
+  leaveCloud();
   resetFeed();
   root.classList.remove("signed-in");
   root.replaceChildren(
@@ -77,7 +84,7 @@ function gate(lede: string, ...children: (Node | null)[]): void {
       "section",
       { class: "gate" },
       h("img", { class: "gate-icon", attrs: { src: "/icon.svg", alt: "" } }),
-      h("h1", { class: "gate-name" }, APP_NAME),
+      h("h1", { class: "gate-name" }, appName()),
       h("p", { class: "gate-lede" }, lede),
       ...children,
     ),
@@ -88,7 +95,7 @@ function renderSignIn(message: string | null = null): void {
   stopPolling();
   const status = h("p", { class: "gate-status", attrs: { role: "status" } }, message ?? "");
   gate(
-    "Your coding agents, on your phone.",
+    hostedPage() ? "Your agent's command centre." : "Your coding agents, on your phone.",
     gateSteps({ title: "Use your passkey", sub: "No password to remember." }),
     button(
       "Sign in with passkey",
@@ -113,7 +120,13 @@ function renderEnrol(code: string): void {
       "Create passkey",
       () => {
         status.textContent = "Waiting for your passkey…";
-        api.enrol(code).then(startApp, (error: unknown) => (status.textContent = describe(error)));
+        api.enrol(code).then(
+          () => {
+            status.textContent = "Passkey made. Finishing setup…";
+            return ownMachineAfterEnrol().then((own) => (own ? startApp() : location.replace("/")));
+          },
+          (error: unknown) => (status.textContent = describe(error)),
+        );
       },
       "primary big",
       false,
@@ -145,9 +158,11 @@ async function startApp(): Promise<void> {
   // A card's link on a phone opens its Decide sheet over the home screen; on a wide window Decide opens where it was.
   else if (front) app.tab = window.matchMedia?.(DESK_QUERY).matches ? "cards" : "progress";
   const asked = link || front ? app.tab : null;
-  if (startConversation) showConversation(startConversation);
+  if (startConversation) showLine(startConversation, startMessage);
   startConversation = null;
+  startMessage = null;
   unmountShell = mountShell(root);
+  void readCloud(changed);
   // What the Share menu sent waits through a signed-out start, and lands in the chat on the first one signed in.
   void takeShare().then((share) => {
     if (!share) return;
@@ -186,9 +201,9 @@ async function startApp(): Promise<void> {
 
 whenSignedOut((message) => renderSignIn(message));
 
-// The open conversation, so a push for it refreshes it instead of ringing; one for any other conversation rings.
-// The Decide sheet's card is on screen while it is open, over whatever the tab shows; on a phone the open conversation
-// is Rivet's sheet's (push.ts), under the sheet, and a wide window's is in the chat beside the pane.
+// The Decide sheet's card is on screen while it is open, over whatever the tab shows, so a push for it refreshes it
+// instead of ringing. Chat has no conversation of its own on screen now the topic page is gone, so
+// `openConversation()` is null and a chat push rings, as it already did over the main Chat.
 watchViewing(() => (signedIn ? { tab: app.tab, card: decideShown(), chat: decideShown() && !isDesk() ? null : openConversation() } : null));
 
 document.addEventListener("visibilitychange", () => {
@@ -200,6 +215,7 @@ document.addEventListener("visibilitychange", () => {
   } else {
     usageShown();
     void refresh().then((ok) => ok && recoverOutbox());
+    void readCloud(changed);
     // Back from the phone's settings, say: allowed again re-subscribes, and the banner reads the server again.
     void resyncPush()
       .catch(() => undefined)
@@ -220,7 +236,7 @@ window.addEventListener("pagehide", () => {
   usageHidden();
 });
 
-navigator.serviceWorker?.addEventListener("message", (event: MessageEvent<{ type?: string; id?: unknown; tab?: unknown; card?: unknown; chat?: unknown; conversation?: unknown }>) => {
+navigator.serviceWorker?.addEventListener("message", (event: MessageEvent<{ type?: string; id?: unknown; tab?: unknown; card?: unknown; chat?: unknown; conversation?: unknown; message?: unknown }>) => {
   if (event.data?.type === "refresh" && signedIn) {
     const card = event.data.card;
     return void workerRefresh(event.data, refreshChat, async () => {
@@ -231,9 +247,10 @@ navigator.serviceWorker?.addEventListener("message", (event: MessageEvent<{ type
   }
   // Dismiss overlays before navigating, including their history entries, so Back cannot undo the destination.
   if (event.data?.type === "open-tab" && typeof event.data.tab === "string" && signedIn) {
-    const { conversation, tab } = event.data;
+    const { conversation, message, tab } = event.data;
     return leaveOverlays(() => {
-      if (typeof conversation === "string") showConversation(conversation);
+      // A notification's tap opens Chat on its line, never a page of its own.
+      if (typeof conversation === "string") showLine(conversation, typeof message === "string" ? message : null);
       go(typeof conversation === "string" ? "chat" : tab);
       changed();
     });
@@ -256,6 +273,7 @@ function takeParams(): { code: string | null; card: string | null } {
   if (conversation) startTab = "chat";
   else if (tab) startTab = tab;
   if (conversation) startConversation = conversation;
+  if (conversation) startMessage = new URLSearchParams(location.search).get("message");
   if (hash || card || tab || conversation) history.replaceState(null, "", location.pathname);
   const code = hash ? (new URLSearchParams(hash).get("code") ?? (hash.includes("=") ? null : hash)) : null;
   return { code: code ? decodeURIComponent(code) : null, card };

@@ -111,7 +111,9 @@ const KIND_LABEL: Record<string, string> = {
   reply: "Your answer",
   worker: "Worker",
   chat: "Agent",
-  message: `${RIVET_NAME} chat`,
+  get message() {
+    return `${RIVET_NAME} chat`;
+  },
   pr: "Pull request",
   timeline: "Timeline",
   briefing: "Briefing",

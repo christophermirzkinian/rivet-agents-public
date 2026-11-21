@@ -6,9 +6,11 @@ import { MIND_KIND_WORDS, mindMarksGone, type MindDot, type MindGraph, type Mind
 import { rivetWords } from "../../../src/shared/names.js";
 import { when } from "../../../src/shared/when.js";
 import * as api from "../api.js";
+import { agentName, hostedPage } from "../cloud-agent.js";
 import { h, keepFocus } from "../dom.js";
 import { onSessionReset, sameSession } from "../session.js";
 import { readingFrame, readingNotes, type Reading } from "./reading.js";
+import { textScale } from "./chat-text-size.js";
 
 // Rivet's mind, a menu page: every memory, topic, note and decision in the folders you name as one graph to pinch, drag
 // and search. force-graph is imported only when this page opens. Labels are drawn after every dot, the biggest first, and
@@ -125,7 +127,7 @@ export function refresh(): Promise<void> {
 function paint(): void {
   if (!root) return;
   const graph = mindData.graph;
-  const reading: Reading = { page: "Rivet's mind", has: true, failed: mindData.error, busy: inflight !== null, at: mindData.at, shape: [56, 420], retry: () => void refresh() };
+  const reading: Reading = { page: `${agentName()}'s mind`, has: true, failed: mindData.error, busy: inflight !== null, at: mindData.at, shape: [56, 420], retry: () => void refresh() };
   if (!graph || !graph.nodes.length) {
     page?.destroy();
     page = null;
@@ -216,7 +218,7 @@ class Page {
 
     const input = h("input", {
       class: "mind-q",
-      attrs: { type: "search", placeholder: "Search the map", autocomplete: "off", "aria-label": "Search Rivet's mind", "data-use": "mind.search" },
+      attrs: { type: "search", placeholder: "Search the map", autocomplete: "off", "aria-label": `Search ${agentName()}'s mind`, "data-use": "mind.search" },
       on: { input: () => this.search(input.value.trim()) },
     });
     this.parts = {
@@ -467,8 +469,10 @@ class Page {
       boxes.push({ x0: a.x, x1: c.x, y0: a.y, y1: c.y });
     }
     this.queue.sort((a, b) => b.pri - a.pri);
+    // Labels follow Text size like the rest of the app; ÷k below keeps them that size on screen at any zoom.
+    const scale = textScale();
     for (const { n, pri } of this.queue) {
-      const px = n.big ? 16 : 14;
+      const px = (n.big ? 16 : 14) * scale;
       ctx.font = `${n.big ? 700 : 600} ${px / k}px ui-rounded, system-ui, sans-serif`;
       const text = n.label.length > 30 ? `${n.label.slice(0, 28)}…` : n.label;
       const w = ctx.measureText(text).width + 8 / k;
@@ -605,7 +609,7 @@ class Page {
       const touched = all.filter((n) => n.today && !this.off.has(n.type as MindType));
       banner.replaceChildren(h("b", {}, "Last 24 hours:"), ` ${fmt(touched.length)} written or changed`);
     } else if (this.mode === "loaded") {
-      banner.replaceChildren(h("b", {}, "In Rivet's window now:"), ` ${fmt(this.loaded.size)} of ${fmt(all.length)}: your memory index and what it lists`);
+      banner.replaceChildren(h("b", {}, `In ${agentName()}'s window now:`), ` ${fmt(this.loaded.size)} of ${fmt(all.length)}: your memory index and what it lists`);
     } else banner.replaceChildren();
     banner.classList.toggle("is-shown", !!this.mode && !this.sel);
   }
@@ -710,5 +714,7 @@ class Page {
 
 const isHub = (n: MindDot) => n.kind === "hub" || n.kind === "context";
 const end = (x: string | Dot) => x as Dot;
+/** A hosted agent's page reads as the rest of its app does (rivetWords); your own page shows the text as it is. */
+export const mindNameless = (s: string): string => (hostedPage() ? rivetWords(s) : s);
 /** Markdown read as words: links and wiki links as their text, no bold or code marks. */
-const plain = mindMarksGone;
+const plain = (s: string): string => mindNameless(mindMarksGone(s));

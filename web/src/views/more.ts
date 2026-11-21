@@ -1,3 +1,4 @@
+import { agentName } from "../cloud-agent.js";
 import { h, ICONS } from "../dom.js";
 import { HOME_ICON } from "../home-data.js";
 import { app, changed, go, setOpsPage, subscribe, type MorePage } from "../state.js";
@@ -23,6 +24,8 @@ export const PAGE_NAMES: Record<MorePage, string> = {
   settings: "Settings",
   "what-you-used": "What you used",
 };
+// Kept apart from the list above, whose lines the public export pins.
+Object.defineProperty(PAGE_NAMES, "mind", { enumerable: true, get: () => `${agentName()}'s mind` });
 
 export interface PageRow {
   page: MorePage;

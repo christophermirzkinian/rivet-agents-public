@@ -15,7 +15,7 @@ export interface CardSpec {
   approx?: boolean;
   /** Words in place of a figure ("Not priced"): smaller and quiet. */
   quiet?: boolean;
-  pill: { text: string; tone: PillTone; dashed?: boolean };
+  pill?: { text: string; tone: PillTone; dashed?: boolean };
   /** Beside the pill: "Checked 9 Oct". */
   meta?: string;
   /** One plain line under it. */
@@ -41,7 +41,7 @@ export function costCard(spec: CardSpec): HTMLLIElement {
     h(
       "p",
       { class: "cost-meta" },
-      h("span", { class: `cost-pill ${spec.pill.tone}${spec.pill.dashed ? " dashed" : ""}` }, spec.pill.text),
+      spec.pill ? h("span", { class: `cost-pill ${spec.pill.tone}${spec.pill.dashed ? " dashed" : ""}` }, spec.pill.text) : null,
       spec.meta ? h("span", { class: "cost-when" }, spec.meta) : null,
     ),
     spec.line ? h("p", { class: "cost-line" }, spec.line) : null,

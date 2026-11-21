@@ -10,7 +10,7 @@
 .ans-day {
   margin: 8px 0 0;
   color: var(--muted);
-  font-size: 15px;
+  font-size: calc(15px * var(--text-scale));
   font-weight: 800;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -45,14 +45,14 @@
 
 .ans-t {
   color: var(--text);
-  font-size: 16px;
+  font-size: calc(16px * var(--text-scale));
   font-weight: 800;
   overflow-wrap: anywhere;
 }
 
 .ans-you {
   color: var(--muted);
-  font-size: 15px;
+  font-size: calc(15px * var(--text-scale));
   overflow-wrap: anywhere;
 }
 
@@ -70,7 +70,7 @@
 
 .ans-state {
   margin: 0;
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
   font-weight: 700;
   overflow-wrap: anywhere;
 }
@@ -89,13 +89,13 @@
   min-height: 44px;
   padding: 8px 16px;
   color: var(--apricot);
-  font-size: 16px;
+  font-size: calc(16px * var(--text-scale));
   font-weight: 800;
 }
 
 .ans-empty {
   padding: 24px 4px;
-  font-size: 16px;
+  font-size: calc(16px * var(--text-scale));
 }
 
 /* The band on a reopened card, above its title. */
@@ -112,7 +112,7 @@
 .ans-merged {
   margin: 0;
   color: var(--text);
-  font-size: 15px;
+  font-size: calc(15px * var(--text-scale));
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
@@ -130,7 +130,7 @@
 .btn.ans-send {
   justify-self: start;
   min-height: 44px;
-  font-size: 15px;
+  font-size: calc(15px * var(--text-scale));
 }
 
 /* The time chips and Show done over the list: one row of five chips, Show done under them. */
@@ -154,7 +154,7 @@
   background: var(--panel);
   color: var(--muted);
   font: inherit;
-  font-size: 16px;
+  font-size: calc(16px * var(--text-scale));
   font-weight: 800;
   cursor: pointer;
 }
@@ -175,7 +175,7 @@
   background: none;
   color: var(--text);
   font: inherit;
-  font-size: 16px;
+  font-size: calc(16px * var(--text-scale));
   font-weight: 700;
   cursor: pointer;
 }

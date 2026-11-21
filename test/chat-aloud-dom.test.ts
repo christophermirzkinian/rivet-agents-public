@@ -16,6 +16,7 @@ vi.mock("../web/src/voice.js", async (original) => ({
 
 const chat = await import("../web/src/views/chat.js");
 const { workerRefresh } = await import("../web/src/push.js");
+const { endSession } = await import("../web/src/session.js");
 
 /** The open conversation's history, oldest first. */
 let history: ChatMessage[] = [];
@@ -32,17 +33,21 @@ const msg = (n: number, from: ChatMessage["from"] = "rivet", id = `h${year}-${St
   threadId: "c1",
 });
 
-/** While `held` is set, reads of the conversation wait for `release()` and answer from the history as it is then. */
+/** While `held` is set, reads of Chat wait for `release()` and answer from the history as it is then. */
 let held: (() => void)[] | null = null;
 const release = () => held?.shift()?.();
 
 async function fakeFetch(input: RequestInfo | URL): Promise<Response> {
   const url = new URL(String(input), "http://x");
   const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
-  // Only the conversation's own reads are held; the list answers at once.
-  if (!url.pathname.startsWith("/api/conversations/")) return json({ conversations: [detailBody("c1", history).conversation], older: 0, unread: 0 });
+  // Only Chat's own reads are held; the list answers at once.
+  if (url.pathname !== "/api/chat") return json({ conversations: [detailBody("c1", history).conversation], older: 0, unread: 0 });
   if (held) await new Promise<void>((resolve) => held!.push(resolve));
-  return json(detailBody("c1", history));
+  const before = url.searchParams.get("before");
+  const end = before === null ? history.length : history.findIndex((one) => one.id === before);
+  const limit = Number(url.searchParams.get("limit") ?? 30);
+  const page = history.slice(Math.max(0, end - limit), end);
+  return json({ messages: page, older: end > limit ? page[0]!.id : null, labels: {} });
 }
 
 class FakeSource {
@@ -74,7 +79,8 @@ beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn(fakeFetch));
   vi.stubGlobal("EventSource", FakeSource);
   localStorage.clear();
-  chat.showConversation("c1");
+  // Chat shows its last page read at once on a mount; the last test's is not this one's.
+  endSession();
   root = document.createElement("main");
   document.body.replaceChildren(root);
 });
@@ -245,38 +251,13 @@ describe("a refresh the service worker holds a chat push for", () => {
     Object.defineProperty(navigator, "serviceWorker", { configurable: true, value: { controller: { postMessage: (message: unknown) => acks.push(message) } } });
   });
 
-  it("is acknowledged only once the reload shows the reply, even with the stream open", async () => {
+  it("is never acknowledged now Chat names no open conversation", async () => {
     chat.mount(root);
     await settle();
-    held = [];
-    history.push(msg(71));
-    const loading = workerRefresh({ id: "1", chat: "c1" }, chat.refresh, async () => true, chat.openConversation);
-    await settle();
-    expect(acks).toEqual([]);
-    release();
-    held = null;
-    await loading;
-    expect(root.textContent).toContain("line 71");
-    expect(acks).toEqual([{ type: "refresh-ack", id: "1" }]);
-  });
-
-  it("is not acknowledged while you is scrolled up through history, and is at the bottom", async () => {
-    chat.mount(root);
-    await settle();
-    const scroller = root.querySelector<HTMLElement>(".chat-scroll")!;
-    Object.defineProperty(scroller, "scrollHeight", { configurable: true, value: 2000 });
-    Object.defineProperty(scroller, "clientHeight", { configurable: true, value: 500 });
-    scroller.scrollTop = 200;
     history.push(msg(71));
     await workerRefresh({ id: "1", chat: "c1" }, chat.refresh, async () => true, chat.openConversation);
     expect(root.textContent).toContain("line 71");
-    expect(scroller.scrollTop).toBe(200);
     expect(acks).toEqual([]);
-
-    scroller.scrollTop = 1500;
-    history.push(msg(72));
-    await workerRefresh({ id: "2", chat: "c1" }, chat.refresh, async () => true, chat.openConversation);
-    expect(acks).toEqual([{ type: "refresh-ack", id: "2" }]);
   });
 
   it("is not acknowledged when the chat closes before or while it loads", async () => {
@@ -291,5 +272,25 @@ describe("a refresh the service worker holds a chat push for", () => {
     await loading;
     await workerRefresh({ id: "2", chat: "c1" }, chat.refresh, async () => true, chat.openConversation);
     expect(acks).toEqual([]);
+  });
+});
+
+describe("a refresh of Chat", () => {
+  it("keeps the owner where he is scrolled up through history, and says it shows the newest only at the bottom", async () => {
+    chat.mount(root);
+    await settle();
+    const scroller = root.querySelector<HTMLElement>(".chat-scroll")!;
+    Object.defineProperty(scroller, "scrollHeight", { configurable: true, value: 2000 });
+    Object.defineProperty(scroller, "clientHeight", { configurable: true, value: 500 });
+    scroller.scrollTop = 200;
+    history.push(msg(71));
+    expect(await chat.refresh()).toBe(false);
+    expect(root.textContent).toContain("line 71");
+    expect(scroller.scrollTop).toBe(200);
+
+    scroller.scrollTop = 1500;
+    history.push(msg(72));
+    expect(await chat.refresh()).toBe(true);
+    expect(root.textContent).toContain("line 72");
   });
 });

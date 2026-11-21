@@ -10,6 +10,7 @@ import type { SchedulesStore } from "../schedules.js";
 import type { ShortTitles } from "../short-titles.js";
 import type { Store } from "../store.js";
 import type { Need } from "../../shared/board.js";
+import type { Plan } from "../../shared/jobs.js";
 import type { WorkersResponse } from "../../shared/workers.js";
 
 export type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -49,6 +50,8 @@ export interface RouteDeps {
   ownerLines(check: (id: string) => boolean): void;
   /** Tells the reply route how to read the conversation titles an open card shows (its top line's thread). */
   cardThreadTitles(lookup: (need: Need) => string[]): void;
+  /** Tells the reply route how to start a job's one run on a plan, a limit card's answer: null when it was sent, else why not. */
+  jobRunsFrom(run: (id: string, plan: Plan, clientId: string) => string | null): void;
   /** The live chats as GET /api/workers shows them. */
   workers(): WorkersResponse;
   /** The PRs as the bridge last read them: merged, closed, and open (null when that read failed). */

@@ -14,7 +14,7 @@ import { HttpError } from "../src/server/httputil.js";
 import { LOG_LEASE_MS, LogLeases } from "../src/server/logs.js";
 import { MAX_TEXT_UPLOADS, MediaStore, parseRange, pdfDisposition, sniffMedia } from "../src/server/media.js";
 import { rivetPayload } from "../src/server/push.js";
-import { actionAckSchema, chatImages as chatImagesOf, MAX_CHAT_IMAGE_BYTES, MAX_CHAT_TEXT, type AuditEntry, type ChatMessage, type ChatPage } from "../src/shared/command.js";
+import { actionAckSchema, chatImages as chatImagesOf, MAX_CHAT_IMAGE_BYTES, MAX_CHAT_TEXT, type AuditEntry, type ChatMessage, type ChatPage, type SavedLine } from "../src/shared/command.js";
 import { rankSearch, type SearchItem } from "../src/shared/search.js";
 import type { SnapshotWorker } from "../src/shared/workers.js";
 import {
@@ -328,7 +328,7 @@ describe("chat", () => {
     const notify = vi.spyOn(server.app.push, "notify");
     const said = await fetch(`${server.base}/api/bridge/say`, { method: "POST", headers: bearer(BOARD_TOKEN), body: JSON.stringify({ text: "done", new: true }) });
     const message = (await said.json()) as ChatMessage;
-    expect(notify).toHaveBeenCalledWith(rivetPayload("done", { id: message.id, title: "done" }), "card", `rivet:${message.id}`);
+    expect(notify).toHaveBeenCalledWith(rivetPayload("done", { id: message.id, title: "done" }, message.id), "card", `rivet:${message.id}`);
     // Updates, where a reply to an id the server does not know still lands, is FYI.
     expect(rivetPayload("done", { id: UPDATES_ID, title: "Updates" })).toMatchObject({ level: "fyi", tag: "conv-updates", chat: "updates", path: "/?conversation=updates" });
     notify.mockRestore();
@@ -341,7 +341,7 @@ describe("chat", () => {
     expect(open.status).toBe(200);
     const said = await fetch(`${server.base}/api/bridge/say`, { method: "POST", headers: bearer(BOARD_TOKEN), body: JSON.stringify({ text: "still here", new: true }) });
     const message = (await said.json()) as ChatMessage;
-    expect(notify).toHaveBeenCalledWith(rivetPayload("still here", { id: message.id, title: "still here" }), "card", `rivet:${message.id}`);
+    expect(notify).toHaveBeenCalledWith(rivetPayload("still here", { id: message.id, title: "still here" }, message.id), "card", `rivet:${message.id}`);
     controller.abort();
     notify.mockRestore();
   });
@@ -877,6 +877,89 @@ describe("chat windows", () => {
     await waitForStatus(server.base, cookie, member.id, "replied");
     expect(shown().filter((message) => message.status === "replied").map((message) => message.id)).toEqual([lead.id, member.id]);
     stream.abort();
+    controller.abort();
+  });
+});
+
+describe("saved lines", () => {
+  const saved = async () => ((await (await fetch(`${server.base}/api/chat/saved`, { headers: { cookie } })).json()) as { saved: SavedLine[] }).saved;
+  const mark = (method: "PUT" | "DELETE", id: string, headers: Record<string, string> = browser(cookie)) =>
+    fetch(`${server.base}/api/chat/saved/${encodeURIComponent(id)}`, { method, headers });
+  const send = async (text: string) => ((await (await post("/api/chat", { clientId: clientId(), text })).json()) as AuditEntry).id;
+
+  it("saves, lists newest saved first, and removes, each twice over the same", async () => {
+    const first = await send("pick up the blue folder");
+    const second = await send("then water the plants");
+    expect(await saved()).toEqual([]);
+    expect((await mark("PUT", first)).status).toBe(200);
+    clock.advance(1_000);
+    expect(await (await mark("PUT", second)).json()).toEqual({ ok: true });
+    expect((await mark("PUT", second)).status).toBe(200);
+    const list = await saved();
+    expect(list.map((line) => line.id)).toEqual([second, first]);
+    // The line as Chat shows it, its status too: a line still collecting offers no Reply in the list.
+    expect(list[0]).toMatchObject({ id: second, conversation: first, from: "owner", text: "then water the plants", status: "collecting" });
+    expect(Date.parse(list[0]!.savedAt)).toBeGreaterThan(Date.parse(list[1]!.savedAt));
+    expect((await mark("DELETE", second)).status).toBe(200);
+    expect((await mark("DELETE", second)).status).toBe(200);
+    expect((await saved()).map((line) => line.id)).toEqual([first]);
+  });
+
+  it("needs a session, and CSRF headers to change", async () => {
+    const id = await send("pick up the blue folder");
+    expect((await fetch(`${server.base}/api/chat/saved`)).status).toBe(401);
+    expect((await mark("PUT", id, browser(""))).status).toBe(401);
+    expect((await mark("DELETE", id, browser(""))).status).toBe(401);
+    expect((await mark("PUT", id, { cookie })).status).toBe(403);
+    expect(await saved()).toEqual([]);
+  });
+
+  it("an unknown line is a 404, a malformed id a 400", async () => {
+    const missing = await mark("PUT", "no-such-line");
+    expect([missing.status, await missing.json()]).toEqual([404, { error: "That message is not in the chat." }]);
+    expect((await mark("PUT", "bad id")).status).toBe(400);
+    expect((await mark("DELETE", "a/b")).status).toBe(400);
+  });
+
+  it("a line gone from the chat drops out of the list", async () => {
+    const said = await fetch(`${server.base}/api/bridge/say`, { method: "POST", headers: bearer(BOARD_TOKEN), body: JSON.stringify({ text: "The folder is on the desk.", new: true }) });
+    const kept = ((await said.json()) as ChatMessage).id;
+    const gone = await send("then water the plants");
+    await mark("PUT", kept);
+    await mark("PUT", gone);
+    expect((await post("/api/chat/cancel", { id: gone })).status).toBe(200);
+    expect((await saved()).map((line) => line.id)).toEqual([kept]);
+  });
+
+  it("tells every open app the saved ids as they change", async () => {
+    const controller = new AbortController();
+    const app = await fetch(`${server.base}/api/chat/stream`, { headers: { cookie }, signal: controller.signal });
+    const reader = app.body!.getReader();
+    const decoder = new TextDecoder();
+    let frames = "";
+    void (async () => {
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) return;
+          frames += decoder.decode(value, { stream: true });
+        }
+      } catch {}
+    })();
+    const heard = () =>
+      frames
+        .split("\n\n")
+        .filter((block) => block.startsWith("event: saved"))
+        .map((block) => (JSON.parse(block.slice(block.indexOf("data: ") + 6)) as { ids: string[] }).ids);
+    const id = await send("pick up the blue folder");
+    await mark("PUT", id);
+    await mark("DELETE", id);
+    // A cancelled line leaves the list on every device as it leaves the chat.
+    const gone = await send("then water the plants");
+    await mark("PUT", gone);
+    expect((await post("/api/chat/cancel", { id: gone })).status).toBe(200);
+    for (let i = 0; i < 100 && heard().length < 4; i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(heard()).toEqual([[id], [], [gone], []]);
     controller.abort();
   });
 });
