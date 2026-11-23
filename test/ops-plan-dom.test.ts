@@ -13,11 +13,14 @@ import { clearWords, navMark, opsStatus } from "../web/src/views/progress-mark.j
 import * as ops from "../web/src/views/ops.js";
 import { fixedToday, nextBody, ownRows, planState, prRef } from "../web/src/views/ops-plan.js";
 import { statusParts } from "../web/src/views/status-line.js";
+import { openChatSheet } from "../web/src/views/worker-sheet.js";
 import * as asks from "../web/src/views/your-asks.js";
 import { serveSummary } from "./summary-served.js";
 
 // Ops opens on Plan: what is being done, by when and why. Nothing on it, in the menu or in Rivet's mood is red; a late
 // record is an amber row in Your asks, Rivet's own.
+vi.mock("../web/src/views/chat.js", () => ({ showLine: () => {} }));
+vi.mock("../web/src/views/worker-sheet.js", async (original) => ({ ...(await original<object>()), openChatSheet: vi.fn() }));
 
 const NOW = "2026-10-20T05:00:00.000Z";
 const REPO = "example-org/example-repo";
@@ -290,7 +293,7 @@ describe("Plan", () => {
     const served = broken() as unknown as Record<string, unknown>;
     delete served.bridge;
     show(served as unknown as OpsResponse);
-    expect(ops.failedItems(opsData.ops).map((item) => item.kind)).toEqual(["pr", "app"]);
+    expect(ops.failedItems(opsData.ops).map((item) => item.kind)).toEqual(["app", "pr"]);
     delete served.apps;
     show(served as unknown as OpsResponse);
     expect(ops.failedItems(opsData.ops).map((item) => item.kind)).toEqual(["pr"]);
@@ -431,6 +434,28 @@ describe("Plan after round 1", () => {
     show(broken());
     const plan = planState(null);
     expect(plan.doing.filter((row) => row.id.endsWith("5995")).map((row) => row.id)).toEqual([`pr/${opsStatusKey("pr", "5995", REPO)}`]);
+  });
+
+  it("opens a Coming row's chat, else its PR, and a row with neither opens nothing", () => {
+    const open = vi.spyOn(window, "open").mockImplementation(() => null);
+    try {
+      setComing([
+        { pr: 2100, title: "Chat fix", stage: "building", chat: "chat-fix", updatedAt: hoursAgo(1) },
+        { pr: 2101, title: "Link fix", stage: "building", updatedAt: hoursAgo(1) },
+        { title: "Bare fix", stage: "building", updatedAt: hoursAgo(1) },
+      ]);
+      show(fixture());
+      const rows = new Map(planState(null).doing.map((row) => [row.title, row.open]));
+      expect(rows.get("Bare fix")).toBeNull();
+      rows.get("Chat fix")!();
+      expect(vi.mocked(openChatSheet)).toHaveBeenCalledWith("chat-fix", REPO, "plan-chat-fix", "ops");
+      expect(open).not.toHaveBeenCalled();
+      rows.get("Link fix")!();
+      expect(open).toHaveBeenCalledWith(`https://github.com/${REPO}/pull/2101`, "_blank", "noopener,noreferrer");
+      expect(vi.mocked(openChatSheet)).toHaveBeenCalledTimes(1);
+    } finally {
+      open.mockRestore();
+    }
   });
 
   it("keeps a quiet Coming row a working chat holds", () => {

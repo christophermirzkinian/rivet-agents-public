@@ -15,12 +15,13 @@ import { STATE_WORDS } from "../crew-words.js";
 import { agentName } from "../cloud-agent.js";
 import { isDesk } from "../desk.js";
 import { IN_HAND, NEEDS_YOU, allMinimised, needYou, stageWord } from "../../../src/shared/words.js";
-import { isGotIt } from "../../../src/shared/answers.js";
+import { isGotIt, isUpdate } from "../../../src/shared/answers.js";
 import { h, ICONS, svg } from "../dom.js";
 import { opsData, watchOps } from "../ops-data.js";
 import { MOOD_WORDS, rivet, type Mood } from "../rivet/rivet.js";
 import { app, boardRead, countedCards, crewLapsed, deck, isWorking, readAgain, subscribe } from "../state.js";
 import { openChatPeek, type PeekFacts } from "./chat-peek.js";
+import { linkedAsks } from "./chat-ticket.js";
 import { openBacklog } from "./backlog-sheet.js";
 import { askingCards, cardsOf, openDecideFor } from "./decide-sheet.js";
 import { deskLife, layoutBox, mapComing, mapSaid, mapStage } from "./desks-life.js";
@@ -156,8 +157,9 @@ export const underWay = (): Worker[] => {
 export function rivetMood(): Mood {
   const ops = clearWords().mood;
   if (ops === "thinking") return ops;
-  // A Got it card is news, so it never makes him asking, as it never counts as needing him (state.needsYou).
-  if (countedCards().some((need) => !isGotIt(need))) return "asking";
+  // A Got it card and an update card opened are news, so they never make him asking, as they never count as needing
+  // him (state.needsYou).
+  if (countedCards().some((need) => !isUpdate(need) && !isGotIt(need))) return "asking";
   return liveCrew().length ? "working" : ops;
 }
 
@@ -265,13 +267,22 @@ export function peekFacts(id: string): PeekFacts | null {
   const asks = openAsks();
   const now = Date.now();
   const ask = askOf(w, asks);
-  const view = rowView(w, asks, now, asking(w, crew, askingCards(), asks), mapReadings(now));
+  const readings = mapReadings(now);
+  const chats = crewLapsed() ? [] : (app.workers?.workers ?? []);
+  const linked = linkedAsks(w, asks, chats, readings.merged);
+  const view = rowView(w, asks, now, asking(w, crew, askingCards(), asks), readings);
   const signalPr = view.signal?.pr;
+  // A chat's row with no ask of its own keeps its own strip and timeline; only a map row takes on an ask it is linked to,
+  // and never one its borrowed chat name finds that the links leave out.
+  const shown = w.id.includes(":") ? (ask && linked.some((one) => one.id === ask.id) ? ask : linked[0]) : ask;
   return {
     worker: w,
     title: rowTitle(w, ask, TWO_LINES),
     project: projectName(homeOf(w)),
-    ...(ask ? { ask } : {}),
+    ...(shown ? { ask: shown } : {}),
+    asks: linked,
+    chats,
+    merged: readings.merged,
     stage: view.stage === "needs-you" ? NEEDS_YOU : IN_HAND[view.stage],
     stageKey: view.stage,
     time: view.time,

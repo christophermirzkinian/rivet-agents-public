@@ -39,7 +39,7 @@ export interface FailedItem extends OwnedItem {
 /** A record's state, or `unclaimed` for a failed item nobody has recorded a status for. */
 type PillState = OpsStatusState | "unclaimed";
 
-const STATE_LABEL: Record<PillState, string> = {
+export const STATE_LABEL: Record<PillState, string> = {
   unclaimed: stageWord("queued"),
   investigating: IN_HAND.building,
   "in-progress": "In hand",

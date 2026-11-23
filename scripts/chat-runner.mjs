@@ -16,7 +16,10 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { logForced, mismatch, refusal as misplacedRefusal } from "../bridge/lib/chat-guard.mjs";
 import { agentName, CHAT_PROVIDER, codexChatArgs, connected, FIRST_PLAN_UNREAD, firstPlan, limitWords, otherPlan, PLAN_NAMES, planOfProvider, plansOn, screenLimit, STATUS_ARGS } from "../bridge/lib/job-drivers.mjs";
+import { loadProjects, projectsFromFolders } from "../bridge/lib/projects.mjs";
+import { repoAllowlist } from "../src/shared/repos.ts";
 
 export const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 export const PROVIDERS = new Set(["claude", "codex"]);
@@ -53,7 +56,20 @@ export function context(opts = {}) {
     bins: { claude: "claude", codex: "codex", ...(opts.bins ?? {}) },
     now: opts.now ?? (() => Date.now()),
     lockWaitMs: opts.lockWaitMs ?? 10_000,
+    routeLists: opts.routeLists ?? (() => projectLists(env, home)),
+    log: opts.log ?? ((line) => process.stderr.write(`${line}\n`)),
   };
+}
+
+/**
+ * The projects a chat's ask is routed among: the list RIVET_PROJECTS_FILE names, else one per work clone under
+ * ~/.rivet-agents/work, each the RIVET_REPOS repo of its folder's name. No product registry: products are a monorepo's.
+ */
+export function projectLists(env, home) {
+  if (env.RIVET_PROJECTS_FILE) return { projects: loadProjects({ file: env.RIVET_PROJECTS_FILE }), products: [], worktreeRoots: [] };
+  const repos = repoAllowlist(env);
+  const projects = projectsFromFolders(path.join(home, ".rivet-agents", "work")).map((p) => ({ ...p, githubRepo: repos.find((repo) => repo.split("/").pop()?.toLowerCase() === p.workspaceRepo.toLowerCase()) ?? null }));
+  return { projects, products: [], worktreeRoots: [] };
 }
 
 const iso = (ms) => new Date(ms).toISOString();
@@ -308,6 +324,28 @@ export function originRepo(dir) {
   return m ? `${m[1]}/${m[2]}` : null;
 }
 
+/** The project whose folder (`~/` read as `home`) most closely holds the real path `dir`, or undefined. */
+function cloneOf(dir, lists, home) {
+  let best;
+  let depth = -1;
+  for (const p of lists.projects) {
+    if (!p.folder) continue;
+    let folder;
+    try {
+      folder = fs.realpathSync(p.folder === "~" || p.folder.startsWith("~/") ? path.join(home, p.folder.slice(1)) : p.folder);
+    } catch {
+      continue;
+    }
+    const rel = path.relative(folder, dir);
+    const inside = rel === "" || (rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
+    if (inside && folder.length > depth) {
+      best = p;
+      depth = folder.length;
+    }
+  }
+  return best;
+}
+
 // --- the API ---
 
 export const list = (ctx) => Object.values(readRegistry(ctx).chats);
@@ -338,12 +376,15 @@ function firstProvider(env) {
 /**
  * Starts a chat named `name` running `provider` in the existing directory `cwd`. With no provider named, a hosted
  * agent's chat runs on its first plan (RIVET_AGENT_FILE's firstPlan), any other on Claude; one whose agent file cannot
- * be read starts none.
+ * be read starts none. A prompt that plainly belongs to another repo's project than the chat's is refused unless
+ * `forceProject` gives a reason, which is logged once the chat runs (bridge/lib/chat-guard.mjs), unless `forceLogged`
+ * says its caller logged it. The prompt is checked against `repo` (owner/name) when given and against the project `cwd`
+ * is in: the project folder holding it, else its origin.
  */
-export function create(ctx, { name, cwd, provider = plansOn(ctx.env) ? firstProvider(ctx.env) : "claude", prompt = null }) {
+export function create(ctx, { name, cwd, provider = plansOn(ctx.env) ? firstProvider(ctx.env) : "claude", prompt = null, repo = null, forceProject = null, forceLogged = false }) {
   if (!NAME_RE.test(name ?? "")) throw new Error(`rivet-chat: bad chat name ${JSON.stringify(name)}`);
   if (prompt != null && typeof prompt !== "string") throw new Error("rivet-chat: a prompt is text");
-  const launch = launchFor(ctx, provider, prompt || null);
+  if (forceProject !== null && (typeof forceProject !== "string" || !forceProject.trim())) throw new Error("rivet-chat: --force-project needs a reason");
   let dir;
   try {
     dir = fs.realpathSync(cwd);
@@ -351,6 +392,27 @@ export function create(ctx, { name, cwd, provider = plansOn(ctx.env) ? firstProv
     throw new Error(`rivet-chat: ${cwd} does not exist`);
   }
   if (!fs.statSync(dir).isDirectory()) throw new Error(`rivet-chat: ${dir} is not a directory`);
+  let misplaced = null;
+  let forced = null;
+  if (prompt) {
+    try {
+      const lists = ctx.routeLists();
+      // The ask must fit both the repo named and the project the chat actually runs in: its folder, else its origin.
+      const own = cloneOf(dir, lists, ctx.home)?.workspaceRepo ?? originRepo(dir) ?? null;
+      // The folder the chat runs in first, so a forced open logs that project.
+      for (const candidate of new Set([own, repo || null].filter(Boolean))) {
+        misplaced = mismatch({ ask: prompt, forced: candidate }, lists);
+        if (misplaced) {
+          forced = candidate;
+          break;
+        }
+      }
+    } catch (err) {
+      ctx.log(`rivet-chat: warning: the project lists could not be read, so ${name} opens unguarded (${err.message})`);
+    }
+  }
+  if (misplaced && forceProject === null) throw new Error(`rivet-chat: ${misplacedRefusal(misplaced)}`);
+  const launch = launchFor(ctx, provider, prompt || null);
   const held = readRegistry(ctx).chats[name];
   if (held && held.status !== "finished") throw new Error(`rivet-chat: ${name} is already a chat (${held.status}); close it first`);
   if (sessions(ctx).has(name)) throw new Error(`rivet-chat: tmux session ${name} already exists`);
@@ -371,10 +433,19 @@ export function create(ctx, { name, cwd, provider = plansOn(ctx.env) ? firstProv
     });
     throw error;
   }
-  return withRegistry(ctx, (doc) => {
+  const running = withRegistry(ctx, (doc) => {
     Object.assign(doc.chats[name], { ...pane, status: "running" });
     return { ...doc.chats[name] };
   });
+  // A log that fails never undoes an open, which a caller would retry into a second chat.
+  if (misplaced && !forceLogged) {
+    try {
+      logForced({ home: ctx.home, chat: name, forced, routed: misplaced.routed.id, reason: forceProject, now: ctx.now() });
+    } catch (error) {
+      ctx.log(`rivet-chat: ${name}'s forced open was not logged (${error.message})`);
+    }
+  }
+  return running;
 }
 
 /** The registry chat `ref` names, refused when it runs on another tmux server than this context's. */

@@ -732,7 +732,7 @@ test("connectOnce tells the server which events this bridge takes", async () => 
   let sent;
   const h = harness({ events: (init) => ((sent = init.headers), new Response("no", { status: 401 })) });
   await h.bridge.connectOnce();
-  assert.equal(sent["x-rivet-bridge-features"], "image,chat-window,long-chat,images,files,reply-images,card-merge,dismiss,choice-detail,ask-late,changes,reopen,ops-pickup,home-control");
+  assert.equal(sent["x-rivet-bridge-features"], "image,chat-window,long-chat,images,files,reply-images,card-merge,dismiss,choice-detail,ask-late,changes,reopen,ops-pickup,home-control,ask-soon");
 });
 test("a late ask's question is the bridge's own sentence, typed into the monitor chat once per id and acked", async () => {
   const event = (/** @type {Record<string, unknown>} */ data) => `event: late-ask\nid: ${data.id}\ndata: ${JSON.stringify(data)}\n\n`;

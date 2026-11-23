@@ -1,9 +1,13 @@
 import type { AnsweredCard } from "../../../src/shared/answered.js";
 import { isUpdate, PLAN } from "../../../src/shared/answers.js";
-import type { Ask } from "../../../src/shared/asks.js";
+import { askPrRepo, asksOfChat, sameRepo, workerOfAsk, type StageReadings } from "../../../src/shared/ask-stages.js";
+import { isFinished, type Ask } from "../../../src/shared/asks.js";
 import type { MediaRef, Reply, ServedNeed } from "../../../src/shared/board.js";
 import { chatName } from "../../../src/shared/names.js";
+import { underWay } from "../../../src/shared/ops-owned.js";
+import type { OpsStatus } from "../../../src/shared/ops-status.js";
 import { when } from "../../../src/shared/when.js";
+import type { Worker } from "../../../src/shared/workers.js";
 import { stageWord } from "../../../src/shared/words.js";
 import { agentName } from "../cloud-agent.js";
 
@@ -77,6 +81,72 @@ export interface TicketSolution {
 
 const time = (at: string | null | undefined) => (at && Number.isFinite(Date.parse(at)) ? Date.parse(at) : Number.POSITIVE_INFINITY);
 
+const ASK_ID = /(?<![A-Za-z0-9])a-(\d{1,5})(?![A-Za-z0-9])/g;
+const BRANCH_ASK = /^a(\d{1,5})-/;
+
+/**
+ * The ask ids a title or branch names: `(a-12)` or `a-12` in either, and a branch that starts `a12-`. A bare `a12` in a
+ * title is a word, not an ask.
+ */
+export function askIdsIn(title: string | undefined, branch?: string): string[] {
+  const named = [title, branch].flatMap((text) => [...(text ?? "").matchAll(ASK_ID)].map((match) => match[1]!));
+  const lead = BRANCH_ASK.exec(branch ?? "")?.[1];
+  return [...new Set([...named, ...(lead ? [lead] : [])])].map((n) => `a-${n}`);
+}
+
+type Chat = Pick<Worker, "chat" | "repo" | "project">;
+
+/**
+ * The row's PRs an ask names, in the ask's repo as its chat's worktree reads it, bar one merged before the ask was made:
+ * that one it names only for context (desks.ts claims).
+ */
+export function linkedPrs(ask: Ask, w: Pick<Worker, "repo" | "prs">, chats: readonly Chat[], merged: StageReadings["merged"]): { number: number; repo: string }[] {
+  const repo = askPrRepo(ask, workerOfAsk(ask, chats));
+  if (!sameRepo(repo, w.repo)) return [];
+  const before = (pr: number) => merged.some((one) => one.number === pr && sameRepo(one.repo, repo) && Date.parse(one.at) < Date.parse(ask.createdAt));
+  return ask.prs.filter((pr) => (w.prs ?? []).includes(pr) && !before(pr)).map((number) => ({ number, repo }));
+}
+
+/**
+ * Every open ask a row is about, newest first: its chat's own and one naming a PR of the row's (linkedPrs). A row the
+ * map builds from GitHub or the push queue has no chat to hold an ask, so with neither its title or branch may name one;
+ * a chat's doing text can mention an ask it only follows, so a chat's row never links by it.
+ */
+export function linkedAsks(w: Pick<Worker, "id" | "chat" | "repo" | "project" | "prs" | "what" | "branch">, asks: readonly Ask[], chats: readonly Chat[] = [], merged: StageReadings["merged"] = []): Ask[] {
+  const own = new Set(asksOfChat(w, asks).map((ask) => ask.id));
+  const open = asks.filter((ask) => !isFinished(ask.stage));
+  // A map row may carry the chat name of the ask it was built from; that chat's other asks naming only other PRs are not its.
+  const mapRow = w.id.includes(":");
+  const direct = open.filter((ask) => {
+    const viaPr = linkedPrs(ask, w, chats, merged).length > 0;
+    return viaPr || (own.has(ask.id) && !(mapRow && ask.prs.length));
+  });
+  const named = !direct.length && w.id.includes(":") ? askIdsIn(w.what, w.branch) : [];
+  const inRepo = (ask: Ask) => sameRepo(askPrRepo(ask, workerOfAsk(ask, chats)), w.repo);
+  return (direct.length ? direct : open.filter((ask) => named.includes(ask.id) && inRepo(ask))).sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+}
+
+/**
+ * The ops record of a chat `rivet fix` opened, newest first: its chat's name, in its repo when the record says, and set
+ * since the chat started, in any state (a fix chat often marks it fixed while its PR waits); with no start known, only one
+ * with work under way on it (a name used again keeps no older record).
+ */
+export function opsRecordOf(w: Pick<Worker, "chat" | "repo" | "startedAt">, statuses: readonly OpsStatus[]): OpsStatus | undefined {
+  const current = (status: OpsStatus) => (w.startedAt === undefined ? underWay(status) : Date.parse(status.updatedAt) >= w.startedAt);
+  return statuses
+    .filter((status) => status.chat === w.chat && (status.repo === undefined || sameRepo(status.repo, w.repo)) && current(status))
+    .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0];
+}
+
+/** Where an ask came from, to link to: the Chat line it was asked in, else the issue it was started from. */
+export function askSourceLink(ask: Ask, line: string | null, chats: readonly Chat[] = []): { line: string } | { issue: number; href: string } | null {
+  if (line) return { line };
+  const backlog = /^backlog:([\w.-]+\/[\w.-]+)#(\d+)$/.exec(ask.source ?? "");
+  const repo = backlog ? backlog[1]! : askPrRepo(ask, workerOfAsk(ask, chats));
+  const issue = backlog ? Number(backlog[2]) : ask.issue;
+  return issue === undefined ? null : { issue, href: `https://github.com/${repo}/issues/${issue}` };
+}
+
 /**
  * The cards for an ask, or for a chat with no ask, open and answered, one each (the answered one, which has his answer),
  * oldest first. A card names its ask (`askId`, or the ask's own `cardId`); one that names none counts when it came from
@@ -103,6 +173,13 @@ export function ticketCards(
   const byId = new Map<string, TicketCard>();
   for (const one of answered) if (ours(one.card)) byId.set(one.card.id, { card: one.card, reply: one.reply });
   for (const card of open) if (ours(card) && !byId.has(card.id)) byId.set(card.id, { card });
+  return [...byId.values()].sort((a, b) => time(a.card.since ?? a.reply?.at) - time(b.card.since ?? b.reply?.at));
+}
+
+/** Several asks' cards as one list, one each (the first list's copy), oldest first. */
+export function mergedCards(lists: readonly (readonly TicketCard[])[]): TicketCard[] {
+  const byId = new Map<string, TicketCard>();
+  for (const one of lists.flat()) if (!byId.has(one.card.id)) byId.set(one.card.id, one);
   return [...byId.values()].sort((a, b) => time(a.card.since ?? a.reply?.at) - time(b.card.since ?? b.reply?.at));
 }
 

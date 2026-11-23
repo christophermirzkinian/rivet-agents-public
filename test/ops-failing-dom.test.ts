@@ -32,8 +32,8 @@ function opsFixture(redCi: number, failingSchedules: number, failingPrs = 0, you
 }
 
 let root: HTMLElement;
-/** The breaks the open page reads, as [kind, title, line]: what Plan lists under Being done. */
-const wrong = () => ops.wrongRows(opsData.ops, app.opsPage).rows.map((row) => [row.kind, row.title, row.line]);
+/** The breaks one group reads, as [kind, title, line]: what Plan lists under Being done. */
+const wrong = (on: ops.WrongBucket = "code") => ops.wrongRows(opsData.ops, on).rows.map((row) => [row.kind, row.title, row.line]);
 /** The rows that light Machines' pill, as [kind, name, line]. */
 const machineRows = () => ops.wrongRows(opsData.ops, "machines").rows.map((row) => [row.kind, row.title, row.line]);
 const show = (redCi: number, failing: number, failingPrs = 0, youngPrs = 0, runs: unknown[] = []) => {
@@ -50,7 +50,7 @@ beforeEach(() => {
   opsData.at = Date.now();
   opsData.opsAt = { mono: performance.now(), wall: Date.now() };
   app.tab = "progress";
-  app.opsPage = "code";
+  app.opsPage = "plan";
   // All clear is said only once the board has loaded (review F1).
   app.board = { version: 1, updatedAt: NOW, board: { updatedAt: NOW, needs: [], chats: [], coming: [], shipped: [] } } as never;
 });
@@ -104,9 +104,6 @@ describe("The breaks Plan lists under Being done", () => {
     expect(wrong()).toEqual([]);
     expect(opsStatus().mark).toMatchObject({ dot: null, line: null, owned: null });
     expect(clearWords().mood).toBe("happy");
-    // Both still show on Code: the PRs under Pull requests, the run under Main and CI.
-    expect(root.textContent).toContain("2 failing");
-    expect(root.textContent).toContain("1 one-off run red");
     // An hour on, the same push's red counts.
     show(0, 0, 1, 1, [oneOff]);
     expect(wrong()).toEqual([["pr", "#100 PR 100", "1 check failed: lint"]]);
@@ -125,8 +122,7 @@ describe("The breaks Plan lists under Being done", () => {
     ops.mount(root);
     expect(wrong()).toEqual([]);
     expect(root.textContent).not.toContain("All clear");
-    expect(root.querySelector(".ops-notices")!.textContent).toContain("GitHub unreachable for pull requests (example-repo)");
-    // The PRs are Code's reading: Machines, which reads GitHub's runners, does not say it.
+    // Machines, which reads GitHub's runners, does not say the PRs went unread.
     ops.unmount();
     app.tab = "progress";
     app.opsPage = "machines";
@@ -156,7 +152,6 @@ describe("The breaks Plan lists under Being done", () => {
     expect(wrong().map((row) => row[0])).toEqual(["schedule"]);
     runs({ failed: ["example-repo"], at: null }, 0);
     expect(wrong()).toEqual([]);
-    expect(root.querySelector(".ops-notices")!.textContent).toContain("GitHub unreachable for main runs (example-repo)");
   });
 
   it("lists no failing schedule from an old schedules reading, judged on the clock since Ops answered", () => {
@@ -190,17 +185,10 @@ describe("Ops folds and quiet faults", () => {
       // Another app's Fly fetch failing leaves this one's reading current.
       flySource: { failed: ["other-app"], at: NOW },
     } as unknown as OpsResponse;
-    app.tab = "progress";
-    app.opsPage = "machines";
-    ops.unmount();
-    ops.mount(root);
-    expect(wrong()).toEqual([["app", "Secret App", "Fly checks: 0 of 1 passing"]]);
+    expect(wrong("apps")).toEqual([["app", "Secret App", "Fly checks: 0 of 1 passing"]]);
     opsData.ops = { ...opsData.ops, flySource: { failed: ["secret-app"], at: NOW } } as unknown as OpsResponse;
-    ops.unmount();
-    ops.mount(root);
-    // Fly unreachable for this app: its old reading is no fault, and no All clear either.
-    expect(wrong()).toEqual([]);
-    expect(root.querySelector(".ops-notices")!.textContent).toContain("Fly unreachable for secret-app");
+    // Fly unreachable for this app: its old reading is no fault.
+    expect(wrong("apps")).toEqual([]);
   });
 
   it("lists an app with no URL that is awake with a failing Fly check, but not one with no machine started", () => {
@@ -210,21 +198,17 @@ describe("Ops folds and quiet faults", () => {
     });
     const show = (g: ReturnType<typeof sleeper>) => {
       opsData.ops = { ...opsFixture(0, 0), apps: [g], flyAt: NOW } as unknown as OpsResponse;
-      app.tab = "progress";
-      app.opsPage = "machines";
-      ops.unmount();
-      ops.mount(root);
     };
     show(sleeper(1, 1, 0, 1));
-    expect(wrong()).toEqual([["app", "Paper Trail", "Fly checks: 0 of 1 passing"]]);
+    expect(wrong("apps")).toEqual([["app", "Paper Trail", "Fly checks: 0 of 1 passing"]]);
     // Asleep: the stopped machine keeps a stale "warning" check, which is no fault.
     show(sleeper(0, 1, 0, 1));
-    expect(wrong()).toEqual([]);
+    expect(wrong("apps")).toEqual([]);
     // One awake and failing beside a stopped spare is amber too; one awake and passing is fine.
     show(sleeper(1, 2, 0, 2));
-    expect(wrong()).toEqual([["app", "Paper Trail", "Fly checks: 0 of 2 passing"]]);
+    expect(wrong("apps")).toEqual([["app", "Paper Trail", "Fly checks: 0 of 2 passing"]]);
     show(sleeper(1, 1, 1, 1));
-    expect(wrong()).toEqual([]);
+    expect(wrong("apps")).toEqual([]);
   });
 
   it("drops only the PRs of a repo that could not be read: the other repos' red PRs stay on Plan", () => {
@@ -236,7 +220,6 @@ describe("Ops folds and quiet faults", () => {
     ops.mount(root);
     expect(wrong()).toEqual([["pr", "#100 PR 100", "1 check failed: lint"]]);
     expect(opsStatus().mark.owned).toBeNull();
-    expect(root.querySelector(".ops-notices")!.textContent).toContain("GitHub unreachable for pull requests (other-repo)");
   });
 
   it("lists an offline runner as a Machines break, an empty pool as nothing, and a failed read as unknown", () => {
@@ -258,37 +241,4 @@ describe("Ops folds and quiet faults", () => {
     expect(machineRows()).toEqual([]);
   });
 
-  it("opens a folded section a search points at, even one he closed", () => {
-    show(0, 0);
-    ops.focusSection("timeline");
-    const timeline = () => root.querySelector<HTMLDetailsElement>('[data-section="timeline"]')!;
-    expect(timeline().open).toBe(true);
-    timeline().open = false;
-    timeline().dispatchEvent(new Event("toggle"));
-    ops.unmount();
-    ops.mount(root);
-    expect(timeline().open).toBe(false);
-    ops.focusSection("timeline");
-    expect(timeline().open).toBe(true);
-  });
-});
-
-describe("Ops folds remember taps only", () => {
-  it("keeps a fold a search opened open across the redraw that follows, and an automatic open is not a tap", () => {
-    show(0, 0);
-    ops.focusSection("actions");
-    const answers = () => root.querySelector<HTMLDetailsElement>('[data-section="actions"]')!;
-    expect(answers().open).toBe(true);
-    // The shell's mount redraws again at once, with nothing pending.
-    ops.unmount();
-    ops.mount(root);
-    expect(answers().open).toBe(true);
-    // A fold built open fires toggle with no change of state: that is not a tap, and a real tap still closes it.
-    answers().dispatchEvent(new Event("toggle"));
-    answers().open = false;
-    answers().dispatchEvent(new Event("toggle"));
-    ops.unmount();
-    ops.mount(root);
-    expect(answers().open).toBe(false);
-  });
 });

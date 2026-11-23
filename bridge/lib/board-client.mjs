@@ -135,11 +135,12 @@ export function documentName(file) {
 }
 
 /**
- * The server's refusal as one line; with `issues`, a 400's first schema issues too.
+ * The server's refusal as one line; with `issues`, a 400's first schema issues too. `max` cuts it; the card checker's
+ * refusal names every rule a card broke, so a card write reads it whole.
  * @param {Response} res
- * @param {{ issues?: boolean }} [opts]
+ * @param {{ issues?: boolean, max?: number }} [opts]
  */
-export async function serverError(res, { issues = false } = {}) {
+export async function serverError(res, { issues = false, max = 200 } = {}) {
   let detail = "";
   try {
     const text = await res.text();
@@ -153,7 +154,19 @@ export async function serverError(res, { issues = false } = {}) {
           .join("; ")})`;
     } catch {}
   } catch {}
-  return `http ${res.status}${detail ? `: ${sanitizeLine(detail, 200)}` : ""}`;
+  return `http ${res.status}${detail ? `: ${sanitizeLine(detail, max)}` : ""}`;
+}
+
+/** The longest card checker refusal a card write prints. */
+export const CARD_REFUSAL_MAX = 2000;
+
+/**
+ * A card's button opening the email a chat sent the owner to himself, found by its subject: a private link goes there,
+ * never on the card.
+ * @param {string} subject
+ */
+export function emailButtonLink(subject) {
+  return { label: "Open the email", url: `https://mail.google.com/mail/#search/${encodeURIComponent(`subject:"${subject}"`)}` };
 }
 
 /** The text types --file takes: the server refuses one the redactor would change, or one over 256 KB. */

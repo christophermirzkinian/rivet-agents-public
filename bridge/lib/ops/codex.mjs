@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -21,10 +22,11 @@ export const CODEX_READ_TTL_MS = 5 * 60_000;
  * dropped, as a Claude reading past 45 minutes is. It was 6 hours, a stale figure all that time. */
 export const CODEX_KEEP_MS = 45 * 60_000;
 const RPC_TIMEOUT_MS = 20_000;
-const MAX_ACCOUNTS = 4;
+/** The most pool homes read: a ChatGPT Add past it would never show, so the sign-ins refuse it. */
+export const MAX_ACCOUNTS = 4;
 const MASK_RE = /^[a-z0-9._-]{1,2}$/i;
 
-/** @typedef {{ kind: string, label: string, percent: number, severity: "normal" | "warning" | "critical", resetsAt: string | null, active: false, credits?: number | null, unlimited?: boolean }} Row */
+/** @typedef {{ kind: string, label: string, percent: number, severity: "normal" | "warning" | "critical", resetsAt: string | null, active: false, credits?: number | null, unlimited?: boolean, slot?: string }} Row */
 /** @typedef {{ mins: number | null, percent: number | null, resetsAt: number | null }} Window */
 /** @typedef {{ windows: Window[], credits: { unlimited: boolean, balance: number | null } | null }} Limits */
 /** @typedef {{ limits: Limits | null, signedIn: boolean | null, email: string | null }} Reading */
@@ -89,6 +91,13 @@ function windowName(mins) {
 
 const WARN_PCT = 90;
 
+/**
+ * A home's name in the usage rows: the first 12 hex of its account id's sha256. The id itself never leaves the Mac, and
+ * the name stays the home's own when another home is added, removed or sorts before it.
+ * @param {string} id
+ */
+export const codexSlot = (id) => createHash("sha256").update(id).digest("hex").slice(0, 12);
+
 /** @param {number | null} percent @returns {Row["severity"]} */
 function severityOf(percent) {
   return percent === null ? "normal" : percent >= 100 ? "critical" : percent >= WARN_PCT ? "warning" : "normal";
@@ -99,7 +108,8 @@ function severityOf(percent) {
  * its window ("5 hr", "week"), so a reset under a bar is that window's. The longest
  * window's row also carries the account's credits as fields (the Spend card reads
  * them). An account with no reply shows one "no reading" row (`unread`: "no reading since HH:MM" once it has read); `note` ("stale", "signed out") rides on every label.
- * @param {{ mask: string, note?: string, limits: Limits | null, unread?: string }[]} accounts
+ * `slot` (codexSlot of the home) rides on every row, so Connectors names the account by its home, not its place.
+ * @param {{ mask: string, note?: string, limits: Limits | null, unread?: string, slot?: string }[]} accounts
  * @returns {Row[]}
  */
 export function codexRows(accounts) {
@@ -108,8 +118,9 @@ export function codexRows(accounts) {
   accounts.forEach((account, i) => {
     const n = i + 1;
     const active = account.note ?? "";
+    const slot = account.slot ? { slot: account.slot } : {};
     if (!account.limits) {
-      rows.push({ kind: `codex_${n}`, label: `${account.mask} (${[active, account.unread ?? "no reading"].filter(Boolean).join(", ")})`, percent: 0, severity: "normal", resetsAt: null, active: false });
+      rows.push({ kind: `codex_${n}`, label: `${account.mask} (${[active, account.unread ?? "no reading"].filter(Boolean).join(", ")})`, percent: 0, severity: "normal", resetsAt: null, active: false, ...slot });
       return;
     }
     const windows = [...account.limits.windows].sort((a, b) => (a.mins ?? Infinity) - (b.mins ?? Infinity));
@@ -126,6 +137,7 @@ export function codexRows(accounts) {
         resetsAt: window.percent === null || window.resetsAt === null ? null : iso(window.resetsAt * 1000),
         active: false,
         ...(longest ? { credits: credits?.balance ?? null, unlimited: credits?.unlimited === true } : {}),
+        ...slot,
       });
     });
   });
@@ -255,7 +267,7 @@ export async function collectCodex(deps) {
       const c = cache.get(id);
       const kept = c?.goodAt != null && t - c.goodAt < CODEX_KEEP_MS;
       const note = c?.signedIn === false ? "signed out" : kept && c.goodAt !== c.at ? "stale" : "";
-      return { mask: c?.mask ?? "?***", note, limits: kept ? c.limits : null, unread: noReadingNote(c?.signedIn === false ? null : c?.goodAt, t) };
+      return { mask: c?.mask ?? "?***", note, limits: kept ? c.limits : null, unread: noReadingNote(c?.signedIn === false ? null : c?.goodAt, t), slot: codexSlot(id) };
     }),
   );
 }

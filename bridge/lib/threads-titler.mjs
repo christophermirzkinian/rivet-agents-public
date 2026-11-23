@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { claudeCwd, ExecError, withoutRivetTokens } from "./config.mjs";
+import { armHardStop, KILL_GRACE_MS } from "./config.mjs";
 import { MAX_AI_TITLE, MAX_THREAD_TAG, ONE_LINE_RE, THREAD_PROJECTS } from "./threads.mjs";
 import { modelPickFile, readModelPick } from "./model-pick.mjs";
 
@@ -167,11 +168,14 @@ export function makeClaudeRun(bin, args = CLAUDE_ARGS, timeoutMs = CLAUDE_TIMEOU
   /** @param {string} input @returns {Promise<string>} */
   return (input) =>
     new Promise((resolve, reject) => {
+      /** @type {NodeJS.Timeout | undefined} */
+      let hardStop;
       const child = execFile(
         bin,
         [...(typeof args === "function" ? args() : args)],
         { cwd: claudeCwd(), env, timeout: timeoutMs, maxBuffer: 1024 * 1024, shell: false, windowsHide: true, encoding: "utf8" },
         (err, stdout, stderr) => {
+          clearTimeout(hardStop);
           if (!err) return resolve(stdout);
           const failure = new ExecError(bin, /** @type {any} */ (err), stderr, stdout);
           const detail = cliDetail(stdout);
@@ -179,6 +183,8 @@ export function makeClaudeRun(bin, args = CLAUDE_ARGS, timeoutMs = CLAUDE_TIMEOU
           reject(failure);
         },
       );
+      // A CLI that ignores the timeout's SIGTERM would hold a reader for good (`makeExec` in config.mjs has the case).
+      hardStop = armHardStop(child, timeoutMs, KILL_GRACE_MS, () => reject(new ExecError(bin, { killed: true, signal: "SIGKILL" }, "")));
       child.stdin?.on("error", () => {});
       child.stdin?.end(input);
     });

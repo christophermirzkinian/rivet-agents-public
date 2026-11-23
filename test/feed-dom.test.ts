@@ -11,7 +11,7 @@ import type { CardThread } from "../src/shared/threads.js";
 import type { Worker } from "../src/shared/workers.js";
 import { readOutbox, remember } from "../web/src/outbox.js";
 import { app, cardState, changed, navStamp, openingTab, refresh, resetSession, settleOpening, subscribe, whenSignedOut } from "../web/src/state.js";
-import { closeAnswerSheet, flushHeld, recoverOutbox, resetFeed, showCard, showList, TAP_LOCK_MS } from "../web/src/views/feed.js";
+import { cardMenu, closeAnswerSheet, flushHeld, recoverOutbox, resetFeed, showCard, showList, TAP_LOCK_MS } from "../web/src/views/feed.js";
 import { workerRefresh } from "../web/src/push.js";
 import { DESK_QUERY } from "../web/src/desk.js";
 import { closeWorkerSheet } from "../web/src/views/worker-sheet.js";
@@ -104,6 +104,8 @@ function fakeFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Re
     const board = { updatedAt: "2026-09-28T00:00:00.000Z", needs, coming: [], chats: [], shipped: [], ...lists };
     return Promise.resolve(json({ version: 1, updatedAt: board.updatedAt, board, minimised }));
   }
+  // Connectors: none linked, so the menu keeps its row in whatever order the tests run.
+  if (url === "/api/connectors") return Promise.resolve(json({ at: "2026-09-28T00:00:00.000Z", services: [] }));
   const minimisedMatch = /^\/api\/minimised\/([^/]+)$/.exec(url);
   if (minimisedMatch && init.method === "PUT") {
     if (minimiseFails) return Promise.resolve(json({ error: "Unavailable" }, 503));
@@ -2940,7 +2942,7 @@ describe("the desktop layout", () => {
     expect(side.hidden).toBe(false);
     expect(side.querySelector(".chat")).not.toBeNull();
     // The menu, Chat being the pane beside it, then the Chat tool.
-    expect([...root.querySelectorAll(".tabs .menu-name")].map((name) => name.textContent)).toEqual(["Home", "Usage", "Code", "Machines", "Rivet's mind", "Home Assistant", "Media", "Settings"]);
+    expect([...root.querySelectorAll(".tabs .menu-name")].map((name) => name.textContent)).toEqual(["Home", "Usage", "Machines", "Rivet's mind", "Home Assistant", "Media", "Connectors", "Settings"]);
     expect([...root.querySelectorAll(".tabs .rail-tool")].map((one) => one.getAttribute("data-key"))).toEqual(["Chat"]);
     // The icon rail hides the names, so each row is named by its title, never only by its badge.
     for (const row of root.querySelectorAll<HTMLElement>(".tabs .menu-row")) {
@@ -3507,7 +3509,9 @@ describe("update cards", () => {
     ...extra,
   });
   const feedBadge = () => root.querySelector(".home-decide.has-cards .home-decide-n")?.textContent ?? null;
-  const sheet = () => document.querySelector<HTMLElement>(".sheet.update-sheet");
+  /** The card on screen, in the Decide sheet on a phone or the Decide pane on a desk. */
+  const shown = () => document.querySelector<HTMLElement>(".card.top");
+  const seen = () => document.querySelector<HTMLButtonElement>('[data-use="updates.pile.seen"]');
 
   const wide = () =>
     vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({ matches: true, media: query, addEventListener() {}, removeEventListener() {} }) as unknown as MediaQueryList);
@@ -3533,12 +3537,11 @@ describe("update cards", () => {
       wide();
       await signIn();
       showCard("new");
-      await vi.waitFor(() => expect(sheet()).not.toBeNull());
-      const [inApp, out, more] = [...sheet()!.querySelectorAll<HTMLAnchorElement>('.upd[data-need="new"] .card-links a')];
+      await vi.waitFor(() => expect(shown()?.dataset.need).toBe("new"));
+      const [inApp, out, more] = [...shown()!.querySelectorAll<HTMLAnchorElement>(".card-links a")];
       expect([inApp!.getAttribute("target"), out!.getAttribute("target"), more!.getAttribute("target")]).toEqual([null, "_blank", "_blank"]);
       inApp!.click();
       await vi.waitFor(() => expect([app.tab, app.morePage]).toEqual(["more", "media"]));
-      expect(sheet()).toBeNull();
     } finally {
       keep.mockRestore();
       dom.setURL(was);
@@ -3558,38 +3561,25 @@ describe("update cards", () => {
     expect(root.querySelector(".upd, .updates, .upd-pile, .ustream, .thread-view, .progress-news")).toBeNull();
   });
 
-  it("opens an update card in full in a sheet, its lines kept, Seen while it is new; Seen clears it after its Undo window", async () => {
-    const ask = "Top line\n\n• a\n• b";
-    needs = [update("u", "1".repeat(16), { ask, chat: "report-page-visual" })];
-    const css = document.createElement("style");
-    css.textContent = readFileSync(resolve(process.cwd(), "web/src/styles.css"), "utf8");
-    document.head.append(css);
-    try {
-      wide();
-      await signIn();
-      showCard("u");
-      await settle(0);
-      const card = sheet()!.querySelector<HTMLElement>('.upd[data-need="u"]')!;
-      expect(card.querySelector(".upd-title")?.textContent).toBe("News u");
-      expect(card.querySelector(".upd-tag")?.textContent).toBe("Merged · Deployed");
-      const line = card.querySelector<HTMLElement>(".upd-line")!;
-      expect(line.textContent).toBe(ask);
-      expect(getComputedStyle(line).whiteSpace).toBe("pre-wrap");
-      expect([...line.querySelectorAll(".upd-li")].map((item) => item.textContent)).toEqual(["• a", "• b"]);
-      sheet()!.querySelector<HTMLButtonElement>(".upd-seen")!.click();
-      expect(sheet()).toBeNull();
-      await settle(5_100);
-      expect(posts.map((post) => post.body)).toEqual([{ clientId: expect.any(String), itemId: "u", decision: "seen", rev: "1".repeat(16) }]);
-      expect(app.answeredToday).toBe(0);
-    } finally {
-      css.remove();
-    }
+  it("opens an update card on Cards like any card, Seen on it; Seen clears it after its Undo window", async () => {
+    needs = [update("u", "1".repeat(16), { chat: "report-page-visual" })];
+    wide();
+    await signIn();
+    showCard("u");
+    await settle(0);
+    expect([app.tab, shown()?.dataset.need]).toEqual(["cards", "u"]);
+    expect(seen()?.textContent).toBe("Seen");
+    seen()!.click();
+    expect(shown()?.dataset.need).not.toBe("u");
+    await settle(5_100);
+    expect(posts.map((post) => post.body)).toEqual([{ clientId: expect.any(String), itemId: "u", decision: "seen", rev: "1".repeat(16) }]);
+    expect(app.answeredToday).toBe(0);
   });
 
-  it("opens a thread as its cards of today newest first, their comments, Say and Seen all N; a tag that only names the thread is left off", async () => {
+  it("says Seen all N for its thread's new cards of today, and one tap marks them all", async () => {
     needs = [
-      update("first", "1".repeat(16), { since: ago(30), thread: "Morning", tag: "Morning", comments: [{ from: "owner", text: "nice", at: ago(20) }] }),
-      update("second", "2".repeat(16), { since: ago(10), thread: "Morning", tag: "Red fixed", comments: [{ from: "rivet", text: "green again", at: ago(9) }] }),
+      update("first", "1".repeat(16), { since: ago(30), thread: "Morning", tag: "Morning" }),
+      update("second", "2".repeat(16), { since: ago(10), thread: "Morning", tag: "Red fixed" }),
       update("third", "3".repeat(16), { since: ago(40), thread: "morning", seen: true }),
       update("other", "4".repeat(16), { since: ago(5), thread: "Egypt" }),
       update("yesterday", "5".repeat(16), { since: ago(30 * 60), thread: "Morning", tag: "Morning" }),
@@ -3598,18 +3588,8 @@ describe("update cards", () => {
     await signIn();
     showCard("second");
     await settle(0);
-    expect(sheet()!.querySelector(".sheet-title")?.textContent).toBe("Morning");
-    expect([...sheet()!.querySelectorAll<HTMLElement>(".upd")].map((card) => card.dataset.need)).toEqual(["second", "first", "third"]);
-    expect([...sheet()!.querySelectorAll(".upd")].map((card) => card.querySelector(".upd-tag")?.textContent ?? null)).toEqual(["Red fixed", null, "Merged · Deployed"]);
-    expect([...sheet()!.querySelectorAll(".upd-note")].map((note) => note.textContent)).toEqual(["Rivet: green again", "You: nice"]);
-    expect(sheet()!.querySelector(".upd-seen")?.textContent).toBe("Seen all 2");
-    expect(sheet()!.querySelector(".say-line")).toBeNull();
-    sheet()!.querySelector<HTMLButtonElement>(".upd-say")!.click();
-    const area = sheet()!.querySelector<HTMLTextAreaElement>('.say-line[data-need="second"] .say-text')!;
-    expect(area.placeholder).toBe("Say something about Morning…");
-    expect(sheet()!.querySelector(".upd-say")).toBeNull();
-    sheet()!.querySelector<HTMLButtonElement>(".upd-seen")!.click();
-    expect(sheet()).toBeNull();
+    expect(seen()?.textContent).toBe("Seen all 2");
+    seen()!.click();
     await settle(5_100);
     expect(posts.map((post) => post.body)).toEqual([
       { clientId: expect.any(String), itemId: "second", decision: "seen", rev: "2".repeat(16) },
@@ -3617,30 +3597,25 @@ describe("update cards", () => {
     ]);
   });
 
-  it("Say on a thread's sheet sends its words as a comment on the newest card", async () => {
+  it("its say-line sends its words as a comment on the card", async () => {
     needs = [update("a", "1".repeat(16), { since: ago(20) }), update("b", "2".repeat(16), { since: ago(5) })];
     await signIn();
     showCard("a");
     await settle(0);
-    expect([...sheet()!.querySelectorAll<HTMLElement>(".upd")].map((card) => card.dataset.need)).toEqual(["b", "a"]);
-    sheet()!.querySelector<HTMLButtonElement>(".upd-say")!.click();
-    const area = sheet()!.querySelector<HTMLTextAreaElement>(".say-text")!;
+    const area = document.querySelector<HTMLTextAreaElement>('.say-line[data-need="a"] .say-text')!;
     area.value = "looks flat";
     area.dispatchEvent(new Event("input"));
-    sheet()!.querySelector<HTMLButtonElement>(".say-send")!.click();
-    await settle(0);
-    expect(sheet()!.querySelector(".say-line")).toBeNull();
+    document.querySelector<HTMLButtonElement>('.say-line[data-need="a"] .say-send')!.click();
     await settle(5_100);
-    expect(posts.map((post) => post.body)).toEqual([{ clientId: expect.any(String), itemId: "b", decision: "comment", rev: "2".repeat(16), text: "looks flat" }]);
+    expect(posts.map((post) => post.body)).toEqual([{ clientId: expect.any(String), itemId: "a", decision: "comment", rev: "1".repeat(16), text: "looks flat" }]);
   });
 
-  it("opens a seen card with its comments and no Seen", async () => {
-    needs = [update("u", "1".repeat(16), { seen: true, comments: [{ from: "owner", text: "flat?", at: ago(1) }, { from: "rivet", text: "on it", at: ago(1) }] })];
+  it("opens a seen update card too", async () => {
+    needs = [update("u", "1".repeat(16), { seen: true })];
     await signIn();
     showCard("u");
     await settle(0);
-    expect([...sheet()!.querySelectorAll(".upd-note")].map((note) => note.textContent)).toEqual(["You: flat?", "Rivet: on it"]);
-    expect(sheet()!.querySelector(".upd-seen:not([hidden])")).toBeNull();
+    expect(shown()?.dataset.need).toBe("u");
   });
 
   it("an update card not on the board this app read (its push, its chat line) is read for and opened", async () => {
@@ -3649,30 +3624,7 @@ describe("update cards", () => {
     needs = [...needs, update("late", "2".repeat(16))];
     showCard("late");
     await settle();
-    expect(sheet()?.querySelector('.upd[data-need="late"]')).not.toBeNull();
-  });
-
-  it("opens no sheet over sign-in when its chat's lookup answers after the session ended", async () => {
-    needs = [update("u", "1".repeat(16), { chat: "report-page-visual" })];
-    await signIn();
-    const real = vi.mocked(fetch).getMockImplementation()!;
-    let answer = () => {};
-    vi.mocked(fetch).mockImplementation((input, init) =>
-      String(input) === "/api/conversations" ? new Promise<Response>((resolve) => (answer = () => resolve(json({ conversations: [] })))) : real(input, init),
-    );
-    showCard("u");
-    await settle(0);
-    answer();
-    await settle(0);
-    expect(sheet()).not.toBeNull();
-    closeSheet();
-    showCard("u");
-    await settle(0);
-    endSession();
-    signOut();
-    answer();
-    await settle(0);
-    expect(sheet()).toBeNull();
+    expect(shown()?.dataset.need).toBe("late");
   });
 
   it("a chat's row starts no draft naming it when its lookup answers after the session ended", async () => {
@@ -3696,15 +3648,11 @@ describe("update cards", () => {
     expect(drafted()).toBe(true);
   });
 
-  it("keeps Seen to what is new as polls bring cards: its label, whether it shows, and what it marks", async () => {
-    needs = [update("a", "1".repeat(16), { since: ago(20), seen: true })];
+  it("keeps Seen all N to what is new as polls bring cards, and marks what it says", async () => {
+    needs = [update("a", "1".repeat(16), { since: ago(20), seen: true }), update("b", "2".repeat(16), { since: ago(10) })];
     await signIn();
-    showCard("a");
+    showCard("b");
     await settle(0);
-    const seen = () => sheet()!.querySelector<HTMLButtonElement>(".upd-seen:not([hidden])");
-    expect(seen()).toBeNull();
-    needs = [...needs, update("b", "2".repeat(16), { since: ago(10) })];
-    await poll();
     expect(seen()?.textContent).toBe("Seen");
     needs = [...needs, update("c", "3".repeat(16), { since: ago(5) })];
     await poll();
@@ -3712,40 +3660,38 @@ describe("update cards", () => {
     seen()!.click();
     await settle(5_100);
     expect(posts.map((post) => post.body)).toEqual([
-      { clientId: expect.any(String), itemId: "c", decision: "seen", rev: "3".repeat(16) },
       { clientId: expect.any(String), itemId: "b", decision: "seen", rev: "2".repeat(16) },
+      { clientId: expect.any(String), itemId: "c", decision: "seen", rev: "3".repeat(16) },
     ]);
   });
 
-  it("Say stays on the card it opened on, its draft and focus kept, when a poll brings a newer card", async () => {
+  it("its say-line stays on the card it opened on, its draft and focus kept, when a poll brings a newer card", async () => {
     needs = [update("a", "1".repeat(16), { since: ago(20) })];
     await signIn();
     showCard("a");
     await settle(0);
-    sheet()!.querySelector<HTMLButtonElement>(".upd-say")!.click();
-    const area = sheet()!.querySelector<HTMLTextAreaElement>('.say-line[data-need="a"] .say-text')!;
+    const area = document.querySelector<HTMLTextAreaElement>('.say-line[data-need="a"] .say-text')!;
+    area.focus();
     area.value = "about a";
     area.dispatchEvent(new Event("input"));
-    expect(document.activeElement).toBe(area);
     needs = [...needs, update("b", "2".repeat(16), { since: ago(5) })];
     await poll();
-    expect([...sheet()!.querySelectorAll<HTMLElement>(".upd")].map((card) => card.dataset.need)).toEqual(["b", "a"]);
-    expect(sheet()!.querySelector(".say-text")).toBe(area);
+    expect(shown()?.dataset.need).toBe("a");
+    expect(document.querySelector('.say-line[data-need="a"] .say-text')).toBe(area);
     expect([area.value, document.activeElement === area]).toEqual(["about a", true]);
-    sheet()!.querySelector<HTMLButtonElement>(".say-send")!.click();
+    document.querySelector<HTMLButtonElement>('.say-line[data-need="a"] .say-send')!.click();
     await settle(5_100);
     expect(posts.map((post) => post.body)).toEqual([{ clientId: expect.any(String), itemId: "a", decision: "comment", rev: "1".repeat(16), text: "about a" }]);
   });
 
-  it("shows Send on the sheet's Say once a photo is picked with no words", async () => {
+  it("shows Send on its say-line once a photo is picked with no words", async () => {
     vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:preview");
     vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
     needs = [update("a", "1".repeat(16))];
     await signIn();
     showCard("a");
     await settle(0);
-    sheet()!.querySelector<HTMLButtonElement>(".upd-say")!.click();
-    const line = sheet()!.querySelector<HTMLElement>(".say-line")!;
+    const line = document.querySelector<HTMLElement>('.say-line[data-need="a"]')!;
     expect(line.classList.contains("has-text")).toBe(false);
     const input = line.querySelector<HTMLInputElement>(".attach-input")!;
     Object.defineProperty(input, "files", { value: [new File(["jpeg bytes"], "IMG_0001.JPG", { type: "image/jpeg" })], configurable: true });
@@ -3753,6 +3699,73 @@ describe("update cards", () => {
     await settle(0);
     await settle(0);
     expect(line.classList.contains("has-text")).toBe(true);
+  });
+
+  it("shows its comments under it in Decide, Rivet's answers among them", async () => {
+    const comments = [
+      { from: "owner" as const, text: "looks flat", at: ago(9) },
+      { from: "rivet" as const, text: "Brightened it", at: ago(8) },
+    ];
+    needs = [update("u", "1".repeat(16), { comments })];
+    wide();
+    await signIn();
+    showCard("u");
+    await settle(0);
+    const notes = [...shown()!.querySelectorAll<HTMLElement>(".upd-note")];
+    expect(notes.map((note) => [note.className, note.textContent])).toEqual([
+      ["upd-note", "You: looks flat"],
+      ["upd-note h", "Rivet: Brightened it"],
+    ]);
+  });
+
+  it("has no Reject: no X on the card, no ⋯ menu row, and the X key does nothing", async () => {
+    const u = update("u", "1".repeat(16), { chat: "billing-visual" });
+    needs = [u];
+    wide();
+    await signIn();
+    showCard("u");
+    await settle(0);
+    expect(shown()?.dataset.need).toBe("u");
+    expect(shown()!.querySelector('[data-use="cards.reject"]')).toBeNull();
+    expect(cardMenu(u).some((row) => row.matches('[data-use="cards.reject"]'))).toBe(false);
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "x", bubbles: true }));
+    document.dispatchEvent(new KeyboardEvent("keyup", { key: "x", bubbles: true }));
+    await settle(0);
+    expect(document.querySelector(".reject-sheet")).toBeNull();
+    expect(cardMenu(need("a", "a1")).some((row) => row.matches('[data-use="cards.reject"]'))).toBe(true);
+  });
+
+  it("marks only the cards its Seen counted when a poll brings one while a note is typed", async () => {
+    needs = [update("b", "2".repeat(16), { since: ago(10) })];
+    await signIn();
+    showCard("b");
+    await settle(0);
+    const area = document.querySelector<HTMLTextAreaElement>('.say-line[data-need="b"] .say-text')!;
+    area.focus();
+    needs = [...needs, update("c", "3".repeat(16), { since: ago(5) })];
+    await poll();
+    expect(seen()?.textContent).toBe("Seen");
+    seen()!.click();
+    area.blur();
+    await settle(5_100);
+    expect(posts.map((post) => post.body)).toEqual([{ clientId: expect.any(String), itemId: "b", decision: "seen", rev: "2".repeat(16) }]);
+  });
+
+  it("a Seen that fails once the Floor is back opens Decide on the card again", async () => {
+    needs = [update("u", "1".repeat(16))];
+    replyPlan = ["lost"];
+    wide();
+    await signIn();
+    showCard("u");
+    await settle(0);
+    seen()!.click();
+    app.tab = "progress";
+    changed();
+    await settle(5_100);
+    expect(posts).toHaveLength(1);
+    expect(app.tab).toBe("cards");
+    expect(root.querySelector(".view.decide-pane .card.top")?.getAttribute("data-need")).toBe("u");
+    expect(root.querySelector(".toast.flash")?.textContent).toBe("Not sent. The card is back on top.");
   });
 });
 

@@ -254,6 +254,19 @@
   font-size: var(--fs-l);
 }
 
+.peek-ask + .peek-ask {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.peek-box .peek-sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  white-space: normal;
+}
+
 .peek-points {
   margin: 0;
   padding-left: 20px;

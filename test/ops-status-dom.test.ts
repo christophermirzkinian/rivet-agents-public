@@ -7,7 +7,7 @@ import { OPS_STATUS_KEY_PATTERN } from "../src/shared/ops-status.js";
 import type { Worker } from "../src/shared/workers.js";
 import { noteDismissal, opsData, refreshOps } from "../web/src/ops-data.js";
 import { app, changed } from "../web/src/state.js";
-import { mount, unmount } from "../web/src/views/ops.js";
+import { mount, unmount, wrongRows } from "../web/src/views/ops.js";
 import { bringBack, ciItem, diskItem, dismissable, dismissed, dismissItem, appItem, macItem, markOf, openStatus, prItem, runnerItem } from "../web/src/views/ops-status.js";
 import { closeSheet } from "../web/src/views/sheet.js";
 import * as asks from "../web/src/views/your-asks.js";
@@ -336,15 +336,16 @@ describe("Dismiss and being fixed", () => {
     expect(el.querySelector('[data-plan-group="dismissed"]')).toBeNull();
   });
 
-  it("keeps an app dismissed while its run of failed checks grows, and its section calm", () => {
+  it("keeps an app dismissed while its run of failed checks grows, and it counts as no break", () => {
     const trail = () => opsData.ops!.apps[0]!;
     opsData.dismissals = [{ kind: "app", key: "paper-trail", mark: markOf(appItem(trail())!), at: at(1) }];
     // The next probe fails too: the same outage, so the same mark.
     opsData.ops = { ...opsData.ops!, apps: [{ ...trail(), health: { ...trail().health, fails: 4 } }, opsData.ops!.apps[1]!] };
     expect(dismissed(appItem(trail()))).toBe(true);
-    // With Field Notes back up, only the dismissed Paper Trail is down: its section is calm, not amber.
+    // With Field Notes back up, only the dismissed Paper Trail is down: no app is a break, the Paper Trail only dismissed.
     opsData.ops = { ...opsData.ops!, apps: [trail(), appRow("field-notes", "up")], summary: { ...opsData.ops!.summary, appsDown: 1 } };
-    expect(page("machines").querySelector('[data-section="apps"] .ops-sec-line')?.className).toBe("ops-sec-line t-ok");
+    const apps = wrongRows(opsData.ops, "apps");
+    expect([apps.count, apps.hidden.map((row) => row.title)]).toEqual([0, ["Paper Trail"]]);
   });
 
   it("offers and applies no Dismiss before the statuses load, since someone may be on it", () => {

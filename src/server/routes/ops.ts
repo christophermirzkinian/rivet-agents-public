@@ -11,6 +11,8 @@ import {
   macSnapshotSchema,
   OPS_MAX_BYTES,
 } from "../ops/schema.js";
+import { promiseKeeper } from "../asks/promises.js";
+import { BehavioursStore } from "../behaviours.js";
 import { createOps } from "../ops/service.js";
 import { NEWS_MS } from "../../shared/short-titles.js";
 import type { Router } from "./router.js";
@@ -22,6 +24,8 @@ const SMALL_BODY_MAX = 16 * 1024;
 
 export function register(router: Router): void {
   const { config, store, bridge, requireSession, push, now, addUpdate, refreshWaits, workers, titles } = router.deps;
+  // Settings › Behaviours' Promise keeper, read by the ask sweep each minute.
+  const behaviours = new BehavioursStore(config.dataDir);
   const ops = createOps({
     dataDir: config.dataDir,
     store,
@@ -34,8 +38,10 @@ export function register(router: Router): void {
     workers: () => workers().workers,
     refreshWaits,
     pickup: { send: (pickup) => bridge.sendOpsPickup(pickup), monitorChat: config.monitorChat },
+    promiseKeeper: () => promiseKeeper(behaviours),
   });
   router.onClose(() => ops.close());
+  router.onClose(() => behaviours.close());
   costs.register(router);
   // Tests and local development never probe the health URLs or send briefings.
   if (config.production) ops.start();

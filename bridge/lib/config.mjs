@@ -90,25 +90,55 @@ function firstBytes(file) {
   }
 }
 
+/** How long a command gets to exit after its timeout's SIGTERM before `armHardStop` sends SIGKILL. */
+export const KILL_GRACE_MS = 5_000;
+
+/**
+ * The hard stop behind an execFile `timeout`: `graceMs` after it, SIGKILL the command and call `onStop`. The caller
+ * clears the returned timer when the command ends first. No timer without a timeout.
+ * @param {import("node:child_process").ChildProcess} child
+ * @param {number | undefined} timeout
+ * @param {number} graceMs
+ * @param {() => void} onStop
+ * @returns {NodeJS.Timeout | undefined}
+ */
+export function armHardStop(child, timeout, graceMs, onStop) {
+  if (!timeout || timeout <= 0) return undefined;
+  return setTimeout(() => {
+    child.kill("SIGKILL");
+    onStop();
+  }, timeout + graceMs);
+}
+
 /**
  * execFile with no shell, a timeout, and an environment without Rivet tokens; a script runs through its interpreter.
+ * The timeout is a hard stop. execFile's own sends one SIGTERM and then waits for the command to exit, so a command
+ * that ignores it holds the caller for good: a `flyctl logs` call did, and the fly-errors reader sat on it for days
+ * while launchd started no other run. `killGraceMs` after the timeout the command gets SIGKILL and the
+ * call rejects as timed out, whether or not its pipes ever close.
+ * @param {{ killGraceMs?: number }} [opts]
  * @returns {Exec}
  */
-export function makeExec() {
+export function makeExec({ killGraceMs = KILL_GRACE_MS } = {}) {
   const env = withoutRivetTokens(process.env);
   return (file, args, { timeout, maxBuffer = 4 * 1024 * 1024, input, cwd, env: extra }) => {
     if (!path.isAbsolute(file)) return Promise.reject(new Error("binary path must be absolute"));
     const command = scriptCommand(file, args);
     return new Promise((resolve, reject) => {
+      /** @type {NodeJS.Timeout | undefined} */
+      let hardStop;
       const child = execFile(
         command.file,
         command.args,
         { timeout, maxBuffer, cwd, env: extra ? { ...env, ...extra } : env, shell: false, windowsHide: true, encoding: "utf8" },
         (err, stdout, stderr) => {
+          clearTimeout(hardStop);
           if (err) reject(new ExecError(file, /** @type {any} */ (err), stderr, stdout));
           else resolve({ stdout, stderr });
         },
       );
+      // A later settle from execFile's callback is a no-op.
+      hardStop = armHardStop(child, timeout, killGraceMs, () => reject(new ExecError(file, { killed: true, signal: "SIGKILL" }, "")));
       if (input !== undefined) {
         child.stdin?.on("error", () => {});
         child.stdin?.end(input);

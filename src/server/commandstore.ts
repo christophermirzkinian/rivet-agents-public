@@ -8,7 +8,9 @@ import { MAX_CHAT_FILES, type FileRef, type FileType, type Need, type ReplyStyle
 import {
   chatImages,
   CHAT_WINDOW_QUIET_MS,
+  chatSendDelaySchema,
   chatWindowText,
+  DEFAULT_CHAT_SEND_DELAY,
   FINAL_STATUSES,
   imageFields,
   MAX_CHAT_IMAGE_BYTES,
@@ -24,6 +26,7 @@ import {
   type ChatQuote,
   type PostedCard,
   type ChatPage,
+  type ChatSendDelay,
   type MediaType,
   type SavedLine,
 } from "../shared/command.js";
@@ -153,7 +156,10 @@ ${["chat_messages", "chat_threads", "audit"]
   .join("\n")}
 `;
 
-/** A chat window flushes 10 s after its last message, and never later than 30 s after its first. */
+/**
+ * A chat window flushes its Send delay after its last message (10 s for a window from before the setting), and never
+ * later than 30 s after its first.
+ */
 export const BATCH_QUIET_MS = CHAT_WINDOW_QUIET_MS;
 export const BATCH_CAP_MS = 30_000;
 /** How much of a thread's first and last message the thread list reads: its title and one-line preview need far less. */
@@ -179,6 +185,8 @@ function migrate(db: DatabaseSync): void {
   if (!audit.has("batch_id")) db.exec("ALTER TABLE audit ADD COLUMN batch_id TEXT");
   if (!audit.has("batch_first_at")) db.exec("ALTER TABLE audit ADD COLUMN batch_first_at INTEGER");
   if (!audit.has("batch_last_at")) db.exec("ALTER TABLE audit ADD COLUMN batch_last_at INTEGER");
+  // The lead's own Send delay in ms, set when the window opens; a window from before it waited BATCH_QUIET_MS.
+  if (!audit.has("batch_quiet_ms")) db.exec("ALTER TABLE audit ADD COLUMN batch_quiet_ms INTEGER");
   db.exec("CREATE INDEX IF NOT EXISTS audit_batch ON audit (batch_id)");
   const chat = columns("chat_messages");
   if (!chat.has("quote_from")) db.exec("ALTER TABLE chat_messages ADD COLUMN quote_from TEXT");
@@ -330,12 +338,20 @@ function uniqueFiles(files: readonly FileRef[]): FileRef[] {
 }
 
 function deadline(lead: Row): number {
-  return windowDeadline(lead.batch_first_at as number, lead.batch_last_at as number);
+  return windowDeadline(lead.batch_first_at as number, lead.batch_last_at as number, lead.batch_quiet_ms);
 }
 
-function windowDeadline(first: number, last: number): number {
-  return Math.min(last + BATCH_QUIET_MS, first + BATCH_CAP_MS);
+/** A window's own Send delay: the one it opened with, or BATCH_QUIET_MS for one from before the setting. */
+function quietOf(quiet: unknown): number {
+  return typeof quiet === "number" ? quiet : BATCH_QUIET_MS;
 }
+
+function windowDeadline(first: number, last: number, quiet: unknown): number {
+  return Math.min(last + quietOf(quiet), first + BATCH_CAP_MS);
+}
+
+/** Where the Send delay is kept, in the meta table. */
+const SEND_DELAY_KEY = "chat.sendDelay";
 
 function toEntry(row: Row): AuditEntry {
   // The Fix it mark is the store's own: no answer carries it.
@@ -400,8 +416,10 @@ function toMessage(row: Row): ChatMessage {
   const status = typeof row.status === "string" ? CHAT_STATUS[row.status as ActionStatus] : undefined;
   if (message.from === "owner" && status) message.status = status;
   // The countdown Chat shows reads the window's own deadline, which every line added to it moves.
-  if (status === "collecting" && typeof row.window_first === "number" && typeof row.window_last === "number")
-    message.sendsAt = new Date(windowDeadline(row.window_first, row.window_last)).toISOString();
+  if (status === "collecting" && typeof row.window_first === "number" && typeof row.window_last === "number") {
+    message.sendsAt = new Date(windowDeadline(row.window_first, row.window_last, row.window_quiet)).toISOString();
+    message.windowMs = quietOf(row.window_quiet);
+  }
   if (status === "collecting" && row.window_fix) message.keeps = true;
   if (typeof row.ack === "string") message.ack = JSON.parse(row.ack) as NonNullable<ChatMessage["ack"]>;
   return message;
@@ -440,7 +458,7 @@ const CARD_TITLE = `CASE WHEN m.sender = 'owner' AND m.media IS NOT NULL AND jso
 
 /** A chat message with its window's status and request, its thread's project and, for a card answer, its card's title. */
 const MESSAGE_SELECT = `SELECT m.*, a.status, a.request, a.batch_id, t.project AS thread_project, t.rivet_project AS thread_rivet_project,
-  w.batch_first_at AS window_first, w.batch_last_at AS window_last, json_extract(w.request, '$.fixIt') AS window_fix,
+  w.batch_first_at AS window_first, w.batch_last_at AS window_last, w.batch_quiet_ms AS window_quiet, json_extract(w.request, '$.fixIt') AS window_fix,
   ${CARD_TITLE} AS card_title FROM chat_messages m
   LEFT JOIN audit a ON a.id = m.id LEFT JOIN audit w ON w.id = a.batch_id LEFT JOIN chat_threads t ON t.root_id = m.thread_id`;
 
@@ -573,9 +591,10 @@ export class CommandStore {
     now: number,
     maxText = BATCH_MAX_TEXT,
     maxImages = MAX_CHAT_IMAGES,
-  ): { entry: AuditEntry; closed: AuditEntry | null } {
+  ): { entry: AuditEntry; closed: AuditEntry | null; sent: AuditEntry | null } {
     const existing = this.getActionByClientId(input.clientId);
-    if (existing) return { entry: existing, closed: null };
+    if (existing) return { entry: existing, closed: null, sent: null };
+    const delay = this.chatSendDelay();
     this.db.exec("BEGIN IMMEDIATE");
     try {
       let closed: AuditEntry | null = null;
@@ -601,10 +620,21 @@ export class CommandStore {
       }
       this.db
         .prepare(
-          `INSERT INTO audit (id, client_id, kind, at, updated_at, status, request, batch_id, batch_first_at, batch_last_at)
-           VALUES (?, ?, 'chat', ?, ?, 'collecting', ?, ?, ?, ?)`,
+          `INSERT INTO audit (id, client_id, kind, at, updated_at, status, request, batch_id, batch_first_at, batch_last_at, batch_quiet_ms)
+           VALUES (?, ?, 'chat', ?, ?, 'collecting', ?, ?, ?, ?, ?)`,
         )
-        .run(input.id, input.clientId, input.at, input.at, JSON.stringify(input.request), lead ?? input.id, lead ? null : now, lead ? null : now);
+        .run(
+          input.id,
+          input.clientId,
+          input.at,
+          input.at,
+          JSON.stringify(input.request),
+          lead ?? input.id,
+          lead ? null : now,
+          lead ? null : now,
+          // A new window keeps the Send delay it opened with: a change later never moves a countdown already running.
+          lead ? null : delay.on ? delay.seconds * 1000 : 0,
+        );
       if (lead) this.db.prepare("UPDATE audit SET batch_last_at = ? WHERE id = ?").run(now, lead);
       const { conversation } = input.request;
       this.addChatMessage({
@@ -617,8 +647,10 @@ export class CommandStore {
         // A new conversation starts at this message, never joining the window open before it.
         ...(conversation === null ? { thread: input.id } : conversation !== undefined ? { thread: conversation } : {}),
       });
+      // Send delay Off: the window this line is in goes now, with no countdown and so no Cancel.
+      const sent = delay.on ? null : this.flush(lead ?? input.id, input.at);
       this.db.exec("COMMIT");
-      return { entry: this.getAction(input.id)!, closed };
+      return { entry: this.getAction(input.id)!, closed, sent };
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
@@ -630,7 +662,7 @@ export class CommandStore {
     const due = this.db
       .prepare(
         `SELECT id FROM audit WHERE kind = 'chat' AND status = 'collecting' AND batch_id = id
-           AND MIN(batch_last_at + ?, batch_first_at + ?) <= ? ORDER BY rowid`,
+           AND MIN(batch_last_at + COALESCE(batch_quiet_ms, ?), batch_first_at + ?) <= ? ORDER BY rowid`,
       )
       .all(BATCH_QUIET_MS, BATCH_CAP_MS, now) as Row[];
     return due.map((row) => this.flush(row.id as string, at)).filter((entry): entry is AuditEntry => entry !== null);
@@ -1515,6 +1547,23 @@ export class CommandStore {
       throw error;
     }
     return counts;
+  }
+
+  /** Chat's Send delay: the saved one, or On at 10 s when none is saved or what is saved no longer reads. */
+  chatSendDelay(): ChatSendDelay {
+    const saved = this.getMeta(SEND_DELAY_KEY);
+    if (saved === null) return { ...DEFAULT_CHAT_SEND_DELAY };
+    try {
+      const parsed = chatSendDelaySchema.safeParse(JSON.parse(saved));
+      return parsed.success ? parsed.data : { ...DEFAULT_CHAT_SEND_DELAY };
+    } catch {
+      return { ...DEFAULT_CHAT_SEND_DELAY };
+    }
+  }
+
+  setChatSendDelay(delay: ChatSendDelay): ChatSendDelay {
+    this.setMeta(SEND_DELAY_KEY, JSON.stringify(delay));
+    return this.chatSendDelay();
   }
 
   getMeta(key: string): string | null {

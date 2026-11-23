@@ -3,7 +3,8 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { mediaFlag, mediaOf, readMedia, replyRecord, serverError, uploadClips } from "../bridge/lib/board-client.mjs";
+import { CARD_REFUSAL_MAX, mediaFlag, mediaOf, readMedia, replyRecord, serverError, uploadClips } from "../bridge/lib/board-client.mjs";
+import { sanitizeLine } from "../bridge/lib/templates.mjs";
 import { fingerprint, makeExec, readToken, serverOrigin } from "../bridge/lib/config.mjs";
 import { chatRepoOf, comingChatRepo, isId, progressFieldProblems } from "../bridge/lib/validate.mjs";
 import { defaultRepo } from "../src/shared/repos.ts";
@@ -532,10 +533,11 @@ async function main() {
         if (attempt < PUSH_TRIES) continue;
         return fail(`the server board changed during each of ${PUSH_TRIES} tries; nothing was pushed, push again`);
       }
-      if (!res.ok) return fail(res.status === 409 ? `stale version (${await serverError(res)})` : await serverError(res));
+      if (!res.ok) return fail(res.status === 409 ? `stale version (${await serverError(res)})` : await serverError(res, { max: CARD_REFUSAL_MAX }));
       const doc = await res.json().catch(() => null);
       if (!doc || !Number.isSafeInteger(doc.version)) return fail("server did not return a version");
       process.stdout.write(`version ${doc.version}\n`);
+      for (const line of Array.isArray(doc.warnings) ? doc.warnings : []) process.stderr.write(`push-board: card checker warning: ${sanitizeLine(String(line), CARD_REFUSAL_MAX)}\n`);
       let learnt = true;
       if (added.length) {
         const kept = added.map(({ section, keys }) => `${section}:${keys[0]}`);

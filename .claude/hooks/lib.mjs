@@ -59,7 +59,8 @@ export const readStdin = async () => {
 };
 
 // A hook that throws or exits non-zero can block the call it watches. These hooks are
-// advisory, so any failure of their own means: say nothing.
+// advisory, so any failure of their own means: say nothing. A hook that must fail closed never uses this, and its
+// own header says why.
 export const advisory = (main) =>
   main().catch(() => {}).finally(() => process.exit(0));
 

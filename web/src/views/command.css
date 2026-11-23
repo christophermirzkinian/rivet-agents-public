@@ -162,6 +162,50 @@
   color: #1a1614;
 }
 
+/* Send delay (chat-send-delay.ts): the menu's last row, under a 1px line: its switch, 3 / 5 / 7 / 10 s (greyed
+   while Off) and a plain line saying what it is for. */
+.chat-delay {
+  /* A column like the menu's own, so the switch's row spans it and the switch sits right, as Read aloud's does. */
+  display: flex;
+  flex-direction: column;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+
+.chat-delay-icon {
+  display: inline-flex;
+}
+
+.chat-delay-row {
+  padding-top: 2px;
+}
+
+.chat-delay-seconds:disabled {
+  color: var(--dim);
+  cursor: default;
+}
+
+.chat-delay-seconds:disabled[aria-checked="true"] {
+  opacity: 0.45;
+  color: #1a1614;
+}
+
+.chat-delay-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-body);
+  line-height: 1.35;
+}
+
+.chat-delay-switch[aria-checked="true"] .chat-switch {
+  background: #3ecf8e;
+}
+
+.chat-delay-switch[aria-checked="true"] .chat-switch::after {
+  left: 21px;
+}
+
 .chat-menu-item {
   display: flex;
   align-items: center;
@@ -283,6 +327,64 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
+}
+
+/* Back to newest: a dock with no height held to the scroller's foot, so the ↓ floats over the last lines,
+   just above the message box, and takes no room in the thread. A thin accent ring marks it out over the lines. */
+.chat-newest-dock {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  height: 0;
+  pointer-events: none;
+}
+
+.chat-newest {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.chat-newest[hidden] {
+  display: none;
+}
+
+.chat-newest .icon,
+.chat-newest .icon svg {
+  display: block;
+  width: 22px;
+  height: 22px;
+}
+
+.chat-newest-count {
+  position: absolute;
+  top: -7px;
+  right: -6px;
+  box-sizing: border-box;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 11px;
+  background: var(--accent);
+  color: var(--bg);
+  font: 700 var(--fs-m)/22px var(--font);
+  text-align: center;
+}
+
+.chat-newest-count[hidden] {
+  display: none;
 }
 
 .chat-older {
@@ -1091,7 +1193,7 @@ button.chat-quote {
   flex: none;
   min-height: 44px;
   padding: 0 18px;
-  border: 2px solid var(--apricot);
+  border: 1px solid var(--line);
   border-radius: 22px;
   background: transparent;
   color: var(--apricot);
@@ -1201,7 +1303,7 @@ button.chat-quote {
   z-index: 20;
   display: grid;
   place-items: center;
-  border: 3px dashed var(--accent);
+  border: 1px dashed var(--line);
   border-radius: var(--radius);
   background: rgb(20, 16, 40);
   color: var(--accent);
@@ -1565,7 +1667,7 @@ button.chat-quote {
 .cmd-worker-foot {
   display: grid;
   flex: none;
-  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-columns: minmax(max-content, 1fr);
   grid-auto-flow: column;
   gap: 8px;
 }
@@ -1648,7 +1750,8 @@ button.chat-quote {
   flex: none;
   gap: 8px;
   padding: 12px;
-  border: 2px solid var(--apricot);
+  /* A thin neutral edge like every other box: thick coloured edges are out. */
+  border: 1px solid var(--line);
   border-radius: 18px;
   background: var(--panel-2);
 }

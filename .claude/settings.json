@@ -48,6 +48,13 @@
           { "type": "command", "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/team-room.mjs\"", "async": true, "timeout": 10 }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/chat-routing.mjs\"", "timeout": 15 }
+        ]
+      }
     ]
   }
 }

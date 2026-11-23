@@ -1,6 +1,6 @@
 import "./feed.css";
 
-import { RIVET_NAME, chatName } from "../../../src/shared/names.js";
+import { chatName } from "../../../src/shared/names.js";
 import { MAX_SHORT, type Decision, type Reply, type ServedNeed } from "../../../src/shared/board.js";
 import { chatImages, imageFields } from "../../../src/shared/command.js";
 import { canApprove, isGotIt, isPlan, isTodo, isUpdate, MERGE_READY, optionNeedsText, stepsOf, threadKey, wantsText } from "../../../src/shared/answers.js";
@@ -39,11 +39,9 @@ import {
   navigated,
   navStamp,
   refresh as refreshBoard,
-  sameSession,
   saveLater,
   saveMinimised,
   signedOut,
-  subscribe,
   unminimise,
   updateCards,
   replyLanded,
@@ -55,13 +53,14 @@ import { cardAnswered, useTap } from "../usage.js";
 import { sending } from "./mac-wait.js";
 import { cardMedia, cardStage, stopCardMedia } from "./card-media.js";
 import { cardShareButton } from "./card-share.js";
-import { openThingFor, showLine } from "./chat.js";
+import { showLine } from "./chat.js";
 import { rivet } from "../rivet/rivet.js";
 import { decideUp } from "./decide-sheet.js";
 import { closeLightbox } from "./lightbox.js";
 import { leaveOverlays } from "./navigation.js";
 import { clearWords } from "./progress-mark.js";
 import { closeSheet, openSheet } from "./sheet.js";
+import { askDesigns, designsFor } from "./three-designs.js";
 import { clearUndo, flash, showUndo } from "./toast.js";
 import { closeWorkerSheet, openChatSheet } from "./worker-sheet.js";
 
@@ -259,7 +258,7 @@ function topCard(need: ServedNeed, minimisable = false, sheet = false): HTMLElem
                 `Round ${thread.round} · ${thread.title}`,
               )
             : null,
-          h("div", { class: "head-tools" }, minimisable ? minimiseButton(need, "top") : null, rejectButton(need)),
+          h("div", { class: "head-tools" }, minimisable ? minimiseButton(need, "top") : null, isUpdate(need) ? null : rejectButton(need)),
         ),
     h(
       "div",
@@ -281,6 +280,9 @@ function topCard(need: ServedNeed, minimisable = false, sheet = false): HTMLElem
             ...links.map(cardLink),
           )
         : null,
+      ...(isUpdate(need) ? (need.comments ?? []) : []).map((note) =>
+        h("p", { class: note.from === "rivet" ? "upd-note h" : "upd-note" }, h("b", {}, note.from === "rivet" ? `${agentName()}: ` : "You: "), ...linkify(note.text)),
+      ),
       listed && !phone
         ? h(
             "p",
@@ -321,7 +323,16 @@ function topCard(need: ServedNeed, minimisable = false, sheet = false): HTMLElem
           )
         : null,
       card.error ? h("p", { class: "card-error box", attrs: { role: "alert" } }, card.error) : null,
-      phone ? null : h("div", { class: "card-tools" }, messageButton(need, `Message ${agentName()}`), keyed(cardShareButton(need, "card-share-top"), `share-${need.id}`), minimisable ? minimiseButton(need, "bottom") : null),
+      phone
+        ? null
+        : h(
+            "div",
+            { class: "card-tools" },
+            messageButton(need, `Message ${agentName()}`),
+            keyed(cardShareButton(need, "card-share-top"), `share-${need.id}`),
+            designsFor(need) ? keyed(button([svg(ICONS.photo, "card-designs-icon"), h("span", {}, "3 designs")], () => void askDesigns({ card: need.id }), "card-designs", false, "cards.designs"), `designs-${need.id}`) : null,
+            minimisable ? minimiseButton(need, "bottom") : null,
+          ),
     ),
     h("div", { class: "more-cue", attrs: { "aria-hidden": "true" } }, "More ↓"),
     card.confirm ? confirmOverlay(need, card) : null,
@@ -389,9 +400,11 @@ export function cardMenu(need: ServedNeed): HTMLElement[] {
     message,
     cardShareButton(need, "decide-menu-row"),
     thread ? row(ICONS.list, "Conversation", () => openConversation(thread.thread), "cards.thread.open", "menu-thread", `Round ${thread.round}`) : null,
+    designsFor(need) ? row(ICONS.photo, "3 designs", () => void askDesigns({ card: need.id }), "cards.designs", "menu-designs") : null,
     // The next card slides in under the menu's foot, where its answers sit: a second tap is held, as after an answer.
     row(MINUS, "Put it aside", () => (lockTaps(), minimise(need)), "cards.minimise", "menu-aside-card"),
-    row(ICONS.no, "Reject, and say why", () => act(need, "reject"), "cards.reject", "menu-reject"),
+    // An update takes only Seen or words (http.ts), so it has no Reject.
+    isUpdate(need) ? null : row(ICONS.no, "Reject, and say why", () => act(need, "reject"), "cards.reject", "menu-reject"),
   ].filter((one) => one !== null);
 }
 
@@ -516,104 +529,21 @@ function planPoints(need: ServedNeed): HTMLElement[] {
 // Updates
 
 /**
- * An update's thread, from its Done today row or a link to any card in it:
- * its thing's page when a conversation holds its chat's work, as a pile's tap
- * did, else a sheet of the thread's update cards in full, newest first, with Say and Share, and Seen (Seen all N) while
- * any are new.
+ * What an update card's Seen clears: the card, then its thread's other new cards of local's today, as Done today
+ * lists them, so one tap says Seen all N.
  */
-function openUpdate(need: ServedNeed): void {
-  const sheet = () => {
-    const key = threadKey(need.thread);
-    // The thread's cards of today, as Done today lists it, and the card opened, even from an older day (a push).
-    const cards = () => {
-      const now = Date.now();
-      const thread = threadUpdates(key).filter((one) => one.id === need.id || (one.since !== undefined && isToday(one.since, now)));
-      return thread.length ? thread : [need];
-    };
-    const fresh = () => {
-      const open = new Set(updateCards().map((one) => one.id));
-      return cards().filter((one) => !app.held.has(one.id) && open.has(one.id));
-    };
-    const thread = cards()[0]!.thread ?? RIVET_NAME;
-    let counted: ServedNeed[] = [];
-    const seen = button(
-      [],
-      () => {
-        closeSheet();
-        if (counted.length) seenPile(counted);
-      },
-      "upd-seen",
-      false,
-      "updates.pile.seen",
-    );
-    let target: ServedNeed | null = null;
-    let say: HTMLElement | null = null;
-    let shown = "";
-    let stop: (() => void) | null = null;
-    const paint = (el: HTMLElement) => {
-      counted = fresh();
-      seen.hidden = !counted.length;
-      seen.parentElement?.classList.toggle("solo", seen.hidden);
-      seen.replaceChildren(svg(ICONS.yes, "btn-icon"), counted.length > 1 ? `Seen all ${counted.length}` : "Seen");
-      const list = cards();
-      // A sent comment holds the card, as an answer does: the say-line goes with it.
-      if (target && app.held.has(target.id)) target = null;
-      if (!target) say = null;
-      const now = JSON.stringify([target?.id ?? null, list.map((one) => [one.id, one.rev, one.comments?.length ?? 0, app.held.has(one.id), cardState(one.id).error])]);
-      if (now === shown) return;
-      shown = now;
-      const shownCards = list.map((one) => updateCard(one, thread));
-      // The say-line stays the same element while Say is open, so a repaint never takes its draft, focus or photos.
-      if (say && say.parentElement === el) {
-        while (el.firstChild && el.firstChild !== say) el.firstChild.remove();
-        say.before(...shownCards);
-        return;
-      }
-      if (target) {
-        const id = target.id;
-        say = sayLine(target, { placeholder: `Say something about ${thread}…`, send: true, current: () => cards().find((one) => one.id === id) ?? target ?? need });
-      }
-      el.replaceChildren(
-        ...shownCards,
-        say ??
-          h(
-            "div",
-            { class: "upd-acts" },
-            button(
-              "Say",
-              () => {
-                target = cards()[0]!;
-                paint(el);
-                el.querySelector<HTMLTextAreaElement>(".say-text")?.focus();
-              },
-              "upd-say",
-              false,
-              "updates.pile.say",
-            ),
-          ),
-      );
-    };
-    openSheet(
-      thread,
-      {
-        mount: (el) => {
-          paint(el);
-          stop = subscribe(() => paint(el));
-        },
-        unmount: () => stop?.(),
-      },
-      "Close",
-      seen,
-      { className: "update-sheet", use: "updates.thread" },
-    );
-    // Close takes the focus, which scrolls a long thread to its foot: it opens on its newest card.
-    document.querySelector(".update-sheet")?.scrollTo({ top: 0 });
-  };
-  if (!need.chat) return sheet();
-  const current = sameSession();
-  void openThingFor(need.chat, need.repo).then((found) => {
-    if (!found && current()) sheet();
-  });
+function seenTogether(need: ServedNeed): ServedNeed[] {
+  const now = Date.now();
+  const open = new Set(updateCards().map((one) => one.id));
+  const rest = threadUpdates(threadKey(need.thread)).filter((one) => one.id !== need.id && one.since !== undefined && isToday(one.since, now) && open.has(one.id) && !app.held.has(one.id));
+  return [need, ...rest];
+}
+
+function seenButton(need: ServedNeed, className: string): HTMLElement {
+  const cards = seenTogether(need);
+  // A typed note holds the redraw (decide-sheet.ts paint), so the tap marks only the cards this button counted.
+  const shown = new Set(cards.map((one) => one.id));
+  return sending(button([svg(ICONS.yes, "btn-icon"), cards.length > 1 ? `Seen all ${cards.length}` : "Seen"], () => seenPile(seenTogether(need).filter((one) => shown.has(one.id))), className, false, "updates.pile.seen"));
 }
 
 /** A thread's update cards on the board, seen ones too, newest first. */
@@ -633,6 +563,7 @@ function threadUpdates(key: string): ServedNeed[] {
 function seenPile(cards: readonly ServedNeed[]): void {
   const [top, ...rest] = cards as [ServedNeed, ...ServedNeed[]];
   if (!rest.length) return decide(top, "seen");
+  if (app.front === top.id) app.front = null;
   const answer = (need: ServedNeed): Answer => ({ itemId: need.id, decision: "seen", rev: need.rev });
   for (const need of cards) {
     app.held.add(need.id);
@@ -640,58 +571,6 @@ function seenPile(cards: readonly ServedNeed[]): void {
     cardAnswered(need, "seen");
   }
   hold({ need: top, answer: answer(top), rest: rest.map((need) => ({ need, answer: answer(need) })), confirm: false, verb: `Seen all ${cards.length}`, tone: "yes" });
-}
-
-function fixTag(tag: string | undefined): boolean {
-  return /\b(red|fix|fixed|failed|down)\b/i.test(tag ?? "");
-}
-
-/**
- * An update card in full: what happened, its line, its media, its PR and chat, the comments, Share. Its tag is left off
- * when it only says `head`, the sheet's name above it.
- */
-function updateCard(need: ServedNeed, head?: string): HTMLElement {
-  const card = cardState(need.id);
-  const tag = need.tag && need.tag.trim().toLowerCase() !== head?.trim().toLowerCase() ? need.tag : null;
-  const meta = need.pr ? [h("b", {}, `#${need.pr}`)] : [];
-  const links = (need.links ?? []).filter((link) => isHttps(link.url));
-  return h(
-    "article",
-    { class: "upd box", attrs: { "data-need": need.id, "data-rev": need.rev, "aria-label": need.title } },
-    h(
-      "div",
-      { class: "upd-head" },
-      tag ? h("span", { class: fixTag(tag) ? "upd-tag fix" : "upd-tag" }, tag) : null,
-      h("span", { class: "upd-age", attrs: need.since ? { "data-since": need.since } : {} }, maybeWhen(need.since) ?? ""),
-    ),
-    h("h3", { class: "upd-title" }, need.title),
-    need.ask ? h("p", { class: "upd-line" }, ...updText(need.ask)) : null,
-    need.media ? cardMedia(need.id, need.media, need.title) : null,
-    meta.length ? h("p", { class: "upd-meta" }, ...meta) : null,
-    links.length
-      ? h(
-          "div",
-          { class: "card-links" },
-          ...links.map(cardLink),
-        )
-      : null,
-    ...(need.comments ?? []).map((note) =>
-      h("p", { class: note.from === "rivet" ? "upd-note h" : "upd-note" }, h("b", {}, note.from === "rivet" ? `${agentName()}: ` : "You: "), ...linkify(note.text)),
-    ),
-    card.error ? h("p", { class: "card-error box", attrs: { role: "alert" } }, card.error) : null,
-    keyed(cardShareButton(need, "upd-share-solo"), `share-${need.id}`),
-  );
-}
-
-/**
- * An update's text as written: its line breaks and blank lines kept (pre-wrap, like a question card's), and each "• "
- * line a list line, its wrap hung under its text. No markdown.
- */
-function updText(text: string): Child[] {
-  return text.split("\n").flatMap((line, index) => [
-    ...(index ? ["\n"] : []),
-    ...(line.startsWith("• ") ? [h("span", { class: "upd-li" }, ...linkify(line))] : linkify(line)),
-  ]);
 }
 
 export function openConversation(id: string): void {
@@ -769,9 +648,6 @@ export const cardOnItsWay = () => cardsOnTheirWay > 0;
 
 function showCardNow(id: string, picked: boolean): void {
   const mine = ++opens;
-  // An update card is not in the deck: it opens on its own, over the tab the owner is on.
-  const update = app.board?.board?.needs.find((need) => need.id === id && isUpdate(need));
-  if (update) return openUpdate(update);
   frontCard(id);
   if (picked) unminimise(id);
   segment = "needs";
@@ -937,6 +813,7 @@ function actionBar(need: ServedNeed): HTMLElement {
       h("div", { class: "pick-row n1" }, sending(button([svg(ICONS.yes, "btn-icon"), "Done"], () => afterVoice(() => decide(need, "done")), "pick yes", false, "cards.todo.done"))),
     );
   }
+  if (isUpdate(need)) return h("div", { class: "actions", attrs: { "data-need": need.id, "data-rev": need.rev } }, say, h("div", { class: "pick-row n1" }, seenButton(need, "pick yes")));
   if (isPlan(need)) {
     return h(
       "div",
@@ -1024,6 +901,7 @@ function act(need: ServedNeed, action: Action): void {
   // A todo is Done, minimised or rejected; never approved.
   if (isTodo(need) && action === "approve") return flash("Do the steps, then tap Done", "warn");
   if (action === "approve" && !canApprove(need)) return noBareApprove(need);
+  if (action === "reject" && isUpdate(need)) return;
   // A recording in the say-line is written down first, so the popup opens with all of its words.
   if (action === "reject") return afterVoice(() => openRejectSheet(need));
   if (action !== "skip") return decide(need, action);
@@ -1115,7 +993,7 @@ function undo(): void {
   opens++;
   frontCard(entry.need.id);
   // The home screen came back after the cheer with this toast still up: the answer taken back reopens its card.
-  if (entry.answer && !isUpdate(entry.need) && isDesk() && app.tab === "progress") app.tab = "cards";
+  if (entry.answer && isDesk() && app.tab === "progress") app.tab = "cards";
   const previous = queue.current;
   if (previous) toastFor(previous);
   unlockTaps();
@@ -1174,8 +1052,8 @@ async function send(need: ServedNeed, answer: Answer, confirm: boolean): Promise
     // The home screen back after the last card's cheer, or a phone's sheet closed on its last answer: Decide opens again on
     // the card, so "back on top" is where the owner looks; off the home screen (Chat, Readings) the toast says where it is.
     // On Open, not the Answered side a closed sheet left saved, which would hide the card behind today's answers.
-    if (!decideUp() && !isUpdate(need) && app.tab === "progress") [app.tab, segment] = ["cards", "needs"];
-    const where = decideUp() || app.tab === "cards" || isUpdate(need) ? "" : " in Decide";
+    if (!decideUp() && app.tab === "progress") [app.tab, segment] = ["cards", "needs"];
+    const where = decideUp() || app.tab === "cards" ? "" : " in Decide";
     if (failure === "changed") {
       card.error = "This card changed; look again.";
       flash(`That card changed. Look again${where}.`, "error");
@@ -1329,6 +1207,8 @@ function deskActions(need: ServedNeed): HTMLElement {
   const todo = isTodo(need);
   const picks = todo
     ? [sending(button([svg(ICONS.yes, "btn-icon"), "Done"], () => decide(need, "done"), "pick yes", false, "cards.todo.done"))]
+    : isUpdate(need)
+    ? [seenButton(need, "pick yes")]
     : options.length && !barHoldsAll(options)
     ? [toAnswers(need)]
     : options.length

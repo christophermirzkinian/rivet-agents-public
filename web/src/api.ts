@@ -3,6 +3,10 @@ import { startAuthentication, startRegistration } from "@simplewebauthn/browser"
 import type { AnsweredResponse, Reopen } from "../../src/shared/answered.js";
 import type { Ask, AsksResponse } from "../../src/shared/asks.js";
 import type { BacklogIssueResponse, BacklogResponse, BacklogStart, IssueWriteState } from "../../src/shared/backlog.js";
+import { CHAT_SEND_DELAY_PATH, type BehaviourRow, type BehavioursResponse, type BehaviourValue } from "../../src/shared/behaviours.js";
+import type { ChatsLineResponse } from "../../src/shared/chats.js";
+import type { ConnectorsResponse, SigninStart, SigninStatus } from "../../src/shared/connectors.js";
+import type { DesignsRequest } from "../../src/shared/designs.js";
 import type { BoardResponse, Decision, FileRef, FileType, PushConfigResponse, Reply, ServedNeed, StatusResponse } from "../../src/shared/board.js";
 import type { OpsDismissal, OpsDismissalsResponse } from "../../src/shared/ops-dismiss.js";
 import type { OpsStatusKind, OpsStatusResponse } from "../../src/shared/ops-status.js";
@@ -12,7 +16,7 @@ import type { MindNodeResponse, MindResponse, MindSearchResponse } from "../../s
 import type { SearchItem } from "../../src/shared/search.js";
 import type { Summary } from "../../src/shared/summary.js";
 import type { CardThreadsResponse } from "../../src/shared/threads.js";
-import type { AuditEntry, ChatMessage } from "../../src/shared/command.js";
+import type { AuditEntry, ChatMessage, ChatSendDelay } from "../../src/shared/command.js";
 import type { ModelPicks, ModelSettingsResponse } from "../../src/shared/models.js";
 import type { UsageAsk, UsageDevice, UsageReport } from "../../src/shared/usage-ids.js";
 import type { WorkersResponse } from "../../src/shared/workers.js";
@@ -226,6 +230,7 @@ export const pushTest = () => call<{ sent: number; removed: number; skipped?: st
 
 export const getWorkers = () => call<WorkersResponse>("GET", "/api/workers");
 export const getSummary = () => call<Summary>("GET", "/api/summary");
+export const getChats = () => call<ChatsLineResponse>("GET", "/api/chats");
 /** More › What you used, counted for one device. */
 export const getUsageReport = (device: UsageDevice) => call<UsageReport>("GET", `/api/usage/report?device=${device}`);
 /** Retire? or Rework? tapped: the server makes the card. */
@@ -245,11 +250,17 @@ export const startBacklogIssue = (repo: string, issue: number, clientId: string)
 /** Close as not needed, with a comment; a second Close gets the first. */
 export const closeBacklogIssue = (repo: string, issue: number, clientId: string) =>
   call<{ close: IssueWriteState }>("POST", "/api/backlog/close", { repo, issue, clientId });
+/** "3 designs": one ask per card or screen and a line to Rivet. A retry with the same clientId is safe. */
+export const postDesigns = (body: DesignsRequest) => call<{ ask: string; already: boolean }>("POST", "/api/designs", body);
 export const getCardThreads = () => call<CardThreadsResponse>("GET", "/api/card-threads");
 export const getOps = () => call<OpsResponse>("GET", "/api/ops");
 export const getOpsStatuses = (signal: AbortSignal) => call<OpsStatusResponse>("GET", "/api/ops/status", undefined, false, signal);
 export const getOpsDismissals = (signal: AbortSignal) => call<OpsDismissalsResponse>("GET", "/api/ops/dismissals", undefined, false, signal);
 export const getOwnerHolds = (signal: AbortSignal) => call<OwnerHoldsResponse>("GET", "/api/ops/holds", undefined, false, signal);
+export const getConnectors = (signal: AbortSignal) => call<ConnectorsResponse>("GET", "/api/connectors", undefined, false, signal);
+export const startSignin = (start: SigninStart) => call<SigninStatus>("POST", "/api/connectors/signin", start);
+export const getSignin = (id: string) => call<SigninStatus>("GET", `/api/connectors/signin?id=${encodeURIComponent(id)}`);
+export const sendSigninCode = (id: string, code: string) => call<SigninStatus>("POST", "/api/connectors/signin/code", { id, code });
 const dismissPath = (kind: OpsStatusKind, key: string) => `/api/ops/dismissals/${kind}/${encodeURIComponent(key)}`;
 export const putOpsDismissal = (kind: OpsStatusKind, key: string, mark: string) => call<OpsDismissal>("PUT", dismissPath(kind, key), { mark });
 export const deleteOpsDismissal = (kind: OpsStatusKind, key: string) => call<{ ok: true }>("DELETE", dismissPath(kind, key));
@@ -260,6 +271,11 @@ export const getTimeline = () => call<TimelineResponse>("GET", "/api/ops/timelin
 export const getBriefing = (id?: string) => call<{ briefing: Briefing | null }>("GET", `/api/briefing${id === undefined ? "" : `?id=${encodeURIComponent(id)}`}`);
 export const searchHistory = (query: string) => call<{ results: SearchItem[] }>("GET", `/api/ops/search?q=${encodeURIComponent(query)}`);
 export const getModelSettings = () => call<ModelSettingsResponse>("GET", "/api/settings/models");
+export const getBehaviours = () => call<BehavioursResponse>("GET", "/api/behaviours");
+export const putBehaviour = (id: string, value: BehaviourValue) => call<BehaviourRow>("PUT", `/api/behaviours/${encodeURIComponent(id)}`, value);
+/** Read as unknown: the route belongs to the send delay, and Behaviours checks the answer against its own copy of the schema. */
+export const getChatSendDelay = () => call<unknown>("GET", CHAT_SEND_DELAY_PATH);
+export const putChatSendDelay = (value: ChatSendDelay) => call<unknown>("PUT", CHAT_SEND_DELAY_PATH, value);
 /** Every job's pick, whole, over the save `base` the screen saw; the action's ack says whether the Mac wrote it. */
 export const postModels = (clientId: string, jobs: ModelPicks, base: string | null) => call<AuditEntry>("POST", "/api/actions/models", { clientId, jobs, base });
 

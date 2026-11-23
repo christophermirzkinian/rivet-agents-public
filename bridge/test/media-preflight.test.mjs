@@ -6,7 +6,7 @@ import { test } from "node:test";
 
 import { PAD_GREY, SIDE } from "../lib/clip-check.mjs";
 import { makeExec, resolveBin } from "../lib/config.mjs";
-import { blankFrame, blankImage, composite, displayedSize, frameSpread, parseViewport, preflight } from "../lib/media-preflight.mjs";
+import { blankFrame, blankImage, composite, displayedSize, EDGE_WIDTH, edgeStripe, frameSpread, parseViewport, preflight } from "../lib/media-preflight.mjs";
 import { run } from "../../scripts/rivet.mjs";
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "rivet-preflight-test-"));
@@ -100,10 +100,10 @@ test("a flat frame is blank and a page is not", () => {
 test("an H.264 mp4 and a png pass", async () => {
   const fake = fakeExec({ "a.mp4": {}, "s.png": {} });
   const r = await check([{ role: "after", file: file("a.mp4") }, { role: "still", file: file("s.png") }], fake);
-  assert.deepEqual(r, { ok: true, problems: [] });
+  assert.deepEqual(r, { ok: true, problems: [], warnings: [] });
   assert.ok(fake.calls.some((c) => c.includes("stream=codec_name,width,height,pix_fmt:stream_side_data=rotation:stream_tags=rotate:format=duration,format_name")));
   const decodes = fake.calls.filter((c) => c[0] === "/fake/ffmpeg");
-  assert.equal(decodes.length, 2);
+  assert.equal(decodes.length, 4, "each file decoded once for the checks and once for the edge");
   for (const c of decodes) assert.equal(c[c.indexOf("-map") + 1], "0:v:0", "decodes the stream ffprobe probed");
 });
 
@@ -129,7 +129,7 @@ test("sizes are the displayed size, after the stream's rotation", async () => {
   assert.deepEqual(displayedSize({ width: 640, height: 320, side_data_list: [{ rotation: 0 }] }, { side_data_list: [{ rotation: -90 }] }), { width: 640, height: 320 });
   const fake = fakeExec({ "b.mp4": { width: 1688, height: 780, rotation: 90 }, "a.mp4": {}, "turned.mp4": { width: 1688, height: 780, rotate: "90" }, "flat.mp4": { width: 1688, height: 780 } });
   const viewport = { width: 390, height: 844 };
-  assert.deepEqual(await check([{ role: "before", file: file("b.mp4") }, { role: "after", file: file("a.mp4") }], fake, { viewport }), { ok: true, problems: [] });
+  assert.deepEqual(await check([{ role: "before", file: file("b.mp4") }, { role: "after", file: file("a.mp4") }], fake, { viewport }), { ok: true, problems: [], warnings: [] });
   const r = await check([{ role: "before", file: file("turned.mp4") }, { role: "after", file: file("flat.mp4") }], fake);
   assert.deepEqual(r.problems, ["before turned.mp4 is 780x1688 but after flat.mp4 is 1688x780; record both at the same size"]);
 });
@@ -166,7 +166,7 @@ test("refuses HEVC, wrong pixel format, short, oversize and webm", async () => {
     "big.mp4: 26.0 MB, over the 25 MB limit",
     "w.webm: not H.264 mp4; a phone may not play it (re-encode to mp4, or add --allow-webm)",
   ]);
-  assert.deepEqual(await check([{ role: "video", file: file("w.webm") }], fake, { allowWebm: true }), { ok: true, problems: [] });
+  assert.deepEqual(await check([{ role: "video", file: file("w.webm") }], fake, { allowWebm: true }), { ok: true, problems: [], warnings: [] });
 });
 
 test("refuses a blank first frame, a blank still and grey padding", async () => {
@@ -184,7 +184,7 @@ test("refuses a blank first frame, a blank still and grey padding", async () => 
   assert.match(r.problems[0], /^blank\.mp4: the first frame is blank/);
   assert.match(r.problems[1], /^blank\.png: the image is blank/);
   assert.match(r.problems[2], /^pad\.mp4: the page sits in the top-left corner, with grey padding along the right edge/);
-  assert.deepEqual(await check([{ role: "video", file: file("pad.mp4") }], fake, { skipCorner: true }), { ok: true, problems: [] });
+  assert.deepEqual(await check([{ role: "video", file: file("pad.mp4") }], fake, { skipCorner: true }), { ok: true, problems: [], warnings: [] });
 });
 
 test("before and after must be the same size", async () => {
@@ -199,7 +199,7 @@ test("--viewport takes exact multiples at DPR 1 to 4", async () => {
   const viewport = { width: 390, height: 844 };
   const fake = fakeExec({ "one.mp4": { width: 390, height: 844 }, "three.png": { width: 1170, height: 2532 }, "off.png": { width: 1200, height: 2532 }, "five.mp4": { width: 1950, height: 4220 } });
   const ok = await check([{ role: "video", file: file("one.mp4") }, { role: "still", file: file("three.png") }], fake, { viewport });
-  assert.deepEqual(ok, { ok: true, problems: [] });
+  assert.deepEqual(ok, { ok: true, problems: [], warnings: [] });
   const r = await check([{ role: "still", file: file("off.png") }, { role: "video", file: file("five.mp4") }], fake, { viewport });
   assert.deepEqual(r.problems, [
     "off.png: 1200x2532 is not the 390x844 viewport at DPR 1 to 4; expected 390x844, 780x1688, 1170x2532 or 1560x3376",
@@ -220,9 +220,54 @@ test("fails closed without ffprobe or ffmpeg", async () => {
     },
     calls: [],
   });
-  assert.deepEqual(enoent, { ok: false, problems: ["ffprobe could not run: media is not sent unchecked (brew install ffmpeg)"] });
+  assert.deepEqual(enoent, { ok: false, warnings: [], problems: ["ffprobe could not run: media is not sent unchecked (brew install ffmpeg)"] });
   const unreadable = await check([{ role: "video", file: file("junk.mp4") }], fake);
   assert.deepEqual(unreadable.problems, ["junk.mp4: ffprobe cannot read it (Invalid data found when processing input)"]);
+});
+
+/**
+ * A dark page EDGE_WIDTH wide with one box drawn on it: `paint(x, y)` gives a pixel's colour, or null for the page.
+ * @param {number} height @param {(x: number, y: number) => number[] | null} paint
+ */
+function darkPage(height, paint) {
+  const rgb = Buffer.alloc(EDGE_WIDTH * height * 3);
+  for (let y = 0; y < height; y++) for (let x = 0; x < EDGE_WIDTH; x++) rgb.set(paint(x, y) ?? [24, 24, 28], (y * EDGE_WIDTH + x) * 3);
+  return rgb;
+}
+const BOX = (/** @type {number} */ x, /** @type {number} */ y) => x >= 40 && x < 372 && y >= 100 && y < 220;
+const ACCENT = [230, 160, 20];
+
+test("edgeStripe finds a thick coloured line on a box's edge, and nothing in a plain box, a button or a 1px line", () => {
+  const box = (/** @type {number} */ x, /** @type {number} */ y) => (BOX(x, y) ? [44, 44, 50] : null);
+  assert.ok(edgeStripe(darkPage(320, (x, y) => (BOX(x, y) && x < 46 ? ACCENT : box(x, y))), EDGE_WIDTH, 320), "a 6px left accent");
+  assert.ok(edgeStripe(darkPage(320, (x, y) => (BOX(x, y) && x >= 368 ? ACCENT : box(x, y))), EDGE_WIDTH, 320), "a 4px right accent");
+  assert.ok(!edgeStripe(darkPage(320, box), EDGE_WIDTH, 320), "a plain box");
+  assert.ok(!edgeStripe(darkPage(320, (x, y) => (BOX(x, y) && x >= 60 && x < 200 ? [40, 120, 230] : box(x, y))), EDGE_WIDTH, 320), "a wide coloured button");
+  assert.ok(!edgeStripe(darkPage(320, (x, y) => (BOX(x, y) && x === 40 ? ACCENT : box(x, y))), EDGE_WIDTH, 320), "a 1px line");
+  assert.ok(!edgeStripe(darkPage(320, (x, y) => (BOX(x, y) && y < 130 && x < 46 ? ACCENT : box(x, y))), EDGE_WIDTH, 320), "a short coloured mark");
+});
+
+test("a thick coloured edge is a warning: the media still passes", async () => {
+  const stripe = darkPage(900, (x, y) => (BOX(x, y) && x < 46 ? ACCENT : BOX(x, y) ? [44, 44, 50] : null));
+  const fake = fakeExec({ "accent.png": {} });
+  /** @type {import("../lib/config.mjs").Exec} */
+  const exec = async (bin, args) => {
+    if (bin.endsWith("ffmpeg") && args.includes(`scale=${EDGE_WIDTH}:-2`)) {
+      fs.writeFileSync(/** @type {string} */ (args.at(-1)), stripe);
+      return { stdout: "", stderr: "" };
+    }
+    return fake.exec(bin, args);
+  };
+  const r = await check([{ role: "still", file: file("accent.png") }], { exec, calls: [] });
+  assert.deepEqual(r, { ok: true, problems: [], warnings: ["accent.png: looks like a thick coloured line on one edge of a box; check the still"] });
+  const card = await cli(["media", "check", file("accent.png")], { exec });
+  assert.equal(card.code, 0, card.stderr);
+  assert.match(card.stderr, /rivet: warning: accent\.png: looks like a thick coloured line/);
+  const failing = async (/** @type {string} */ bin, /** @type {string[]} */ args) => {
+    if (bin.endsWith("ffmpeg") && args.includes(`scale=${EDGE_WIDTH}:-2`)) throw new Error("ffmpeg exit 1");
+    return fake.exec(bin, args);
+  };
+  assert.deepEqual(await check([{ role: "still", file: file("accent.png") }], { exec: failing, calls: [] }), { ok: true, problems: [], warnings: [] }, "an edge frame that will not decode is skipped");
 });
 
 /** @param {string[]} argv @param {Partial<import("../../scripts/rivet.mjs").Deps>} deps */
@@ -304,7 +349,7 @@ test("a real testsrc clip passes and a flat grey one is blank", { skip: !ffmpeg 
   const busy = await make("busy.mp4", "testsrc=decimals=0");
   const grey = await make("grey.mp4", "color=c=0x404040");
   const opts = { exec, ffprobe, ffmpeg, tmpdir: TMP };
-  assert.deepEqual(await preflight([{ role: "before", file: busy }], opts), { ok: true, problems: [] });
+  assert.deepEqual(await preflight([{ role: "before", file: busy }], opts), { ok: true, problems: [], warnings: [] });
   const r = await preflight([{ role: "after", file: grey }], opts);
   assert.deepEqual(r.problems, ["grey.mp4: the first frame is blank (one flat colour); start the clip after the page has painted"]);
 
@@ -314,7 +359,7 @@ test("a real testsrc clip passes and a flat grey one is blank", { skip: !ffmpeg 
     () => true,
     () => false,
   );
-  if (rotates) assert.deepEqual(await preflight([{ role: "before", file: turned }], { ...opts, viewport: { width: 320, height: 160 } }), { ok: true, problems: [] });
+  if (rotates) assert.deepEqual(await preflight([{ role: "before", file: turned }], { ...opts, viewport: { width: 320, height: 160 } }), { ok: true, problems: [], warnings: [] });
 
   // A jpg coded 640x320 with EXIF Orientation 6 shows as 320 wide by 640 tall. The APP1 segment is written by hand: no exiftool.
   const coded = path.join(TMP, "coded.jpg");
@@ -324,7 +369,7 @@ test("a real testsrc clip passes and a flat grey one is blank", { skip: !ffmpeg 
   const jpg = fs.readFileSync(coded);
   const oriented = path.join(TMP, "oriented.jpg");
   fs.writeFileSync(oriented, Buffer.concat([jpg.subarray(0, 2), Buffer.from([0xff, 0xe1, (app1.length + 2) >> 8, (app1.length + 2) & 255]), app1, jpg.subarray(2)]));
-  assert.deepEqual(await preflight([{ role: "still", file: oriented }], { ...opts, viewport: { width: 320, height: 640 } }), { ok: true, problems: [] });
+  assert.deepEqual(await preflight([{ role: "still", file: oriented }], { ...opts, viewport: { width: 320, height: 640 } }), { ok: true, problems: [], warnings: [] });
 
   const clear = path.join(TMP, "clear.png");
   await exec(ffmpeg, ["-v", "error", "-nostdin", "-f", "lavfi", "-i", "testsrc=size=64x64,format=rgba,colorchannelmixer=aa=0", "-frames:v", "1", "-y", clear], { timeout: 60_000 });

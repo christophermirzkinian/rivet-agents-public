@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { coverLines, redactCutTop, redactLine, redactLines, redactText } from "../lib/redact.mjs";
 import { redactKeepingLines } from "../lib/redact-cut.mjs";
+import { assertLinear } from "./linear-time.mjs";
 
 // Telling a sentence from a key needs regex modifiers, which came in Node 23. Node 22 hides the sentence too, which is
 // the safe way round, so these cases, which expect the sentence kept, run on Node 23 and later.
@@ -93,17 +94,7 @@ test("a secret's name inside a URL's password does not leave the password while 
   assert.deepEqual(read(["https://u:hunter2@host TOKEN=[", "next"]), ["https://[redacted]@host TOKEN= [redacted]", "[redacted]"]);
   assert.deepEqual(read(["https://u:hunter2TOKEN=foo@host", "next"]), ["https://[redacted]@host", "next"]);
   // The run around the cut is found in linear time on a long line.
-  const cpuMs = () => {
-    const { user, system } = process.cpuUsage();
-    return (user + system) / 1000;
-  };
-  let fastest = Infinity;
-  for (let i = 0; i < 3; i += 1) {
-    const start = cpuMs();
-    read(["a".repeat(80_000) + " https://u:hunter2TOKEN=x@h TOKEN=["]);
-    fastest = Math.min(fastest, cpuMs() - start);
-  }
-  assert.ok(fastest < 300, `took ${Math.round(fastest)}ms`);
+  assertLinear((line) => read([line]), (k) => "a".repeat(80_000 * k) + " https://u:hunter2TOKEN=x@h TOKEN=[", "aaaa… https://u:hunter2TOKEN=x@h TOKEN=[");
 });
 
 test("a command's password flag with an open quote covers the rows until it closes", () => {
@@ -173,43 +164,24 @@ test("an IP address written with escapes is withheld, as its plain spelling is c
 });
 
 test("a long line of password flags or address-shaped escapes is read in linear time", () => {
-  // CPU time, not the wall clock: a loaded runner stalls a run, a quadratic read costs the CPU it always did.
-  const cpuMs = () => {
-    const { user, system } = process.cpuUsage();
-    return (user + system) / 1000;
-  };
-  for (const line of ["mysql " + "-p ".repeat(8000), "mysql " + '-p"a '.repeat(3000), "mysql " + "-p$( ".repeat(4000), "mysql -h redis-cli " + "-a ".repeat(8000), "redis-cli " + "-a ".repeat(8000), "password: " + "ab ".repeat(10_000), "mysql -pfoo ".repeat(8000) + "-a ".repeat(8000), 'mysql "'.repeat(8000), "mysql " + '\\"'.repeat(8000), "mysql " + `'"`.repeat(8000)]) {
-    let fastest = Infinity;
-    for (let i = 0; i < 3; i++) {
-      const start = cpuMs();
-      read([line, "next"]);
-      fastest = Math.min(fastest, cpuMs() - start);
-    }
-    assert.ok(fastest < 150, `${line.slice(0, 20)}… took ${Math.round(fastest)}ms`);
+  for (const line of [(k) => "mysql " + "-p ".repeat(8000 * k), (k) => "mysql " + '-p"a '.repeat(3000 * k), (k) => "mysql " + "-p$( ".repeat(4000 * k), (k) => "mysql -h redis-cli " + "-a ".repeat(8000 * k), (k) => "redis-cli " + "-a ".repeat(8000 * k), (k) => "password: " + "ab ".repeat(10_000 * k), (k) => "mysql -pfoo ".repeat(8000 * k) + "-a ".repeat(8000 * k), (k) => 'mysql "'.repeat(8000 * k), (k) => "mysql " + '\\"'.repeat(8000 * k), (k) => "mysql " + `'"`.repeat(8000 * k)]) {
+    assertLinear((text) => read([text, "next"]), line, `${line(1).slice(0, 20)}…`);
   }
 });
 
 test("a line of many secrets' values or a long blank run is read in linear time, and still redacted", () => {
-  const cpuMs = () => {
-    const { user, system } = process.cpuUsage();
-    return (user + system) / 1000;
-  };
   const lines = [
-    ...["TOKEN=[".repeat(6000), 'TOKEN="'.repeat(6000), "TOKEN=`".repeat(6000), " --password=[".repeat(6000), "password: a" + " ".repeat(20_000) + "#", "a" + "\t".repeat(20_000) + "b"],
+    ...[(k) => "TOKEN=[".repeat(6000 * k), (k) => 'TOKEN="'.repeat(6000 * k), (k) => "TOKEN=`".repeat(6000 * k), (k) => " --password=[".repeat(6000 * k), (k) => "password: a" + " ".repeat(20_000 * k) + "#", (k) => "a" + "\t".repeat(20_000 * k) + "b"],
     // Values that close: each secret's regex read only its value's start, not the line's end.
-    ...["TOKEN=x ".repeat(32_000), " --password=x".repeat(20_000), "token: x, ".repeat(25_000)],
+    ...[(k) => "TOKEN=x ".repeat(32_000 * k), (k) => " --password=x".repeat(20_000 * k), (k) => "token: x, ".repeat(25_000 * k)],
     // Every flag's value has a line break in it (an escaped U+2028) but the last's, which each gives way to: kept once.
-    "-pass x ".repeat(500) + "\\u2028 -pass " + "$( ".repeat(500),
+    (k) => "-pass x ".repeat(500 * k) + "\\u2028 -pass " + "$( ".repeat(500 * k),
   ];
   for (const line of lines) {
-    let fastest = Infinity;
-    for (let i = 0; i < 3; i++) {
-      const start = cpuMs();
-      read([line, "next"]);
-      redactLine(line, HOME);
-      fastest = Math.min(fastest, cpuMs() - start);
-    }
-    assert.ok(fastest < 300, `${line.slice(0, 20)}… took ${Math.round(fastest)}ms`);
+    assertLinear((text) => {
+      read([text, "next"]);
+      redactLine(text, HOME);
+    }, line, `${line(1).slice(0, 20)}…`);
   }
   // Past the budget the line overflows: its values go and the log is held.
   assert.deepEqual(read(["TOKEN=[a".repeat(6000), "hunter2"]), ["TOKEN= [redacted]", "[redacted]"]);

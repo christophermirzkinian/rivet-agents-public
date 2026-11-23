@@ -37,13 +37,11 @@ const MORE_SCREENS: Record<string, string> = {
   machines: "more.machines",
   home: "more.home",
   media: "more.media",
+  connectors: "more.connectors",
   settings: "more.settings",
   "what-you-used": "more.what-you-used",
-  code: "ops.code",
 };
 const CARDS_SCREENS: Record<Where["cards"], string> = { needs: "cards", done: "answered" };
-/** The long part of a page whose scroll is its depth: Code is its Timeline. */
-const DEPTH_OF: Record<string, string> = { "ops.code": "ops.timeline" };
 /** A sheet that shows the screen under it: on a phone a menu page's sheet is the More tab, so the page is on top. */
 const SHOWS: Record<string, string> = { "floor.page": "floor" };
 /** The long views a sheet shows besides its own: Decide shows Answered, Rivet's sheet the Chat. */
@@ -205,7 +203,7 @@ export function cardAnswered(need: { id: string; kind: string }, outcome: Outcom
  * The nearest watched holder names it. One event per visit: sent when the screen under the sheets changes, or for a
  * sheet's own view when the sheet goes.
  */
-export function watchDepth(holder: Element, name: () => string | null = () => (base ? (DEPTH_OF[base.id] ?? base.id) : null)): void {
+export function watchDepth(holder: Element, name: () => string | null = () => base?.id ?? null): void {
   if (!on || watched.has(holder)) return;
   watched.add(holder);
   holder.addEventListener(

@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { logFeed } from "../src/shared/log-feed.js";
 import { when } from "../src/shared/when.js";
-import { NEEDS_YOU, noTimeYet } from "../src/shared/words.js";
+import { noTimeYet } from "../src/shared/words.js";
 
 import { MAX_CHAT_TEXT, type AuditEntry, type ChatMessage, type ChatPage } from "../src/shared/command.js";
 import type { SearchItem } from "../src/shared/search.js";
@@ -411,6 +411,8 @@ describe("chat tab", () => {
     expect(chat.collectBarWidth([line("2026-11-16T04:00:06.400Z")], now)).toBeCloseTo(64);
     expect(chat.collectBarWidth([line("2026-11-16T04:00:30.000Z")], now)).toBe(100);
     expect(chat.collectBarWidth([line("2026-11-16T03:59:58.000Z")], now)).toBe(0);
+    // A 3 s Send delay drains from its own 3 s: half gone at 1.5 s left, not 85%.
+    expect(chat.collectBarWidth([{ ...line("2026-11-16T04:00:01.500Z"), windowMs: 3_000 }], now)).toBeCloseTo(50);
   });
 
   it("Cancel never doubles words still in the box (a send whose answer was lost), and asks once more when its own answer is lost", async () => {
@@ -1996,6 +1998,16 @@ describe("worker sheet", () => {
     expect([...document.querySelectorAll(".cmd-worker-sheet button")].map((b) => b.textContent)).not.toContain("Pause");
     const foot = document.querySelector(".cmd-worker-sheet > .cmd-worker-foot")!;
     expect([...foot.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Close"]);
+  });
+
+  it("has no Move control, live or offline: a chat is not moved between projects here", () => {
+    for (const options of [{}, { offline: true }]) {
+      openWorkerSheet(worker, options);
+      const sheet = document.querySelector(".cmd-worker-sheet")!;
+      expect([sheet.querySelector('[data-use*="move"]'), sheet.querySelector('[aria-label^="Move"]')]).toEqual([null, null]);
+      expect([...sheet.querySelectorAll("button")].map((b) => b.textContent)).not.toContain("Move");
+      closeWorkerSheet();
+    }
   });
 
   it("shows the live log as a feed, newest first with its time, and Show raw brings back the redacted lines", async () => {

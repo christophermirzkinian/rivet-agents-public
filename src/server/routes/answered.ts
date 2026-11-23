@@ -63,7 +63,7 @@ export function register(router: Router): void {
     const asks = store.cardAsks(kept.map(({ card }) => card));
     const cards = kept.map((entry) => {
       const ask = answeredAsk(entry.reply, asks.get(entry.card.id) ?? null);
-      // With an ask, its state alone says done, whatever merged or was answered: under way and called off are not (GitHub sweep idea 3, 15 Nov).
+      // With an ask, its state alone says done, whatever merged or was answered: under way and called off are not.
       const done = ask ? ask.state === "done" : answeredDone(entry, facts);
       return { ...entry, ...(done ? { done: true as const } : {}), ...(ask ? { ask } : {}) };
     });

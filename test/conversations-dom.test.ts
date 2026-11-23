@@ -541,7 +541,7 @@ describe("a thing's lines in Chat", () => {
     expect(bubble().querySelector(".chat-card-open")!.textContent).toBe("Open card");
   });
 
-  it("Rivet's Card: line (say.mjs --card) opens its update card, which is in no deck; it says no 'from a card'", async () => {
+  it("Rivet's Card: line (say.mjs --card) opens its update card on Cards like any card; it says no 'from a card'", async () => {
     server.messages.push(rivet("h9", "g1", 45, { text: "Card: Billing deployed ›", card: "upd-1" }));
     await onChat();
     const bubble = () => root.querySelector<HTMLElement>('.chat-msg[data-id="h9"]')!;
@@ -549,7 +549,7 @@ describe("a thing's lines in Chat", () => {
     board([{ id: "upd-1", kind: "update", title: "Billing deployed", thread: "Billing", rev: "r1", since: at(45) } as unknown as ServedNeed]);
     await settle();
     bubble().querySelector<HTMLButtonElement>(".chat-card-open")!.click();
-    expect(app.tab).toBe("progress");
+    expect([app.tab, app.front]).toEqual(["cards", "upd-1"]);
   });
 
   it("Rivet's Card: line is in Chat too, and is itself one tap to its card", async () => {
@@ -562,7 +562,7 @@ describe("a thing's lines in Chat", () => {
     await settle();
     expect(line().tagName).toBe("BUTTON");
     line().click();
-    expect(app.tab).toBe("progress");
+    expect([app.tab, app.front]).toEqual(["cards", "upd-8"]);
   });
 
   it("a card Rivet posted shows as a card bubble, with Open card while it is on the board, and is never read aloud", async () => {

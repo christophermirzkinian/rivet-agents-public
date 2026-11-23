@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { forcedLog } from "../lib/chat-guard.mjs";
 import { fixBrief, parseArgs, run } from "../../scripts/rivet.mjs";
 
 const TOKEN = "cd".repeat(32);
@@ -209,13 +210,13 @@ test("status key prints the key the app gives an item, without the server", asyn
 
 /** A chat runner in memory: its chats, what it was asked to open, and a failing or half-failing create. */
 function fakeRunner({ chats = /** @type {any[]} */ ([]), fail = /** @type {string | undefined} */ (undefined), startsAnyway = false } = {}) {
-  const made = /** @type {{ name: string, cwd: string, prompt: string }[]} */ ([]);
+  const made = /** @type {{ name: string, cwd: string, prompt: string, repo?: string, forceProject?: string | null, forceLogged?: boolean }[]} */ ([]);
   return {
     made,
     context: () => ({}),
     ps: () => chats,
     send: () => null,
-    create: (/** @type {any} */ _ctx, /** @type {{ name: string, cwd: string, prompt: string }} */ chat) => {
+    create: (/** @type {any} */ _ctx, /** @type {(typeof made)[number]} */ chat) => {
       if (fail) {
         if (startsAnyway) chats.push({ name: chat.name, status: "starting" });
         throw new Error(fail);
@@ -502,4 +503,67 @@ test("a coming key is its repo's", async () => {
   const named = await cli(["fix", "coming", "report", "--repo", "example-org/second-repo"], { env: FIX_ENV, fetch: stubServer().fetch, runner });
   assert.equal(named.code, 0, named.stderr);
   assert.match(named.stdout, /^coming second-repo\/report investigating: fix chat fix-coming-second-repo-report opened/);
+});
+
+/** A home whose work clones are two repos' projects, and RIVET_REPOS naming both. */
+function cloneHome() {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "rivet-fix-route-"));
+  for (const name of ["example-repo", "trip-planner"]) fs.mkdirSync(path.join(home, ".rivet-agents", "work", name), { recursive: true });
+  return { home, env: { ...ENV, HOME: home, RIVET_REPOS: "example-org/example-repo,example-org/trip-planner" } };
+}
+
+test("fix whose title and brief plainly name another repo's project is refused; --force-project opens it there and logs one line", async () => {
+  const { home, env } = cloneHome();
+  const bags = ["--title", "Bags", "--brief", "pack the trip planner bags"];
+  for (const more of [[], ["--repo", "example-org/example-repo"]]) {
+    const s = stubServer();
+    const runner = fakeRunner();
+    const out = await cli(["fix", "ci", "ci.yml", ...bags, ...more], { env, fetch: s.fetch, runner });
+    assert.equal(out.code, 1);
+    assert.match(out.stderr, /^rivet: This ask matches trip-planner \(.+\), not example-org\/example-repo\. Use --force-project "<reason>" to open it there anyway\.\n$/);
+    assert.deepEqual(runner.made, []);
+    assert.ok(!s.state.calls.some((call) => call.method === "PUT"));
+  }
+  // One of the other project's words is not enough to refuse.
+  assert.equal((await cli(["fix", "ci", "ci.yml", "--brief", "the trip view is slow"], { env, fetch: stubServer().fetch, runner: fakeRunner() })).code, 0);
+  const runner = fakeRunner();
+  const out = await cli(["fix", "ci", "ci.yml", ...bags, "--force-project", "the bags' CI is ours"], { env, fetch: stubServer().fetch, runner });
+  assert.equal(out.code, 0, out.stderr);
+  // The runner is told it was logged, so its own guard over the whole brief writes no second line.
+  assert.deepEqual([runner.made[0].repo, runner.made[0].forceProject, runner.made[0].forceLogged], ["example-org/example-repo", "the bags' CI is ours", true]);
+  const logged = fs.readFileSync(forcedLog(home), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  assert.deepEqual(logged, [{ time: NOW, chat: "fix-ci-ci.yml", forced: "example-org/example-repo", routed: "trip-planner", reason: "the bags' CI is ours" }]);
+  assert.throws(() => parseArgs(["fix", "ci", "x", "--force-project", " "]), usage("--force-project is one line"));
+});
+
+test("fix with no --repo opens in the repo its key's prefix names, else routes by the item's words; one it cannot place asks for --repo", async () => {
+  const { env } = cloneHome();
+  const runner = fakeRunner();
+  const named = await cli(["fix", "coming", "trip-planner/report"], { env, fetch: stubServer().fetch, runner });
+  assert.equal(named.code, 0, named.stderr);
+  assert.equal(runner.made[0].repo, "example-org/trip-planner");
+  const routed = await cli(["fix", "ci", "nowhere/build", "--brief", "pack the trip planner bags"], { env, fetch: stubServer().fetch, runner });
+  assert.equal(routed.code, 0, routed.stderr);
+  assert.equal(runner.made[1].repo, "example-org/trip-planner");
+  const s = stubServer();
+  const lost = await cli(["fix", "ci", "nowhere/build"], { env, fetch: s.fetch, runner });
+  assert.equal(lost.code, 1);
+  assert.match(lost.stderr, /^rivet: cannot tell which repo ci nowhere\/build belongs to \(.+\): give --repo, one of .+\n$/);
+  assert.ok(!s.state.calls.some((call) => call.method === "PUT"));
+  // One everyday word is not enough to pick a repo; two of a project's words are.
+  const weak = await cli(["fix", "ci", "nowhere/build", "--brief", "book a trip"], { env, fetch: s.fetch, runner });
+  assert.equal(weak.code, 1);
+  assert.match(weak.stderr, /^rivet: cannot tell which repo ci nowhere\/build belongs to \(.+\): give --repo, one of example-org\/trip-planner\n$/);
+  assert.ok(!s.state.calls.some((call) => call.method === "PUT"));
+  const two = await cli(["fix", "ci", "nowhere/build", "--brief", "book a trip for the planner"], { env, fetch: stubServer().fetch, runner });
+  assert.equal(two.code, 0, two.stderr);
+  assert.equal(runner.made[2].repo, "example-org/trip-planner");
+  // Lists that cannot be read: a warning, a key it can place without them opens, unguarded; one it cannot asks.
+  const broken = () => { throw new Error("projects file: Unexpected token"); };
+  const warned = await cli(["fix", "ci", "ci.yml", "--brief", "pack the trip planner bags"], { env, fetch: stubServer().fetch, runner, routeLists: broken });
+  assert.equal(warned.code, 0, warned.stderr);
+  assert.match(warned.stderr, /^rivet: warning: the project lists could not be read, so ci ci\.yml opens unguarded \(.*Unexpected token.*\)\n$/);
+  const blind = await cli(["fix", "ci", "nowhere/build"], { env, fetch: stubServer().fetch, runner, routeLists: broken });
+  assert.equal(blind.code, 1);
+  assert.match(blind.stderr, /cannot tell which repo ci nowhere\/build belongs to \(the project lists could not be read\): give --repo\n$/);
 });

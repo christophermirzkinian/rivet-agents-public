@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { after, before, test } from "node:test";
 import * as runner from "../../scripts/chat-runner.mjs";
+import { forcedLog } from "../lib/chat-guard.mjs";
 import { main, parseArgs, Usage } from "../../scripts/rivet-chat.mjs";
 
 const hasTmux = spawnSync("tmux", ["-V"], { stdio: "ignore" }).status === 0;
@@ -192,4 +193,83 @@ test("a hosted agent's chat starts on its first plan and, at that plan's limit, 
   assert.equal(runner.create(plain, { name: "plain", cwd: workdir }).provider, "claude");
   assert.deepEqual(await runner.limitCheck(plain, { post: () => assert.fail("no agent file posts nothing"), status: () => assert.fail("nor reads a status") }), []);
   runner.close(plain, "plain");
+});
+
+test("projectLists: RIVET_PROJECTS_FILE's list, else one project per work clone, each its RIVET_REPOS repo", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "rc-lists-"));
+  for (const name of ["trip-planner", "recipe-box"]) fs.mkdirSync(path.join(home, ".rivet-agents", "work", name), { recursive: true });
+  const lists = runner.projectLists({ RIVET_REPOS: "example-org/trip-planner" }, home);
+  assert.deepEqual(lists.projects.map((p) => [p.id, p.githubRepo]), [["recipe-box", null], ["trip-planner", "example-org/trip-planner"], ["general", null]]);
+  assert.deepEqual([lists.products, lists.worktreeRoots], [[], []]);
+  const file = path.join(home, "lists.json");
+  fs.writeFileSync(file, JSON.stringify([{ id: "notes", name: "Notes", workspaceRepo: "notes", githubRepo: "example-org/notes", folder: null, words: ["notebook"], paths: [], appOnly: false }]));
+  assert.deepEqual(runner.projectLists({ RIVET_PROJECTS_FILE: file }, home).projects.map((p) => p.id), ["notes", "general"]);
+});
+
+test("create given a repo refuses a prompt that plainly belongs to another repo's project; --force-project opens and logs it once, after the chat runs", { skip }, () => {
+  const home = fs.mkdtempSync(path.join(root, "guard-"));
+  for (const name of ["trip-planner", "recipe-box"]) fs.mkdirSync(path.join(home, ".rivet-agents", "work", name), { recursive: true });
+  const said = [];
+  const c = runner.context({ env: { ...ctx.env, HOME: home }, home, socket: "rivet-chat-test", bins: ctx.bins, log: (line) => said.push(line) });
+  const log = forcedLog(home);
+  const start = (name, more) => runner.create(c, { name, cwd: workdir, prompt: "pack the trip planner bags", repo: "example-org/recipe-box", ...more });
+  assert.throws(() => start("bags-1", {}), /^Error: rivet-chat: This ask matches trip-planner \(.+\), not example-org\/recipe-box\. Use --force-project "<reason>" to open it there anyway\.$/);
+  assert.equal(runner.readRegistry(c).chats["bags-1"], undefined);
+  assert.throws(() => start("bags-1", { forceProject: " " }), /--force-project needs a reason/);
+  start("bags-1", { forceProject: "shared bags" });
+  const lines = fs.readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  assert.deepEqual(lines.map(({ time, ...rest }) => rest), [{ chat: "bags-1", forced: "example-org/recipe-box", routed: "trip-planner", reason: "shared bags" }]);
+  // Its caller logged it; and with no repo and a cwd in no clone, or the routed repo, there is no check.
+  start("bags-2", { forceProject: "shared bags", forceLogged: true });
+  start("bags-3", { repo: undefined });
+  start("bags-4", { repo: "example-org/trip-planner" });
+  assert.equal(fs.readFileSync(log, "utf8").trim().split("\n").length, 1);
+  // A log that cannot be written never undoes the open.
+  fs.rmSync(path.dirname(log), { recursive: true });
+  fs.writeFileSync(path.dirname(log), "");
+  assert.equal(start("bags-5", { forceProject: "shared bags" }).status, "running");
+  assert.ok(said.some((line) => /bags-5's forced open was not logged/.test(line)), said.join("\n"));
+  for (const name of ["bags-1", "bags-2", "bags-3", "bags-4", "bags-5"]) runner.close(c, name);
+});
+
+test("new with no repo is guarded as the work clone its cwd is in; --force-project opens it and logs it once", { skip }, async () => {
+  const home = fs.mkdtempSync(path.join(root, "clone-"));
+  const clone = (name) => path.join(home, ".rivet-agents", "work", name);
+  for (const name of ["trip-planner", "recipe-box"]) fs.mkdirSync(path.join(clone(name), "src"), { recursive: true });
+  const c = runner.context({ env: { ...ctx.env, HOME: home }, home, socket: "rivet-chat-test", bins: ctx.bins, log: () => {} });
+  await assert.rejects(main(["new", "pack-1", "--cwd", path.join(clone("recipe-box"), "src"), "--prompt", "pack the trip planner bags"], { ctx: c, out: () => {} }), /This ask matches trip-planner \(.+\), not recipe-box\./);
+  assert.equal(runner.readRegistry(c).chats["pack-1"], undefined);
+  await main(["new", "pack-2", "--cwd", clone("trip-planner"), "--prompt", "pack the trip planner bags"], { ctx: c, out: () => {} });
+  assert.equal(runner.create(c, { name: "pack-1", cwd: clone("recipe-box"), prompt: "pack the trip planner bags", forceProject: "shared bags" }).status, "running");
+  const lines = fs.readFileSync(forcedLog(home), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  assert.deepEqual(lines.map(({ time, ...rest }) => rest), [{ chat: "pack-1", forced: "recipe-box", routed: "trip-planner", reason: "shared bags" }]);
+  for (const name of ["pack-1", "pack-2"]) runner.close(c, name);
+});
+
+test("the cwd's own project is checked even with a repo named, a ~/ folder counts, and a clone's folder outranks its origin", { skip }, () => {
+  const home = fs.mkdtempSync(path.join(root, "own-"));
+  const clone = (name) => path.join(home, ".rivet-agents", "work", name);
+  for (const name of ["trip-planner", "recipe-box"]) fs.mkdirSync(clone(name), { recursive: true });
+  const c = runner.context({ env: { ...ctx.env, HOME: home }, home, socket: "rivet-chat-test", bins: ctx.bins, log: () => {} });
+  // A repo that fits the ask never lets a chat open in another project's folder.
+  assert.throws(() => runner.create(c, { name: "own-1", cwd: clone("recipe-box"), repo: "trip-planner", prompt: "pack the trip planner bags" }), /This ask matches trip-planner \(.+\), not recipe-box\./);
+  // When the named repo and the folder both mismatch, a forced open logs the folder the chat runs in.
+  runner.create(c, { name: "own-5", cwd: clone("recipe-box"), repo: "example-org/notes", prompt: "pack the trip planner bags", forceProject: "shared notes" });
+  assert.equal(JSON.parse(fs.readFileSync(forcedLog(home), "utf8").trim()).forced, "recipe-box");
+  // A clone whose origin names another repo is still its folder's project.
+  assert.equal(spawnSync("git", ["init", "-q", clone("recipe-box")]).status, 0);
+  assert.equal(spawnSync("git", ["-C", clone("recipe-box"), "remote", "add", "origin", "https://github.com/example-org/cookbook.git"]).status, 0);
+  assert.equal(runner.create(c, { name: "own-2", cwd: clone("recipe-box"), prompt: "in recipe-box fix the header" }).status, "running");
+  // Folders written from home.
+  const routes = path.join(home, "routes");
+  for (const name of ["trip-planner", "recipe-box"]) fs.mkdirSync(path.join(routes, name), { recursive: true });
+  const file = path.join(home, "route-list.json");
+  const entry = (id, words) => ({ id, name: id, workspaceRepo: id, githubRepo: null, folder: `~/routes/${id}`, words, paths: [], appOnly: false });
+  fs.writeFileSync(file, JSON.stringify([entry("recipe-box", ["recipe box"]), entry("trip-planner", ["trip planner"])]));
+  const t = runner.context({ env: { ...ctx.env, HOME: home, RIVET_PROJECTS_FILE: file }, home, socket: "rivet-chat-test", bins: ctx.bins, log: () => {} });
+  assert.throws(() => runner.create(t, { name: "own-3", cwd: path.join(routes, "recipe-box"), prompt: "pack the trip planner bags" }), /This ask matches trip-planner \(.+\), not recipe-box\./);
+  // A sub-folder whose name starts with two dots is still inside its project's folder.
+  fs.mkdirSync(path.join(routes, "recipe-box", "..notes"));
+  assert.throws(() => runner.create(t, { name: "own-4", cwd: path.join(routes, "recipe-box", "..notes"), prompt: "pack the trip planner bags" }), /This ask matches trip-planner \(.+\), not recipe-box\./);
+  for (const name of ["own-2", "own-5"]) runner.close(c, name);
 });

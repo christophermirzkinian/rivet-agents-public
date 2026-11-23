@@ -773,82 +773,6 @@ a {
   font-weight: 600;
 }
 
-.upd {
-  --edge: rgba(47, 214, 123, 0.55);
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 12px;
-}
-
-.upd-head {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  min-width: 0;
-}
-
-.upd-tag {
-  flex: none;
-  color: var(--muted);
-  font-size: var(--fs-s);
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.upd-tag.fix {
-  color: var(--apricot);
-}
-
-.upd-age {
-  flex: none;
-  margin-left: auto;
-  color: var(--muted);
-  font-size: var(--fs-m);
-  font-weight: 600;
-}
-
-.upd-title {
-  margin: 0;
-  color: var(--text);
-  font-size: var(--fs-2xl);
-  font-weight: 800;
-  line-height: 1.25;
-  overflow-wrap: anywhere;
-}
-
-.upd-line {
-  margin: 0;
-  color: var(--muted);
-  font-size: var(--fs-body);
-  line-height: 1.4;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-/* A "• " line: its wrap lines up under its text, not under the bullet. */
-.upd-li {
-  display: inline-block;
-  padding-left: 0.6em;
-  text-indent: -0.6em;
-}
-
-.upd .media {
-  margin-top: 4px;
-}
-
-.upd-meta {
-  margin: 2px 0 0;
-  color: var(--muted);
-  font-size: var(--fs-m);
-}
-
-.upd-meta b {
-  color: var(--apricot);
-  font-weight: 700;
-}
-
 .upd-note {
   margin: 2px 0 0;
   padding: 8px 10px;
@@ -1166,7 +1090,7 @@ a {
   justify-content: center;
   min-height: var(--tap);
   padding: 10px 16px;
-  border: 2px solid #ffd166;
+  border: 1px solid var(--line);
   border-radius: 14px;
   color: #ffd166;
   font-size: var(--fs-xl);
@@ -1270,15 +1194,10 @@ a {
 
 /* Share on a card: a full tap target with its word; on the open card it sits in the card's tools
    row now, still with its word (feed.css .card-tools). */
-.btn.card-share-top,
-.btn.upd-share-solo {
+.btn.card-share-top {
   width: 100%;
   margin-bottom: 12px;
   font-size: var(--fs-l);
-}
-
-.btn.upd-share-solo {
-  margin: 4px 0 0;
 }
 
 .card-share-icon {
@@ -1326,7 +1245,7 @@ a {
 }
 
 .card-link.primary {
-  border-color: var(--apricot);
+  border-width: 1px;
   color: var(--apricot);
 }
 
@@ -1459,7 +1378,7 @@ a {
 .btn.pick {
   min-height: 44px;
   padding: 6px 12px;
-  border: 2px solid var(--yes);
+  border: 1px solid var(--line);
   color: var(--text);
   font-size: var(--fs-l);
   font-weight: 900;

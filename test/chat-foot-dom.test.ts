@@ -555,6 +555,129 @@ describe("the chat opens on its newest message when the thread grows after it sc
   });
 });
 
+describe("Back to newest: a round ↓ once he is more than one screen up", () => {
+  const newest = () => root.querySelector<HTMLButtonElement>(".chat-newest")!;
+  const count = () => root.querySelector<HTMLElement>(".chat-newest-count")!;
+  /** The owner scrolled up so the newest line is `below` px under the screen. */
+  const upBy = (below: number) => scrollTo(scroller(), tall - SHOWN - below);
+
+  it("shows only past one screen from the newest: at the foot and at exactly one screen it stays hidden", async () => {
+    await open();
+    expect(newest().hidden).toBe(true);
+    upBy(SHOWN);
+    expect(newest().hidden).toBe(true);
+    upBy(SHOWN + 1);
+    expect(newest().hidden).toBe(false);
+    expect(count().hidden).toBe(true);
+    expect(newest().getAttribute("aria-label")).toBe("Back to newest");
+    upBy(200);
+    expect(newest().hidden).toBe(true);
+  });
+
+  it("counts the lines that land while he is up, his own left out, and starts again once he is back", async () => {
+    const server = fakeServer(MESSAGES.map((one) => ({ ...one })));
+    vi.stubGlobal("fetch", vi.fn(server.fetch));
+    await open();
+    upBy(2000);
+    expect(count().hidden).toBe(true);
+    server.messages.push(message("n1", "m1", 3, "First new"), message("n2", "m1", 4, "Mine"), message("n3", "m1", 5, "Second new"));
+    await chat.refresh();
+    await settle();
+    expect(thread().textContent).toContain("Second new");
+    expect(newest().hidden).toBe(false);
+    expect(count().hidden).toBe(false);
+    expect(count().textContent).toBe("2");
+    expect(newest().getAttribute("aria-label")).toBe("Back to newest, 2 new");
+    // Within a screen but short of the newest and up again: he has not been back, so they still count.
+    upBy(100);
+    expect(newest().hidden).toBe(true);
+    upBy(2000);
+    expect(count().textContent).toBe("2");
+    // Back at the newest and up again: the lines he has seen are not counted twice.
+    upBy(0);
+    upBy(2000);
+    expect(newest().hidden).toBe(false);
+    expect(count().hidden).toBe(true);
+  });
+
+  it("a search covering Chat while he is up keeps the count, and the lines that land under it are counted", async () => {
+    const server = fakeServer(MESSAGES.map((one) => ({ ...one })));
+    vi.stubGlobal("fetch", vi.fn(server.fetch));
+    await open();
+    upBy(2000);
+    server.messages.push(message("n1", "m1", 3, "First new"));
+    await chat.refresh();
+    await settle();
+    expect(count().textContent).toBe("1");
+    const input = root.querySelector<HTMLInputElement>(".chat-search-input")!;
+    input.value = "three";
+    input.dispatchEvent(new Event("input"));
+    expect(root.querySelector(".chat")!.classList.contains("searching")).toBe(true);
+    server.messages.push(message("n2", "m1", 5, "Under the search"));
+    await chat.refresh();
+    await settle();
+    root.querySelector<HTMLButtonElement>(".chat-search-clear")!.click();
+    await settle();
+    expect(newest().hidden).toBe(false);
+    expect(count().textContent).toBe("2");
+  });
+
+  it("a tap scrolls smoothly to the newest; arriving there hides it and the foot holds again", async () => {
+    await open();
+    upBy(2000);
+    const smooth = vi.fn();
+    scroller().scrollTo = smooth as unknown as HTMLElement["scrollTo"];
+    newest().click();
+    expect(smooth).toHaveBeenCalledWith({ top: tall, behavior: "smooth" });
+    // The browser's smooth scroll reaches the foot.
+    scrollTo(scroller(), tall - SHOWN);
+    expect(newest().hidden).toBe(true);
+    tall = 4185;
+    FakeResizeObserver.grew(thread());
+    expect(gap()).toBe(0);
+  });
+
+  it("lines growing under the smooth scroll leave it short: as it ends, the rest of the way, unless his hand took it", async () => {
+    await open();
+    upBy(2000);
+    scroller().scrollTo = vi.fn() as unknown as HTMLElement["scrollTo"];
+    newest().click();
+    // Rows not drawn yet take their real height as the scroll passes them: the newest is further down than it aimed.
+    tall = 4185;
+    scroller().dispatchEvent(new Event("scrollend"));
+    expect(gap()).toBe(0);
+    expect(newest().hidden).toBe(true);
+    // His own touch on the way down lets the scroll be.
+    upBy(2000);
+    newest().click();
+    scroller().dispatchEvent(new Event("pointerdown"));
+    scroller().dispatchEvent(new Event("scrollend"));
+    expect(gap()).toBe(2000);
+  });
+
+  it("hidden as he gets back with the keyboard on it, it hands the keyboard on rather than dropping it to the page", async () => {
+    await open();
+    upBy(2000);
+    scroller().scrollTo = vi.fn() as unknown as HTMLElement["scrollTo"];
+    newest().focus();
+    expect(document.activeElement).toBe(newest());
+    newest().click();
+    scrollTo(scroller(), tall - SHOWN);
+    expect(newest().hidden).toBe(true);
+    expect(document.activeElement).not.toBe(newest());
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it("with reduced motion asked for, a tap goes to the newest at once", async () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: query.includes("reduce"), media: query, addEventListener() {}, removeEventListener() {} }));
+    await open();
+    upBy(2000);
+    newest().click();
+    expect(gap()).toBe(0);
+    expect(newest().hidden).toBe(true);
+  });
+});
+
 describe("One chat: Chat oldest to newest, no topics", () => {
   // Ten lines of a, five of b, ten more of a: in time order, never gathered by topic.
   const LINES = () => [

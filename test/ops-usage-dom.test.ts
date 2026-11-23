@@ -188,7 +188,7 @@ describe("Ops Usage page", () => {
     expect(hero("claude").classList.contains("box")).toBe(true);
     ops.unmount();
     app.tab = "progress";
-    app.opsPage = "code";
+    app.opsPage = "machines";
     ops.mount(root);
     expect(root.querySelector(".usage-heroes")).toBeNull();
     expect(root.querySelector(".usage-more")).toBeNull();

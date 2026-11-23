@@ -1,17 +1,11 @@
 import "./ops.css";
 
 import { clock, dayDate, localDay, maybeWhen, when } from "../../../src/shared/when.js";
-import { NEEDS_YOU, needYou, noTimeYet } from "../../../src/shared/words.js";
 import {
   diskTone,
   brokenOnMain,
-  isOneOff,
-  isRed,
-  latestMainRuns,
   sourceProblem,
   resetText,
-  flySourceProblem,
-  addDays,
   CLAUDE_STALE_MS,
   accountsTotal,
   claudeCells,
@@ -25,25 +19,18 @@ import {
   type GithubSource,
   type MacVolume,
   type OpsResponse,
-  type PullRequest,
-  type TimelineEvent,
-  type TimelineResponse,
   type Tone,
-  type WorkflowRun,
   macChats,
 } from "../../../src/shared/ops.js";
 import { NO_REPO } from "../../../src/shared/repos.js";
 import type { OpsStatusKind } from "../../../src/shared/ops-status.js";
 import { opsStatusKey } from "../../../src/shared/ops-status-key.js";
-import { button, h, isHttps, keepFocus, type Child } from "../dom.js";
+import { button, h, keepFocus, type Child } from "../dom.js";
 import { loadPushHealth, pushHealth } from "../push-health.js";
-import { brokenPrs, ciCurrent, failingSchedules, flyCurrent, freshPrs, githubCurrent, healthCurrent, macCurrent, opsAge, opsData, readingAge, refreshOps, watchOps } from "../ops-data.js";
-import { app, changed, deck, go, refresh as refreshBoard, sameSession, setOpsPage, subscribe, type OpsPage } from "../state.js";
-import type { AuditEntry } from "../../../src/shared/command.js";
-import * as cmd from "../command-api.js";
-import { auditList } from "./audit-list.js";
+import { brokenPrs, ciCurrent, failingSchedules, flyCurrent, githubCurrent, healthCurrent, macCurrent, opsAge, opsData, readingAge, refreshOps, watchOps } from "../ops-data.js";
+import { app, changed, go, refresh as refreshBoard, sameSession, setOpsPage, subscribe, type OpsPage } from "../state.js";
 import { costCard, type PillTone } from "./costs.js";
-import { calm, ciItem, currentAppItem, diskItem, dismissed, fixProgress, macItem, owned, prItem, pushItem, parked, quiet, runnerItem, scheduleItem, shade, type FailedItem } from "./ops-status.js";
+import { calm, ciItem, currentAppItem, diskItem, dismissed, macItem, owned, prItem, pushItem, parked, quiet, runnerItem, scheduleItem, shade, type FailedItem } from "./ops-status.js";
 import { nextBody, planBody } from "./ops-plan.js";
 import { countedSchedules, holdStatusLine, releaseStatusLine, schedulesOwned } from "./status-line.js";
 import { scheduleApi, scheduleLines, schedulesStale } from "./schedules.js";
@@ -52,7 +39,6 @@ import type { SchedulesResponse } from "../../../src/shared/schedules.js";
 import * as settings from "./settings.js";
 import { openSheet } from "./sheet.js";
 import { machinesTrend } from "./machines-trend.js";
-import { holdOf, holdReason, isHold } from "../../../src/shared/pr-holds.js";
 import * as api from "../api.js";
 import { agentName } from "../cloud-agent.js";
 import { accountLines, machinesHead, machinesWorstFirst, usageLead } from "../reading-figures.js";
@@ -63,7 +49,8 @@ export { HOLD_WORDS } from "../../../src/shared/pr-holds.js";
 
 // Plan (ops-plan.ts) sits under the desks on the Floor: what is being done, by when and why. The readings are pages in
 // the menu: Usage leads with the two overalls, Machines with one line per box, its readings and chart in full, then the
-// schedules; Usage's detail folds under "More". Everything here only reads.
+// schedules; Usage's detail folds under "More". Apps and Code are gone: their breaks are Plan's failed items, and a
+// search hit for them opens Plan. Everything here only reads.
 
 type Shade = Tone | "idle";
 
@@ -73,24 +60,14 @@ const SECTION_TAB: Record<string, OpsPage> = {
   openai: "usage",
   "claude-accounts": "usage",
   "openai-accounts": "usage",
-  prs: "code",
-  main: "code",
-  actions: "code",
-  timeline: "code",
-  apps: "machines",
   runners: "machines",
   mac: "machines",
   boxes: "machines",
   schedules: "machines",
 };
 
-const PR_LIMIT = 25;
-let showAllPrs = false;
-let repoFilter: string | null = null;
 /** A folded section you opened or closed yourself this visit; otherwise it opens only while red or amber. */
 const folds = new Map<string, boolean>();
-/** The Timeline days opened past their first TIMELINE_DAY_ROWS rows, until the page reloads. */
-const openDays = new Set<string>();
 let pendingSection: string | null = null;
 let unsubscribe: (() => void) | null = null;
 let unwatch: (() => void) | null = null;
@@ -102,13 +79,12 @@ let holding = false;
 let schedules: SchedulesResponse | null = null;
 let schedulesError: string | null = null;
 
-/** Opens the page holding one section (search results use this); the timeline unfiltered, so a hit for any repo shows. */
+/** Opens the page holding one section (search results use this); a section with no page left opens Plan. */
 export function focusSection(section: string): void {
   // Red jobs have no page: they open a sheet of their own.
   if (section === "jobs") return openRedJobs();
   const owner = SECTION_TAB[section];
   if (!owner) return openOps();
-  if (section === "timeline") repoFilter = null;
   pendingSection = section;
   openOpsPage(owner);
 }
@@ -148,9 +124,8 @@ export function unmount(): void {
   root = null;
 }
 
-/** Pull to refresh: the board and the Ops data; an open actions list reloads on the next render. */
+/** Pull to refresh: the board and the Ops data. */
 export function refresh(): Promise<unknown> {
-  if (audit) audit = { ...audit, at: 0 };
   return Promise.all([
     refreshBoard(),
     refreshOps(),
@@ -198,10 +173,6 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 
 /** Reading labels use the same advancing server clock as their freshness flags. */
 const readingAt = (ops: OpsResponse, at: string) => maybeWhen(at, Date.parse(ops.now) + opsAge());
-
-function external(url: string, use: "pr" | "run" | "timeline", ...children: Child[]): HTMLElement {
-  return isHttps(url) ? h("a", { class: "ops-link", attrs: { href: url, target: "_blank", rel: "noopener noreferrer", "data-use": use === "pr" ? "ops.pr.row" : use === "run" ? "ops.run.row" : "ops.timeline.row" } }, ...children) : h("span", {}, ...children);
-}
 
 /**
  * One section: its title and headline, then its content. The body is only built for the page on screen. A folded
@@ -270,11 +241,6 @@ function allSections(ops: OpsResponse | null): Section[] {
   // On each page a red section comes first (renderOps); what is only history or detail is folded under its title.
   // Usage draws its own page (usageHeroes, usageMore).
   return [
-    prSection(ops),
-    mainSection(ops),
-    folded(timelineSection(opsData.timeline)),
-    folded(actionsSection()),
-    appsSection(ops),
     macSection(ops),
     runnersSection(ops),
   ];
@@ -284,12 +250,10 @@ function allSections(ops: OpsResponse | null): Section[] {
 const READING: Record<Exclude<OpsPage, "plan">, { page: string; shape: readonly number[] }> = {
   usage: { page: "Usage", shape: [250, 250, 56] },
   machines: { page: "Machines", shape: [110, 230, 200] },
-  code: { page: "Code", shape: [220, 220] },
 };
 
-/** What a reading page has read: Code is Ops and the timeline, the rest Ops alone; Usage's figures are its Claude reading. */
+/** What a reading page has read: Ops alone; Usage's figures are its Claude reading. */
 function readingOf(ops: OpsResponse | null, page: Exclude<OpsPage, "plan">): { has: boolean; failed: boolean } {
-  if (page === "code") return { has: !!ops || !!opsData.timeline, failed: !!opsData.error || opsData.timelineError };
   const failed = !!opsData.error;
   // A read with nothing to show says it failed plainly, never that it shows the last numbers read. Usage's figure is
   // an overall with an account read, not a Claude reading of unread rows.
@@ -486,8 +450,14 @@ function wrongRow(kind: string, tone: "bad" | "warn", title: string, line: strin
   return { kind, tone, title, line, item, owned: mine, section: typeof to === "string" ? to : null, open: typeof to === "string" ? () => focusSection(to) : to };
 }
 
-/** The page whose glance shows each kind of row: a failing schedule, timed CI, sits with Code and opens Schedules. */
-const WRONG_PAGE: Record<string, OpsPage> = { app: "machines", ci: "code", pr: "code", schedule: "code", machine: "machines", disk: "machines", runner: "machines", push: "machines" };
+/**
+ * The groups Plan's failed items are read in: the Apps and Code pages' old groups, which no page shows now, and
+ * Machines, whose page still marks its sections by them.
+ */
+export type WrongBucket = "apps" | "code" | "machines";
+
+/** The group each kind of row is read in: a failing schedule, timed CI, sits with Code and opens Schedules. */
+const WRONG_PAGE: Record<string, WrongBucket> = { app: "apps", ci: "code", pr: "code", schedule: "code", machine: "machines", disk: "machines", runner: "machines", push: "machines" };
 
 /**
  * Everything red or amber, as rows of the page that reads it: apps down or with a failed deploy, red on main, red PRs,
@@ -495,7 +465,7 @@ const WRONG_PAGE: Record<string, OpsPage> = { app: "machines", ci: "code", pr: "
  * of date adds no row: the notices say what is old. `hidden` holds the rows you dismissed (ops-status.ts dismissed),
  * left out of `rows` and `count` until the item changes or breaks again.
  */
-export function wrongRows(ops: OpsResponse | null, on: OpsPage, perKind = GLANCE_PER_KIND): { rows: WrongRow[]; count: number; hidden: WrongRow[] } {
+export function wrongRows(ops: OpsResponse | null, on: WrongBucket | OpsPage, perKind = GLANCE_PER_KIND): { rows: WrongRow[]; count: number; hidden: WrongRow[] } {
   const rows: WrongRow[] = [];
   const hidden: WrongRow[] = [];
   let count = 0;
@@ -618,7 +588,7 @@ export function parkedItems(ops: OpsResponse | null): FailedItem[] {
 
 function planItems(ops: OpsResponse | null): { shown: FailedItem[]; gone: FailedItem[]; parked: FailedItem[] } {
   const seen = new Set<string>();
-  const pages = (["code", "machines"] as const).map((page) => wrongRows(ops, page, Infinity));
+  const pages = (["apps", "code", "machines"] as const).map((page) => wrongRows(ops, page, Infinity));
   // Only while Ops counts a schedule failing, as its own rows do; each by name when the line's list has them, and the
   // rest of Ops' count, which the list may not have caught up with, as one row.
   const failing = ops?.summary ? failingSchedules(ops) : 0;
@@ -686,8 +656,8 @@ function proseWords(text: string, opens: boolean): string {
     .replace(/\bGitHub\b/g, "the code host");
 }
 
-/** The page each GitHub source feeds: PRs and runs are Code's, runners and the queue are Machines'. */
-const GITHUB_PAGE: Record<GithubSource, OpsPage> = { prs: "code", runs: "code", merged: "code", runners: "machines", queue: "machines" };
+/** The group each GitHub source feeds: PRs and runs are Code's, which no page shows, runners and the queue Machines'. */
+const GITHUB_PAGE: Record<GithubSource, WrongBucket> = { prs: "code", runs: "code", merged: "code", runners: "machines", queue: "machines" };
 const GITHUB_SOURCES = Object.keys(GITHUB_PAGE) as GithubSource[];
 
 /** What is old or unread, on the pages it touches: a failed load, the bridge and "Loading" on every page. */
@@ -703,8 +673,8 @@ function notices(ops: OpsResponse | null, on: OpsPage): HTMLElement | null {
   if (ops) {
     if (!ops.bridge.connected) add("The Mac bridge is offline; GitHub and Mac data stop updating.", "warn");
     else {
-      // GitHub gives Code its PRs and runs and Machines its runners.
-      if (ops.github?.stale) add(`GitHub data is from ${readingAt(ops, ops.github.at) ?? "earlier"}.`, "warn", ["code", "machines"]);
+      // GitHub gives Machines its runners.
+      if (ops.github?.stale) add(`GitHub data is from ${readingAt(ops, ops.github.at) ?? "earlier"}.`, "warn", ["machines"]);
       else if (ops.github) {
         const gh = ops.github;
         const problems = GITHUB_SOURCES.filter((source) => GITHUB_PAGE[source] === on)
@@ -714,12 +684,6 @@ function notices(ops: OpsResponse | null, on: OpsPage): HTMLElement | null {
       }
       if (ops.claude && usageStale(ops.claude)) add(`Claude usage is from ${readingAt(ops, ops.claude.at) ?? "earlier"}.`, "warn", ["usage"]);
       if (ops.mac?.stale) add(`Mac health is from ${readingAt(ops, ops.mac.at) ?? "earlier"}.`, "warn", ["machines"]);
-      if (ops.flyStale && ops.flyAt) add(`Fly status is from ${readingAt(ops, ops.flyAt) ?? "earlier"}.`, "warn", ["machines"]);
-      else {
-        const flyProblem = flySourceProblem({ source: ops.flySource });
-        if (flyProblem) add(`${flyProblem}.`, "warn", ["machines"]);
-      }
-      if (ops.healthStaleSince) add(`App checks are from ${readingAt(ops, ops.healthStaleSince) ?? "earlier"}.`, "warn", ["machines"]);
     }
   } else if (on === "plan" && !opsData.error) add("Loading Ops…", "info");
   if (!lines.length) return null;
@@ -728,112 +692,7 @@ function notices(ops: OpsResponse | null, on: OpsPage): HTMLElement | null {
   return h("div", { class: "ops-notices", attrs: { role: "status" } }, ...lines.map((line) => h("p", { class: `ops-notice box t-${line.tone}` }, line.text)));
 }
 
-// Pull requests
-
-/** The one thing happening to a PR, and when it should be merged. */
-export interface PrStatus {
-  tag: string;
-  tone: Shade;
-  eta: string | null;
-}
-
-/** An answerable card naming this PR; a merge-ready card must still name its current head. */
-function prCard(pr: PullRequest) {
-  return deck().find(
-    (need) =>
-      need.pr === pr.number &&
-      (need.repo ?? NO_REPO) === pr.repo &&
-      (need.kind !== "merge-ready" || (pr.headSha !== undefined && need.headSha === pr.headSha)),
-  );
-}
-
-function checksEta(pr: PullRequest, typicalMin: number | undefined): string | null {
-  if (!typicalMin || !pr.ciStartedAt) return null;
-  const by = Date.parse(pr.ciStartedAt) + typicalMin * 60_000;
-  return by - Date.now() >= 60_000 ? `Checks done by ${when(by)}` : `Checks running past ${when(by)}`;
-}
-
-/**
- * `live` false (GitHub data out of date or the PR read failed): the checks and their timing are from then, so neither
- * is claimed now.
- */
-export function prStatus(pr: PullRequest, typicalMin?: number, live = true): PrStatus {
-  if (!live) return { tag: `As of ${when(pr.updatedAt)} · no current reading`, tone: "idle", eta: null };
-  if (pr.draft) return { tag: "Draft", tone: "idle", eta: null };
-  if (pr.checks.state === "fail") {
-    const { fixing, eta } = fixProgress(prItem(pr)!);
-    // Being fixed is amber, never red.
-    return fixing ? { tag: "Being fixed", tone: "warn", eta: eta ? `Fix ETA: ${eta}` : `Fixing · ${noTimeYet()}` } : { tag: "Red: not picked up", tone: "bad", eta: null };
-  }
-  // A hold first: a card's yes is refused while one stands.
-  const hold = holdOf(pr);
-  const card = prCard(pr);
-  if (hold) {
-    const reason = holdReason(hold);
-    const held = reason ? `On hold: ${reason}` : "On hold";
-    return card ? { tag: NEEDS_YOU, tone: "warn", eta: held } : { tag: held, tone: "warn", eta: null };
-  }
-  if (card) return { tag: NEEDS_YOU, tone: "warn", eta: card.kind === "merge-ready" ? "Merges when you tap" : null };
-  if (pr.checks.state === "pending") return { tag: "Checks running", tone: "info", eta: checksEta(pr, typicalMin) };
-  return { tag: pr.checks.state === "pass" ? "Checks green" : "No checks yet", tone: "idle", eta: null };
-}
-
-function prTone(pr: PullRequest, live: boolean): Shade {
-  return prStatus(pr, undefined, live).tone;
-}
-
-const PR_ORDER: Record<string, number> = { bad: 0, warn: 1, info: 2, ok: 3, idle: 4 };
-
-function checksText(pr: PullRequest): string {
-  const c = pr.checks;
-  if (c.state === "none") return "No checks";
-  const parts = [c.failed ? `${c.failed} failed` : "", c.pending ? `${c.pending} running` : "", c.passed ? `${c.passed} passed` : ""].filter(Boolean);
-  return parts.join(" · ");
-}
-
-/** Checks as a bar sized by count: passed green, failed red, running the track. */
-function checksBar(pr: PullRequest): HTMLElement {
-  const c = pr.checks;
-  const total = c.passed + c.failed + c.pending;
-  if (c.state === "none" || !total) return h("span", { class: "ops-row-meta t-muted" }, "No checks");
-  const segment = (kind: string, n: number) => {
-    const el = h("span", { class: `ops-checks-${kind}` });
-    el.style.width = `${(n / total) * 100}%`;
-    return el;
-  };
-  const label = [`${c.passed}/${total}`, c.failed ? `${c.failed} failed` : c.pending ? `${c.pending} running` : null].filter(Boolean).join(" · ");
-  return h(
-    "span",
-    { class: `ops-checks t-${c.state === "fail" ? "bad" : "muted"}` },
-    h("span", { class: "ops-checks-bar", attrs: { role: "img", "aria-label": `Checks: ${checksText(pr)}` } }, segment("passed", c.passed), segment("failed", c.failed)),
-    h("span", { class: "ops-checks-label" }, label),
-  );
-}
-
-function prRow(pr: PullRequest, typicalMin: number | undefined, live: boolean, asOf?: string): HTMLElement {
-  const status = prStatus(pr, typicalMin, live);
-  if (!live && asOf) status.tag = `${asOf} · no current reading`;
-  const others = pr.labels.filter((label) => !isHold(label)).slice(0, 3);
-  return h(
-    "li",
-    { class: `ops-row box s-${status.tone}` },
-    external(
-      pr.url,
-      "pr",
-      h("span", { class: "ops-row-title" }, h("span", { class: "ops-num" }, `#${pr.number}`), pr.title),
-      h(
-        "span",
-        { class: "ops-tags" },
-        h("span", { class: `ops-tag ops-tag-wrap ops-pr-status t-${status.tone}` }, status.tag),
-        ...others.map((label) => h("span", { class: "ops-tag t-idle" }, label)),
-      ),
-      status.eta ? h("span", { class: "ops-row-eta" }, status.eta) : null,
-      live ? checksBar(pr) : h("span", { class: "ops-row-meta" }, `Checks then: ${checksText(pr)}`),
-      pr.checks.failing.length ? h("span", { class: live ? "ops-row-fail" : "ops-row-meta" }, pr.checks.failing.slice(0, 4).join(", ")) : null,
-      h("span", { class: "ops-row-meta" }, [short(pr.repo), pr.author, pr.headAt ? `head ${maybeWhen(pr.headAt)}` : null].filter(Boolean).join(" · ")),
-    ),
-  );
-}
+// GitHub readings
 
 /** Failed fetches retain a source's last successful timestamp, never the newer envelope's. */
 function githubAsOf(gh: NonNullable<OpsResponse["github"]>, source: GithubSource): string {
@@ -842,107 +701,8 @@ function githubAsOf(gh: NonNullable<OpsResponse["github"]>, source: GithubSource
   return at ? `as of ${when(at)}` : "no reading";
 }
 
-function prSection(ops: OpsResponse | null): Section {
-  // Current GitHub data whose PR read did not fail for that PR's repo: a kept response or kept PRs are from then.
-  const read = new Set(ops ? (freshPrs(ops) ?? []) : []);
-  const live = (pr: PullRequest) => read.has(pr);
-  const prs = [...(ops?.github?.prs ?? [])].sort((a, b) => PR_ORDER[prTone(a, live(a))]! - PR_ORDER[prTone(b, live(b))]! || b.updatedAt.localeCompare(a.updatedAt));
-  const failing = prs.filter((pr) => live(pr) && pr.checks.state === "fail").length;
-  const tags = prs.filter(live).map((pr) => prStatus(pr, undefined, true).tag);
-  const waiting = tags.filter((tag) => tag === NEEDS_YOU).length;
-  const held = tags.filter((tag) => tag.startsWith("On hold")).length;
-  const problem = ops?.github ? sourceProblem(ops.github, "prs") : null;
-  const current = !!ops && githubCurrent(ops);
-  const complete = ops?.github?.prsComplete === true && !problem;
-  const headline = ops?.github
-    ? [current ? (complete ? plural(read.size, "open PR") : `${read.size}+ open PRs fetched`) : `PRs ${githubAsOf(ops.github, "prs")} · no current reading`, failing ? `${failing} failing` : null, waiting ? needYou(waiting) : null, held ? `${held} on hold` : null, problem ? "GitHub unreachable" : null].filter(Boolean).join(" · ")
-    : "No GitHub data yet";
-  // Red only for what the Ops mark counts: a PR red on the same push for over an hour.
-  const broken = ops ? (brokenPrs(ops)?.length ?? 0) : 0;
-  // Holds are your own wait, which comes to you as a card when you have to decide, so they leave the calm tone too.
-  const unowned = ops ? (brokenPrs(ops) ?? []).filter((pr) => !quiet(prItem(pr))).length : 0;
-  const calmTone: Shade = unowned ? "bad" : waiting ? "warn" : current && !problem ? "ok" : "info";
-  return { ...section("prs", "Pull requests", broken ? "bad" : waiting || held ? "warn" : current && !problem ? "ok" : "info", headline, () => {
-    if (!prs.length) return h("p", { class: "empty" }, problem ? `${problem}.` : current && complete ? "No open pull requests." : current ? "No open pull requests in the fetched sample." : ops?.github ? "No current PR reading." : "Waiting for the Mac to send GitHub status.");
-    const shown = showAllPrs ? prs : prs.slice(0, PR_LIMIT);
-    return h(
-      "div",
-      {},
-      h("ul", { class: "ops-rows" }, ...shown.map((pr) => calm(prRow(pr, ops?.github?.ciTypicalMin, live(pr), ops?.github ? githubAsOf(ops.github, "prs") : undefined), live(pr) ? prItem(pr) : null))),
-      prs.length > shown.length
-        ? button(`Show ${prs.length} fetched PRs`, () => {
-            showAllPrs = true;
-            if (root) renderOps(root);
-          }, "ghost big", false, "ops.prs.show-fetched")
-        : null,
-    );
-  }), calmTone };
-}
-
-// Main, deploys and runners
-
-function runTone(run: WorkflowRun): Shade {
-  if (run.status !== "completed") return "info";
-  return isRed(run) ? "bad" : "ok";
-}
-
-function runRow(run: WorkflowRun, current = true, asOf = `as of ${when(run.updatedAt)}`): HTMLElement {
-  const tone = current ? runTone(run) : "idle";
-  const word = run.status !== "completed" ? "Running" : isRed(run) ? (run.conclusion ?? "failed") : "Passed";
-  return h(
-    "li",
-    { class: `ops-row box s-${tone}` },
-    external(
-      run.url,
-      "run",
-      h("span", { class: "ops-row-title" }, `${short(run.repo)} · ${run.workflow}`),
-      h("span", { class: "ops-tags" }, h("span", { class: `ops-tag t-${tone}` }, (current ? word : `${word} ${asOf}`).replace(/_/g, " ")), h("span", { class: "ops-row-meta" }, maybeWhen(run.updatedAt) ?? "")),
-      run.title ? h("span", { class: "ops-row-meta" }, run.title) : null,
-      run.failedJobs?.length ? h("span", { class: current ? "ops-row-fail" : "ops-row-meta" }, run.failedJobs.join(", ")) : null,
-    ),
-  );
-}
-
 function stat(value: string, label: string, tone: Shade = "idle"): HTMLElement {
   return h("div", { class: `ops-stat box t-${tone}` }, h("span", { class: "ops-stat-n" }, value), h("span", { class: "ops-stat-l" }, label));
-}
-
-function mainSection(ops: OpsResponse | null): Section {
-  const gh = ops?.github ?? null;
-  const latest = gh ? latestMainRuns(gh.runs) : [];
-  // A one-off run's red is listed here but leaves the section's tone, as Rivet and the Ops mark leave it out.
-  const brokenRuns = gh ? brokenOnMain(gh.runs) : [];
-  const oneOffs = latest.filter((run) => isRed(run) && isOneOff(run));
-  const red = [...brokenRuns, ...oneOffs];
-  const broken = brokenRuns.length;
-  const running = (gh?.runs ?? []).filter((run) => run.status !== "completed");
-  const problem = gh ? sourceProblem(gh, "runs") : null;
-  const runsFailed = (gh?.sources?.runs.failed.length ?? 0) > 0;
-  const current = !!ops && ciCurrent(ops);
-  const headline = gh
-    ? [
-        current ? (broken ? `${broken} red` : "main green") : `main ${githubAsOf(gh, "runs")} · no current reading`,
-        current && oneOffs.length ? `${oneOffs.length} one-off ${oneOffs.length === 1 ? "run" : "runs"} red` : null,
-        current && running.length ? `${running.length} running` : null,
-        problem ? "GitHub unreachable" : null,
-      ]
-        .filter(Boolean)
-        .join(" · ")
-    : "No GitHub data yet";
-  const mainTone = !current ? "info" : broken ? "bad" : "ok";
-  return section("main", "Main and CI", mainTone, headline, () =>
-    h(
-      "div",
-      { class: "ops-stack" },
-      problem ? h("p", { class: "ops-notice box t-warn" }, `${problem}.`) : null,
-      h("h3", { class: "ops-sub" }, current && red.length ? "Red on main" : "Latest on main"),
-      latest.length
-        ? h("ul", { class: "ops-rows" }, ...[...red, ...latest.filter((run) => !isRed(run) && !red.includes(run))].slice(0, 12).map((run) => calm(runRow(run, current, githubAsOf(gh!, "runs")), current ? ciItem(run) : null)))
-        : h("p", { class: "empty" }, runsFailed ? "No main runs from GitHub yet." : "No finished runs on main yet."),
-      running.length ? h("h3", { class: "ops-sub" }, current ? `Running now (${running.length})` : `Running ${githubAsOf(gh!, "runs")} (${running.length})`) : null,
-      running.length ? h("ul", { class: "ops-rows" }, ...running.slice(0, 8).map((run) => runRow(run, current, githubAsOf(gh!, "runs")))) : null,
-    ),
-  );
 }
 
 type RunnerRow = { name: string; status: string; busy: boolean };
@@ -1043,9 +803,7 @@ function runnersSection(ops: OpsResponse | null): Section {
   ), calmTone: (tone === "warn" || (tone === "bad" && offline > 0)) && ownedOffline ? (runnerCurrent && queueCurrent ? "ok" : "info") : tone };
 }
 
-// Apps
-
-const HEALTH_WORD: Record<AppStatus["health"]["state"], string> = { up: "Up", down: "Down", unknown: "Checking", "no-check": "No check" };
+// Apps, as Plan's failed items read them
 
 function appTone(one: AppStatus, ops: OpsResponse): Shade {
   if (healthCurrent(ops) && one.health.state === "down") return "bad";
@@ -1054,72 +812,6 @@ function appTone(one: AppStatus, ops: OpsResponse): Shade {
   if (flyCurrent(ops, one.app ?? undefined) && one.health.state === "no-check" && one.fly?.checks.total && one.fly.machines.started > 0) return one.fly.checks.passing < one.fly.checks.total ? "warn" : "ok";
   if (healthCurrent(ops) && one.health.state === "up") return "ok";
   return "idle";
-}
-
-function appRow(one: AppStatus, ops: OpsResponse): HTMLElement {
-  const tone = appTone(one, ops);
-  const current = healthCurrent(ops);
-  const flyLive = flyCurrent(ops, one.app ?? undefined);
-  const flyAt = one.app && ops.flySource?.failed.includes(one.app) ? ops.flySource.at : ops.flyAt;
-  const fly = one.fly;
-  const health = one.health;
-  const detail = [
-    health.status ? `HTTP ${health.status}` : health.state === "down" ? "no answer" : null,
-    health.ms !== null && health.state === "up" ? `${health.ms} ms` : null,
-    health.state === "down" && health.since ? `since ${maybeWhen(health.since)}` : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
-  const flyLine = fly
-    ? [fly.version !== null ? `v${fly.version}` : null, `${fly.machines.started}/${fly.machines.total} machines`, fly.status || null, fly.lastRelease ? `${fly.lastRelease.status} ${maybeWhen(fly.lastRelease.at) ?? ""}` : null]
-        .filter(Boolean)
-        .join(" · ")
-    : null;
-  return h(
-    "li",
-    { class: `ops-app box s-${tone}` },
-    h("span", { class: "ops-app-name" }, one.name),
-    h("span", { class: `ops-tag t-${current ? tone : "idle"}` }, current ? HEALTH_WORD[health.state] : `${HEALTH_WORD[health.state]} as of ${when(health.checkedAt ?? ops.now)} · no current health reading`),
-    detail ? h("span", { class: "ops-row-meta" }, detail) : null,
-    flyLine ? h("span", { class: `ops-row-meta${flyLive && fly?.lastRelease?.status === "failed" ? " t-bad" : ""}` }, flyLive ? flyLine : `${flyLine} · ${flyAt ? `as of ${when(flyAt)}` : "no reading"} · no current Fly reading`) : null,
-  );
-}
-
-/**
- * Your apps, from the health URLs and any Fly apps you set: the ones down, with a failed deploy or still being checked
- * are listed; the healthy ones are one folded line ("12 up") so a page of green never hides a red one.
- */
-function appsSection(ops: OpsResponse | null): Section {
-  const apps = ops?.apps ?? [];
-  const current = !!ops && healthCurrent(ops);
-  const down = current ? apps.filter((one) => one.health.state === "down").length : 0;
-  const up = current ? apps.filter((one) => one.health.state === "up").length : 0;
-  const fine = (one: AppStatus) => appTone(one, ops!) === "ok";
-  const shown = apps.filter((one) => !fine(one));
-  const healthy = apps.filter(fine);
-  const headline = apps.length ? [down ? `${down} down` : null, current ? `${up} up` : "No current health reading", plural(apps.length, "app")].filter(Boolean).join(" · ") : "No apps listed";
-  const list = (rows: AppStatus[]) => h("ul", { class: "ops-apps" }, ...rows.map((one) => calm(appRow(one, ops!), currentAppItem(one, ops!))));
-  const loose = apps.filter((one) => !quiet(currentAppItem(one, ops!)));
-  const idle = apps.length ? "info" : "idle";
-  return { ...section("apps", "Apps", down ? "bad" : apps.some((one) => appTone(one, ops!) === "warn") ? "warn" : up ? "ok" : idle, headline, () =>
-    apps.length
-      ? h(
-          "div",
-          { class: "ops-stack" },
-          shown.length ? list(shown) : h("p", { class: "ops-notice box t-ok" }, "Every app is up."),
-          healthy.length
-            ? fold(
-                "apps-fine",
-                false,
-                { class: "ops-more ops-apps-fine" },
-                h("summary", { attrs: { "data-use": "ops.apps-up.fold" } }, h("h3", { class: "ops-sub" }, `${plural(healthy.length, "app")} up`), h("span", { class: "ops-more-n" }, "all fine")),
-                list(healthy),
-              )
-            : null,
-        )
-      : h("p", { class: "empty" }, "No apps yet."),
-    true,
-  ), calmTone: current && loose.some((one) => one.health.state === "down") ? "bad" : loose.some((one) => appTone(one, ops!) === "warn") ? "warn" : up ? "ok" : idle };
 }
 
 // Mac
@@ -1481,143 +1173,7 @@ function usageMore(ops: OpsResponse | null): HTMLElement {
   );
 }
 
-// Timeline
-
-const KIND_WORD: Record<TimelineEvent["kind"], string> = { merged: "Merged", deploy: "Deployed", "deploy-failed": "Deploy failed", shipped: "Shipped" };
-const KIND_TONE: Record<TimelineEvent["kind"], Shade> = { merged: "info", deploy: "ok", "deploy-failed": "bad", shipped: "ok" };
-
-function dayLabel(day: string): string {
-  const today = localDay(Date.now());
-  if (day === today) return "Today";
-  if (day === addDays(today, -1)) return "Yesterday";
-  // Noon UTC falls on the same calendar day nearly everywhere.
-  return dayDate(`${day}T12:00:00Z`);
-}
-
-function timeOf(at: string | null): string | null {
-  if (!at) return null;
-  return clock(at);
-}
-
-/** A day shows this many rows, then "N more" (a mass redeploy put 500 rows under one day). */
-export const TIMELINE_DAY_ROWS = 20;
-
-function timelineSection(timeline: TimelineResponse | null): Section {
-  const days = (timeline?.days ?? [])
-    .map((day) => ({ day: day.day, events: repoFilter ? day.events.filter((event) => event.repo === repoFilter) : day.events }))
-    .filter((day) => day.events.length);
-  const total = days.reduce((n, day) => n + day.events.length, 0);
-  const failed = days.reduce((n, day) => n + day.events.filter((event) => event.kind === "deploy-failed").length, 0);
-  const headline = timeline ? [`${total} in 14 days`, failed ? `${failed} failed deploys` : null].filter(Boolean).join(" · ") : "Loading";
-  return section(
-    "timeline",
-    "Timeline",
-    failed ? "warn" : "info",
-    headline,
-    () =>
-      h(
-        "div",
-        { class: "ops-stack" },
-        timeline && timeline.repos.length > 1
-          ? h(
-              "div",
-              { class: "ops-filter", attrs: { role: "group", "aria-label": "Filter by repo" } },
-              ...[null, ...timeline.repos].map((repo, i) =>
-                h(
-                  "button",
-                  {
-                    class: `ops-filter-btn${repoFilter === repo ? " on" : ""}`,
-                    attrs: { type: "button", "aria-pressed": String(repoFilter === repo), "data-use": "ops.timeline.repo", "data-use-value": String(i + 1) },
-                    on: {
-                      click: () => {
-                        repoFilter = repo;
-                        if (root) renderOps(root);
-                      },
-                    },
-                  },
-                  repo ?? "All",
-                ),
-              ),
-            )
-          : null,
-        days.length
-          ? h(
-              "div",
-              { class: "ops-days" },
-              ...days.map((day) =>
-                h(
-                  "div",
-                  { class: "ops-day" },
-                  h("h3", { class: "ops-sub" }, dayLabel(day.day), h("span", { class: "ops-day-n" }, String(day.events.length))),
-                  h(
-                    "ul",
-                    { class: "ops-rows" },
-                    ...(openDays.has(day.day) ? day.events : day.events.slice(0, TIMELINE_DAY_ROWS)).map((event) => {
-                      const tone = KIND_TONE[event.kind];
-                      const body: Child[] = [
-                        h("span", { class: "ops-row-title" }, event.number ? h("span", { class: "ops-num" }, `#${event.number}`) : null, event.title),
-                        h(
-                          "span",
-                          { class: "ops-tags" },
-                          h("span", { class: `ops-tag t-${tone}` }, KIND_WORD[event.kind]),
-                          h("span", { class: "ops-row-meta" }, [event.repo, event.app, timeOf(event.at)].filter(Boolean).join(" · ")),
-                        ),
-                      ];
-                      return h("li", { class: `ops-row box s-${tone}` }, event.url ? external(event.url, "timeline", ...body) : h("span", { class: "ops-link" }, ...body));
-                    }),
-                  ),
-                  !openDays.has(day.day) && day.events.length > TIMELINE_DAY_ROWS
-                    ? h(
-                        "button",
-                        {
-                          class: "ops-filter-btn ops-day-more",
-                          attrs: { type: "button", "data-use": "ops.timeline.day-more" },
-                          on: {
-                            click: () => {
-                              openDays.add(day.day);
-                              if (root) renderOps(root);
-                            },
-                          },
-                        },
-                        `${day.events.length - TIMELINE_DAY_ROWS} more`,
-                      )
-                    : null,
-                ),
-              ),
-            )
-          : h("p", { class: "empty" }, timeline ? "Nothing merged or deployed in the last 14 days." : "Loading the timeline…"),
-      ),
-    true,
-  );
-}
-
-const AUDIT_MS = 30_000;
-let audit: { entries: AuditEntry[]; at: number } | null = null;
-let auditLoading = false;
 onSessionReset(() => {
   refreshing = false;
-  audit = null;
-  auditLoading = false;
 });
-
-/** The one-tap audit: sends, pauses and GitHub writes, newest first. Read when the section is open. */
-function actionsSection(): Section {
-  const headline = audit ? (audit.entries.length ? `${audit.entries.length} recent` : "Nothing yet") : "Sends, pauses, GitHub";
-  return section("actions", "One-tap actions", "info", headline, () => {
-    if (!auditLoading && (!audit || Date.now() - audit.at > AUDIT_MS)) {
-      auditLoading = true;
-      cmd.getAudit(20).then(
-        ({ entries }) => {
-          auditLoading = false;
-          audit = { entries, at: Date.now() };
-          if (root) renderOps(root);
-        },
-        () => {
-          auditLoading = false;
-        },
-      );
-    }
-    return audit ? auditList(audit.entries) : h("p", { class: "empty" }, "Loading…");
-  }, true);
-}
 

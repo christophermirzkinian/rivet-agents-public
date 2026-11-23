@@ -1010,7 +1010,9 @@ describe("one chat: every line its own More and Reply, shown at a tap with its t
     expect(menu.hidden).toBe(true);
     options().click();
     expect(menu.hidden).toBe(false);
-    expect([...menu.querySelectorAll(".chat-menu-item")].map((item) => item.textContent)).toEqual(["Read aloud"]);
+    // Send delay's switch is the menu's last row (chat-send-delay-dom.test.ts covers it).
+    // 3 designs of this screen (three-designs.ts) is hidden while its Behaviours row is off.
+    expect([...menu.querySelectorAll(".chat-menu-item:not([hidden])")].map((item) => item.textContent)).toEqual(["Anything I asked not done?", "Read aloud", "Send delay"]);
     const toggle = root.querySelector<HTMLButtonElement>(".chat-menu .chat-speak")!;
     expect(toggle.getAttribute("role")).toBe("menuitemcheckbox");
     toggle.click();
@@ -1047,7 +1049,7 @@ describe("one chat: every line its own More and Reply, shown at a tap with its t
     localStorage.removeItem("rivet.chat.replyStyle");
     await onChat();
     options().click();
-    const styles = () => [...root.querySelectorAll<HTMLButtonElement>(".chat-menu .chat-style")];
+    const styles = () => [...root.querySelectorAll<HTMLButtonElement>(".chat-menu .chat-style:not(.chat-delay-seconds)")];
     expect(root.querySelector(".chat-menu [aria-label='Reply style'] .chat-size-title")!.textContent).toBe("Reply style");
     expect(styles().map((one) => one.textContent)).toEqual(["Short", "Normal", "Detailed"]);
     expect(styles().map((one) => one.getAttribute("aria-checked"))).toEqual(["false", "true", "false"]);

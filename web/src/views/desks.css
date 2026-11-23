@@ -815,6 +815,15 @@ button.desk.is-rivet:focus-visible {
 }
 
 /* Every project's name under the boxes: full strength while it has a box, dimmed while it is quiet. */
+.desks-chats {
+  position: relative;
+  z-index: 1;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-body);
+  font-weight: 700;
+}
+
 .desks-idle {
   display: flex;
   flex-wrap: wrap;
@@ -841,7 +850,7 @@ button.desk.is-rivet:focus-visible {
   position: absolute;
   inset: 5px 0;
   border-radius: 14px;
-  border: 2px solid rgba(214, 205, 255, 0.35);
+  border: 1px solid var(--line);
   pointer-events: none;
 }
 

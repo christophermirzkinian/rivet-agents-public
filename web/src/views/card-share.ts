@@ -118,7 +118,7 @@ export function cardShareButton(need: ServedNeed, className: string, allowed: ()
     "button",
     {
       class: `btn card-share ${className}`,
-      attrs: { type: "button", "aria-label": `Share ${need.title}`, "data-share": key, ...(fetching.has(key) ? { "aria-busy": "true" } : {}), "data-use": className.startsWith("upd-") ? "updates.pile.share" : "cards.share" },
+      attrs: { type: "button", "aria-label": `Share ${need.title}`, "data-share": key, ...(fetching.has(key) ? { "aria-busy": "true" } : {}), "data-use": "cards.share" },
       on: {
         click: (event) => {
           // Inside an update card the tap is Share's alone, never the card's open-the-thread.

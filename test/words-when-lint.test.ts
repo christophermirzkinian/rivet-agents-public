@@ -107,6 +107,7 @@ function files(dir: string): string[] {
 const ALLOW: { file: string; pattern: string; why: string; hits?: number }[] = [
   { file: "src/shared/command.ts", pattern: "Rivet is looking into it", why: "a stored record's reason, mirrored by scripts/rivet.mjs and asserted by bridge tests" },
   { file: "web/src/day.ts", pattern: 'new Intl.DateTimeFormat("en-CA"', why: "a key, not shown: the phone's own calendar day as YYYY-MM-DD" },
+  { file: "src/shared/promise-time.ts", pattern: "ago", why: "a word the promise parser reads, never shown: a time said with it is past, so no promise" },
 ];
 
 const allowed = (hit: Hit) => ALLOW.some((one) => one.file === hit.file && hit.text.includes(one.pattern));

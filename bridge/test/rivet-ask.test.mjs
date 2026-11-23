@@ -13,7 +13,7 @@ const NOW = "2026-10-01T02:00:00.000Z";
  * @param {any[]} [seed] @param {Record<string, string>} [messages] your messages by id, for POST from
  */
 function stubServer(seed = [], messages = {}) {
-  const state = { asks: /** @type {any[]} */ ([...seed]), held: /** @type {string[] | undefined} */ (undefined), calls: /** @type {{ method: string, path: string, body?: any, ifMatch?: string }[]} */ ([]) };
+  const state = { asks: /** @type {any[]} */ ([...seed]), held: /** @type {string[] | undefined} */ (undefined), workers: /** @type {any[] | undefined} */ (undefined), calls: /** @type {{ method: string, path: string, body?: any, ifMatch?: string }[]} */ ([]) };
   /** @param {number} status @param {unknown} doc */
   const reply = (status, doc) => new Response(JSON.stringify(doc), { status, headers: { "content-type": "application/json" } });
   /** @param {string | URL | Request} url @param {RequestInit} [init] */
@@ -24,6 +24,8 @@ function stubServer(seed = [], messages = {}) {
     const body = typeof init.body === "string" ? JSON.parse(init.body) : undefined;
     state.calls.push({ method, path: `${u.pathname}${u.search}`, body, ifMatch: headers["if-match"] });
     if (headers.authorization !== `Bearer ${TOKEN}`) return reply(401, { error: "unauthorized" });
+    // With no chats given the read fails, as with no server: the ask is written unchecked.
+    if (u.pathname === "/api/workers" && method === "GET" && state.workers) return reply(200, { workers: state.workers });
     if (u.pathname === "/api/asks" && method === "GET") {
       const stage = u.searchParams.get("stage");
       const rows = [...state.asks].reverse().filter((a) => !stage || a.stage === stage);
@@ -48,6 +50,10 @@ function stubServer(seed = [], messages = {}) {
       return reply(201, ask);
     }
     const m = /^\/api\/asks\/([^/]+)$/.exec(u.pathname);
+    if (m && method === "GET") {
+      const ask = state.asks.find((a) => a.id === decodeURIComponent(m[1]));
+      return ask ? reply(200, ask) : reply(404, { error: "no such ask" });
+    }
     if (m && method === "PATCH") {
       const ask = state.asks.find((a) => a.id === decodeURIComponent(m[1]));
       if (!ask) return reply(404, { error: "no such ask" });
@@ -159,6 +165,79 @@ test("needs-you may name its card, and the list shows each ask's stage, due time
   );
   await cli(["ask", "list", "--status", "needs-you"], { fetch: server.fetch });
   assert.equal(server.state.calls.at(-1)?.path, "/api/asks?stage=needs-you");
+});
+
+test("an ask's --chat a short tail off a live chat's name is refused; one not on the Town yet is noted; an unread Town warns", async () => {
+  const server = stubServer([mk({ id: "a-7" }), mk({ id: "a-9", repo: "sam/side-tool" })]);
+  server.state.workers = [
+    { chat: "build-chat-21", repo: "example-org/example-repo" },
+    { chat: "side-chat", repo: "sam/side-tool" },
+    // A row with no chat name is skipped, never matched.
+    { chat: null, repo: "example-org/example-repo" },
+  ];
+  const writes = () => server.state.calls.filter((call) => call.method !== "GET").length;
+  const town = { fetch: server.fetch, env: { ...ENV, RIVET_REPOS: "example-org/example-repo" } };
+
+  const tailed = await cli(["ask", "set", "a-7", "--chat", "build-chat-21-fd"], town);
+  assert.equal(tailed.code, 2);
+  assert.equal(tailed.stderr, "rivet: no chat is named build-chat-21-fd on the Town; did you mean build-chat-21? pass --chat build-chat-21, or --force to write build-chat-21-fd as it is\n");
+  // A set checks the ask's own repo's chats, naming a repo other than the main one; it has no --repo to pass.
+  const away = await cli(["ask", "set", "a-9", "--chat", "side-chat-fd"], town);
+  assert.equal(away.code, 2);
+  assert.match(away.stderr, /did you mean side-chat in sam\/side-tool\? pass --chat side-chat, or --force to write side-chat-fd as it is\n$/);
+  // An open or status reads the main repo's chats unless --repo names another, which the hint then names.
+  const opened = await cli(["ask", "open", "glow", "--chat", "side-chat-fd"], town);
+  assert.deepEqual([opened.code, opened.stderr], [0, "rivet: note: side-chat-fd is not on the Town yet\n"]);
+  const there = await cli(["ask", "status", "a-7", "building", "--chat", "side-chat-fd", "--repo", "sam/side-tool"], town);
+  assert.equal(there.code, 2);
+  assert.match(there.stderr, /pass --chat side-chat --repo sam\/side-tool, or --force/);
+  // A status with no --repo keeps the ask's own repo, so it reads that repo's chats: a-9's is side-tool's.
+  const asksRepo = await cli(["ask", "status", "a-9", "building", "--chat", "side-chat-fd"], town);
+  assert.equal(asksRepo.code, 2);
+  assert.match(asksRepo.stderr, /did you mean side-chat in sam\/side-tool\? pass --chat side-chat --repo sam\/side-tool, or --force/);
+  // a-7 names none, so it is in the main repo, where side-chat is not; another repo's exact name never lets a tail through.
+  const mainAsk = await cli(["ask", "status", "a-7", "building", "--chat", "side-chat-fd"], town);
+  assert.deepEqual([mainAsk.code, mainAsk.stderr], [0, "rivet: note: side-chat-fd is not on the Town yet\n"]);
+  assert.equal(writes(), 2);
+  server.state.workers.push({ chat: "build-chat-21-fd", repo: "sam/side-tool" });
+  const elsewhere = await cli(["ask", "status", "a-7", "building", "--chat", "build-chat-21-fd"], town);
+  assert.equal(elsewhere.code, 2);
+  const setElsewhere = await cli(["ask", "set", "a-7", "--chat", "build-chat-21-fd"], town);
+  assert.equal(setElsewhere.code, 2);
+  server.state.workers.pop();
+  // An ask that cannot be read checks every repo's chats.
+  const noAsk = await cli(["ask", "status", "a-40", "building", "--chat", "side-chat-fd"], town);
+  assert.equal(noAsk.code, 2);
+  assert.equal(writes(), 2);
+
+  const exact = await cli(["ask", "set", "a-7", "--chat", "build-chat-21"], town);
+  assert.deepEqual([exact.code, exact.stderr], [0, ""]);
+  // Only a tail added off a live name is a near miss: one cut off, a numbered name used again and a long tail are notes.
+  for (const chat of ["build-chat", "build-chat-21-2", "build-chat-21-12", "build-chat-21-follow-up", "null-ab"]) {
+    const noted = await cli(["ask", "set", "a-7", "--chat", chat], town);
+    assert.deepEqual([noted.code, noted.stderr], [0, `rivet: note: ${chat} is not on the Town yet\n`]);
+  }
+  const forced = await cli(["ask", "set", "a-7", "--chat", "build-chat-21-fd", "--force"], town);
+  assert.deepEqual([forced.code, forced.stderr], [0, ""]);
+  assert.equal(server.state.asks[0].chat, "build-chat-21-fd");
+
+  server.state.workers = undefined;
+  const unread = await cli(["ask", "set", "a-7", "--chat", "build-chat-21-xy"], town);
+  assert.equal(unread.code, 0, unread.stderr);
+  assert.match(unread.stderr, /^rivet: warning: could not read the chats on the Town \(.+\): --chat build-chat-21-xy is written unchecked\n$/);
+  assert.equal(server.state.asks[0].chat, "build-chat-21-xy");
+});
+
+test("a status record's or a card's --chat a short tail off a live chat's name is refused before it is written", async () => {
+  const server = stubServer();
+  server.state.workers = [{ chat: "build-chat-21", repo: "sam/side-tool" }];
+  const status = await cli(["status", "set", "disk", "data", "--state", "parked", "--chat", "build-chat-21-fd"], { fetch: server.fetch });
+  assert.equal(status.code, 2);
+  assert.match(status.stderr, /did you mean build-chat-21 in sam\/side-tool\? pass --chat build-chat-21, or --force/);
+  const card = await cli(["card", "add", "c1", "--kind", "update", "--title", "Done", "--chat", "build-chat-21-fd"], { fetch: server.fetch });
+  assert.equal(card.code, 2);
+  assert.match(card.stderr, /did you mean build-chat-21 in sam\/side-tool\?/);
+  assert.equal(server.state.calls.filter((call) => call.method !== "GET").length, 0);
 });
 
 test("ask open, status, close and list against the asks routes", async () => {

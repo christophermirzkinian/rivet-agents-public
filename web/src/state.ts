@@ -1,6 +1,7 @@
 import type { BoardResponse, Decision, Reply, ServedNeed, StatusResponse } from "../../src/shared/board.js";
 import { isWorking, needCounts, type Summary } from "../../src/shared/summary.js";
-import { isGotIt } from "../../src/shared/answers.js";
+import { isGotIt, waitsOnYou } from "../../src/shared/answers.js";
+import { chatsLine } from "../../src/shared/chats.js";
 import type { CardThread } from "../../src/shared/threads.js";
 import { SNAPSHOT_STALE_MS, type Worker, type WorkersResponse } from "../../src/shared/workers.js";
 import * as api from "./api.js";
@@ -20,10 +21,10 @@ export const TABS = ["cards", "progress", "chat", "more"] as const;
 export type Tab = (typeof TABS)[number];
 
 /** The pages the menu opens: a sheet over the home screen on a phone, the middle column on a computer. */
-export const OPS_PAGES = ["plan", "usage", "machines", "code"] as const;
+export const OPS_PAGES = ["plan", "usage", "machines"] as const;
 export type OpsPage = (typeof OPS_PAGES)[number];
 
-export const MORE_PAGES = ["usage", "mind", "machines", "code", "home", "media", "settings", "what-you-used"] as const;
+export const MORE_PAGES = ["usage", "mind", "machines", "home", "media", "connectors", "settings", "what-you-used"] as const;
 export type MorePage = (typeof MORE_PAGES)[number];
 
 /** Where a tab id lands (a saved link, a notification, `?tab=`); an id never known lands on the home screen. */
@@ -80,6 +81,10 @@ export const app = {
   workers: null as WorkersResponse | null,
   /** GET /api/summary as last read: the asks' counts and next done time every screen shows. */
   summary: null as Summary | null,
+  /** GET /api/chats as last read: "N chats open · cap N", or "Can't tell"; null before the first read. */
+  chatsLine: null as string | null,
+  /** When chatsLine's report goes stale (ms, this clock: read time plus the server's leftMs); null for "Can't tell" or a line set with no read. */
+  chatsLineUntil: null as number | null,
   /** When this device last loaded the crew: the app shows them offline once that is SNAPSHOT_STALE_MS old. */
   workersAt: null as number | null,
   /** Card id → the thread it belongs to and its round there; a card in no thread is absent. */
@@ -182,8 +187,8 @@ export function summary(): Summary | null {
   return { ...app.summary, ...needCounts(asking(), minimisedCards()) };
 }
 
-/** The deck less its Got it cards: news he clears, which never counts as needing him, as the server counts it (openBoard). */
-const asking = (): ServedNeed[] => deck().filter((need) => !isGotIt(need));
+/** The deck less its news, Got it cards and an update card opened: never counted as needing him, as the server counts it (openBoard). */
+const asking = (): ServedNeed[] => deck().filter((need) => waitsOnYou(need) && !isGotIt(need));
 
 /** The summary's needsYou, which the Cards tab and the home-screen icon show: counted here even before its first read. */
 export const needsYou = (): number => needCounts(asking(), minimisedCards()).needsYou;
@@ -338,6 +343,8 @@ export function resetSession(): void {
   app.board = null;
   app.status = null;
   app.summary = null;
+  app.chatsLine = null;
+  app.chatsLineUntil = null;
   app.workers = null;
   app.workersAt = null;
   app.cardThreads.clear();
@@ -396,6 +403,12 @@ export const MAC_WAITS = "(waits for the Mac)";
 /** Whether the crew on hand is too old to show as live, as its lapse times it: then nobody counts as working. */
 export function crewLapsed(now = Date.now()): boolean {
   return app.workersAt !== null && now - app.workersAt > SNAPSHOT_STALE_MS;
+}
+
+/** Progress's chats line: "Can't tell" once the server would no longer keep the report it was read from. */
+export function chatsLineShown(now = Date.now()): string | null {
+  if (app.chatsLine === null) return null;
+  return app.chatsLineUntil !== null && now > app.chatsLineUntil ? chatsLine(null, 0) : app.chatsLine;
 }
 
 /** The chats at work: the one live crew that the Desks tab's "N at work", each desk's "N working" and Coming's In progress all count. */
@@ -503,7 +516,7 @@ export async function refresh(): Promise<boolean> {
       changed();
     }, STILL_READING_MS);
   try {
-    const [board, status, replies, workers, links, conversations, summary] = await Promise.all([
+    const [board, status, replies, workers, links, conversations, summary, chats] = await Promise.all([
       api.getBoard(),
       api.getStatus(),
       api.getReplies(),
@@ -515,6 +528,9 @@ export async function refresh(): Promise<boolean> {
       getConversations().catch(() => null),
       // And the asks' counts: a failed read keeps the last.
       api.getSummary().catch(() => null),
+      // And Progress's chats count, likewise.
+      // Timed as it lands, so a slower read beside it never makes the count look newer.
+      api.getChats().then((line) => ({ line, at: Date.now() })).catch(() => null),
     ]);
     if (!current()) return false;
     if (read < readApplied) return true;
@@ -530,6 +546,12 @@ export async function refresh(): Promise<boolean> {
     if (links) app.cardThreads = new Map(links.cards.map((link) => [link.card, link]));
     if (typeof conversations?.unread === "number") app.chatUnread = conversations.unread;
     if (summary) app.summary = summary;
+    if (typeof chats?.line.line === "string") {
+      // A count with no time left on it is one the server no longer keeps.
+      const leftMs = typeof chats.line.leftMs === "number" && chats.line.leftMs > 0 ? chats.line.leftMs : null;
+      app.chatsLine = leftMs === null ? chatsLine(null, 0) : chats.line.line;
+      app.chatsLineUntil = leftMs === null ? null : chats.at + leftMs;
+    }
     app.status = status;
     app.replies.clear();
     for (const reply of replies.replies) if (!app.replies.has(reply.itemId)) app.replies.set(reply.itemId, reply);

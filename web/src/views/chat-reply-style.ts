@@ -2,7 +2,9 @@
 // writes now. Saved on this device like the text size; every chat message and card
 // answer sent from here carries the pick (Normal carries nothing), and the bridge adds a line for it to Rivet's.
 import type { ReplyStyle } from "../../../src/shared/command.js";
+import { REPLY_STYLE_ID } from "../../../src/shared/behaviours.js";
 import { h } from "../dom.js";
+import { repaintAfterList, saveChatPref } from "./chat-prefs.js";
 
 export type ChatReplyStyle = "short" | "normal" | "detailed";
 
@@ -17,8 +19,18 @@ export const CHAT_REPLY_STYLES: readonly { style: ChatReplyStyle; label: string 
   { style: "detailed", label: "Detailed" },
 ];
 
-function isStyle(value: unknown): value is ChatReplyStyle {
+export function isStyle(value: unknown): value is ChatReplyStyle {
   return value === "short" || value === "normal" || value === "detailed";
+}
+
+/** The style this phone saved, or null when it saved none. */
+export function savedChatReplyStyle(): ChatReplyStyle | null {
+  try {
+    const saved = localStorage.getItem(KEY);
+    return isStyle(saved) ? saved : null;
+  } catch {
+    return null;
+  }
 }
 
 export function readChatReplyStyle(): ChatReplyStyle {
@@ -66,12 +78,15 @@ export function chatReplyStylePicker(): HTMLElement {
   function pick(style: ChatReplyStyle): void {
     setChatReplyStyle(style);
     paint();
+    saveChatPref(REPLY_STYLE_ID, { style }, "reply style");
   }
   paint();
-  return h(
+  const row = h(
     "div",
     { class: "chat-size-row", attrs: { role: "group", "aria-label": "Reply style" } },
     h("span", { class: "chat-size-title" }, "Reply style"),
     h("div", { class: "chat-size-choices" }, ...buttons),
   );
+  repaintAfterList(row, paint);
+  return row;
 }

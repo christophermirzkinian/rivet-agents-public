@@ -438,11 +438,6 @@
   overflow-wrap: anywhere;
 }
 
-.ops-num {
-  margin-right: 8px;
-  color: #b9cdff;
-}
-
 .ops-row-meta {
   color: var(--muted);
   font-size: var(--fs-body);
@@ -457,51 +452,7 @@
   margin: 4px 0 0;
 }
 
-/* When the PR should be merged: as large as the checks label, never small text. */
-.ops-row-eta {
-  color: var(--text);
-  font-size: var(--fs-body);
-  font-weight: 700;
-}
-
 .ops-row-meta.t-bad {
-  color: var(--no);
-  font-weight: 700;
-}
-
-.ops-checks {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: var(--fs-body);
-}
-
-.ops-checks-bar {
-  display: flex;
-  flex: 1;
-  height: 10px;
-  border-radius: 999px;
-  background: var(--panel-2);
-  box-shadow: inset 0 0 0 1px var(--line);
-  overflow: hidden;
-}
-
-.ops-checks-passed {
-  background: var(--yes);
-}
-
-.ops-checks-failed {
-  background: var(--no);
-}
-
-.ops-checks-label {
-  flex-shrink: 0;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.ops-checks.t-bad .ops-checks-label {
   color: var(--no);
   font-weight: 700;
 }
@@ -670,24 +621,6 @@
   border-color: transparent;
   background: var(--apricot);
   color: #2a1204;
-}
-
-.ops-days {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.ops-day-more {
-  margin-top: 8px;
-}
-
-.ops-day-n {
-  padding: 0 10px;
-  border-radius: 999px;
-  background: var(--panel-2);
-  color: var(--muted);
-  font-size: var(--fs-body);
 }
 
 @media (min-width: 900px) {

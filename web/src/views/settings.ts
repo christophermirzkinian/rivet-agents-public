@@ -7,9 +7,9 @@ import { button, describe, h, keepFocus } from "../dom.js";
 import { loadPushHealth, onPushChanged, pushBanner, pushChanged } from "../push-health.js";
 import { disablePush, enablePush, pushState, type PushState } from "../push.js";
 import { app, changed, sameSession, signedOut, subscribe } from "../state.js";
+import type { BehaviourSection } from "../../../src/shared/behaviours.js";
+import { behavioursPanel, loadBehaviours } from "./behaviours.js";
 import { closeModels, loadModels, modelSettings } from "./model-settings.js";
-import * as patchNotes from "./patch-notes.js";
-import { openSheet } from "./sheet.js";
 import { flash } from "./toast.js";
 import { voiceSettings } from "./voice-settings.js";
 
@@ -20,6 +20,9 @@ let push: PushState | null = null;
 let pushBusy = false;
 let unsubscribe: (() => void) | null = null;
 let stopListening: (() => void) | null = null;
+type SettingsTab = "general" | "behaviours";
+/** General is today's page; Behaviours lists what Rivet does by itself. Each open starts on General. */
+let tab: SettingsTab = "general";
 
 /** Bumped by each read and each Turn on or off, so only the latest answer lands. */
 let pushReads = 0;
@@ -42,6 +45,7 @@ function readPushState(): void {
 
 export function mount(el: HTMLElement): void {
   unmount();
+  tab = "general";
   const render = () => renderSettings(el);
   unsubscribe = subscribe(render);
   stopListening = onPushChanged(readPushState);
@@ -183,19 +187,48 @@ function device(): HTMLElement {
   );
 }
 
-function patchNotesPanel(): HTMLElement {
-  return h(
-    "section",
-    { class: "panel box" },
-    h("h3", { class: "panel-title" }, "Patch notes"),
-    h("p", { class: "panel-text" }, `What changed in each ${APP_NAME} update.`),
-    button("Patch notes", () => openSheet("Patch notes", patchNotes, "Close", undefined, { use: "patch-notes" }), "ghost big", false, "settings.patch-notes"),
-  );
+/** Shows a tab; the preview opens Behaviours with it. */
+export function openTab(next: SettingsTab): void {
+  tab = next;
+  if (next === "behaviours") void loadBehaviours();
+  changed();
+}
+
+function tabs(el: HTMLElement): HTMLElement {
+  const tabButton = (name: SettingsTab, label: string) => {
+    const pick = h("button", { class: "set-tab", attrs: { type: "button", role: "tab", "aria-selected": String(tab === name), "data-use": `settings.tab.${name}` } }, label);
+    pick.addEventListener("click", () => {
+      if (tab === name) return;
+      openTab(name);
+      const body = el.querySelector(".set");
+      if (body) body.scrollTop = 0;
+    });
+    return pick;
+  };
+  return h("div", { class: "set-tabs box", attrs: { role: "tablist", "aria-label": "Settings" } }, tabButton("general", "General"), tabButton("behaviours", "Behaviours"));
+}
+
+/** A linked behaviour opens its section on General. */
+function openSection(el: HTMLElement, section: BehaviourSection): void {
+  openTab("general");
+  el.querySelector(`[data-section="${section}"]`)?.scrollIntoView({ block: "start" });
+}
+
+function marked(panel: HTMLElement, section: BehaviourSection): HTMLElement {
+  panel.dataset.section = section;
+  return panel;
 }
 
 function renderSettings(el: HTMLElement): void {
   const scroll = el.querySelector(".set")?.scrollTop ?? 0;
-  const body = h("div", { class: "set" }, pushBanner(), modelSettings(), voiceSettings(), notifications(), device(), patchNotesPanel());
+  const body = h(
+    "div",
+    { class: "set" },
+    tabs(el),
+    ...(tab === "behaviours"
+      ? [behavioursPanel((section) => openSection(el, section))]
+      : [pushBanner(), marked(modelSettings(), "models"), marked(voiceSettings(), "voice"), marked(notifications(), "push"), device()]),
+  );
   const refocus = keepFocus(el);
   el.replaceChildren(body);
   refocus();

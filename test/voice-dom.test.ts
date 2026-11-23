@@ -5,7 +5,7 @@ const DEFAULT_PUSH = {
   enabled: false,
   start: "22:00",
   end: "07:00",
-  breakthrough: { gameDown: true, deployFailed: true, capHit: true },
+  breakthrough: { appDown: true, deployFailed: true, capHit: true },
   held: 0,
   quietNow: false,
 };

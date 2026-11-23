@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { documentName, MAX_MEDIA_BYTES, readClip, uploadClips } from "../bridge/lib/board-client.mjs";
+import { CARD_REFUSAL_MAX, documentName, MAX_MEDIA_BYTES, readClip, uploadClips } from "../bridge/lib/board-client.mjs";
 import { definitiveRefusal, dropCardHold, holdForCard, isVideoCard, rekeyCardHold } from "../bridge/lib/card-holds.mjs";
 import { makeExec, readToken, resolveBin, serverOrigin } from "../bridge/lib/config.mjs";
 import { folderRepo, prRepo } from "../bridge/lib/folder-repo.mjs";
@@ -303,7 +303,8 @@ export async function postSay(body, { origin, token, fetch: fetchFn, file = HOLD
   }
   if (!res.ok) {
     const doc = await res.json().catch(() => null);
-    const line = `http ${res.status}${typeof doc?.error === "string" ? `: ${sanitizeLine(doc.error, 200)}` : ""}`;
+    // The card checker's refusal (422) says what to change on each card, so it is kept whole.
+    const line = `http ${res.status}${typeof doc?.error === "string" ? `: ${sanitizeLine(doc.error, res.status === 422 ? CARD_REFUSAL_MAX : 200)}` : ""}`;
     // The 409 for a reply into the old Updates is written before anything is (2026-11-16): nothing landed.
     const updates = res.status === 409 && typeof doc?.error === "string" && doc.error.includes("old Updates");
     err(`${line}${definitiveRefusal(res.status) || updates ? drop() : kept}`);
@@ -311,6 +312,7 @@ export async function postSay(body, { origin, token, fetch: fetchFn, file = HOLD
   }
   const doc = await res.json().catch(() => null);
   out(`sent ${typeof doc?.id === "string" ? sanitizeLine(doc.id, 100) : ""}`);
+  for (const line of Array.isArray(doc?.warnings) ? doc.warnings : []) err(`card checker warning: ${sanitizeLine(String(line), CARD_REFUSAL_MAX)}`);
   if (!hold) return { code: 0, posted: true };
   if (typeof doc?.card !== "string") {
     if (!held.length) return { code: 0, posted: true };
@@ -384,8 +386,9 @@ async function main() {
         return undefined;
       }
     };
-    const { ok, problems } = await preflight(files, { exec, ffprobe: bin("ffprobe"), ffmpeg: bin("ffmpeg"), tmpdir: os.tmpdir() });
+    const { ok, problems, warnings } = await preflight(files, { exec, ffprobe: bin("ffprobe"), ffmpeg: bin("ffmpeg"), tmpdir: os.tmpdir() });
     for (const problem of problems) process.stderr.write(`say: ${problem}\n`);
+    for (const warning of warnings) process.stderr.write(`say: warning: ${warning}\n`);
     if (!ok) return fail("media refused; nothing was sent", 5);
   }
   /** @type {{ role: "image" | "video" | "file", file: string, type: string, bytes: Buffer, sha256: string }[]} */

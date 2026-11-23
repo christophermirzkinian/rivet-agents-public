@@ -296,13 +296,18 @@ export async function pass(d) {
     d.log("pass", { stopped: "busy", ...(d.mode === "propose" ? { left: "the next run proposes" } : {}) });
     return NO_RUN;
   }
+  let state;
   try {
     const due = d.readDue();
     const owed = due !== null && d.now.getTime() - Date.parse(due) < DUE_HOURS * HOUR_MS;
     const mode = d.mode === "propose" || owed ? "propose" : "record";
     if (mode === "propose" && !owed) d.writeDue(d.now.toISOString());
-    await d.run(mode, owed ? new Date(/** @type {string} */ (due)) : d.now);
+    state = await d.run(mode, owed ? new Date(/** @type {string} */ (due)) : d.now);
     if (mode === "propose") d.clearDue();
+    // Every finished run writes a line, a quiet hour's too: Ops reads a run that wrote nothing as a reader gone empty
+    // (server ops/readers.ts haikuReading), and the hourly record run went red for it.
+    const kept = /** @type {Partial<State> | undefined} */ (state);
+    d.log("pass", { mode, fixes: kept?.fixes?.length, proposed: kept?.proposed?.length });
   } finally {
     release();
   }
@@ -345,7 +350,7 @@ async function main() {
     run: async (runMode, week) => {
       const origin = serverOrigin(process.env.RIVET_URL);
       const token = await readToken(exec, "RIVET_BOARD_TOKEN");
-      await runWeekly({
+      return runWeekly({
         mode: runMode,
         now: new Date(),
         week,

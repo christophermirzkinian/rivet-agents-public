@@ -5,7 +5,6 @@ import type { BoardChat, ComingItem, ServedBoard } from "../src/shared/board.js"
 import type { Worker } from "../src/shared/workers.js";
 import { app } from "../web/src/state.js";
 import { comingRowRepo } from "../web/src/views/board.js";
-import { resetComingSheet } from "../web/src/views/coming-sheet.js";
 import { closeSheet } from "../web/src/views/sheet.js";
 import { resetComingFilter } from "../web/src/views/coming-filter.js";
 
@@ -32,7 +31,6 @@ function render(lists: { chats?: BoardChat[]; coming?: ComingItem[] }, workers: 
 
 afterEach(() => {
   closeSheet();
-  resetComingSheet();
   document.body.replaceChildren();
   localStorage.clear();
   resetComingFilter();

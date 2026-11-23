@@ -200,6 +200,10 @@ export const claudeUsageSnapshotSchema = z
             unlimited: z.boolean().optional(),
             // Google rows only: when Google's usage was read.
             readAt: iso.optional(),
+            // Claude account rows only: the account's config dir ("account-4"). Absent from a bridge older than the field.
+            dir: z.string().regex(/^[a-z0-9-]{1,12}$/).optional(),
+            // Codex rows only: the home's slot, 12 hex of its account id's sha256. Absent from a bridge older than the field.
+            slot: z.string().regex(/^[0-9a-f]{12}$/).optional(),
           })
           .strict(),
       )

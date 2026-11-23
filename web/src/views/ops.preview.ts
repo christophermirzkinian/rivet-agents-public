@@ -1,15 +1,16 @@
 // Dev-only preview of Progress, the menu's pages and the search and settings sheets with fake data:
-// web/preview/ops.html?tab=progress|more[&page=usage|machines|code]&sheet=search|settings&q=notes
+// web/preview/ops.html?tab=progress|more[&page=usage|machines]&sheet=search|settings&q=notes&set=behaviours
 // Nothing imports this from the app, so the production build leaves it out.
 import "../styles.css";
 
 import type { OpsStatus } from "../../../src/shared/ops-status.js";
 import type { OpsDismissal } from "../../../src/shared/ops-dismiss.js";
 import { boardSchema, type PushConfigResponse, type Reply } from "../../../src/shared/board.js";
-import type { AuditEntry } from "../../../src/shared/command.js";
+import { DEFAULT_CHAT_SEND_DELAY, type AuditEntry } from "../../../src/shared/command.js";
 import type { ConversationsResponse } from "../../../src/shared/conversations.js";
 import type { ClaudeUsageSnapshot, FlySnapshot, GithubSnapshot, Health, MacSnapshot, OpsResponse, TimelineResponse } from "../../../src/shared/ops.js";
 import { defaultPicks, MODEL_JOBS, picksFromFile, type ModelPicks, type ModelSettingsResponse } from "../../../src/shared/models.js";
+import { BEHAVIOURS, type BehaviourRow } from "../../../src/shared/behaviours.js";
 import type { PushSettingsResponse } from "../../../src/shared/quiet.js";
 import type { SearchItem } from "../../../src/shared/search.js";
 import type { SchedulesResponse } from "../../../src/shared/schedules.js";
@@ -20,7 +21,6 @@ import { app, crewLoaded, go } from "../state.js";
 // Chat first, as main.ts loads it: it registers a search source as it loads, which needs search.ts loaded already.
 import "./chat.js";
 import * as search from "./search.js";
-import * as patchNotes from "./patch-notes.js";
 import * as settings from "./settings.js";
 import { openSheet } from "./sheet.js";
 import { mountShell } from "./shell.js";
@@ -471,6 +471,10 @@ const timeline: TimelineResponse = {
   ],
   repos: [MS, OTHER],
 };
+const behaviourRows: BehaviourRow[] = BEHAVIOURS.map(({ knobs: _knobs, default: value, chip, ...shown }) =>
+  shown.control === "endpoint" ? { ...shown, value: null, chip: null, updatedAt: null } : { ...shown, value, chip: chip?.(value) ?? null, updatedAt: null },
+);
+let sendDelay = DEFAULT_CHAT_SEND_DELAY;
 const pushSettings: PushSettingsResponse = {
   enabled: true,
   start: "22:00",
@@ -693,6 +697,8 @@ window.fetch = async (input, init) => {
     status = 202;
   }
   else if (url.startsWith("/api/settings/push")) body = method === "PUT" ? { ...pushSettings, ...JSON.parse(String(init?.body)) } : pushSettings;
+  else if (url === "/api/settings/chat-send-delay") body = method === "PUT" ? (sendDelay = JSON.parse(String(init?.body))) : sendDelay;
+  else if (url === "/api/behaviours") body = { behaviours: behaviourRows };
   else if (url.startsWith("/api/workers")) body = workers;
   else if (url.startsWith("/api/replies")) body = { replies };
   else if (url.startsWith("/api/audit")) body = { entries: audit };
@@ -739,5 +745,7 @@ if (sheet === "search") {
       input.value = q;
       input.dispatchEvent(new Event("input"));
     }, 300);
-} else if (sheet === "settings") openSheet("Settings", settings);
-else if (sheet === "patchnotes") openSheet("Patch notes", patchNotes);
+} else if (sheet === "settings") {
+  openSheet("Settings", settings);
+  if (params.get("set") === "behaviours") settings.openTab("behaviours");
+}

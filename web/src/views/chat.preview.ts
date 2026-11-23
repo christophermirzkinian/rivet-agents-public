@@ -194,6 +194,7 @@ const workers = {
 } as unknown as WorkersResponse;
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+let sendDelay = { on: true, seconds: 10 };
 const passThrough = window.fetch.bind(window);
 window.fetch = async (input, init) => {
   const url = new URL(String(input), location.origin);
@@ -262,6 +263,11 @@ window.fetch = async (input, init) => {
     return found ? json(detail(conversationOf(found))) : json({ error: "no such conversation" }, 404);
   }
 
+  // Chat's Send delay: kept here while the page is open, as the server keeps it.
+  if (path === "/api/settings/chat-send-delay") {
+    if (init?.method === "PUT") sendDelay = JSON.parse(String(init.body)) as typeof sendDelay;
+    return json(sendDelay);
+  }
   // Saved lines: kept here while the page is open, newest saved first.
   if (path === "/api/chat/saved") {
     const saved = savedIds.flatMap((one) => {

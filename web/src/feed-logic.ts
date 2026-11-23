@@ -33,9 +33,14 @@ function isOpen(need: ServedNeed, input: Pick<DeckInput, "answeredRev" | "reopen
   return !input.held.has(need.id) && (input.reopened.has(need.id) || input.answeredRev.get(need.id) !== need.rev);
 }
 
-/** The cards still to answer, in the order the feed shows them: the desktop's order, with the front card first. Update cards answer nothing, so they are never here. */
+/**
+ * The cards still to answer, in the order the feed shows them: the desktop's order, with the front card first. An update
+ * card answers nothing, so it is here only while it is the front card, opened on purpose, seen or not.
+ */
 export function deckOrder(needs: readonly ServedNeed[], input: DeckInput): ServedNeed[] {
-  const ordered = deskOrder(needs.filter((need) => waitsOnYou(need) && isOpen(need, input) && input.later.get(need.id) !== need.rev));
+  const ordered = deskOrder(
+    needs.filter((need) => (waitsOnYou(need) ? isOpen(need, input) && input.later.get(need.id) !== need.rev : need.id === input.front && !input.held.has(need.id))),
+  );
   const front = input.front ? ordered.findIndex((need) => need.id === input.front) : -1;
   if (front > 0) ordered.unshift(...ordered.splice(front, 1));
   return ordered;

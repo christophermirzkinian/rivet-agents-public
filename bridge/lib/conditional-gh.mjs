@@ -1,6 +1,6 @@
 // GitHub GETs that send the ETag of their last 200. GitHub answers an unchanged resource with 304 Not
 // Modified, and a 304 costs none of the owner's hourly REST budget, which every tool on the account shares: 40 of them
-// in one second spent none of it (8 Oct 2026). gh exits 1 on a 304, so the answer is read from the status line `-i`
+// in one second spent none of it. gh exits 1 on a 304, so the answer is read from the status line `-i`
 // prints, never from the exit code. Only a 200 with a well-formed ETag is kept; anything else is passed on as it came.
 
 /** The answers kept; past it the one used longest ago goes. */

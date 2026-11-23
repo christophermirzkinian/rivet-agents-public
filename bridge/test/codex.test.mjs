@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import { spawn } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { PassThrough, Writable } from "node:stream";
 import test from "node:test";
@@ -46,6 +47,21 @@ test("parseCodexAccountRead: no account is signed out; an error or a malformed r
   assert.deepEqual(parseCodexAccountRead({ id: 3, result: { account: null } }), { signedIn: false, email: null });
   assert.deepEqual(parseCodexAccountRead({ id: 3, error: { message: "no" } }), { signedIn: null, email: null });
   assert.deepEqual(parseCodexAccountRead({ id: 3, result: "x" }), { signedIn: null, email: null });
+});
+
+test("collectCodex: every row of a home carries its slot, 12 hex of its id's sha256, and never the id", async () => {
+  const rows = await collectCodex({
+    codexBin: "/bin/codex",
+    list: () => [
+      { id: "aaa-1", home: "/pool/a/home" },
+      { id: "bbb-2", home: "/pool/b/home" },
+    ],
+    read: async (_, home) => ({ limits: home === "/pool/a/home" ? week(40) : null, signedIn: null, email: null }),
+    cache: new Map(),
+  });
+  const slot = (id) => createHash("sha256").update(id).digest("hex").slice(0, 12);
+  assert.deepEqual([...new Set(rows.map((row) => `${row.kind.split("_").slice(0, 2).join("_")} ${row.slot}`))], [`codex_1 ${slot("aaa-1")}`, `codex_2 ${slot("bbb-2")}`]);
+  assert.ok(!JSON.stringify(rows).includes("aaa-1") && !JSON.stringify(rows).includes("bbb-2"));
 });
 
 test("codexRows: every window named, shortest first, the week's row carries credits as fields, graded at 90/100; no reply is 'no reading'", () => {

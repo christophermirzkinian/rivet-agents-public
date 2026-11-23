@@ -31,6 +31,8 @@ import { NO_REPO } from "../../shared/repos.js";
 import { rankSearch, type SearchItem } from "../../shared/search.js";
 import type { Worker } from "../../shared/workers.js";
 import { askLateId, askOfLateId, asksPastDue } from "../asks/late.js";
+import { askOfSoonId, asksAboutToSlip, askSoonId } from "../asks/promises.js";
+import type { PromiseKeeper } from "../../shared/behaviours.js";
 import { pickupAsk, settlePickupAsks } from "../asks/made.js";
 import { stageReadings, syncAskStages, syncIssueCloses } from "../asks/stages.js";
 import type { HealthCheck } from "../config.js";
@@ -51,6 +53,7 @@ import { held, lateCardId, lateDue, lateKey, LATE_ASK_ACK_MS, type LateLog } fro
 import { MachineHistory, macMachine } from "./machines.js";
 import { nextRows } from "./next.js";
 import { CHAT_CLOSED, isHoldLabel, itemId, keepsBreakingCard, machineReds, NO_PICKUPS, PICKUP_BY, PICKUP_NOTE, planPickups, QUEUE_FULL, releasePickup, scheduleRepo, type PickupState, type RedItem } from "./pickup.js";
+import { createReaders } from "./readers.js";
 import { MAX_NOTES } from "./schema.js";
 import { OpsStore, type PendingAlert, type QueuedPush } from "./store.js";
 import { alertSummary, buildApps, buildOps, buildTimeline, deployAlerts, downAlerts, isDev, isStale, type Alert, type Owned } from "./view.js";
@@ -76,6 +79,8 @@ export interface OpsDeps {
   pickup?: { send: (pickup: { kind: string; key: string; repo: string; detail?: string }) => string | null; monitorChat: string };
   /** Makes the wait cards again from the records and asks (http.ts); writes the board only when they changed. */
   refreshWaits?: () => void;
+  /** Settings › Behaviours' Promise keeper, read each sweep; without it no ask is warned before its time. */
+  promiseKeeper?: () => PromiseKeeper;
 }
 
 export type Ops = ReturnType<typeof createOps>;
@@ -86,6 +91,7 @@ export function createOps(deps: OpsDeps) {
   const opsStore = new OpsStore(deps.dataDir);
   const machineHistory = new MachineHistory(deps.dataDir);
   const schedules = new SchedulesStore(deps.dataDir);
+  const readers = createReaders({ dataDir: deps.dataDir, opsStore, schedules });
   let timer: ReturnType<typeof setInterval> | null = null;
   let first: ReturnType<typeof setTimeout> | null = null;
   let ticking = false;
@@ -423,7 +429,9 @@ export function createOps(deps: OpsDeps) {
     if (!deps.addUpdate) return;
     const at = now();
     const read = schedules.view(at);
-    const readings = { view: view(), schedules: [...(read.stale ? [] : read.items), ...schedules.jobs.readings()] };
+    const shown = view();
+    // The readers read as schedules (readers.ts readerSchedules), so a reader's record settles like a schedule's.
+    const readings = { view: shown, schedules: [...(read.stale ? [] : read.items), ...schedules.jobs.readings(), ...readers.schedules(at, shown)] };
     const posted = opsStore.get("fixResults") ?? [];
     // Failures read red at a pass, so a later green reads as the item going green; stored, so a restart keeps them.
     const before = opsStore.get("fixSeenRed") ?? [];
@@ -431,7 +439,7 @@ export function createOps(deps: OpsDeps) {
     for (const { status, green } of fixResults(deps.store.listOpsStatuses(), readings, at, seenRed)) {
       const card = fixCard(status, readings);
       // The card first, then the record: a record set fixed whose card the board refused would never get it.
-      if (postsFixCard(status.kind) && !posted.includes(card.id)) {
+      if (postsFixCard(status.kind, status.key) && !posted.includes(card.id)) {
         const added = deps.addUpdate(card);
         if (added.status !== 200 && added.status !== 409) {
           logger.error(`[ops] Fix result ${card.id} refused: ${added.error ?? added.status}`);
@@ -453,7 +461,9 @@ export function createOps(deps: OpsDeps) {
   function clearStale(): void {
     const at = now();
     const read = schedules.view(at);
-    const readings = { view: view(), schedules: [...(read.stale ? [] : read.items), ...schedules.jobs.readings()] };
+    const shown = view();
+    // The readers read as schedules (readers.ts readerSchedules), so a reader's record settles like a schedule's.
+    const readings = { view: shown, schedules: [...(read.stale ? [] : read.items), ...schedules.jobs.readings(), ...readers.schedules(at, shown)] };
     const stale = staleRecords(deps.store.listOpsStatuses(), {
       github: readings.view.github,
       merged: opsStore.get("merged") ?? [],
@@ -604,6 +614,36 @@ export function createOps(deps: OpsDeps) {
       if (sentAt && at.getTime() - Date.parse(sentAt) < LATE_ASK_ACK_MS) continue;
       if (deps.bridge.sendLateAsk?.(id, { kind: "ask", key: ask.id, ...(ask.chat !== undefined && ID_PATTERN.test(ask.chat) ? { chat: ask.chat } : {}), dueAt: ask.dueAt as string })) askQuestions.set(id, at.toISOString());
     }
+    sweepAskWarnings(at);
+  }
+
+  // An ask's warning before its time by its event id, kept as askQuestions is: in memory, the bridge types each id once.
+  const askWarnings = new Map<string, string | null>();
+
+  /**
+   * Promise keeper: an ask due within the tab's minutes gets one warning to its chat, through the bridge, for the cause
+   * and a new time if it will slip; retried until acked. Off in the tab, nothing is sent and nothing waits.
+   */
+  function sweepAskWarnings(at: Date): void {
+    const keeper = deps.promiseKeeper?.();
+    const due = keeper?.on ? asksAboutToSlip(deps.store.listAsks({ limit: MAX_ASKS }), at, keeper.warnMinutes * 60_000) : [];
+    const ids = new Set(due.map(askSoonId));
+    for (const id of askWarnings.keys()) if (!ids.has(id)) askWarnings.delete(id);
+    for (const ask of due) {
+      const id = askSoonId(ask);
+      const sentAt = askWarnings.get(id);
+      if (sentAt === "delivered") continue;
+      if (sentAt && at.getTime() - Date.parse(sentAt) < LATE_ASK_ACK_MS) continue;
+      const chat = ask.chat !== undefined && ID_PATTERN.test(ask.chat) ? { chat: ask.chat } : {};
+      if (deps.bridge.sendLateAsk?.(id, { kind: "ask", key: ask.id, ...chat, dueAt: ask.dueAt as string, soon: true })) askWarnings.set(id, at.toISOString());
+    }
+  }
+
+  /** The bridge's word on an ask's warning: delivered, it is not sent again for this time; false for an id never sent. */
+  function ackAskWarning(id: string, delivered: boolean): boolean {
+    if (!askWarnings.has(id)) return false;
+    askWarnings.set(id, delivered ? "delivered" : null);
+    return true;
   }
 
   /**
@@ -630,6 +670,7 @@ export function createOps(deps: OpsDeps) {
   /** The bridge's word on a late question it was sent. False for an id the sweeper never sent. */
   function ackLateAsk(id: string, delivered: boolean): boolean {
     if (askOfLateId(id) !== null) return ackAskTime(id, delivered);
+    if (askOfSoonId(id) !== null) return ackAskWarning(id, delivered);
     const at = now();
     const logs: Record<string, LateLog> = { ...(opsStore.get("late") ?? {}) };
     const ask = Object.values(logs)
@@ -644,7 +685,8 @@ export function createOps(deps: OpsDeps) {
 
   /**
    * The red items the auto pick-up reads, as the app counts them: main's broken workflows, prod apps down, ready PRs red
-   * on one push over an hour, failing schedules you have not answered, and the machine, disk and runner reds. `held`:
+   * on one push over an hour, failing schedules you have not answered, the machine, disk and runner reds, and readers
+   * gone stale, empty or wrong (readers.ts). `held`:
    * heldItems, read or not red, never touched.
    */
   function redItems(at: Date, statuses: readonly OpsStatus[]): { red: RedItem[]; held: Set<string> } {
@@ -669,7 +711,9 @@ export function createOps(deps: OpsDeps) {
         red.push({ ...scheduleOwnedItem(failing.scheduleId), repo: scheduleRepo(failing.scheduleId, failing.need.repo), name: failing.need.title, detail: failing.detail });
       }
     }
-    red.push(...machineReds(view()));
+    const ops = view();
+    red.push(...machineReds(ops));
+    red.push(...readers.reds(at, ops));
     return { red, held };
   }
 
@@ -745,7 +789,7 @@ export function createOps(deps: OpsDeps) {
       const before = state;
       state = { ...state, starts: [...state.starts, { item: itemId(item), at: iso }] };
       opsStore.put("pickup", state, at);
-      const id = pickup.send({ kind: item.kind, key: item.key, repo: item.repo, ...(item.kind === "machine" && item.detail ? { detail: item.detail } : {}) });
+      const id = pickup.send({ kind: item.kind, key: item.key, repo: item.repo, ...((item.kind === "machine" || item.reader) && item.detail ? { detail: item.detail } : {}) });
       // No capable bridge: the record and the start go back and the next tick tries again.
       if (id === null) {
         restore(item.kind, item.key, wrote.written.version, wrote.before);
@@ -757,8 +801,11 @@ export function createOps(deps: OpsDeps) {
       // Rivet's own ask for it, beside yours on Progress with the same stage and time.
       if (!pickupAsk(deps.store, item, at, PICKUP_DUE_MINUTES)) logger.error(`[ops] pick-up of ${item.kind} ${item.key}: its ask was refused`);
     }
-    for (const { item, episode } of plan.keepsBreaking) {
-      const added = deps.addUpdate?.(keepsBreakingCard(item, episode));
+    for (const { item, episode, tries } of plan.keepsBreaking) {
+      // The pick-up's own notes say nothing was tried.
+      const note = deps.store.getOpsStatus(item.kind, item.key)?.note;
+      const fix = note && ![PICKUP_NOTE, QUEUE_FULL, CHAT_CLOSED].includes(note) ? note : null;
+      const added = deps.addUpdate?.(keepsBreakingCard(item, episode, fix, tries));
       if (added?.status === 200 || added?.status === 409) state = { ...state, cards: [...state.cards, itemId(item)] };
       else if (added) logger.error(`[ops] keeps-breaking card for ${item.kind} ${item.key} refused: ${added.error ?? added.status}`);
     }
@@ -887,6 +934,7 @@ export function createOps(deps: OpsDeps) {
       opsStore.close();
       machineHistory.close();
       schedules.close();
+      readers.close();
     },
   };
 }

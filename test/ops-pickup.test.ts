@@ -131,7 +131,7 @@ describe("auto pick-up", () => {
       state.unowned = { "ci/ci": iso(hour * 60 * MIN) };
     }
     const capped = plan({ red: [item], state, now: 6 * 60 * MIN });
-    expect([capped.start, capped.queueFull, capped.keepsBreaking]).toEqual([[], [], [{ item, episode: iso(60 * MIN) }]]);
+    expect([capped.start, capped.queueFull, capped.keepsBreaking]).toEqual([[], [], [{ item, episode: iso(60 * MIN), tries: 3 }]]);
     const carded = { ...capped.state, cards: [...capped.state.cards, "ci/ci"] };
     const again = plan({ red: [item], state: carded, now: 7 * 60 * MIN });
     expect([again.start, again.keepsBreaking]).toEqual([[], []]);

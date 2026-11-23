@@ -31,8 +31,9 @@ export const FEATURES_HEADER = "x-rivet-bridge-features";
  * `reopen`: the bridge types a Reopen of an answered card into the monitor chat, for the card's chat; an older one would drop it.
  * `ops-pickup`: the bridge types the auto pick-up's rivet fix ask into the monitor chat; an older one would drop it.
  * `home-control`: the bridge runs the Home page's buttons; an older one would drop them.
+ * `ask-soon`: the bridge types the Promise keeper's warning before an ask's time; an older one would type it as late.
  */
-const KNOWN_FEATURES = ["image", "chat-window", "long-chat", "images", "files", "reply-images", "card-merge", "dismiss", "choice-detail", "ask-late", "changes", "reopen", "ops-pickup", "home-control"] as const;
+const KNOWN_FEATURES = ["image", "chat-window", "long-chat", "images", "files", "reply-images", "card-merge", "dismiss", "choice-detail", "ask-late", "changes", "reopen", "ops-pickup", "home-control", "ask-soon"] as const;
 export type BridgeFeature = (typeof KNOWN_FEATURES)[number];
 
 /** A comma list of [a-z-]+ tokens; anything else is no features at all. Unknown tokens are dropped. */
@@ -52,6 +53,7 @@ export class BridgeChannel {
   /** The features of the most recent bridge connection; null until one connects. */
   private features: Set<BridgeFeature> | null = null;
   private readonly attachListeners: (() => void)[] = [];
+  private readonly detachListeners: (() => void)[] = [];
 
   /** Why a send carrying a photo is refused now, or null when the last bridge said it takes them. */
   photoRefusal(): string | null {
@@ -149,6 +151,7 @@ export class BridgeChannel {
         this.current = null;
         this.droppedAt = Date.now();
         this.seen();
+        for (const listener of this.detachListeners) listener();
       }
     });
     for (const reply of backlog) this.send(reply);
@@ -232,8 +235,10 @@ export class BridgeChannel {
    * for the monitor chat, under the id the bridge acks (the same for every resend of one question). False with no
    * capable bridge. Not replayed: the next sweep sends it again until a delivered ack.
    */
-  sendLateAsk(id: string, ask: { kind: string; key: string; chat?: string; dueAt: string }): boolean {
-    if (!this.current || this.features?.has("ask-late") !== true) return false;
+  sendLateAsk(id: string, ask: { kind: string; key: string; chat?: string; dueAt: string; soon?: true }): boolean {
+    // An ask's question only to a bridge that writes its sentence, and its warning only to one that writes that.
+    const feature = ask.soon ? "ask-soon" : "ask-late";
+    if (!this.current || this.features?.has(feature) !== true) return false;
     this.current.response.write(`event: late-ask\nid: ${id}\ndata: ${JSON.stringify({ id, ...ask })}\n\n`);
     return true;
   }
@@ -255,5 +260,16 @@ export class BridgeChannel {
     clearInterval(ping);
     this.current = null;
     response.end();
+    for (const listener of this.detachListeners) listener();
+  }
+
+  /** Runs each time the event stream goes, closed by the bridge or replaced. */
+  onDetach(listener: () => void): void {
+    this.detachListeners.push(listener);
+  }
+
+  /** An event stream is attached now (no grace), from a bridge that said it takes `feature`. */
+  liveWith(feature: BridgeFeature): boolean {
+    return this.current !== null && this.features?.has(feature) === true;
   }
 }

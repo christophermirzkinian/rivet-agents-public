@@ -118,6 +118,31 @@ test("makeExec runs a script through its #! line, not by exec'ing the file", asy
   assert.equal(out.stdout, `${script}|one arg`);
 });
 
+test("makeExec's timeout is a hard stop for a command that ignores SIGTERM", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rivet-exec-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const pidFile = path.join(dir, "pid");
+  // Writes its pid once the trap is set, then ignores SIGTERM for a minute: execFile's own timeout never returns here.
+  const script = path.join(dir, "deaf");
+  fs.writeFileSync(script, `#!/bin/sh\ntrap '' TERM\necho $$ > "${pidFile}"\nwhile :; do /bin/sleep 2 & wait $!; done\n`, { mode: 0o644 });
+  const started = Date.now();
+  await assert.rejects(
+    makeExec({ killGraceMs: 300 })(script, [], { timeout: 1_500 }),
+    (/** @type {any} */ err) => err instanceof ExecError && /timed out/.test(err.message) && err.transientGitHub === true,
+  );
+  assert.ok(Date.now() - started < 10_000, "rejected at the hard stop, not at the script's end");
+  const pid = Number(fs.readFileSync(pidFile, "utf8"));
+  assert.ok(pid > 0);
+  // SIGKILL landed: the process is gone (give the kernel a moment to reap it).
+  await new Promise((r) => setTimeout(r, 200));
+  assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+});
+
+test("makeExec's hard stop leaves a command that ends in time alone", async () => {
+  const out = await makeExec({ killGraceMs: 0 })("/bin/sh", ["-c", "printf ok"], { timeout: 10_000 });
+  assert.equal(out.stdout, "ok");
+});
+
 test("makeExec hands `input` to the command's stdin", async () => {
   const out = await makeExec()("/bin/cat", [], { timeout: 10_000, input: 'words "$(id)"\nline two' });
   assert.equal(out.stdout, 'words "$(id)"\nline two');

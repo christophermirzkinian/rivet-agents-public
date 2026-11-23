@@ -359,3 +359,20 @@ test("say does not hold again a PR his yes released between the post and the boa
   assert.deepEqual([r.code, r.posted], [0, true]);
   assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")).map((/** @type {any} */ h) => [h.pr, h.card]), [[42, "vc-1"]]);
 });
+
+test("say prints the card checker's refusal whole and each of its warnings", async () => {
+  const refusal = `the update card was refused: card checker: card upd-1: ${"the title has 13 words (at most 12), ".repeat(8)}keep each item short`;
+  /** @param {number} status @param {unknown} doc */
+  const post = async (status, doc) => {
+    /** @type {string[]} */
+    const lines = [];
+    const fetchFn = /** @type {typeof fetch} */ (async () => new Response(JSON.stringify(doc), { status }));
+    const r = await postSay({ text: "x" }, { origin: "http://127.0.0.1:1", token: "t", fetch: fetchFn, out: (l) => lines.push(`out ${l}`), err: (l) => lines.push(`err ${l}`) });
+    return { code: r.code, lines };
+  };
+  assert.deepEqual(await post(422, { error: refusal }), { code: 1, lines: [`err http 422: ${refusal}`] });
+  assert.deepEqual(await post(201, { id: "upd-1", card: "upd-1", warnings: ["card upd-1: still 1 is 900×1700", "card upd-1: the ask is long"] }), {
+    code: 0,
+    lines: ["out sent upd-1", "err card checker warning: card upd-1: still 1 is 900×1700", "err card checker warning: card upd-1: the ask is long"],
+  });
+});

@@ -387,6 +387,21 @@ describe("the desks", () => {
     expect(moodOf(el)).toBe("happy");
   });
 
+  it("an update card opened is news: the front card of the deck, it never makes Rivet asking", async () => {
+    const { deck } = await import("../web/src/state.js");
+    const update = { id: "u1", rev: "r-u1", kind: "update", title: "Shipped", thread: "Billing", since: at(-5) };
+    app.board = { version: 1, updatedAt: at(0), board: { updatedAt: at(0), needs: [update], coming: [], chats: [], shipped: [] } } as never;
+    app.front = "u1";
+    try {
+      const el = mount();
+      expect(deck().map((need) => need.id)).toEqual(["u1"]);
+      expect([moodOf(el), el.querySelector(".desk.is-rivet .desk-mood")!.textContent]).toEqual(["happy", NOTHING_NEEDS_YOU]);
+    } finally {
+      app.board = null;
+      app.front = null;
+    }
+  });
+
   it("with only minimised cards waiting, Rivet's desk says they wait, all minimised, never Needs you", () => {
     CARDS.minimised = 3;
     const el = mount();
@@ -894,6 +909,18 @@ describe("everything under way", () => {
     ASKS.open = [ask("new", { chat: "c1", prs: [41], createdAt: at(-5) })];
     changed();
     expect(underWay().map((w) => w.chat)).toEqual(["pr-41"]);
+  });
+
+  it("a PR row keeps its own name but its sheet links the older ask naming its PR, and one its title names", () => {
+    read([pull(7), pull(8, { title: "Port change (a-1)" })]);
+    crew();
+    ASKS.open = [ask("older", { chat: "c1", prs: [7], createdAt: at(-10) }), ask("newer", { chat: "c1", createdAt: at(-5) }), ask("a-1", { chat: "c2", createdAt: at(-20) }), ask("a-2", { chat: "c2", createdAt: at(-4) })];
+    changed();
+    expect(underWay().map((w) => w.chat)).toEqual(["pr-7", "pr-8"]);
+    const seven = peekFacts(`pr:${MS}#7`)!;
+    expect([seven.ask?.id, seven.asks.map((one) => one.id)]).toEqual(["older", ["older"]]);
+    const eight = peekFacts(`pr:${MS}#8`)!;
+    expect([eight.ask?.id, eight.asks.map((one) => one.id)]).toEqual(["a-1", ["a-1"]]);
   });
 
   it("a queue entry with no branch or PR joins no PR that also has no branch", () => {

@@ -18,6 +18,7 @@ import { logs } from "./logs.mjs";
  * @typedef {{
  *   family: string,
  *   events: readonly string[],
+ *   feature?: string,
  *   handle(event: string, raw: unknown, ctx: ActionContext): Promise<ActionResult>,
  * }} ActionFamily
  */

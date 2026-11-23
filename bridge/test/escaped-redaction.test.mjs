@@ -1,13 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { redactLine, redactLines } from "../lib/redact.mjs";
-
-// The linear-time guards below time CPU, not the wall clock: a loaded runner stalls a run until its CPU quota
-// refills, while a quadratic or backtracking parse still costs the CPU it always did.
-const cpuMs = () => {
-  const { user, system } = process.cpuUsage();
-  return (user + system) / 1000;
-};
+import { assertLinear } from "./linear-time.mjs";
 
 // Synthetic fixtures only; no credential files or URL parsing.
 const TOKEN = ["gh", "p_"].join("") + "MadeUpFixture1234567890AbCd";
@@ -478,11 +472,11 @@ test("partially decoded escape headers retain raw spellings across layers and ba
 });
 
 test("a run of YAML anchor or tag marks after a secret's name has one reading: no exponential backtracking", () => {
-  for (const line of [`api_key: ${"!".repeat(60)} x\\n`, `api_key: ${"&".repeat(60)} x`, `password = ${"!&".repeat(40)} y\\n`, `password: ${"!:".repeat(32_768)}`]) {
-    const started = cpuMs();
-    redactLine(line);
-    redactLines([line, "  next"]);
-    assert.ok(cpuMs() - started < 200, `${line.slice(0, 20)}… took too long`);
+  for (const line of [(k) => `api_key: ${"!".repeat(60 * k)} x\\n`, (k) => `api_key: ${"&".repeat(60 * k)} x`, (k) => `password = ${"!&".repeat(40 * k)} y\\n`, (k) => `password: ${"!:".repeat(32_768 * k)}`]) {
+    assertLinear((text) => {
+      redactLine(text);
+      redactLines([text, "  next"]);
+    }, line, `${line(1).slice(0, 20)}…`);
   }
   // Anchors and tags still introduce a value on the lines under them, a block scalar's included.
   assert.deepEqual(redactLines(["password: &anchor !!str |", "  hunter2"]).join("\n").includes("hunter2"), false);
@@ -748,10 +742,8 @@ test("a home folder is shortened before / or the end, and read as written before
 });
 
 test("many escaped surrogate halves with no other half are read in linear time", () => {
-  const line = "\\uD800 ".repeat(8192);
-  const started = cpuMs();
-  redactLine(line, "/synthetic");
-  assert.ok(cpuMs() - started < 1000, "took too long");
+  // Up to 2,048 halves: a line of 8,192 is over the redactor's budget, and costs less.
+  assertLinear((line) => redactLine(line, "/synthetic"), (k) => "\\uD800 ".repeat(1024 * k), "\\uD800 \\uD800 …");
 });
 
 test("a value opened past an invisible character and a no-break space stays held in a log", () => {
@@ -790,13 +782,13 @@ test("an invisible character before a label's ellipsis is read in every reading"
 });
 
 test("a line of many -u flags is read once: each -u's value test does not read its word to the end", () => {
-  for (const line of [`-u${";-u".repeat(20_000)}`, `--user${";--user=".repeat(10_000)}`, `x -u${"-u".repeat(20_000)}`, `-u${" -u".repeat(20_000)}`,
-    `curl ${"-u a:b ".repeat(16_000)}`, "-u a: ".repeat(16_000), `${"-u origin ".repeat(16_000)}TOKEN=x`, `${"-u;".repeat(16_000)}TOKEN=x`]) {
-    const started = cpuMs();
-    redactLine(line, "/synthetic");
-    redactLines([line, "  next"], { inKey: false }, "/synthetic");
-    redactLines([line], { inKey: false }, "/synthetic", { rest: true });
-    assert.ok(cpuMs() - started < 300, `${line.slice(0, 20)}… took too long`);
+  for (const line of [(k) => `-u${";-u".repeat(20_000 * k)}`, (k) => `--user${";--user=".repeat(10_000 * k)}`, (k) => `x -u${"-u".repeat(20_000 * k)}`, (k) => `-u${" -u".repeat(20_000 * k)}`,
+    (k) => `curl ${"-u a:b ".repeat(16_000 * k)}`, (k) => "-u a: ".repeat(16_000 * k), (k) => `${"-u origin ".repeat(16_000 * k)}TOKEN=x`, (k) => `${"-u;".repeat(16_000 * k)}TOKEN=x`]) {
+    assertLinear((text) => {
+      redactLine(text, "/synthetic");
+      redactLines([text, "  next"], { inKey: false }, "/synthetic");
+      redactLines([text], { inKey: false }, "/synthetic", { rest: true });
+    }, line, `${line(1).slice(0, 20)}…`);
   }
 });
 
@@ -818,12 +810,12 @@ test("a long run of name characters is read once: a secret's name rule starts on
   // The issue's worst shape (`ab.` to 4,000 characters a line) and its siblings: on main 128 KB of `ab.` took over a
   // second, every later word boundary (or `--`) in a line rescanning it to its end.
   for (const unit of ["ab.", "ab-", "a--", "--a", "a_.", "a.-"]) {
-    const line = unit.repeat(Math.ceil(4000 / unit.length)).slice(0, 4000);
-    const text = Array(32).fill(line).join("\n");
-    const started = cpuMs();
-    redactKeepingLines(text);
-    redactLines(text.split("\n"), { inKey: false }, "/synthetic", { rest: true, max: Infinity });
-    assert.ok(cpuMs() - started < 600, `${unit} took too long`);
+    // Lines of 500 and 4,000 characters: a longer line's cost grows no faster, so it would hide a rescan.
+    const text = (k) => Array(32).fill(unit.repeat(Math.ceil((2000 * k) / unit.length)).slice(0, 2000 * k)).join("\n");
+    assertLinear((lines) => {
+      redactKeepingLines(lines);
+      redactLines(lines.split("\n"), { inKey: false }, "/synthetic", { rest: true, max: Infinity });
+    }, text, `a long run of ${unit}`);
   }
 });
 

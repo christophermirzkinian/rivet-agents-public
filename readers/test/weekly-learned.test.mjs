@@ -252,6 +252,15 @@ function passDeps({ mode, at = NOW, held = false, due = null, ran = [] }) {
   };
 }
 
+test("a quiet hourly run still writes one line, so Ops does not read it as a reader gone empty", async () => {
+  const lines = [];
+  const quiet = passDeps({ mode: "record" });
+  quiet.deps.run = async () => ({ fixes: [{}, {}], proposed: [] });
+  quiet.deps.log = (event, fields) => lines.push([event, fields]);
+  await pass(quiet.deps);
+  assert.deepEqual(lines, [["pass", { mode: "record", fixes: 2, proposed: 0 }]]);
+});
+
 test("a Sunday run that cannot get the lock leaves a marker, and the next hourly run proposes and clears it", async () => {
   const busy = passDeps({ mode: "propose", held: true });
   await pass(busy.deps);

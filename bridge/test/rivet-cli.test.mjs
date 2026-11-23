@@ -954,3 +954,38 @@ test("unhold --card drops only that card's holds.json entries, and touches neith
   assert.equal(none.code, 0);
   assert.equal(none.stdout, "holds.json: no merge hold of video card vc-1\n");
 });
+
+test("card add prints the card checker's warnings, and its refusal whole", async () => {
+  const server = stubServer();
+  const long = `card checker: card cam-pick: 3 options but 1 still; put every option's picture on the card (one --still each); card cam-pick: 2 private links, which the card would show cut as https:[redacted]; send them to the owner in one email to himself, then add an email button (rivet card add … --email-button "<subject>")`;
+  let refuse = true;
+  /** @type {typeof fetch} */
+  const fetchFn = async (url, init) => {
+    const method = init?.method ?? "GET";
+    if (String(url).includes("/api/board/needs/") && (method === "PUT" || method === "PATCH")) {
+      if (refuse) return new Response(JSON.stringify({ error: long }), { status: 422, headers: { "content-type": "application/json" } });
+      const res = await server.fetch(url, init);
+      return new Response(JSON.stringify({ ...(await res.json()), warnings: ["card cam-pick: the title has 13 words (at most 12); keep each item to a heading and at most 3 short bullets (detail goes in the saved file)"] }), { status: res.status });
+    }
+    return server.fetch(url, init);
+  };
+  const refused = await cli(["card", "add", "cam-pick", "--title", "Camera"], { fetch: fetchFn });
+  assert.equal(refused.code, 1);
+  assert.ok(refused.stderr.includes(`rivet: http 422: ${long}\n`), refused.stderr);
+  refuse = false;
+  const added = await cli(["card", "add", "cam-pick", "--title", "Camera"], { fetch: fetchFn });
+  assert.equal(added.code, 0, added.stderr);
+  assert.equal(added.stdout, "added card cam-pick, version 1\n");
+  assert.match(added.stderr, /^rivet: card checker warning: card cam-pick: the title has 13 words \(at most 12\);/m);
+  const edited = await cli(["card", "edit", "cam-pick", "--title", "Camera two"], { fetch: fetchFn });
+  assert.equal(edited.code, 0, edited.stderr);
+  assert.match(edited.stderr, /^rivet: card checker warning: card cam-pick: the title has 13 words/m);
+});
+
+test("--email-button adds a button opening the email of that subject", async () => {
+  const server = stubServer();
+  const added = await cli(["card", "add", "lab-links", "--title", "Lab links", "--email-button", 'Lab "links" & keys'], { fetch: server.fetch });
+  assert.equal(added.code, 0, added.stderr);
+  assert.deepEqual(server.state.board.needs[0].links, [{ label: "Open the email", url: `https://mail.google.com/mail/#search/${encodeURIComponent('subject:"Lab "links" & keys"')}` }]);
+  await assert.rejects(async () => parseArgs(["card", "add", "x", "--email-button", " "]), usage("--email-button takes the email's subject"));
+});

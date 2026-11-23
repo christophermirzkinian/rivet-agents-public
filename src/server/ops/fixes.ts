@@ -15,6 +15,7 @@ import {
   type OpsResponse,
   type WorkflowRun,
 } from "../../shared/ops.js";
+import { isReaderRecord } from "../../shared/readers.js";
 import { newestFinished, type Schedule } from "../../shared/schedules.js";
 import { itemId, machineReds } from "./pickup.js";
 
@@ -31,7 +32,8 @@ export const MAX_FIX_RESULTS = 500;
  * news, and the owner hears of hardware only when it needs him: the record is still set fixed, with no
  * card. Other kinds keep theirs.
  */
-export const postsFixCard = (kind: OpsStatus["kind"]): boolean => kind !== "machine" && kind !== "disk" && kind !== "runner";
+/** A reader's fix gets no card either: the owner hears of a reader only past its fix cap (ops/readers.ts). */
+export const postsFixCard = (kind: OpsStatus["kind"], key = ""): boolean => kind !== "machine" && kind !== "disk" && kind !== "runner" && !isReaderRecord(kind, key);
 const MAX_TITLE = 300;
 
 export interface FixReadings {

@@ -7,6 +7,7 @@ import { opsStatusKey, statusKeyRepo } from "../../shared/ops-status-key.js";
 import type { OpsStatus } from "../../shared/ops-status.js";
 import type { OpsResponse } from "../../shared/ops.js";
 import { holdsPr, type OwnerHold } from "../../shared/owner-holds.js";
+import { isReaderRecord } from "../../shared/readers.js";
 import { NO_REPO } from "../../shared/repos.js";
 import type { Store } from "../store.js";
 import { PICKUP_BY } from "./pickup.js";
@@ -75,6 +76,8 @@ export function opsCardItems(
   for (const status of statuses) {
     const schedule = status.kind === "schedule" ? schedules.get(status.key) : undefined;
     if (status.state === "fixed" || schedule?.handled || schedule?.answered) continue;
+    // A reader's record cards the owner only past its fix cap, on the pick-up's keeps-breaking card (ops/readers.ts), never late.
+    if (isReaderRecord(status.kind, status.key)) continue;
     const app = status.kind === "app" ? view.apps.find((one) => opsStatusKey("app", one.id) === status.key) : undefined;
     const item: CardItem = {
       kind: status.kind,

@@ -12,6 +12,7 @@ import {
   chatCancelSchema,
   chatCreateSchema,
   chatImages,
+  chatSendDelaySchema,
   chatWindowText,
   FIX_IT_BY,
   FIX_IT_NOTE,
@@ -54,6 +55,7 @@ import { ensureAsk } from "./asks.js";
 import { registerConversations } from "./conversations.js";
 import { writeOpsStatus } from "./ops-status.js";
 import { registerBacklog } from "./backlog.js";
+import { registerDesigns } from "./designs.js";
 import { registerJobs } from "./jobs.js";
 import { registerMedia } from "./media.js";
 import { registerTeamRoom } from "./team.js";
@@ -69,6 +71,8 @@ import { RIVET_NAME, searchNeedles } from "../../shared/names.js";
 const SMALL_BODY_MAX = 64 * 1024;
 /** An action's body: a chat message's MAX_CHAT_TEXT characters at up to 6 bytes each once JSON-escaped, with room to spare. */
 const ACTION_BODY_MAX = 160 * 1024;
+/** A setting's body: Send delay's `{ on, seconds }` is about 30 bytes. */
+const SETTING_BODY_MAX = 1024;
 const LOGS_BODY_MAX = 256 * 1024;
 /** Why an action the offline bridge never got failed; a retry of it answers 503 again. */
 const OFFLINE = "the Mac bridge is offline";
@@ -85,6 +89,7 @@ function namesWord(text: string, word: string): boolean {
 
 /** needSchema's title cap. */
 const MAX_CARD_TITLE = 300;
+type SaySent = { text: string; tag?: string; thread?: string };
 /** Your message into the old Updates conversation, read-only: news is update cards. */
 const UPDATES_READ_ONLY = "Updates is read-only now: news comes as update cards (Feed › Updates). Start a new conversation to write.";
 
@@ -226,6 +231,7 @@ export function register(router: Router): void {
   registerTeamRoom(router, commands, broadcast);
   const toMonitor = (entry: AuditEntry) => void bridge.sendEvent(EVENT.chat, entry.id, bridgePayload(entry));
   registerBacklog(router, commands, { broadcast, toMonitor });
+  registerDesigns(router, commands, { broadcast, toMonitor });
   const scheduled = registerJobs(router, commands, { dispatch, sentBody });
   function broadcastBatch(id: string): void {
     for (const member of commands.batchIds(id)) {
@@ -302,13 +308,15 @@ export function register(router: Router): void {
     const at = time.toISOString();
     if (kind === "chat") {
       // Chat waits in a window for follow-ups; the sweep hands the whole window to the bridge.
-      const { entry, closed } = commands.addChat(
+      const { entry, closed, sent } = commands.addChat(
         { id: randomUUID(), clientId: body.clientId, request: body.request, at },
         time.getTime(),
         bridge.chatWindowMax(),
         bridge.photoRefusal() ? 0 : bridge.chatWindowImages(),
       );
       if (closed) sendBatch(closed);
+      // Send delay Off: this line's window goes at once.
+      if (sent) sendBatch(sent);
       broadcast(commands.getChatMessage(entry.id)!);
       // His line under an ask awaiting him answers it: its wait card goes (asks/waits.ts).
       router.deps.refreshWaits();
@@ -412,6 +420,21 @@ export function register(router: Router): void {
       ),
     ),
   );
+
+  // Chat's Send delay: On/Off and 3, 5, 7 or 10 s, kept on the server so every device has the same. A change counts
+  // from the next window; one already counting down keeps its own.
+  router.on("GET", "/api/settings/chat-send-delay", ({ request, response }) => {
+    requireSession(request);
+    json(response, 200, commands.chatSendDelay());
+  });
+
+  router.on("PUT", "/api/settings/chat-send-delay", async ({ request, response }) => {
+    requireSameOrigin(request, config.origin);
+    requireSession(request);
+    const parsed = chatSendDelaySchema.safeParse(await readJson(request, SETTING_BODY_MAX));
+    if (!parsed.success) throw new HttpError(400, "invalid send delay");
+    json(response, 200, commands.setChatSendDelay(parsed.data));
+  });
 
   // Cancel while a chat window collects: its lines never reach the bridge and leave the chat; the answer holds what they
   // said for the box. A window the sweep has already handed on is a 409, and its lines stay; so is a Feed Fix it. Asked
@@ -607,8 +630,11 @@ export function register(router: Router): void {
 
   router.on("POST", "/api/bridge/say", async ({ request, response }) => {
     requireBearer(request, config.boardTokenDigest);
-    const parsed = parseRedacted(saySchema, await readJson(request, SMALL_BODY_MAX), SAY_MEDIA);
-    if (!parsed.success)
+    const body = await readJson(request, SMALL_BODY_MAX);
+    const parsed = parseRedacted(saySchema, body, SAY_MEDIA);
+    // As the chat sent it: the card checker's links rule must see the link the redactor cuts.
+    const sent = saySchema.safeParse(body);
+    if (!parsed.success || !sent.success)
       throw new HttpError(
         400,
         "invalid say: text up to 4000 characters, 1 to 3 images, a video and a PDF (on a chat line, not a card) by sha256, replyTo a message id; text, an image, a video or a PDF, or an ack with replyTo alone",
@@ -681,11 +707,12 @@ export function register(router: Router): void {
     // A card never lives in the Team room, nor opens from it: there it is a card like any other, with no line in the room.
     const inRoom = thread === TEAM_ROOM_ID;
     const cardHome = (via === "mention" || replyTo !== undefined) && !inRoom ? thread : null;
-    const card = isSayCard(parsed.data) && !inferred ? sayCard(parsed.data, text, cardHome) : asking ? askCard(parsed.data, text, cardHome) : null;
+    const asSent = { text: (sent.data.text ?? "").trim(), tag: sent.data.tag, thread: sent.data.thread };
+    const card = isSayCard(parsed.data) && !inferred ? sayCard(parsed.data, text, cardHome, { sent: asSent }) : asking ? askCard(parsed.data, text, cardHome, asSent) : null;
     if (card && (replyTo === undefined || inRoom)) {
       // A card answering your room line still answers it.
       if (inRoom && !parsed.data.new) for (const one of commands.markReplied(replyTo, at)) broadcast(commands.getChatMessage(one)!);
-      json(response, 201, { id: card.id, card: card.id });
+      json(response, 201, { id: card.id, card: card.id, ...(card.warnings ? { warnings: card.warnings } : {}) });
       return;
     }
     if (thread === UPDATES_ID) commands.ensureUpdates(at);
@@ -699,7 +726,7 @@ export function register(router: Router): void {
     broadcast(message);
     // The card pushed as it was added.
     if (card) {
-      json(response, 201, message);
+      json(response, 201, card.warnings ? { ...message, warnings: card.warnings } : message);
       return;
     }
     // Every reply pushes, open streams or not: each phone's service worker drops it when that phone shows the chat.
@@ -715,14 +742,25 @@ export function register(router: Router): void {
    * Adds say.mjs's card: the first line its title, the rest its line, its photos and video its media. One replying to
    * You (--card) is something you must confirm: a decision card, Yes, keep it or Change it, in Needs you. One replying to nothing is an update card. Its thread,
    * unless the writer gives one: the server's (the topic of its PR's Coming row, else its chat) when it has a PR or chat,
-   * from the one PR its text names or the ask of `conversation`, else that conversation's title, else Rivet.
+   * from the one PR its text names or the ask of `conversation`, else that conversation's title, else Rivet. `sent`: its
+   * text, tag and thread as the chat sent them, before redaction, for the card checker.
    */
-  function sayCard(say: z.infer<typeof saySchema>, text: string, conversation: string | null, kind?: typeof QUESTION): { id: string; title: string } {
-    const [first = "", ...rest] = text.split("\n");
-    const line = first.trim();
-    const long = line.length > MAX_CARD_TITLE;
-    const title = long ? `${line.slice(0, MAX_CARD_TITLE - 1)}…` : line || (say.video ? "A video" : say.images?.length === 1 ? "A photo" : "Photos");
-    const ask = (long ? text : rest.join("\n")).trim();
+  function sayCard(
+    say: z.infer<typeof saySchema>,
+    text: string,
+    conversation: string | null,
+    { kind, sent }: { kind?: typeof QUESTION; sent?: SaySent } = {},
+  ): { id: string; title: string; warnings?: string[] } {
+    const headed = (body: string) => {
+      const [first = "", ...rest] = body.split("\n");
+      const line = first.trim();
+      const long = line.length > MAX_CARD_TITLE;
+      return {
+        title: long ? `${line.slice(0, MAX_CARD_TITLE - 1)}…` : line || (say.video ? "A video" : say.images?.length === 1 ? "A photo" : "Photos"),
+        ask: (long ? body : rest.join("\n")).trim(),
+      };
+    };
+    const { title, ask } = headed(text);
     const asks = store.listAsks({ limit: MAX_ASKS });
     const home = conversation !== null && !ownsNoCard(conversation) ? conversation : null;
     const homeAsks = home ? (allAsksByThread(asks, commands.threadRows(), (one) => commands.threadOf(one)).get(home) ?? []) : [];
@@ -779,16 +817,29 @@ export function register(router: Router): void {
         ...(media ? { media } : {}),
       },
       // That conversation may be one you began: news all the same, not an answer to you.
-      { progress: say.replyTo === undefined },
+      {
+        progress: say.replyTo === undefined,
+        check: true,
+        ...(sent
+          ? {
+              sent: {
+                id,
+                ...headed(sent.text),
+                ...(thread ? { thread: say.thread !== undefined ? sent.thread : thread } : {}),
+                ...(say.tag && !outcome ? { tag: sent.tag } : {}),
+              },
+            }
+          : {}),
+      },
     );
     if (added.status !== 200) throw new HttpError(added.status, `the ${kind ? "question" : outcome ? "outcome" : "update"} card was refused: ${added.error ?? "error"}`);
-    return { id, title };
+    return added.warnings ? { id, title, warnings: added.warnings } : { id, title };
   }
 
   /** A question card for a reply that asks you something, or null when the board refuses it: then the reply stays words. */
-  function askCard(say: z.infer<typeof saySchema>, text: string, conversation: string | null): { id: string; title: string } | null {
+  function askCard(say: z.infer<typeof saySchema>, text: string, conversation: string | null, sent: SaySent): { id: string; title: string; warnings?: string[] } | null {
     try {
-      return sayCard(say, text, conversation, QUESTION);
+      return sayCard(say, text, conversation, { kind: QUESTION, sent });
     } catch (error) {
       if (!(error instanceof HttpError)) throw error;
       logger.error(`[command] a question stays words: ${error.message}`);

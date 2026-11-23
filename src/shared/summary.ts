@@ -231,7 +231,7 @@ const itemName = (item: ComingItem) => (item.app && item.app !== item.title ? `$
 export type TimeMark = "no-time" | "moved-twice" | null;
 
 /** A Coming item's status key: its PR number, else its name, within its repo. */
-const comingKey = (item: ComingItem, repo: string = NO_REPO) => opsStatusKey("coming", item.pr ? String(item.pr) : itemName(item), repo);
+export const comingKey = (item: ComingItem, repo: string = NO_REPO) => opsStatusKey("coming", item.pr ? String(item.pr) : itemName(item), repo);
 
 /** The ids a Coming row in hand joins by: a record under way on one of them is listed on its row, not as Rivet's own. */
 export function comingIds(board: ComingBoard | null | undefined, crew: Crew, now: number): Set<string> {

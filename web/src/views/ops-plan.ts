@@ -2,7 +2,7 @@ import type { ComingItem } from "../../../src/shared/board.js";
 import type { PullRequest } from "../../../src/shared/ops.js";
 import type { OpsStatus } from "../../../src/shared/ops-status.js";
 import { recordOf, underWay } from "../../../src/shared/ops-owned.js";
-import { opsStatusKey } from "../../../src/shared/ops-status-key.js";
+import { opsStatusKey, statusKeyRepo } from "../../../src/shared/ops-status-key.js";
 import { NO_REPO } from "../../../src/shared/repos.js";
 import { localDay, when } from "../../../src/shared/when.js";
 import { noTimeYet, slipped, slippedTwice } from "../../../src/shared/words.js";
@@ -11,11 +11,11 @@ import { button, h, type Child } from "../dom.js";
 import { freshPrs, opsData } from "../ops-data.js";
 import { app } from "../state.js";
 import { comingRowRepo, isStaleComing, shownComingRows } from "./board.js";
-import { comingKey, openComingSheet } from "./coming-sheet.js";
 import { dismissedItems, failedItems, opsItem, planWords } from "./ops.js";
 import { bringBack, openStatus, runnerTitle, statusOf, type FailedItem } from "./ops-status.js";
 import { etaWords } from "./plan-time.js";
-import { comingDone, comingWhat, stageLabel } from "./queue-cards.js";
+import { comingDone, comingWhat, prHref, stageLabel } from "./queue-cards.js";
+import { comingIds, comingKey, ownRecord, ownRecords, recordMark } from "../../../src/shared/summary.js";
 import { openChatSheet } from "./worker-sheet.js";
 
 // Plan, under the desks on the Floor: what is being done, by when and why, what comes next and what was done today.
@@ -41,7 +41,8 @@ export interface PlanRow {
   item: FailedItem | null;
   /** The record the row reads, `kind/key`; null for a break with none. */
   record: string | null;
-  open: () => void;
+  /** Null for a Coming row with no chat and no PR to open. */
+  open: (() => void) | null;
 }
 
 /** A row as it is first listed, before its record is read. */
@@ -157,13 +158,21 @@ function derive({ row, status, numbered }: Entry, now: number): PlanRow {
   };
 }
 
-/** A record's own row, titled from its PR when Ops lists it. */
-function recordEntry(status: OpsStatus, prs: readonly PullRequest[]): Entry {
+/**
+ * A record's own row, titled from its PR when Ops lists it. A record naming no repo is in `repo` when the caller knows it
+ * (the chat holding it works there), else the one its key names.
+ */
+function recordEntry(status: OpsStatus, prs: readonly PullRequest[], repo?: string): Entry {
   const pr = status.kind === "pr" ? prs.find((one) => opsStatusKey("pr", String(one.number), one.repo) === status.key) : undefined;
   const title = pr ? pr.title : recordTitle(status);
-  const item: FailedItem = { kind: status.kind, key: status.key, repo: pr?.repo ?? NO_REPO, title, what: [], failedAt: status.since, url: pr?.url ?? null };
+  const item: FailedItem = { kind: status.kind, key: status.key, repo: pr?.repo ?? status.repo ?? repo ?? statusKeyRepo(status.kind, status.key), title, what: [], failedAt: status.since, url: pr?.url ?? null };
   const row = { id: `${status.kind}/${status.key}`, kind: status.kind, key: status.key, title, why: reason(status), dueAt: null, eta: null, picking: false, late: null, counted: false, item: null, open: () => openStatus(item) };
   return { row, status, numbered: !pr };
+}
+
+/** Opens a record's Ops sheet, titled as its Plan row is; `repo` is the holding chat's, for a record naming none. */
+export function openRecord(status: OpsStatus, repo?: string): void {
+  recordEntry(status, opsData.ops ? (freshPrs(opsData.ops) ?? []) : [], repo).row.open?.();
 }
 
 const byDue = (a: PlanRow, b: PlanRow) => (a.dueAt ? Date.parse(a.dueAt) : Infinity) - (b.dueAt ? Date.parse(b.dueAt) : Infinity);
@@ -175,12 +184,13 @@ function comingInHand(now: number) {
   return coming.rows
     .filter((item) => !(comingDone(item) || (isStaleComing(item, now) && !coming.held.has(item))))
     .map((item) => {
-      const repo = comingRowRepo(app.board?.board?.chats ?? [], item) ?? item.mergedRepo ?? NO_REPO;
+      const own = comingRowRepo(app.board?.board?.chats ?? [], item);
+      const repo = own ?? item.mergedRepo ?? NO_REPO;
       const key = comingKey(item);
       const recordKey = comingKey(item, repo);
       const prKey = item.pr ? opsStatusKey("pr", String(item.pr), repo) : null;
       // A Coming record's key carries its repo outside the default one, so each repo's row has its own.
-      return { item, key, recordKey, repo, prKey, ids: [`coming/${repo}/${key}`, `coming/${recordKey}`, ...(prKey ? [`pr/${prKey}`] : [])] };
+      return { item, key, recordKey, repo, prKey, mixed: own === null, ids: [`coming/${repo}/${key}`, `coming/${recordKey}`, ...(prKey ? [`pr/${prKey}`] : [])] };
     });
 }
 
@@ -215,10 +225,13 @@ export function planState(schedules: SchedulesResponse | null = null, now = Date
   }
   // Coming rows under way: not done, not gone quiet unless a chat at work holds it (as Feed's Coming keeps it). One
   // waiting on your OK stays too: it is still being done, and its card on Cards is the server's (asks/waits.ts).
-  for (const { item, key, recordKey, repo, prKey, ids } of comingInHand(now)) {
+  for (const { item, key, recordKey, repo, prKey, ids, mixed } of comingInHand(now)) {
     const status = [recordOf({ kind: "coming", key: recordKey, repo }, statuses), prKey ? recordOf({ kind: "pr", key: prKey, repo }, statuses) : null].find((one) => one && underWay(one)) ?? null;
+    // A row whose chat or PR two repos claim opens neither: it cannot say which repo's is meant.
+    const chat = mixed ? null : (item.chat ?? status?.chat ?? null);
+    const open = chat ? () => openChat(chat, repo) : item.pr && !mixed ? () => window.open(prHref(item.pr!, repo), "_blank", "noopener,noreferrer") : null;
     add(
-      { id: `coming/${repo}/${key}`, kind: "coming", key, title: comingTitle(item), why: reason(status) ?? comingWhat(item) ?? stageLabel(item), dueAt: null, eta: null, picking: false, late: null, counted: false, item: null, open: () => openComingSheet(item, openChat, now) },
+      { id: `coming/${repo}/${key}`, kind: "coming", key, title: comingTitle(item), why: reason(status) ?? comingWhat(item) ?? stageLabel(item), dueAt: null, eta: null, picking: false, late: null, counted: false, item: null, open },
       ids,
       status,
       comingWhat(item) ?? null,

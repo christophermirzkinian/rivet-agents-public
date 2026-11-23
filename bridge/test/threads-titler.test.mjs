@@ -292,3 +292,21 @@ test("a CLI failure's log line says why in a few words, with no key or message t
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("makeClaudeRun's timeout is a hard stop for a CLI that ignores SIGTERM", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "titler-deaf-"));
+  const savedHome = process.env.HOME;
+  try {
+    process.env.HOME = dir;
+    const stub = path.join(dir, "claude");
+    // Ignores SIGTERM for good: execFile's own timeout would never return from it.
+    fs.writeFileSync(stub, "#!/bin/sh\ntrap '' TERM\ncat >/dev/null\nwhile :; do /bin/sleep 2 & wait $!; done\n");
+    fs.chmodSync(stub, 0o755);
+    const started = Date.now();
+    await assert.rejects(makeClaudeRun(stub, ["-p"], 500)("hi"), /claude timed out/);
+    assert.ok(Date.now() - started < 20_000);
+  } finally {
+    process.env.HOME = savedHome;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

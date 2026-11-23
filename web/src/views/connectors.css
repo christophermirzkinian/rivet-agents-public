@@ -1,0 +1,329 @@
+/* Connectors (connectors.ts): a search, then each group's rows on 1px lines as Settings › Behaviours draws them. The
+   brand's colour is only ever the logo tile's own background. */
+
+.cn {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 28px;
+}
+
+.cn-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cn-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--tap);
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--dim);
+}
+
+.cn-search-icon,
+.cn-search-icon svg {
+  display: block;
+  width: 20px;
+  height: 20px;
+}
+
+.cn-q {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--tap);
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-l);
+  outline: none;
+}
+
+.cn-q::placeholder {
+  color: var(--dim);
+}
+
+.cn-logo {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: #fff;
+}
+
+.cn-mark {
+  width: 24px;
+  height: 24px;
+  background: currentColor;
+  -webkit-mask: var(--mark) center / contain no-repeat;
+  mask: var(--mark) center / contain no-repeat;
+}
+
+/* Each brand's colour and mark (connector-logos.ts). */
+.cn-logo[data-logo="claude"] {
+  --mark: url("/logos/claude.svg");
+  background: #d97757;
+}
+
+.cn-logo[data-logo="googlegemini"] {
+  --mark: url("/logos/googlegemini.svg");
+  background: #8e75b2;
+}
+
+.cn-logo[data-logo="github"] {
+  --mark: url("/logos/github.svg");
+  background: #181717;
+}
+
+.cn-logo[data-logo="flydotio"] {
+  --mark: url("/logos/flydotio.svg");
+  background: #24175b;
+}
+
+.cn-logo[data-logo="homeassistant"] {
+  --mark: url("/logos/homeassistant.svg");
+  background: #18bcf2;
+}
+
+.cn-logo[data-logo="youtube"] {
+  --mark: url("/logos/youtube.svg");
+  background: #f00;
+}
+
+.cn-logo[data-logo="instagram"] {
+  --mark: url("/logos/instagram.svg");
+  background: #ff0069;
+}
+
+.cn-logo[data-logo="googleplay"] {
+  --mark: url("/logos/googleplay.svg");
+  background: #414141;
+}
+
+.cn-logo[data-logo="appstore"] {
+  --mark: url("/logos/appstore.svg");
+  background: #0d96f6;
+}
+
+.cn-logo[data-logo="reddit"] {
+  --mark: url("/logos/reddit.svg");
+  background: #ff4500;
+}
+
+.cn-logo[data-logo="tiktok"] {
+  --mark: url("/logos/tiktok.svg");
+  background: #000;
+}
+
+.cn-logo[data-logo="meta"] {
+  --mark: url("/logos/meta.svg");
+  background: #0467df;
+}
+
+.cn-logo.mono {
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: var(--fs-m);
+  font-weight: 900;
+  letter-spacing: 0.02em;
+}
+
+.cn-logo.big {
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+}
+
+.cn-logo.big .cn-mark {
+  width: 36px;
+  height: 36px;
+}
+
+.cn-logo.big.mono {
+  font-size: var(--fs-3xl);
+}
+
+.cn-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 64px;
+  padding: 10px 14px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+}
+
+.cn-row + .cn-row {
+  border-top: 1px solid var(--line);
+}
+
+button.cn-row {
+  cursor: pointer;
+}
+
+.cn-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.cn-name {
+  margin: 0;
+  font-size: var(--fs-xl);
+  font-weight: 800;
+}
+
+.cn-state {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: var(--fs-m);
+  font-weight: 600;
+}
+
+.cn-state .ops-dot {
+  width: 8px;
+  height: 8px;
+}
+
+.cn-chev {
+  flex: none;
+  color: var(--dim);
+  font-size: var(--fs-4xl);
+  font-weight: 700;
+}
+
+.cn-back {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  min-height: var(--tap);
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-xl);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.cn-back-mark {
+  font-size: var(--fs-6xl);
+  line-height: 1;
+}
+
+.cn-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 4px 2px 8px;
+}
+
+.cn-head .cn-name {
+  font-size: var(--fs-5xl);
+}
+
+.cn-note {
+  margin: 0;
+  padding: 12px 14px;
+  color: var(--muted);
+  font-size: var(--fs-m);
+  line-height: 1.4;
+}
+
+.cn-part {
+  display: contents;
+}
+
+.cn-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.cn-signin-btn {
+  flex: none;
+  min-height: var(--tap);
+}
+
+.cn-signin {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  padding: 14px;
+}
+
+.cn-signin-title {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--fs-2xl);
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.cn-code-label {
+  color: var(--text);
+  font-size: var(--fs-l);
+  font-weight: 700;
+}
+
+.cn-signin-words {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.cn-signin-open {
+  min-height: var(--tap);
+  text-align: center;
+  text-decoration: none;
+}
+
+.cn-signin-code {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--fs-5xl);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-align: center;
+  user-select: all;
+}
+
+.cn-signin-send {
+  display: flex;
+  gap: 10px;
+}
+
+.cn-code-field {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--tap);
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-l);
+}

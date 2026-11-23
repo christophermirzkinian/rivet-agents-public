@@ -54,7 +54,7 @@ export function lateDue(statuses: readonly OpsStatus[], logs: Readonly<Record<st
   return due;
 }
 
-/** The third-late card's id, one per failure (its since): a card raised before 27 Oct 2026 stands in for its Ops card until it goes. */
+/** The third-late card's id, one per failure (its since): a card raised before the change stands in for its Ops card until it goes. */
 export function lateCardId(item: Pick<OpsStatus, "kind" | "key" | "since">): string {
   const hash = createHash("sha256").update(`${item.kind}\n${item.key}\n${item.since}`).digest("hex").slice(0, 12);
   return `late-${item.kind}-${item.key.replace(/[^a-z0-9.-]+/g, "-").slice(0, 40)}-${hash}`;

@@ -36,6 +36,13 @@ let readLeft = MAX_READ;
 let inputs = []; // parse()'s here-strings and heredoc bodies, read by mergeUnresolved()
 let fed = []; // who reads each of `inputs`: a record, a group's range of records, or null
 let ran = false; // parse() met text that runs as code: `<(…)`, a shell's, eval's or group's script
+let bareWrapper = false; // parse() met a wrapper left with no command words (`env -S '…'`), or a heredoc opened in backticks: what it runs is not read
+let grouped = false; // parse() met a `( … )` or `{ …; }` group at any depth: its input reaches every command in it
+let readsIn = false; // parse() met a redirect onto stdin other than a heredoc or here-string (`< f`, `<> f`, `<&3`, `0>&3`)
+let pipeAt = Infinity; // how many records parse() had when it met its first `|` (any depth: a nested one counts low)
+let defines = false; // parse() met a function definition (`cat() …`, `function cat …`): its body runs where it is called
+let literal = []; // where parse()'s quoted heredoc bodies (`<<'EOF'`) stand, `{ src, start, end }`: bash expands nothing in them
+let writes = []; // parse()'s output redirection targets (`> f`, `>> f`, `&> f`, `<> f`, `>& f`), never `>&2`
 let deadline = Infinity; // parse() past this time throws TooDeep: the hook has 5 seconds, and a timeout says nothing
 let ticks = 0;
 // ANSI-C quoting, `$'…'`: the escapes bash decodes.
@@ -60,10 +67,19 @@ function parse(src, asText = false, depth = 0) {
     for (const record of parse(text, asData, depth + 1)) found.push(record);
   };
 
+  let backticks = 0; // how many backtick substitutions the reader is inside, at any depth (`\`echo $(…)\``)
   const substitution = (stop) => {
     const before = found.length;
     if ((depth += 1) > MAX_DEPTH) throw new TooDeep();
+    const start = i;
+    if (stop === "`") backticks += 1;
     list(stop);
+    if (stop === "`") backticks -= 1;
+    // Bash ends backticks at the first backtick, quotes and heredocs aside, and strips a level of backslashes in them
+    // before it reads them (`\\\<<'EOF'` is a heredoc there): unless the read closed at that backtick with no
+    // backslash before it, what bash runs is not what was read.
+    const tick = stop === "`" ? src.indexOf("`", start) : 0;
+    if (stop === "`" && (tick < 0 || i !== tick + 1 || src.slice(start, tick).includes("\\"))) bareWrapper = true;
     depth -= 1;
     return found.slice(before).some(namesByPattern) ? PGREP : SUB;
   };
@@ -133,8 +149,12 @@ function parse(src, asText = false, depth = 0) {
       } else break;
     }
     const words = raw.slice(k);
-    if (!words.length && !assigns.length) return null;
-    const record = { words: words.length ? [basename(words[0]).toLowerCase(), ...words.slice(1)] : [], assigns, wrappers, from };
+    if (!words.length && !assigns.length) {
+      if (wrappers.length) bareWrapper = true;
+      return null;
+    }
+    // `path`: the command name as written, before basename() (`/tmp/x/grep` is not grep).
+    const record = { words: words.length ? [basename(words[0]).toLowerCase(), ...words.slice(1)] : [], assigns, wrappers, from, path: words[0] ?? "" };
     found.push(record);
     const [head, ...args] = record.words;
     const shell = SHELLS.has(head) ? shellOptions(head, args) : null;
@@ -146,7 +166,11 @@ function parse(src, asText = false, depth = 0) {
   function readHeredocs(docs) {
     for (const doc of docs) {
       let body = "";
+      const start = i;
+      let end = i;
+      let closed = false;
       while (i < src.length) {
+        end = i;
         const nl = src.indexOf("\n", i) < 0 ? src.length : src.indexOf("\n", i);
         let line = src.slice(i, nl);
         i = Math.min(nl + 1, src.length);
@@ -156,11 +180,18 @@ function parse(src, asText = false, depth = 0) {
           line = line.slice(0, -1) + src.slice(i, next);
           i = Math.min(next + 1, src.length);
         }
-        if ((doc.strip ? line.replace(/^\t+/, "") : line) === doc.delim) break;
+        if ((doc.strip ? line.replace(/^\t+/, "") : line) === doc.delim) {
+          closed = true;
+          break;
+        }
         body += `${line}\n`;
+        end = i;
       }
       // `bash <<EOF` runs its body; an unquoted heredoc runs the substitutions in it first, whoever reads it.
       inputs.push(body);
+      // `<<'EOF'`: bash expands nothing in it. Kept by its place in `src`, so equal text elsewhere is still read; only
+      // a body closed by a plain delimiter, since a misread one (`'EOF'$(echo)`) or none would run on over live text.
+      if (doc.quoted && closed && /^[A-Za-z0-9_.-]+$/.test(doc.delim)) literal.push({ src, start, end });
       fed.push(doc.reader());
       if (feedsShell(doc.reader())) nested(body);
       if (!doc.quoted) nested(body, true);
@@ -233,7 +264,9 @@ function parse(src, asText = false, depth = 0) {
     let word = null;
     let quoted = false;
     let target = null; // after a redirection: "file", "herestring", "heredoc" or "heredoc-" (<<-)
+    let output = false; // that "file" redirection writes: its target goes to `writes`
     let from = null;
+    let piped = false; // the last `|` had no command record before it (`( … ) |`, `{ …; } |`): the next is still piped
     let last = null;
     let parens = 0;
     const caseAt = []; // each open `case … esac`'s paren depth: a `)` at that depth ends a pattern, not a group
@@ -258,6 +291,7 @@ function parse(src, asText = false, depth = 0) {
           caseAt.push(parens);
           subject = 2;
         } else if (lead && !quoted && word === "esac") caseAt.pop();
+        else if (lead && !quoted && word === "function") defines = true;
         if (quoted || !LEADING.has(word)) lead = false;
         words.push(word);
       } else if (target === "file" && stdinFrom) {
@@ -266,10 +300,13 @@ function parse(src, asText = false, depth = 0) {
         // The last stdin redirect wins: `bash </dev/null <&3` reads fd 3 again.
         ownStdin = word === (stdinFrom === "dup" ? "-" : "/dev/null");
       }
+      // A descriptor duplicated (`>&2`) writes no file; `> 2` writes one named 2.
+      if (target === "file" && output && !(output === "dup" && /^(?:\d+|-)$/.test(word))) writes.push(word);
       stdinFrom = null;
       word = null;
       quoted = false;
       target = null;
+      output = false;
     };
     const owners = new Map(); // a command's words → its record, or a group's records, for the heredocs it reads
     const groups = []; // where each open `(` or `{` group's records start in `found`
@@ -278,11 +315,19 @@ function parse(src, asText = false, depth = 0) {
       endWord();
       target = null;
       for (const w of words) { // `{`, `if true; then {`, `{ {`, `time {`: each opens a group
-        if (w === "{") groups.push(found.length);
-        else if (!LEADING.has(w)) break;
+        if (w === "{") {
+          groups.push(found.length);
+          grouped = true;
+        } else if (!LEADING.has(w)) break;
       }
       const record = words.length ? command(words, from) : null;
+      // The first `|`'s place in `found`: every record read after it may be fed by it (a group past a newline, a
+      // substitution in the reader, a writer that left no record such as `command -V`).
+      if (pipe) pipeAt = Math.min(pipeAt, found.length);
       if (record) record.ownStdin = ownStdin;
+      if (record) record.piped = piped || from !== null;
+      // A pipe sets it; an empty end (`|` then a newline, or a `(`) keeps it; any other command clears it.
+      piped = pipe || (!words.length && piped);
       ownStdin = false;
       stdinFrom = null;
       lead = true;
@@ -362,11 +407,16 @@ function parse(src, asText = false, depth = 0) {
       } else if (c === "\n") {
         endCommand(false);
         i += 1;
+        // Backticks end at the first unescaped backtick, even inside a heredoc body opened in them (bash and zsh), and
+        // strip one level of backslashes first, so what follows may run: a heredoc opened anywhere inside backticks,
+        // a `$(…)` in them too, is not trusted (`echo \`cat <<'EOF'<newline>x\` ; <live call><newline>EOF`).
+        if (backticks && pending.length) bareWrapper = true;
         readHeredocs(pending.splice(0));
       } else if (c === "&" && src[i + 1] === ">") {
         endWord();
         i += src[i + 2] === ">" ? 3 : 2;
         target = "file";
+        output = true;
       } else if (c === ";" || c === "&" || c === "|") {
         endCommand(c === "|" && src[i + 1] !== "|");
         i += src[i + 1] === c || (c === "|" && src[i + 1] === "&") || (c === ";" && src[i + 1] === "&") ? 2 : 1;
@@ -374,16 +424,21 @@ function parse(src, asText = false, depth = 0) {
         endCommand(false); // a case pattern's end: `x) cmd;;`
         i += 1;
       } else if (c === "(" || c === ")") {
+        // A `(` after a command word: `cat() …`, `cat ()`, `a=(…)`; not after reserved words alone (`if ( … )`).
+        if (c === "(" && ((word !== null && (quoted || !LEADING.has(word))) || !lead)) defines = true;
         endCommand(false);
-        if (c === "(") groups.push(found.length);
-        else if (groups.length) closed = { start: groups.pop(), end: found.length };
+        if (c === "(") {
+          groups.push(found.length);
+          grouped = true;
+        } else if (groups.length) closed = { start: groups.pop(), end: found.length };
         parens += c === "(" ? 1 : -1;
         i += 1;
       } else if (c === "<" || c === ">") {
         const fd = word !== null && !quoted && /^\d+$/.test(word) ? word : null;
         if (fd !== null) word = null; // the descriptor of `2>&1`
         else endWord();
-        const stdin = c === "<" && (fd === null || fd === "0");
+        const zero = fd !== null && /^0+$/.test(fd); // bash reads `00<` as descriptor 0
+        const stdin = c === "<" && (fd === null || zero);
         if (stdin && src[i + 1] === "<") ownStdin = true; // its own here-string or heredoc
         if (src.startsWith("<<<", i)) {
           i += 3;
@@ -393,9 +448,13 @@ function parse(src, asText = false, depth = 0) {
           target = src[i] === "-" ? "heredoc-" : "heredoc";
           if (src[i] === "-") i += 1;
         } else {
+          if (stdin || zero) readsIn = true;
           i += 1;
+          const writing = c === ">" || src[i] === ">"; // `>`, `>>`, `>|`, `<>`
           if (src[i] === ">" || src[i] === "|" || (c === "<" && src[i] === ">")) i += 1;
           if (stdin && src[i - 1] === "<") stdinFrom = src[i] === "&" ? "dup" : "file";
+          if (writing && src[i] === "&") output = "dup"; // `>&2`, `>&-`; `>& file` writes the file
+          else output = writing;
           if (src[i] === "&") i += 1;
           target = "file";
         }
@@ -544,9 +603,14 @@ const MERGE_PATH = /(?:^|\/)pulls\/[^/\s]+\/merge(?:[/?#]|$)/;
 function readable(command) {
   // One read per command line: the robot rule, the hard lines and the nudges share it, so the 2-second budget is the
   // whole hook's, not one per caller.
-  if (lastRead?.command === command) return lastRead.commands;
-  lastRead = { command, commands: read(command) };
-  return lastRead.commands;
+  if (lastRead?.command === command) {
+    // Another line read since (scriptsChrome() on one word) left its own; this line's come back with its commands.
+    ({ inputs, fed, ran, bare: bareWrapper, writes, grouped, readsIn, pipeAt, defines, literal } = lastRead);
+    return lastRead.commands;
+  }
+  const commands = read(command);
+  lastRead = { command, commands, inputs, fed, ran, bare: bareWrapper, writes, grouped, readsIn, pipeAt, defines, literal };
+  return commands;
 }
 let lastRead = null;
 function read(command) {
@@ -572,6 +636,13 @@ function read(command) {
     inputs = [];
     fed = [];
     ran = false;
+    bareWrapper = false;
+    grouped = false;
+    readsIn = false;
+    pipeAt = Infinity;
+    defines = false;
+    literal = [];
+    writes = [];
     return parse(command);
   } catch (err) {
     if (err instanceof TooDeep) return null;

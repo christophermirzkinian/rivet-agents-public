@@ -176,6 +176,47 @@ describe("chat", () => {
     stream.abort();
   });
 
+  it("Send delay: one value for every device; 3 s counts from the next window, and Off sends each line at once", async () => {
+    const put = (body: unknown, headers: Record<string, string> = browser(cookie)) =>
+      fetch(`${server.base}/api/settings/chat-send-delay`, { method: "PUT", headers, body: JSON.stringify(body) });
+    const read = async () => (await (await fetch(`${server.base}/api/settings/chat-send-delay`, { headers: { cookie } })).json()) as unknown;
+    try {
+      expect(await read()).toEqual({ on: true, seconds: 10 });
+      expect((await fetch(`${server.base}/api/settings/chat-send-delay`)).status).toBe(401);
+      for (const bad of [{ on: true, seconds: 4 }, { on: true }, { on: "yes", seconds: 3 }, { on: true, seconds: 3, extra: 1 }]) expect((await put(bad)).status).toBe(400);
+      expect((await put({ on: true, seconds: 3 }, { ...browser(cookie), origin: "https://evil.example" })).status).toBe(403);
+      const { cookie: _, ...noCookie } = browser(cookie);
+      expect((await put({ on: true, seconds: 3 }, noCookie)).status).toBe(401);
+      expect(await read()).toEqual({ on: true, seconds: 10 });
+
+      const stream = await connectBridge();
+      const put3 = await put({ on: true, seconds: 3 });
+      expect([put3.status, await put3.json()]).toEqual([200, { on: true, seconds: 3 }]);
+      const lead = (await (await post("/api/chat", { clientId: clientId(), text: "three seconds" })).json()) as AuditEntry;
+      const page = async () => ((await (await fetch(`${server.base}/api/chat`, { headers: { cookie } })).json()) as ChatPage).messages;
+      expect((await page()).find((message) => message.id === lead.id)).toMatchObject({ status: "collecting", sendsAt: new Date(Date.parse(lead.at) + 3_000).toISOString(), windowMs: 3_000 });
+      // A change while it counts down never moves it.
+      await put({ on: true, seconds: 7 });
+      expect((await page()).find((message) => message.id === lead.id)!.sendsAt).toBe(new Date(Date.parse(lead.at) + 3_000).toISOString());
+      clock.advance(3_000);
+      await stream.waitFor(1);
+      expect(stream.events()[0]).toMatchObject({ event: "chat", id: lead.id, data: { text: "three seconds" } });
+
+      await put({ on: false, seconds: 7 });
+      const now = await post("/api/chat", { clientId: clientId(), text: "right away" });
+      const sent = (await now.json()) as AuditEntry;
+      expect(sent.status).toBe("queued");
+      // No clock moves: it is on the bridge already, never collecting, so Cancel has nothing to take back.
+      await stream.waitFor(2);
+      expect(stream.events()[1]).toMatchObject({ event: "chat", id: sent.id, data: { text: "right away" } });
+      expect((await page()).find((message) => message.id === sent.id)).not.toHaveProperty("sendsAt");
+      expect((await post("/api/chat/cancel", { id: sent.id })).status).toBe(409);
+      stream.abort();
+    } finally {
+      await put({ on: true, seconds: 10 });
+    }
+  });
+
   it("an ack is the status line on your message: no bubble, no unread, no push; on anything else it is a reply", async () => {
     const notify = vi.spyOn(server.app.push, "notify");
     const entry = (await (await post("/api/chat", { clientId: clientId(), text: "Podium in logo gold?" })).json()) as AuditEntry;
@@ -445,6 +486,44 @@ describe("chat windows", () => {
     flush(BATCH_CAP_MS);
     expect(store.getChatMessage(lead.id)!.status).toBe("sent");
     expect(store.getChatMessage(lead.id)!.sendsAt).toBeUndefined();
+  });
+
+  it("Send delay: each window waits its own seconds under the same 30 s cap; Off sends the open window with the line", () => {
+    for (const seconds of [3, 5, 7, 10] as const) {
+      store.setChatSendDelay({ on: true, seconds });
+      const start = seconds * 100_000;
+      const lead = add(start, { text: `wait ${seconds}` }).entry;
+      expect(store.getChatMessage(lead.id)).toMatchObject({ sendsAt: new Date(T0 + start + seconds * 1000).toISOString(), windowMs: seconds * 1000 });
+      expect(flush(start + seconds * 1000 - 1)).toEqual([]);
+      expect(flush(start + seconds * 1000).map((entry) => entry.id)).toEqual([lead.id]);
+    }
+    // 3 s windows kept alive by a line every 2 s still go 30 s after the first.
+    store.setChatSendDelay({ on: true, seconds: 3 });
+    const capped = add(2_000_000, { text: "first" }).entry;
+    for (let at = 2_000; at < BATCH_CAP_MS; at += 2_000) add(2_000_000 + at, { text: `more ${at}` });
+    expect(store.getChatMessage(capped.id)!.sendsAt).toBe(new Date(T0 + 2_000_000 + BATCH_CAP_MS).toISOString());
+    // Turned Off mid-window: the next line joins it and the whole window goes at once, no sweep needed.
+    const open = add(3_000_000, { text: "before off" }).entry;
+    store.setChatSendDelay({ on: false, seconds: 3 });
+    const off = add(3_001_000, { text: "after off" });
+    expect(off.sent).toMatchObject({ id: open.id, text: "before off | after off" });
+    expect(off.entry.status).toBe("queued");
+    const alone = add(3_002_000, { text: "alone" });
+    expect([alone.closed, alone.sent?.id, alone.entry.status]).toEqual([null, alone.entry.id, "queued"]);
+    expect(store.cancelChat(alone.entry.id, new Date(T0 + 3_002_000).toISOString())).toEqual({ outcome: "sent" });
+  });
+
+  it("Send delay: unsaved or unreadable, it is On at 10 s; a window from before the setting waits 10 s", () => {
+    expect(store.chatSendDelay()).toEqual({ on: true, seconds: 10 });
+    store.setMeta("chat.sendDelay", "{not json");
+    expect(store.chatSendDelay()).toEqual({ on: true, seconds: 10 });
+    store.setMeta("chat.sendDelay", JSON.stringify({ on: true, seconds: 4 }));
+    expect(store.chatSendDelay()).toEqual({ on: true, seconds: 10 });
+    const old = add(0, { text: "old" }).entry;
+    (store as unknown as { db: { prepare(sql: string): { run(...args: unknown[]): unknown } } }).db.prepare("UPDATE audit SET batch_quiet_ms = NULL WHERE id = ?").run(old.id);
+    expect(store.getChatMessage(old.id)).toMatchObject({ sendsAt: new Date(T0 + BATCH_QUIET_MS).toISOString(), windowMs: BATCH_QUIET_MS });
+    expect(flush(BATCH_QUIET_MS - 1)).toEqual([]);
+    expect(flush(BATCH_QUIET_MS)).toHaveLength(1);
   });
 
   it("Cancel takes a whole window back before it goes: its lines leave the chat and the sweep never sends it", () => {

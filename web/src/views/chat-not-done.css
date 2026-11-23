@@ -1,0 +1,33 @@
+/* Chat's "Anything I asked not done?" list: one row per ask, its title over its stage and time. */
+.chat-not-done {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.chat-not-done-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line, rgba(127, 127, 127, 0.25));
+}
+
+.chat-not-done-row:last-child {
+  border-bottom: 0;
+}
+
+.chat-not-done-title {
+  font-size: var(--fs-xl);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.chat-not-done-meta {
+  font-size: var(--fs-body);
+  color: var(--muted, inherit);
+}
+
+.chat-not-done-row.is-late .chat-not-done-meta {
+  color: var(--amber, #d98b00);
+}

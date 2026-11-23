@@ -1,10 +1,14 @@
+import { MAX_ASKS } from "../../shared/asks.js";
 import type { ChatMessage } from "../../shared/command.js";
 import { TEAM_PER_HOUR, TEAM_ROOM_ID, TEAM_ROOM_KEEP_MS, TEAM_TEXT_MAX, teamMessageSchema } from "../../shared/conversations.js";
+import { promiseChange, promiseKeeper } from "../asks/promises.js";
+import { BehavioursStore } from "../behaviours.js";
 import type { CommandStore } from "../commandstore.js";
 import { HttpError, json, readJson, requireBearer } from "../httputil.js";
 import { retentionTick } from "../retention.js";
 import { chatName } from "../../shared/names.js";
 import { parseRedacted } from "../redact.js";
+import { patched } from "./asks.js";
 import type { Router } from "./router.js";
 
 // The Team room (src/shared/conversations.ts): the Mac's team-room hook posts each agent-to-agent message here, already
@@ -45,7 +49,9 @@ export function summaryLine(messages: readonly { from: string; to: string; text:
 }
 
 export function registerTeamRoom(router: Router, commands: CommandStore, broadcast: (message: ChatMessage) => void): void {
-  const { config, now } = router.deps;
+  const { config, now, store, refreshWaits } = router.deps;
+  const behaviours = new BehavioursStore(config.dataDir);
+  router.onClose(() => behaviours.close());
 
   router.on("POST", "/api/team/message", async ({ request, response }) => {
     requireBearer(request, config.boardTokenDigest);
@@ -62,8 +68,23 @@ export function registerTeamRoom(router: Router, commands: CommandStore, broadca
     const { from, to } = parsed.data;
     const message = commands.addChatMessage({ id, from: "rivet", text: clip(parsed.data.text, TEAM_TEXT_MAX), at: at.toISOString(), thread: TEAM_ROOM_ID, team: { from, to } });
     broadcast(message);
+    // Read from the text the room keeps, so a time the owner cannot see in the room never moves an ask.
+    keepPromise({ from, to, text: message.text }, at);
     json(response, 201, { id });
   });
+
+  /** Promise keeper: a time this message promises the monitor goes on the sender's ask, while the tab has it on. */
+  function keepPromise(message: { from: string; to: string; text: string }, at: Date): void {
+    try {
+      if (!promiseKeeper(behaviours).on) return;
+      const found = promiseChange(store.listAsks({ limit: MAX_ASKS }), message, config.monitorChat, at);
+      if (!found) return;
+      if (store.replaceAsk(patched(found.ask, found.change, at), found.ask.version)) refreshWaits();
+    } catch (error) {
+      // The message is in the room either way; a time it could not set is no reason to refuse it.
+      router.deps.logger.error("promise keeper: could not set the time", error instanceof Error ? error.message : "unknown");
+    }
+  }
 
   const tick = () => {
     const at = now();

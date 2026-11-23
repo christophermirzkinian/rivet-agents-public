@@ -8,6 +8,7 @@
  */
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { join } from "node:path";
 
 import { keepsAnswer, type Reopen } from "../shared/answered.js";
 import { armsMerge, bareGotIt, canApprove, DECISION, GOT_IT, isGotIt, isTodo, isUpdate, optionNeedsText, QUESTION, takesDecision } from "../shared/answers.js";
@@ -72,6 +73,10 @@ import { ShortTitles } from "./short-titles.js";
 import { deriveWorkers } from "./workers.js";
 import { BOARD_MEDIA, parseRedacted, redactBody, redactText } from "./redact.js";
 import { isRetiredCard, isWait, withoutWaits, withWaits } from "./asks/waits.js";
+import { BehavioursStore, OWNER } from "./behaviours.js";
+import { CARD_VIDEO_SIZES, checkCards, mediaSizeReader } from "./card-check.js";
+import { cardCheckerBehaviour } from "../shared/behaviours.js";
+import type { CardChecker } from "../shared/card-check.js";
 import { ASK_PAGE_MAX, type Ask } from "../shared/asks.js";
 import { isRepo } from "../shared/repos.js";
 
@@ -173,6 +178,9 @@ export function createApp(
   const router = createRouter({ config, store, bridge, requireSession, push, quiet, schedules, logger, now, addUpdate, refreshWaits, prs, ownerLines, cardThreadTitles, jobRunsFrom, workers, titles, ops });
   router.onClose(() => ops.close());
   router.onClose(() => titles.close());
+  const behaviours = new BehavioursStore(config.dataDir);
+  router.onClose(() => behaviours.close());
+  const mediaSize = mediaSizeReader(join(config.dataDir, "media"));
   registerRoutes(router);
 
   // A 100 MB video from a phone on a slow uplink takes longer than Node's 300 s default to arrive, so the request
@@ -250,7 +258,7 @@ export function createApp(
         // readJson already capped the request at BOARD_MAX_BYTES; schema defaults must not push a valid body over.
         // Its chats move a row it keeps as a chat's own routes may: a dropped chat moves none, as its DELETE moves
         // none, and a changed one none into a repo where the row's PR or title is taken or its PR shipped, as its PATCH.
-        commitBoard(response, ifMatch, () => ({ board: body }), { sizeCap: false, guard: putGuard });
+        commitBoard(response, ifMatch, () => ({ board: body }), { sizeCap: false, guard: putGuard, check: true });
         return;
       }
       throw new HttpError(405, "method not allowed");
@@ -493,7 +501,7 @@ export function createApp(
     response: ServerResponse,
     ifMatch: number | null,
     change: BoardChange,
-    options: { sizeCap?: boolean; guard?: BoardGuard } = {},
+    options: { sizeCap?: boolean; guard?: BoardGuard; check?: boolean } = {},
   ): void {
     const { status, body, headers } = writeBoard(ifMatch, change, options);
     json(response, status, body, headers);
@@ -503,7 +511,7 @@ export function createApp(
   function writeBoard(
     ifMatch: number | null,
     change: BoardChange,
-    { sizeCap = true, progress = false, guard }: { sizeCap?: boolean; progress?: boolean; guard?: BoardGuard } = {},
+    { sizeCap = true, progress = false, guard, check = false, sentAs }: { sizeCap?: boolean; progress?: boolean; guard?: BoardGuard; check?: boolean; sentAs?: { id: string } & Partial<Need> } = {},
   ): { status: number; body: unknown; headers?: Record<string, string> } {
     const stored = store.getBoard();
     if (ifMatch !== null && ifMatch !== (stored?.version ?? 0)) return { status: 409, body: { error: "board version is stale", version: stored?.version ?? 0 } };
@@ -553,6 +561,21 @@ export function createApp(
       const missing = mediaShas(need.media).find((sha) => !named.has(sha) && !store.hasMedia(sha));
       if (missing) return { status: 422, body: { error: `card ${need.id} names media ${missing.slice(0, 12)} that is not on the server; upload it again` } };
     }
+    // Only cards the writer sent that this write adds or changes: a whole-board PUT sends every card back, and one stored
+    // as it is never blocks it; a card the server makes in the same write (a wait card) is not the writer's to fix.
+    let warnings: string[] = [];
+    if (check) {
+      const sentNeeds = (asSent.data as Board).needs.map((need) => (sentAs && need.id === sentAs.id ? { ...need, ...sentAs } : need));
+      const sentIds = new Set(sentNeeds.map((need) => need.id));
+      const revs = new Map((previous ?? []).map((need) => [need.id, needRev(need)]));
+      const cards = next.needs.filter((need) => sentIds.has(need.id) && !isWait(need) && revs.get(need.id) !== needRev(need));
+      if (cards.length) {
+        const knobs = behaviours.get(OWNER, cardCheckerBehaviour).value as CardChecker;
+        const checked = checkCards({ cards, sentCards: sentNeeds, storedCards: previous ?? [], knobs, mediaSize, videoSizes: CARD_VIDEO_SIZES });
+        if (checked.refusals.length) return { status: 422, body: { error: `card checker: ${checked.refusals.join("; ")}` } };
+        warnings = checked.warnings;
+      }
+    }
     const written = store.putBoard(next, ifMatch);
     if (!written) return { status: 409, body: { error: "board version is stale", version: store.boardVersion() } };
     const added = newNeeds(previous, next.needs);
@@ -571,15 +594,21 @@ export function createApp(
         logger.error(`[push] new-card push failed: ${error instanceof Error ? error.message : "error"}`);
       });
     }
-    return { status: 200, body: item ? { ...written, item: item(next, settlement?.keep ?? touched?.index) } : written, headers: etag(written.version) };
+    const answer = { ...written, ...(warnings.length ? { warnings } : {}) };
+    return { status: 200, body: item ? { ...answer, item: item(next, settlement?.keep ?? touched?.index) } : answer, headers: etag(written.version) };
   }
 
   /**
    * An update card added as `PUT /api/board/needs/<id>?create=only` adds one (its push included): kind and since filled.
    * A question or decision card keeps its kind. `progress`: a card shown in the conversation its text names, which may
    * be one you began, is news all the same (say.mjs with no --reply-to).
+   * `check`: a card a chat posts (say.mjs) goes through the card checker; the server's own producers' do not. `sent`: its
+   * fields as the chat sent them, before the route redacted them, for the checker's links rule.
    */
-  function addUpdate(card: { id: string } & Record<string, unknown>, { progress = false }: { progress?: boolean } = {}): { status: number; error?: string } {
+  function addUpdate(
+    card: { id: string } & Record<string, unknown>,
+    { progress = false, check = false, sent }: { progress?: boolean; check?: boolean; sent?: { id: string } & Partial<Need> } = {},
+  ): { status: number; error?: string; warnings?: string[] } {
     try {
       const { status, body } = writeBoard(
         null,
@@ -588,12 +617,13 @@ export function createApp(
           const need = { since: now().toISOString(), ...card, kind: card.kind === QUESTION || card.kind === DECISION ? card.kind : UPDATE };
           return { board: stamped(board, "needs", [...board.needs, need]), item: (stored) => stored.needs.find((one) => one.id === card.id) ?? null };
         },
-        { progress },
+        { progress, check, sentAs: sent },
       );
       if (status !== 200) return { status, error: String((body as { error?: unknown }).error) };
       // A full board of question cards makes room by dropping updates, this one included: then it was not added.
       if ((body as { item?: unknown }).item == null) return { status: 507, error: "the board is full of question cards" };
-      return { status };
+      const { warnings } = body as { warnings?: string[] };
+      return warnings ? { status, warnings } : { status };
     } catch (error) {
       if (error instanceof HttpError) return { status: error.status, error: error.message };
       throw error;
@@ -644,7 +674,7 @@ export function createApp(
       // By id: making room past the card cap can move the card up.
       const answer = (stored: Board) => stored.needs.find((need) => need.id === id) ?? null;
       return { board: stamped(board, "needs", rows), item: (stored) => (answer(stored) ? { ...answer(stored)!, rev: needRev(answer(stored)!) } : null) };
-    });
+    }, { check: true });
   }
 
   /**

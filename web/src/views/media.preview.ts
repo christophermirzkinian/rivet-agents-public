@@ -74,7 +74,7 @@ export function drawnStill(id: string, label: string, hue: number, width?: numbe
 }
 
 /** Draws `id` as a still of a sample screen, `label` its look, for a card that must read as a picture. */
-export function gameStill(id: string, label: string, hue: number): string {
+export function appStill(id: string, label: string, hue: number): string {
   drawn.set(id, { type: "image/png", hue, label, width: 720, height: 540, scene: true });
   return id;
 }
@@ -98,7 +98,7 @@ function picture(hue: number, label: string, frame = 0, width = 540, height = 72
 }
 
 /** A sample screen of round shapes under a sky, one popping in the given look. */
-function gameScreen(hue: number, label: string): HTMLCanvasElement {
+function appScreen(hue: number, label: string): HTMLCanvasElement {
   const canvas = document.createElement("canvas");
   canvas.width = 720;
   canvas.height = 540;
@@ -170,7 +170,7 @@ function blobOf(id: string): Promise<Blob | null> {
   if (!known) return Promise.resolve(null);
   let blob = blobs.get(id);
   if (!blob) {
-    blob = known.type.startsWith("video/") ? keptClip(known.hue, known.label, known.width, known.height) : new Promise((resolve) => (known.scene ? gameScreen(known.hue, known.label) : picture(known.hue, known.label, 0, known.width, known.height)).toBlob(resolve, "image/png"));
+    blob = known.type.startsWith("video/") ? keptClip(known.hue, known.label, known.width, known.height) : new Promise((resolve) => (known.scene ? appScreen(known.hue, known.label) : picture(known.hue, known.label, 0, known.width, known.height)).toBlob(resolve, "image/png"));
     blobs.set(id, blob);
   }
   return blob;

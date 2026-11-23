@@ -51,6 +51,10 @@ export function isHoldLabel(label: string): boolean {
 export interface RedItem extends OwnedItem {
   name: string;
   detail?: string;
+  /** Pick-ups in PICKUP_KEY_WINDOW_MS before its card, in place of PICKUP_KEY_CAP. */
+  cap?: number;
+  /** A reader's own red (readers.ts): its detail goes with its pick-up and its card. */
+  reader?: boolean;
 }
 
 export interface PickupState {
@@ -85,7 +89,7 @@ export interface PickupPlan {
   /** Items due a pick-up that a cap holds back: each is set Late, "queue full", and tried again next tick. */
   queueFull: RedItem[];
   /** Items past their pick-up cap with no card yet, each with the first start of its run of pick-ups. */
-  keepsBreaking: { item: RedItem; episode: string }[];
+  keepsBreaking: { item: RedItem; episode: string; tries: number }[];
 }
 
 /**
@@ -160,8 +164,9 @@ export function planPickups(input: {
     state.unowned[id] = since;
     if (age(since) < PICKUP_AFTER_MS) continue;
     const mine = state.starts.filter((one) => one.item === id);
-    if (mine.length >= PICKUP_KEY_CAP) {
-      if (!input.state.cards.includes(id)) keepsBreaking.push({ item, episode: mine.map((one) => one.at).sort()[0]! });
+    // An item with its own cap knob stays off once carded, even if the cap is raised after: the card said auto pick-up is off.
+    if (mine.length >= (item.cap ?? PICKUP_KEY_CAP) || (item.cap !== undefined && mine.length > 0 && input.state.cards.includes(id))) {
+      if (!input.state.cards.includes(id)) keepsBreaking.push({ item, episode: mine.map((one) => one.at).sort()[0]!, tries: mine.length });
       continue;
     }
     if (!input.workers.length) continue;
@@ -189,14 +194,18 @@ export function releasePickup(state: PickupState, id: string): { state: PickupSt
   return { state: { ...state, sent: rest }, sent };
 }
 
-/** The one card for a run of pick-ups of a key: its id is the key's and the run's first start, so a second post is refused. */
-export function keepsBreakingCard(item: RedItem, episode: string): { id: string } & Record<string, unknown> {
+/**
+ * The one card for a run of pick-ups of a key: its id is the key's and the run's first start, so a second post is refused.
+ * A reader's card says what is wrong and `fix`, the last fix its record notes.
+ */
+export function keepsBreakingCard(item: RedItem, episode: string, fix?: string | null, tries?: number): { id: string } & Record<string, unknown> {
   const hash = createHash("sha256").update(`${itemId(item)}\n${episode}`).digest("hex").slice(0, 16);
+  const said = item.reader ? [item.detail ? ` Now: ${item.detail}.` : "", fix ? ` Last fix tried: ${fix}` : ""].join("") : "";
   return {
     id: `${KEEPS_BREAKING_PREFIX}${hash}`,
     kind: "decision",
     title: `${item.name} is still red`,
-    ask: `Rivet has tried to start on this ${PICKUP_KEY_CAP} times in 24 hours and it is still red. Auto pick-up is off for it.`,
+    ask: `Rivet has tried to start on this ${tries ?? item.cap ?? PICKUP_KEY_CAP} times in 24 hours and it is still red. Auto pick-up is off for it.${said}`,
     ...(item.repo ? { repo: item.repo } : {}),
     options: [
       { label: "Find the cause", detail: "Rivet looks for why it is still red before trying again.", recommended: true },

@@ -289,6 +289,8 @@ describe("Fix result", () => {
 
   it("on the server: a machine, a disk or a runner set fixed files no Fix result card; an app set fixed still does", () => {
     expect([postsFixCard("machine"), postsFixCard("disk"), postsFixCard("runner"), postsFixCard("app"), postsFixCard("ci")]).toEqual([false, false, false, true, true]);
+    // A reader's fix stays quiet: the owner hears of a reader only past its cap, on the card that carries the fix.
+    expect([postsFixCard("schedule", "reader-github"), postsFixCard("schedule", "job-nightly")]).toEqual([false, true]);
     const dir = mkdtempSync(join(tmpdir(), "rivet-fix-hw-"));
     const store = new Store(dir);
     const cards: Record<string, unknown>[] = [];

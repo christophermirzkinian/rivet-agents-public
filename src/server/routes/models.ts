@@ -1,5 +1,5 @@
 import { json, readJson, requireBearer } from "../httputil.js";
-import { MODEL_JOBS, modelReportSchema, picksFromFile, type ModelReport, type ModelSettingsResponse } from "../../shared/models.js";
+import { MODEL_JOBS, modelReportSchema, picksFromFile, type ModelPick, type ModelReport, type ModelSettingsResponse } from "../../shared/models.js";
 import { parseRedacted } from "../redact.js";
 import type { Router } from "./router.js";
 
@@ -8,10 +8,20 @@ import type { Router } from "./router.js";
 
 const REPORT_BODY_MAX = 16 * 1024;
 
+const appLookPicks = new WeakMap<Router, () => ModelPick | null>();
+
+/** App look's pick in the Mac's last reported file: null before a report, or while the file leaves it on its default. */
+export const appLookPickOf = (router: Router): ModelPick | null => appLookPicks.get(router)?.() ?? null;
+
 export function register(router: Router): void {
   const { config, bridge, requireSession, now } = router.deps;
   /** The bridge's last report and when it came; in memory, as the bridge reports again on each connect. */
   let last: { report: ModelReport; at: string } | null = null;
+  appLookPicks.set(router, () => {
+    const file = last?.report.file;
+    const pick = file ? picksFromFile(file.jobs)["app-look"] : null;
+    return pick && !pick.fromDefault ? { model: pick.model, effort: pick.effort } : null;
+  });
 
   router.on("GET", "/api/settings/models", ({ request, response }) => {
     // The signed-in session is the owner's: Rivet has one login today. A second login needs an owner check here.

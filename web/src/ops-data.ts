@@ -1,6 +1,7 @@
 import { BRIEFING_STALE_MS, CLAUDE_STALE_MS, FLY_STALE_MS, GITHUB_STALE_MS, longRed, MAC_STALE_MS, type OpsResponse, type PullRequest, type TimelineResponse } from "../../src/shared/ops.js";
 import type { OpsDismissal } from "../../src/shared/ops-dismiss.js";
 import type { OpsStatus } from "../../src/shared/ops-status.js";
+import type { ConnectorsResponse } from "../../src/shared/connectors.js";
 import type { OwnerHold } from "../../src/shared/owner-holds.js";
 import { setDefaultRepo } from "../../src/shared/repos.js";
 import { SCHEDULES_STALE_MS } from "../../src/shared/schedules.js";
@@ -22,6 +23,11 @@ export const opsData = {
   dismissals: [] as OpsDismissal[],
   /** Your own holds, as `rivet hold` records them (GET /api/ops/holds); null until loaded. */
   ownerHolds: null as OwnerHold[] | null,
+  /** Each linked account's status (GET /api/connectors); null until loaded. A failed load keeps the last. */
+  connectors: null as ConnectorsResponse | null,
+  connectorsFailed: false,
+  /** This copy's server has no Connectors (it answered 404): the menu hides the row and nothing asks again this session. */
+  connectorsAbsent: false,
   /** The last /api/ops read failed; the timeline's own failure is `timelineError`. */
   error: null as string | null,
   timelineError: false,
@@ -138,6 +144,43 @@ function loadOwnerHolds(): void {
     });
 }
 
+let connectorsLoad: AbortController | null = null;
+
+/** The Connectors page and the menu's count of services that need attention. */
+export function loadConnectors(): Promise<void> {
+  if (opsData.connectorsAbsent) return Promise.resolve();
+  connectorsLoad?.abort();
+  const current = sameSession();
+  const load = new AbortController();
+  connectorsLoad = load;
+  const timer = setTimeout(() => load.abort(), STATUSES_TIMEOUT_MS);
+  return api
+    .getConnectors(load.signal)
+    .then((answer) => {
+      if (load.signal.aborted || !current() || !Array.isArray(answer?.services)) return;
+      const same = !opsData.connectorsFailed && JSON.stringify(answer.services) === JSON.stringify(opsData.connectors?.services);
+      opsData.connectors = answer;
+      opsData.connectorsFailed = false;
+      if (!same) notify();
+    })
+    .catch((error: unknown) => {
+      if (load.signal.aborted && connectorsLoad !== load) return;
+      if (!current()) return;
+      if (error instanceof api.ApiError && error.status === 404) {
+        opsData.connectorsAbsent = true;
+        notify();
+        return;
+      }
+      if (opsData.connectorsFailed) return;
+      opsData.connectorsFailed = true;
+      notify();
+    })
+    .finally(() => {
+      clearTimeout(timer);
+      if (connectorsLoad === load) connectorsLoad = null;
+    });
+}
+
 /** A dismissal this phone just made (a mark) or took back (null), shown at once; the next load brings the stored ones. */
 export function noteDismissal(kind: OpsDismissal["kind"], key: string, mark: string | null): void {
   dismissalsTurn++;
@@ -200,6 +243,7 @@ export function refreshOps(): Promise<void> {
   loadStatuses();
   loadDismissals();
   loadOwnerHolds();
+  void loadConnectors();
   return inflight;
 }
 
@@ -315,7 +359,7 @@ export function watchStatuses(listener: () => void): () => void {
 
 /** Forgets the previous session's Ops, so a new shell shows Loading until its own read lands. */
 export function resetOps(): void {
-  Object.assign(opsData, { ops: null, timeline: null, statuses: null, statusesLoaded: false, dismissals: [], ownerHolds: null, error: null, timelineError: false, at: 0, opsAt: { mono: 0, wall: 0 } });
+  Object.assign(opsData, { ops: null, timeline: null, statuses: null, statusesLoaded: false, dismissals: [], ownerHolds: null, connectors: null, connectorsFailed: false, connectorsAbsent: false, error: null, timelineError: false, at: 0, opsAt: { mono: 0, wall: 0 } });
   if (expiry !== null) window.clearTimeout(expiry);
   expiry = null;
   statusesLoad?.abort();
@@ -324,6 +368,8 @@ export function resetOps(): void {
   dismissalsLoad = null;
   ownerHoldsLoad?.abort();
   ownerHoldsLoad = null;
+  connectorsLoad?.abort();
+  connectorsLoad = null;
 }
 onSessionReset(resetOps);
 

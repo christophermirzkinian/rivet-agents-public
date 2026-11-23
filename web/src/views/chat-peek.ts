@@ -1,10 +1,11 @@
 import "./chat-peek.css";
 
 import type { AnsweredCard } from "../../../src/shared/answered.js";
-import { askPrRepo } from "../../../src/shared/ask-stages.js";
+import { askPrRepo, asksOfChat, type StageReadings } from "../../../src/shared/ask-stages.js";
 import type { Ask } from "../../../src/shared/asks.js";
 import type { LogsResponse } from "../../../src/shared/command.js";
 import { chatName } from "../../../src/shared/names.js";
+import type { OpsStatus } from "../../../src/shared/ops-status.js";
 import type { ScreenItem } from "../../../src/shared/screen-view.js";
 import { when } from "../../../src/shared/when.js";
 import type { Worker } from "../../../src/shared/workers.js";
@@ -13,10 +14,30 @@ import { h, ICONS, svg } from "../dom.js";
 import { rivet } from "../rivet/rivet.js";
 import { mediaName } from "./card-media.js";
 import { fetchDocument } from "./documents.js";
-import { app, crewLapsed, macOffline, subscribe } from "../state.js";
-import { activityRows, askedBy, ticketCards, ticketMeta, ticketPictures, ticketSolution, WHO_CHIPS, WHO_EMPTY, type ActivityRow } from "./chat-ticket.js";
+import { opsData, watchStatuses } from "../ops-data.js";
+import { app, changed, crewLapsed, macOffline, subscribe } from "../state.js";
+import { showLine } from "./chat.js";
+import {
+  activityRows,
+  askedBy,
+  askSourceLink,
+  linkedPrs,
+  mergedCards,
+  opsRecordOf,
+  ticketCards,
+  ticketMeta,
+  ticketPictures,
+  ticketSolution,
+  WHO_CHIPS,
+  WHO_EMPTY,
+  type ActivityRow,
+} from "./chat-ticket.js";
+import { askLine } from "./due-line.js";
 import { holdFoot } from "./hold-foot.js";
 import { openImages } from "./lightbox.js";
+import { leaveOverlays } from "./navigation.js";
+import { openRecord } from "./ops-plan.js";
+import { STATE_LABEL } from "./ops-status.js";
 import { prHref } from "./queue-cards.js";
 import { closeTallSheet, openTallSheet } from "./sheet.js";
 import { liveLog } from "./worker-sheet.js";
@@ -34,6 +55,11 @@ export interface PeekFacts {
   title: string;
   project: string;
   ask?: Ask;
+  /** Every open ask the row is about, newest first (linkedAsks): `ask` is the one its strip and Activity read. */
+  asks: Ask[];
+  /** The chats at work and the PRs just merged, as the row was read: an ask's repo and which of its PRs link it. */
+  chats?: readonly Worker[];
+  merged?: StageReadings["merged"];
   stage: string;
   /** The row's stage key (`review`, `needs-you`…): the colour of the strip's dot. */
   stageKey?: string;
@@ -111,6 +137,54 @@ const section = (title: string, aside: string, ...body: HTMLElement[]) =>
 
 const empty = (text: string) => h("p", { class: "peek-empty" }, text);
 
+const linkChip = (use: string, href: string, label: string, value: string) =>
+  h("a", { class: "peek-chip peek-pr", attrs: { href, target: "_blank", rel: "noopener noreferrer", "data-use": use } }, h("span", { class: "peek-k" }, label), h("b", {}, value));
+
+const prChip = (number: number, repo: string) => linkChip("desks.chat.pr-link", prHref(number, repo), "PR", `#${number} ›`);
+
+/** Brings Chat to the line an ask was asked in, once the sheet's Back has landed. */
+const openLine = (id: string) =>
+  leaveOverlays(() => {
+    showLine(id, id);
+    app.tab = "chat";
+    changed();
+  });
+
+/** One linked ask in the Description: its writeup as written, then his words, its id, who asked, and where it came from and the row's PRs it names. */
+function askView(ask: Ask, facts: PeekFacts): HTMLElement {
+  const link = askSourceLink(ask, askLine(ask), facts.chats);
+  const prs = linkedPrs(ask, facts.worker, facts.chats ?? [], facts.merged ?? []);
+  const source = link
+    ? "line" in link
+      ? h("button", { class: "peek-chip peek-pr", attrs: { type: "button", "data-use": "desks.chat.open-line" }, on: { click: () => openLine(link.line) } }, h("b", {}, "Open in Chat ›"))
+      : linkChip("desks.chat.issue-link", link.href, "Issue", `#${link.issue} ›`)
+    : null;
+  return h(
+    "div",
+    { class: "peek-ask" },
+    ask.why ? h("p", { class: "peek-writeup" }, ask.why) : null,
+    h("p", {}, h("q", { class: "peek-words" }, ask.words)),
+    h("p", { class: "peek-from" }, `${ask.id} · ${askedBy(ask)}`),
+    source || prs.length ? h("p", { class: "peek-sources" }, source, ...prs.map((pr) => prChip(pr.number, pr.repo))) : null,
+  );
+}
+
+/** A fix chat's ops record in the Description: what holds it up, then what it is about, its state and when it is due. */
+function recordView(record: OpsStatus, repo: string | undefined): HTMLElement {
+  const writeup = record.cause ?? record.note ?? record.why;
+  return h(
+    "div",
+    { class: "peek-ask" },
+    writeup ? h("p", { class: "peek-writeup" }, writeup) : null,
+    h("p", { class: "peek-from" }, [`Red: ${record.kind}`, record.key, STATE_LABEL[record.state], record.eta ? `due ${record.eta}` : null].filter(Boolean).join(" · ")),
+    h(
+      "p",
+      { class: "peek-sources" },
+      h("button", { class: "peek-chip peek-pr", attrs: { type: "button", "data-use": "desks.chat.open-ops" }, on: { click: () => openRecord(record, repo) } }, h("b", {}, "Open in Ops ›")),
+    ),
+  );
+}
+
 /** One Activity row: who, their role, when, then what. */
 function activityView(row: ActivityRow): HTMLElement {
   return h(
@@ -130,7 +204,7 @@ function activityView(row: ActivityRow): HTMLElement {
 
 /** Opens the chat sheet for a map row; `read` gives its facts as the map has them now, null once it has left the map. */
 export function openChatPeek(w: Worker, read: () => PeekFacts | null, first: PeekTab = "ticket"): void {
-  let facts = read() ?? { worker: w, title: chatName(w.chat), project: "", stage: "", time: null, prs: [] };
+  let facts = read() ?? { worker: w, title: chatName(w.chat), project: "", asks: [], stage: "", time: null, prs: [] };
   const face = rivet("working", { tone: "agent", size: 44, glow: true });
   const title = h("h2", { class: "peek-title" });
   const sub = h("p", { class: "peek-sub" });
@@ -296,19 +370,51 @@ export function openChatPeek(w: Worker, read: () => PeekFacts | null, first: Pee
           ? wholeAsk
           : { ...listed, timeline: [...wholeAsk.timeline, ...listed.timeline.filter((event) => !wholeAsk!.timeline.some((one) => one.at === event.at))] }
         : listed;
-    const cards = ticketCards(ask, ask?.chat ?? w.chat, ask ? [askPrRepo(ask, w), w.project, w.repo] : [w.project, w.repo], app.board?.board?.needs ?? [], answered, w.startedAt);
+    const linked = facts.asks.length ? facts.asks : listed ? [listed] : [];
+    // A row the map builds from GitHub or the push queue has no chat of its own; a chat's row does.
+    const mapRow = w.id.includes(":");
+    // `tied`: only the cards that name the ask, never its chat's other cards, which may be a newer ask's.
+    const cardsOf = (one: Ask | undefined, tied = false) =>
+      ticketCards(one, tied ? "" : (one?.chat ?? w.chat), one ? [askPrRepo(one, w), w.project, w.repo] : [w.project, w.repo], app.board?.board?.needs ?? [], answered, w.startedAt);
+    // A chat's own asks hold its cards. With none, its own cards stay, with those it sent naming an ask it is linked to. A map
+    // row's linked asks hold only the cards that name them, even when the row borrows its ask's chat name.
+    const own = new Set(asksOfChat(w, linked).map((one) => one.id));
+    const holders = own.size ? linked.filter((one) => own.has(one.id)) : mapRow ? linked : [];
+    const cards = mergedCards(
+      holders.length
+        ? holders.map((one) => cardsOf(one.id === ask?.id ? ask : one, mapRow || !own.has(one.id)))
+        : [cardsOf(undefined), ...linked.map((one) => cardsOf(one, true).filter((entry) => entry.card.chat === w.chat))],
+    );
     rows = activityRows(ask, ask?.chat ?? w.chat, cards, lastSaid);
     paintActivity();
     const pics = ticketPictures(cards);
     const plan = ticketSolution(cards);
     // Until its cards are read, Ticket says so rather than that they do not exist.
     const unread = answeredState === "reading" ? "Reading its cards…" : answeredState === "failed" ? "Could not read its cards. Trying again shortly." : null;
-    const key = JSON.stringify([ask?.words, ask?.who, ask?.createdAt, plan, pics, answeredState]);
+    // A chat with no ask of its own shows its ops record first, before an ask that only names its PR.
+    const record = own.size || mapRow ? undefined : opsRecordOf(w, opsData.statuses ?? []);
+    const prsOnly = !linked.length && !record ? facts.prs : [];
+    // A map row's doing text is its PR's number and title; a chat's is its own words, never the PR's.
+    const prTitle = w.id.includes(":") ? facts.worker.what?.replace(/^#\d+ /, "") : undefined;
+    const key = JSON.stringify([
+      linked.map((one) => [one.id, one.words, one.why, one.who, one.createdAt, one.source, one.replyId, one.issue, linkedPrs(one, facts.worker, facts.chats ?? [], facts.merged ?? [])]),
+      record,
+      prsOnly,
+      prTitle,
+      plan,
+      pics,
+      answeredState,
+    ]);
     if (key === ticketKey) return;
     ticketKey = key;
-    descriptionAside.textContent = ask ? (ask.who === "owner" ? "your words" : "the ask") : "";
+    const first = linked[0];
+    descriptionAside.textContent = linked.length > 1 ? `${linked.length} asks` : !first ? "" : first.why || first.who !== "owner" ? "the ask" : "your words";
     description.replaceChildren(
-      ...(ask ? [h("p", {}, h("q", { class: "peek-words" }, ask.words)), h("p", { class: "peek-from" }, askedBy(ask))] : [empty("No ask is linked to this chat.")]),
+      ...(linked.length || record
+        ? [...(record ? [recordView(record, w.repo || undefined)] : []), ...linked.map((one) => askView(one, facts))]
+        : prsOnly.length
+            ? [prTitle ? h("p", {}, prTitle) : null, h("p", { class: "peek-sources" }, ...prsOnly.map((pr) => prChip(pr.number, pr.repo)))].flatMap((one) => (one ? [one] : []))
+            : [empty("No ask is linked to this chat.")]),
     );
     solution.replaceChildren(
       ...(plan
@@ -452,11 +558,13 @@ export function openChatPeek(w: Worker, read: () => PeekFacts | null, first: Pee
         show(tab);
         const unsubscribe = subscribe(paint);
         const unwatchAsks = watchAsks(paint);
+        const unwatchStatuses = watchStatuses(paint);
         stop = () => {
           open = false;
           clearTimeout(answeredRetry);
           unsubscribe();
           unwatchAsks();
+          unwatchStatuses();
           log?.stop();
           log = null;
           foot.stop();

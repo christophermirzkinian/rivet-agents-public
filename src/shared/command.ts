@@ -92,6 +92,20 @@ const image = z.string().regex(MEDIA_SHA_PATTERN);
 /** A chat window goes to Rivet this long after its last message (and never later than 30 s after its first). */
 export const CHAT_WINDOW_QUIET_MS = 10_000;
 
+/**
+ * Chat's Send delay, On/Off and 3, 5, 7 or 10 s: how
+ * long a window waits after its last line, so he can cancel and edit it first. Off sends each line at once. Saved on
+ * the server under `chat.sendDelay`, read and written at /api/settings/chat-send-delay; Settings › Behaviours
+ * reads the same value through this schema.
+ */
+export const CHAT_SEND_DELAY_SECONDS = [3, 5, 7, 10] as const;
+export const chatSendDelaySchema = z
+  .object({ on: z.boolean(), seconds: z.union([z.literal(3), z.literal(5), z.literal(7), z.literal(10)]) })
+  .strict();
+export type ChatSendDelay = z.infer<typeof chatSendDelaySchema>;
+/** On at 10 s, the window Chat had before the setting. */
+export const DEFAULT_CHAT_SEND_DELAY: ChatSendDelay = { on: true, seconds: (CHAT_WINDOW_QUIET_MS / 1000) as 10 };
+
 /** Cancel on a collecting chat window: any of its messages names it. */
 export const chatCancelSchema = z.object({ id: z.string().regex(ID_PATTERN) }).strict();
 
@@ -355,6 +369,8 @@ export interface ChatMessage {
   status?: "collecting" | "sent" | "typed" | "unconfirmed" | "failed" | "replied" | "cancelled";
   /** A collecting message: when its window goes to Rivet, by the server's clock (ISO). */
   sendsAt?: string;
+  /** A collecting message: its window's own Send delay in ms, which the countdown bar drains from. */
+  windowMs?: number;
   /** A collecting message whose window goes as it is (a Feed Fix it): Cancel never takes it back, so none is offered. */
   keeps?: true;
   /** Your line typed in a message box, not one a tap sent for you: only such a line is a question Not an answer asks again. */

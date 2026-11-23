@@ -97,7 +97,7 @@ function todayThreads(updates: readonly Need[], fixed: PlanState["done"], now: n
   });
 }
 
-/** Each fixed record's newest fix-result card posted today: its row opens that card's thread. */
+/** Each fixed record's newest fix-result card posted today: its row opens that card. */
 function fixCards(updates: readonly Need[], fixed: PlanState["done"], now: number): Map<string, string> {
   const cards = new Map<string, string>();
   for (const card of todayUpdates(updates, now)) {
@@ -362,7 +362,7 @@ function rowEl(row: AskRow): HTMLElement {
   const cls = `ask-row${row.tone === "moved" || row.tone === "asked" ? " is-long" : ""}${row.counted ? " is-counted" : ""}`;
   const record = row.go && "record" in row.go ? row.go.record : null;
   const dismiss = record?.picking && dismissable(record.item) ? record.item : null;
-  const use = record ? (record.kind === "coming" ? "coming.sheet.open" : "ops.status.detail") : row.id.startsWith("update:") ? "updates.pile.open" : "plan.ask.open";
+  const use = record ? (record.kind === "coming" ? "plan.coming.open" : "ops.status.detail") : row.id.startsWith("update:") ? "updates.pile.open" : "plan.ask.open";
   const el = open
     ? h("button", { class: cls, attrs: { type: "button", "data-ask": row.id, "data-use": use }, on: { click: open } }, ...parts)
     : h("div", { class: cls, attrs: { "data-ask": row.id } }, ...parts);

@@ -1,7 +1,9 @@
 // Chat's text size: Small, Medium or Large under the chat's options button, saved on this device and applied at once.
 // It sets the page's data-chat-text: command.css sizes a line's words, its reply quote and the box he types in from it,
 // and styles.css's --text-scale sizes every other word in the app.
+import { TEXT_SIZE_ID } from "../../../src/shared/behaviours.js";
 import { h } from "../dom.js";
+import { repaintAfterList, saveChatPref } from "./chat-prefs.js";
 
 export type ChatTextSize = "s" | "m" | "l";
 
@@ -16,8 +18,18 @@ export const CHAT_TEXT_SIZES: readonly { size: ChatTextSize; label: string }[] =
   { size: "l", label: "Large" },
 ];
 
-function isSize(value: unknown): value is ChatTextSize {
+export function isSize(value: unknown): value is ChatTextSize {
   return value === "s" || value === "m" || value === "l";
+}
+
+/** The size this phone saved, or null when it saved none. */
+export function savedChatTextSize(): ChatTextSize | null {
+  try {
+    const saved = localStorage.getItem(KEY);
+    return isSize(saved) ? saved : null;
+  } catch {
+    return null;
+  }
 }
 
 export function readChatTextSize(): ChatTextSize {
@@ -70,12 +82,15 @@ export function chatTextSizePicker(): HTMLElement {
   function pick(size: ChatTextSize): void {
     setChatTextSize(size);
     paint();
+    saveChatPref(TEXT_SIZE_ID, { size }, "text size");
   }
   paint();
-  return h(
+  const row = h(
     "div",
     { class: "chat-size-row", attrs: { role: "group", "aria-label": "Text size" } },
     h("span", { class: "chat-size-title" }, "Text size"),
     h("div", { class: "chat-size-choices" }, ...buttons),
   );
+  repaintAfterList(row, paint);
+  return row;
 }

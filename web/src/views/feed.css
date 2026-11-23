@@ -273,43 +273,6 @@
   padding: 8px 0 0;
 }
 
-/* A thread's update cards opened from Done today, in a sheet: their tags, ages and details read at 14px at least. */
-.update-sheet .upd {
-  padding: 0;
-  border: 0;
-  background: none;
-}
-
-.update-sheet :is(.upd-tag, .upd-age, .upd-meta) {
-  font-size: max(calc(14px * var(--text-scale)), 1em);
-}
-
-/* Seen goes when nothing in the thread is new, and Close takes the row. */
-.update-sheet .upd-seen[hidden] {
-  display: none;
-}
-
-.update-sheet .sheet-foot.solo {
-  grid-template-columns: 1fr;
-}
-
-.update-sheet .upd + .upd {
-  margin-top: 16px;
-  padding-top: 16px;
-  border-top: 1px solid var(--line);
-}
-
-.update-sheet .upd-acts,
-.update-sheet .say-line {
-  margin-top: 12px;
-}
-
-.update-sheet .upd-say {
-  width: 100%;
-  min-height: var(--tap);
-  font-size: var(--fs-l);
-}
-
 /* The lists and option details in the Feed read at 14px at least (no small text). */
 .feed.v4 :is(.choice-detail, .cfilter-n, .qc-stage, .qc-what, .fsec-n, .card-link) {
   font-size: max(calc(14px * var(--text-scale)), 1em);
@@ -438,7 +401,7 @@
   font-weight: 700;
 }
 
-/* Message Rivet, Share and the bottom "−" share one row at the card's end: tools, not answers. */
+/* Message Rivet, Share, 3 designs and the bottom "−" share one row at the card's end: tools, not answers. */
 .card-tools {
   display: flex;
   flex-wrap: wrap;
@@ -458,13 +421,29 @@
 
 /* Share keeps its word. Where the row is
    too tight for it, Share wraps onto its own line beside the "−" rather than shrinking to an icon. */
-.card-tools .btn.card-share-top {
+.card-tools .btn.card-share-top,
+.card-tools .btn.card-designs {
   flex: 1 0 auto;
   width: auto;
   min-height: 44px;
   margin: 0;
   justify-content: center;
   white-space: nowrap;
+}
+
+.card-tools .btn.card-designs {
+  font-size: var(--fs-l);
+}
+
+.card-designs-icon {
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+}
+
+.card-designs-icon svg {
+  width: 100%;
+  height: 100%;
 }
 
 .card-tools .btn.min-btn.bottom {

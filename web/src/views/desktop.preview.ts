@@ -37,7 +37,7 @@ import { openBacklog } from "./backlog-sheet.js";
 import { planState } from "./ops-plan.js";
 import { takeShare } from "../share-target.js";
 import { receiveShare, showLine, startDraft } from "./chat.js";
-import { drawnClip, drawnStill, drawPreviewMedia, gameStill, previewMediaFile, previewMediaPage, tapPreviewThumb } from "./media.preview.js";
+import { drawnClip, drawnStill, drawPreviewMedia, appStill, previewMediaFile, previewMediaPage, tapPreviewThumb } from "./media.preview.js";
 import { answeredRoute } from "./answered.preview.js";
 import { mindPreview } from "./mind.preview.js";
 import { mountShell } from "./shell.js";
@@ -416,7 +416,7 @@ if (new URLSearchParams(location.search).get("pictured") === "1")
     ask: "Three stills from the test build. One goes out tonight.",
     chat: "dashboard-numbers",
     since: ago(8),
-    media: { kind: "stills", stills: [{ sha256: gameStill("b1".repeat(32), "Glow", 48), type: "image/png" }, { sha256: gameStill("b2".repeat(32), "Bounce", 200), type: "image/png" }, { sha256: gameStill("b3".repeat(32), "Keep", 280), type: "image/png" }] },
+    media: { kind: "stills", stills: [{ sha256: appStill("b1".repeat(32), "Glow", 48), type: "image/png" }, { sha256: appStill("b2".repeat(32), "Bounce", 200), type: "image/png" }, { sha256: appStill("b3".repeat(32), "Keep", 280), type: "image/png" }] },
     options: [
       { label: "Glow", short: "Glow", recommended: true, detail: "Gold halo, 400 ms" },
       { label: "Bounce", short: "Bounce", detail: "Two hops, no halo" },
@@ -1437,7 +1437,7 @@ if (TOP5 && params.get("offline") === "net")
 function openTask(id: string, tries = 25): void {
   const rows = planState().doing;
   const row = rows.find((r) => r.id === id) ?? rows.find((r) => r.id.includes(id));
-  if (row) row.open();
+  if (row) row.open?.();
   else if (tries > 0) setTimeout(() => openTask(id, tries - 1), 200);
 }
 

@@ -1,5 +1,5 @@
 import type { FileRef } from "../../src/shared/board.js";
-import type { AuditEntry, ChatCancelled, ChatMessage, ChatPage, LogsResponse, SavedLine } from "../../src/shared/command.js";
+import type { AuditEntry, ChatCancelled, ChatMessage, ChatPage, ChatSendDelay, LogsResponse, SavedLine } from "../../src/shared/command.js";
 import { FINAL_STATUSES, imageFields } from "../../src/shared/command.js";
 import type { SearchItem } from "../../src/shared/search.js";
 import type { Worker } from "../../src/shared/workers.js";
@@ -18,7 +18,7 @@ import { replyStyleField } from "./views/chat-reply-style.js";
 /** The clientId of each request still waiting for an answer, keyed by what it asks for. */
 const unresolved = new Map<string, string>();
 /** No answer, a timeout, a rate limit or any 5xx but one saying it was never sent: the action may have happened. */
-const lostAnswer = (error: unknown): boolean =>
+export const lostAnswer = (error: unknown): boolean =>
   error instanceof ApiError && !error.undelivered && (error.status === 0 || error.status === 408 || error.status === 429 || error.status >= 500);
 
 const pendingNotes = new Map<string, Promise<AuditEntry>>();
@@ -119,6 +119,10 @@ export const sendChat = (text: string, images: readonly string[], files: readonl
 
 /** Cancels the collecting chat window `id` is in; a 409 says it has already gone to Rivet. */
 export const cancelChat = (id: string) => call<ChatCancelled>("POST", "/api/chat/cancel", { id });
+
+/** Chat's Send delay, kept on the server so every device has the same. */
+export const getChatSendDelay = () => call<ChatSendDelay>("GET", "/api/settings/chat-send-delay");
+export const putChatSendDelay = (delay: ChatSendDelay) => call<ChatSendDelay>("PUT", "/api/settings/chat-send-delay", delay);
 
 /**
  * The note `key` goes as: the one still out from an unanswered try, so a retry is that

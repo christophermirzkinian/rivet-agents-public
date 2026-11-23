@@ -33,15 +33,8 @@ beforeEach(() => {
 });
 afterEach(() => { unmount(); opsData.ops = null; vi.unstubAllGlobals(); vi.useRealTimers(); });
 
-it("expires PR, main, runner and queue claims on the device", () => {
+it("expires runner and queue claims on the device", () => {
   opsData.opsAt.wall -= GITHUB_STALE_MS + 1;
-  show("code");
-  expect(line("prs").textContent).toContain("no current reading");
-  expect(line("prs").textContent).not.toContain("failing");
-  expect(section("prs").querySelector(".s-bad,.t-bad,.ops-checks-bar")).toBeNull();
-  expect(line("main").textContent).toContain("no current reading");
-  expect(section("main").textContent).not.toContain("Running now");
-  expect(section("main").querySelector(".s-bad,.s-ok")).toBeNull();
   show("machines");
   expect(line("runners").textContent).not.toContain("busy");
   expect(section("runners").querySelector(".s-bad,.t-bad,.t-ok")).toBeNull();
@@ -49,11 +42,8 @@ it("expires PR, main, runner and queue claims on the device", () => {
 
 it("handles failed PR, runs and runner sources while queue stays current", () => {
   opsData.ops!.github!.sources = { prs: { failed: ["repo"], at: NOW }, runs: { failed: ["repo"], at: NOW }, runners: { failed: ["repo"], at: NOW }, queue: { failed: [], at: NOW } } as never;
-  show("code");
-  expect(line("prs").textContent).not.toContain("failing");
-  expect(line("main").textContent).toContain("no current reading");
-  expect(root.querySelector(".ops-pill")).toBeNull();
   show("machines");
+  expect(root.querySelector(".ops-pill")).toBeNull();
   expect(line("runners").textContent).toContain("2+ jobs queued in sample");
   expect(line("runners").textContent).not.toContain("offline");
 });
@@ -62,13 +52,7 @@ it("dates stale health in apps without down actions, independently of Fly", () =
   opsData.ops!.healthStaleSince = NOW;
   opsData.ops!.flySource = { at: NOW, failed: ["example-app"] };
   show("machines");
-  expect(line("apps").textContent).toContain("No current health reading");
-  expect(section("apps").textContent).toContain("no current Fly reading");
-  expect(section("apps").querySelector(".s-bad,.t-bad")).toBeNull();
   expect(broken("app")).toHaveLength(0);
-  opsData.ops!.flySource = null;
-  show("machines");
-  expect(section("apps").querySelector(".s-warn")).not.toBeNull();
 });
 
 it("expires Fly separately and honours missing dates and per-app failures", () => {
@@ -78,24 +62,17 @@ it("expires Fly separately and honours missing dates and per-app failures", () =
   opsData.opsAt.wall -= FLY_STALE_MS;
   expect(flyCurrent(opsData.ops!, "example-app")).toBe(false);
   show("machines");
-  expect(section("apps").querySelector(".s-bad,.s-warn")).toBeNull();
   opsData.opsAt.wall = Date.now(); opsData.ops!.flyAt = null;
   expect(flyCurrent(opsData.ops!, "example-app")).toBe(false);
 });
 
-it("qualifies partial PR, runner and job counts, including legacy snapshots", () => {
-  show("code");
-  expect(line("prs").textContent).toContain("1+ open PRs fetched");
+it("qualifies partial runner and job counts, including legacy snapshots", () => {
   show("machines");
   expect(line("runners").textContent).toContain("0+/0+ busy");
   expect(section("runners").textContent).toContain("Runner list is a fetched sample");
-  opsData.ops!.github!.prsComplete = true;
   opsData.ops!.github!.runners!.complete = true;
   opsData.ops!.github!.runners!.detailsComplete = true;
   opsData.ops!.github!.queue!.jobsComplete = true;
-  show("code");
-  expect(line("prs").textContent).toContain("1 open PR");
-  expect(line("prs").textContent).not.toContain("+");
   show("machines");
   expect(line("runners").textContent).toContain("2 jobs queued");
   expect(section("runners").textContent).not.toContain("fetched sample");
@@ -104,14 +81,8 @@ it("qualifies partial PR, runner and job counts, including legacy snapshots", ()
 it("dates retained readings from the failed source, not the new envelope", () => {
   const old = "2026-10-07T20:00:00.000Z";
   opsData.ops!.github!.sources = { prs: { failed: ["repo"], at: old }, runs: { failed: ["repo"], at: old }, runners: { failed: ["repo"], at: old }, queue: { failed: [], at: NOW } } as never;
-  show("code");
-  expect(section("prs").querySelector(".ops-pr-status")!.textContent).toContain("7:00am");
-  expect(line("main").textContent).toContain("7:00am");
   show("machines");
   expect(section("runners").querySelector(".ops-row")!.textContent).toContain("7:00am");
-  opsData.ops!.flySource = { failed: ["example-app"], at: null };
-  show("machines");
-  expect(section("apps").textContent).toContain("no reading · no current Fly reading");
 });
 
 it("qualifies offline details separately from complete totals and explains the queue sample", () => {
@@ -134,13 +105,8 @@ it("qualifies offline details separately from complete totals and explains the q
 it("expires checks already fourteen minutes old after two minutes on the device", () => {
   opsData.ops!.apps[0]!.health.checkedAt = new Date(Date.parse(NOW) - 14 * 60_000).toISOString();
   opsData.ops!.apps[0]!.fly = null;
-  show("machines");
-  expect(line("apps").textContent).toContain("1 down");
   expect(broken("app")).toHaveLength(1);
   opsData.opsAt.wall -= 2 * 60_000;
-  show("machines");
-  expect(line("apps").textContent).toContain("No current health reading");
-  expect(section("apps").querySelector(".s-bad,.t-bad")).toBeNull();
   expect(broken("app")).toHaveLength(0);
 });
 
@@ -177,10 +143,10 @@ it("a new sign-in shows Machines reading, never the last session's reading", () 
   expect(root.textContent).not.toContain(last);
 });
 
-it("Code never says it shows the last numbers read when no Ops read ever landed", () => {
+it("Plan never says it shows the last numbers read when no Ops read ever landed", () => {
   opsData.ops = null;
   opsData.error = "Request failed (500)";
-  show("code");
+  show("plan");
   expect(root.textContent).not.toContain("last numbers read");
   expect(root.textContent).not.toContain("Request failed");
   show("usage");
@@ -197,18 +163,7 @@ const respond = (fail: (path: string) => boolean) =>
     return new Promise(() => {});
   }));
 
-it("Code says plainly that it couldn't load when Ops and its timeline both fail in a new session", async () => {
-  resetOps();
-  resetSession();
-  respond((path) => path === "/api/ops" || path === "/api/ops/timeline");
-  await refreshOps();
-  show("code");
-  expect(root.querySelector(".reading-failed-words")?.textContent).toBe("Couldn't load Code.");
-  expect(root.querySelector(".reading-failed .reading-btn")?.textContent).toBe("Try again");
-  expect(root.textContent).not.toMatch(/last numbers read|Request failed|boom/);
-});
-
-it("a failed timeline alone leaves Usage and Machines current, and only Code says it couldn't refresh", async () => {
+it("a failed timeline alone leaves Usage and Machines current", async () => {
   resetOps();
   resetSession();
   respond(() => false);
@@ -220,8 +175,6 @@ it("a failed timeline alone leaves Usage and Machines current, and only Code say
     expect(root.querySelector(".reading-figures"), page).not.toBeNull();
     expect(root.querySelector(".reading-stale"), page).toBeNull();
   }
-  show("code");
-  expect(root.querySelector(".reading-stale")?.textContent).toBe("Couldn't refresh. These are the last numbers read.");
 });
 
 it("Usage with no Claude reading says a failed refresh plainly, never that it shows the last numbers read", () => {
@@ -272,7 +225,7 @@ it("Plan says a failed feed read in plain words, never the server's", () => {
   app.notice = null;
 });
 
-it("a search hit chosen while Ops is still reading opens and scrolls to its section once it is drawn", () => {
+it("a search hit chosen while Ops is still reading scrolls to its section once it is drawn", () => {
   const scrolled: string[] = [];
   vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(function (this: HTMLElement) {
     scrolled.push(this.dataset.section ?? "");
@@ -280,16 +233,14 @@ it("a search hit chosen while Ops is still reading opens and scrolls to its sect
   resetOps();
   resetSession();
   show("plan");
-  focusSection("timeline");
-  expect(root.querySelector('[data-section="timeline"]')).toBeNull();
+  focusSection("runners");
+  expect(root.querySelector('[data-section="runners"]')).toBeNull();
   opsData.ops = fixture();
-  opsData.timeline = { days: [], repos: [] } as unknown as typeof opsData.timeline;
   changed();
-  expect(scrolled).toEqual(["timeline"]);
-  expect(root.querySelector<HTMLDetailsElement>('[data-section="timeline"]')!.open).toBe(true);
+  expect(scrolled).toEqual(["runners"]);
   // Taken once: the next redraw scrolls nowhere.
   changed();
-  expect(scrolled).toEqual(["timeline"]);
+  expect(scrolled).toEqual(["runners"]);
   vi.restoreAllMocks();
 });
 

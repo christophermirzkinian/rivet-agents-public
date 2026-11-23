@@ -1,6 +1,6 @@
 import { brokenOnMain } from "../../../src/shared/ops.js";
 import { maybeWhen, when } from "../../../src/shared/when.js";
-import { isGotIt } from "../../../src/shared/answers.js";
+import { isGotIt, waitsOnYou } from "../../../src/shared/answers.js";
 import { needYou } from "../../../src/shared/words.js";
 import { failingStreak, type Schedule, type SchedulesResponse } from "../../../src/shared/schedules.js";
 import { isDesk } from "../desk.js";
@@ -76,8 +76,8 @@ function redPart(text: string, red: number, mine: number, otherwise: StatusPart[
 /** The line's parts, in order; one whose numbers have not loaded is left out. */
 export function statusParts(): StatusPart[] {
   const parts: StatusPart[] = [];
-  // A Got it card is news on the Feed, never one that needs you (state.needsYou).
-  const cards = deck().filter((need) => !isGotIt(need)).length;
+  // A Got it card or an update card opened is news on the Feed, never one that needs you (state.needsYou).
+  const cards = deck().filter((need) => waitsOnYou(need) && !isGotIt(need)).length;
   // With none, the empty state under the line says Nothing needs you, once; on a phone the dock's Decide N says it.
   if (cards && isDesk()) parts.push({ key: "cards", text: `${needYou(cards)} →`, short: needYou(cards), tone: "warn", lead: true, open: () => showList() });
   const ops = opsData.ops;

@@ -58,7 +58,7 @@ const TAB_SCREENS = new Set(["floor", "progress", "cards", "answered", "chat", "
 /** The tabs a phone's sheet left showing as it closed; the Floor it closed onto is where you then were. */
 const FLASHED_TABS = new Set(["cards", "answered", "chat", "more"]);
 /**
- * A copy of an event this close after the one it repeats is the same event recorded again (27 Oct: 3 copies within
+ * A copy of an event this close after the one it repeats is the same event recorded again (3 copies within
  * 14 ms, and within 434 ms); it is the answer's tap lock, so two real answers are never this close. A screen's copy
  * may come later still: a new visit with the very same ms takes that long.
  */
@@ -69,7 +69,7 @@ const FLASH_MS = 1500;
 const JOIN_MS = 100;
 
 /**
- * The events as they were used, read from the stored ones and never changing them (27 Oct, the first hour's real
+ * The events as they were used, read from the stored ones and never changing them (the first hour's real
  * events). An early recorder logged two things you never did:
  * - an event recorded 2 or 3 times (same device, kind, id, screen and value, within 450 ms of the one kept or that screen's time);
  * - a tab you never saw on the phone: closing Rivet's pane on the Floor left the Chat tab under it for about 600 ms, and closing
@@ -257,7 +257,7 @@ function features(
 
 /**
  * A phone shows the Cards and Chat tabs as the Floor's Decide and Rivet sheets (web floor.ts syncSheets), and Answered
- * as Decide's Answered segment. Readings showed More until both went on 3 Nov; the pair stays for older events.
+ * as Decide's Answered segment. Readings showed More until both went; the pair stays for older events.
  */
 const SHEET_SHOWS: Record<string, readonly string[]> = { decide: ["cards"], "decide.seg.answered": ["answered"], "floor.rivet": ["chat"], readings: ["more"] };
 

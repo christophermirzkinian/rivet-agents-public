@@ -1,7 +1,10 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { BehaviourRow } from "../src/shared/behaviours.js";
+import { THREE_DESIGNS_ID } from "../src/shared/designs.js";
 import type { OpsResponse } from "../src/shared/ops.js";
+import { noteDesignsRow } from "../web/src/views/three-designs.js";
 import type { OpsStatus } from "../src/shared/ops-status.js";
 import { opsData } from "../web/src/ops-data.js";
 import type { ServedNeed } from "../src/shared/board.js";
@@ -141,8 +144,8 @@ describe("the app's frame", () => {
     wide(true);
     mount();
     const rows = () => [...document.querySelectorAll<HTMLElement>(".tabs .menu-row")];
-    expect(rows().map((one) => one.dataset.key)).toEqual(["asks", "usage", "code", "machines", "mind", "home", "media", "settings"]);
-    expect(rows().map((one) => one.querySelector(".menu-name")?.textContent)).toEqual(["Home", "Usage", "Code", "Machines", "Rivet's mind", "Home Assistant", "Media", "Settings"]);
+    expect(rows().map((one) => one.dataset.key)).toEqual(["asks", "usage", "machines", "mind", "home", "media", "connectors", "settings"]);
+    expect(rows().map((one) => one.querySelector(".menu-name")?.textContent)).toEqual(["Home", "Usage", "Machines", "Rivet's mind", "Home Assistant", "Media", "Connectors", "Settings"]);
     expect([...document.querySelectorAll<HTMLElement>(".tabs .rail-tool")].map((one) => one.dataset.key)).toEqual(["Chat"]);
     expect(document.querySelector(".home-dock")).toBeNull();
     expect(document.querySelector('.view[data-tab="home"] .home')).not.toBeNull();
@@ -429,7 +432,7 @@ describe("old tab ids", () => {
     ["machines", "more", "machines"],
     ["scheduled", "progress", null],
     ["floor", "progress", null],
-    ["code", "more", "code"],
+    ["code", "progress", null],
     ["settings", "more", "settings"],
     ["no-such-tab", "progress", null],
   ])("%s lands on %s %s", (id, tabId, page) => {
@@ -836,12 +839,11 @@ describe("links and pushes, as main.ts opens them", () => {
     expect(vi.mocked(fetch).mock.calls.some(([input]) => String(input) === "/api/answered")).toBe(true);
   });
 
-  it("an update's ?card= opens the card in full in its own sheet over the home screen", async () => {
-    const { state } = await start("/?card=u1");
-    expect(sheet()).toBeNull();
-    expect(state.app.tab).toBe("progress");
+  it("an update's ?card= opens it in the Decide sheet like any card, with its Seen", async () => {
+    const { decide } = await start("/?card=u1");
+    expect([kind(), decide.decideShown()]).toEqual(["decide-sheet", "u1"]);
     expect(document.querySelector(`.home .progress-news`)).toBeNull();
-    expect(document.querySelector(`.sheet.update-sheet [data-need="u1"]`)).not.toBeNull();
+    expect(sheet()!.querySelector('[data-use="updates.pile.seen"]')?.textContent).toBe("Seen");
   });
 
   it("Rivet's sheet opens on the conversation: one head row with the magnifier in it, then the first bubble, no search bar or stage list over it", async () => {
@@ -919,15 +921,14 @@ describe("links and pushes, as main.ts opens them", () => {
     expect(viewing()?.chat).toBeUndefined();
   });
 
-  it("the worker's open-card puts a decision in the Decide sheet and an update in its own sheet over the home screen", async () => {
-    const { decide, state } = await start("/");
+  it("the worker's open-card puts a decision or an update in the Decide sheet", async () => {
+    const { decide } = await start("/");
     await push({ type: "open-card", id: "d2" });
     expect(kind()).toBe("decide-sheet");
     expect(decide.decideShown()).toBe("d2");
     await push({ type: "open-card", id: "u1" });
-    expect(sheet()).toBeNull();
-    expect(state.app.tab).toBe("progress");
-    expect(document.querySelector(`.sheet.update-sheet [data-need="u1"]`)).not.toBeNull();
+    expect([kind(), decide.decideShown()]).toEqual(["decide-sheet", "u1"]);
+    expect(sheet()!.querySelector('[data-use="updates.pile.seen"]')?.textContent).toBe("Seen");
   });
 
   it("the worker's open-tab opens the sheet its id names, and a conversation's line lit in Rivet's", async () => {
@@ -1046,15 +1047,15 @@ describe("links and pushes, as main.ts opens them", () => {
     expect(document.querySelector<HTMLElement>("aside.side .chat-msg.lit")?.dataset.id).toBe("k1");
   });
 
-  it("on a wide window the worker's open-card puts a decision in the middle pane and an update in its own sheet over it; open-tab names the column", async () => {
+  it("on a wide window the worker's open-card puts a decision or an update in the middle pane; open-tab names the column", async () => {
     wide(true);
     const { decide, state } = await start("/");
     expect([middle(), sheet()]).toEqual(["home", null]);
     await push({ type: "open-card", id: "d2" });
     expect([middle(), sheet(), decide.decideShown()]).toEqual(["decide", null, "d2"]);
     await push({ type: "open-card", id: "u1" });
-    expect([state.app.tab, middle(), sheet()]).toEqual(["cards", "decide", null]);
-    expect(document.querySelector(`.sheet.update-sheet [data-need="u1"]`)).not.toBeNull();
+    expect([state.app.tab, middle(), sheet(), decide.decideShown()]).toEqual(["cards", "decide", null, "u1"]);
+    expect(document.querySelector('[data-use="updates.pile.seen"]')?.textContent).toBe("Seen");
     await push({ type: "open-tab", tab: "usage" });
     expect([middle(), sheet()]).toEqual(["page", null]);
     await push({ type: "open-tab", tab: "cards" });
@@ -1181,5 +1182,88 @@ describe("the home screen before and between reads", () => {
     app.notice = "Request failed (429)";
     changed();
     expect(sheet()!.querySelector(".feed-offline")!.textContent).toContain(`Can't reach Rivet · cards as of ${when(app.loadedAt)}`);
+  });
+});
+
+describe("3 designs on a phone's sheets", () => {
+  const designsRow = (on: boolean) => noteDesignsRow({ id: THREE_DESIGNS_ID, value: { on }, updatedAt: null } as unknown as BehaviourRow);
+  const asked = (posts: ReturnType<typeof vi.fn>) =>
+    posts.mock.calls.filter(([url]) => url === "/api/designs").map(([, init]) => JSON.parse(String((init as RequestInit).body)).screen);
+  afterEach(() => designsRow(false));
+
+  // A tall sheet covers the menu, whose foot row would only name Main: a page carries its own in the head, Chat in its
+  // options (its head has no room), and Cards in Decide's ⋯ menu.
+  it("a page sheet's head has its own button while the row is on", async () => {
+    const posts = vi.fn(() => new Promise<Response>(() => {}));
+    vi.stubGlobal("fetch", posts);
+    go("usage");
+    mount();
+    await settle();
+    const own = () => sheet()!.querySelector<HTMLButtonElement>('.home-sheet-head [data-use="menu.row.designs"]')!;
+    expect(own().hidden).toBe(true);
+    designsRow(true);
+    expect(own().hidden).toBe(false);
+    own().click();
+    expect(asked(posts)).toEqual(["usage"]);
+  });
+
+  it("Chat's options ask for the Chat screen while the row is on, and its head gains no button", async () => {
+    const posts = vi.fn(() => new Promise<Response>(() => {}));
+    vi.stubGlobal("fetch", posts);
+    go("chat");
+    mount();
+    await settle();
+    expect(sheet()!.querySelector('.home-sheet-head > [data-use="menu.row.designs"]')).toBeNull();
+    const item = () => sheet()!.querySelector<HTMLButtonElement>(".chat-menu .chat-designs")!;
+    const options = sheet()!.querySelector<HTMLButtonElement>('[data-use="chat.options"]')!;
+    options.click();
+    expect(item().hidden).toBe(true);
+    options.click();
+    designsRow(true);
+    options.click();
+    expect([item().hidden, item().textContent]).toEqual([false, "3 designs of this screen"]);
+    item().click();
+    expect(asked(posts)).toEqual(["chat"]);
+    expect(sheet()!.querySelector<HTMLElement>(".chat-menu")!.hidden).toBe(true);
+  });
+
+  it("on Answered, ⋯ shows only while the row is on, and holds 3 designs of this screen alone", async () => {
+    const posts = vi.fn(() => new Promise<Response>(() => {}));
+    vi.stubGlobal("fetch", posts);
+    deal([]);
+    go("cards");
+    mount();
+    await settle();
+    const more = () => sheet()!.querySelector<HTMLButtonElement>(".decide-more")!;
+    expect(more().hidden).toBe(true);
+    designsRow(true);
+    await settle();
+    expect(more().hidden).toBe(false);
+    more().click();
+    expect(document.querySelector(".decide-menu .sheet-title")?.textContent).toBe("Answered");
+    const rows = [...document.querySelectorAll<HTMLElement>(".decide-menu-list .decide-menu-row")];
+    expect(rows.map((one) => one.dataset.use)).toEqual(["menu.row.designs"]);
+    rows[0]!.click();
+    await settle();
+    expect(asked(posts)).toEqual(["cards"]);
+  });
+
+  it("Decide's ⋯ menu asks for the Cards screen while the row is on", async () => {
+    const posts = vi.fn(() => new Promise<Response>(() => {}));
+    vi.stubGlobal("fetch", posts);
+    deal([card("a")]);
+    go("cards");
+    mount();
+    await settle();
+    const screenRow = () => document.querySelector<HTMLButtonElement>('.decide-menu-list .decide-screen[data-use="menu.row.designs"]');
+    sheet()!.querySelector<HTMLButtonElement>(".decide-more")!.click();
+    expect(screenRow()).toBeNull();
+    closeSheet();
+    designsRow(true);
+    sheet()!.querySelector<HTMLButtonElement>(".decide-more")!.click();
+    expect(screenRow()!.textContent).toBe("3 designs of this screen");
+    screenRow()!.click();
+    await settle();
+    expect(asked(posts)).toEqual(["cards"]);
   });
 });

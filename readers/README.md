@@ -76,6 +76,10 @@ macOS keeps launchd jobs out of `~/Documents`, so a checkout there could not ser
   running agent is not closed: only the chat runner saying it finished closes it.
 - `--dry-run` on a reader writes nothing it would otherwise write, though its model calls are real spend. It still goes
   through the gate.
+- The server checks each reader too (`src/server/ops/readers.ts`): one with no good run inside its fresh window, one
+  that runs but writes no log, or one whose reading makes no sense opens a `reader-<name>` Ops record, and the auto
+  pick-up sends it to a fix chat. Only past its cap (3 in 24 hours by default) does it post a card, with what is wrong
+  and the last fix tried. Settings › Behaviours sets each reader on or off and its fresh window, and the cap.
 
 ## Tests
 

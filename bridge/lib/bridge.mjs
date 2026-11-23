@@ -8,6 +8,7 @@ import { chatLine, field, githubCommentBody, githubTarget, replyMarker, sanitize
 import { resolveChatTerminal } from "./terminals.mjs";
 import { isChatName, validateReply } from "./validate.mjs";
 import { ASK_ID_RE } from "./asks.mjs";
+import { clock } from "./when.mjs";
 import { workerSnapshot } from "./workers.mjs";
 import { putSnapshot } from "./snapshot-compat.mjs";
 import { createWorkRepos } from "./work-repo.mjs";
@@ -46,7 +47,7 @@ export const HOLD_POLL_MS = 5_000;
  * scripts/attachments.mjs), a merge-ready card's arming answer and a Dismiss (no GitHub comment for either), late asks,
  * the owner's Reopen, the auto pick-up and the Home page's buttons.
  */
-export const FEATURES = "image,chat-window,long-chat,images,files,reply-images,card-merge,dismiss,choice-detail,ask-late,changes,reopen,ops-pickup,home-control";
+export const FEATURES = "image,chat-window,long-chat,images,files,reply-images,card-merge,dismiss,choice-detail,ask-late,changes,reopen,ops-pickup,home-control,ask-soon";
 /** Queued events an app chat line may go ahead of: the server re-sends them on reconnect. */
 const OVERTAKABLE = new Set(["reply"]);
 /**
@@ -121,6 +122,13 @@ export function lateAskLine(raw) {
   if (typeof r.dueAt !== "string" || !/^\d{4}-\d{2}-\d{2}T[\d:.]{5,12}(?:Z|[+-]\d{2}:\d{2})$/.test(r.dueAt)) return null;
   const who = r.chat === undefined ? "No chat is named on it, so find who has it." : isChatName(r.chat) ? `Ask chat ${r.chat} what held it up.` : null;
   if (who === null) return null;
+  // The Promise keeper's warning before the time (Settings › Behaviours): the chat answers with the cause and a new
+  // time only if it will slip. Its time is the local clock, as the chat would say it: a chat repeating a UTC clock
+  // back ("ETA 21:30") would be read as a local time and move the ask.
+  if (r.soon === true) {
+    const chat = r.chat === undefined ? "No chat is named on it, so find who has it." : `Ask chat ${r.chat} whether it will make it.`;
+    return `Rivet: ask ${r.key} is due soon, at ${clock(r.dueAt)}. ${chat} If it will slip, give it the cause and a new time before then: rivet ask set ${r.key} --due "<new time>" --why "<cause>". When it is done: rivet ask set ${r.key} --stage done.`;
+  }
   // An ask's time is the server's: one new time with its reason, which it keeps as a move.
   return `Rivet: ask ${r.key} ran past its done-by time (${r.dueAt}). ${who} Then give it a new time and the cause: rivet ask set ${r.key} --due "<new time>" --why "<cause>". When it is done: rivet ask set ${r.key} --stage done.`;
 }
@@ -130,7 +138,15 @@ const N = "\\d{1,4}";
 // Every machine fault text the server writes from fixed words and numbers (ops/pickup.ts machineReds). A list of what
 // may pass, as no rule can tell a short password from plain words; text that carries an error or a name, even a
 // runner's, is not here, so it never passes.
-const OPS_DETAIL_FAULTS = ["[Mm]emory pressure critical", `${N}% free`, "Bridge offline"].join("|");
+const SPAN = `${N} (?:min|h|days?)`;
+// A reader's own red (server/ops/readers.ts), each from fixed words and a span.
+const READER_DETAILS = [
+  "reader stale: never ran",
+  `reader stale: no good reading for ${SPAN} \\(wanted within ${SPAN}\\)`,
+  `reader empty: (?:ran but wrote nothing(?: for ${SPAN})?|no runs and no PRs|no apps|no repos|no accounts|no packs|nothing read)`,
+  "reader wrong: (?:reading time ahead of now|a negative count|an app listed twice|a repo listed twice|no account has a reading)",
+];
+const OPS_DETAIL_FAULTS = ["[Mm]emory pressure critical", `${N}% free`, "Bridge offline", ...READER_DETAILS].join("|");
 const OPS_DETAIL_RE = new RegExp(`^(?:${OPS_DETAIL_FAULTS})(?:[,;] (?:${OPS_DETAIL_FAULTS}))*$`);
 
 /**
@@ -157,7 +173,9 @@ export function opsPickupLine(kind, key, repo, detail) {
   if (typeof repo !== "string" || !repoAllowlist().includes(repo)) return null;
   const flag = repo === defaultRepo() ? "" : ` --repo ${repo}`;
   const why = opsPickupDetail(detail);
-  return `Rivet auto pick-up: ${kind} ${key} is red with nobody on it${why ? ` (${why})` : ""}. Run rivet fix ${kind} ${key}${flag} --by rivet (no card for the owner).`;
+  // A reader's fix chat needs what is wrong with it: the detail passed the list above, so it holds no quote or shell sign.
+  const brief = why && kind === "schedule" && key.startsWith("reader-") ? ` --brief "${why}"` : "";
+  return `Rivet auto pick-up: ${kind} ${key} is red with nobody on it${why ? ` (${why})` : ""}. Run rivet fix ${kind} ${key}${flag}${brief} --by rivet (no card for the owner).`;
 }
 
 const REOPEN_WORDS = { approve: "APPROVED", reject: "REJECTED", done: "DONE", dismiss: "DISMISSED", comment: "COMMENT" };

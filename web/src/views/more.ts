@@ -2,6 +2,8 @@ import { agentName } from "../cloud-agent.js";
 import { h, ICONS } from "../dom.js";
 import { HOME_ICON } from "../home-data.js";
 import { app, changed, go, setOpsPage, subscribe, type MorePage } from "../state.js";
+import * as connectors from "./connectors.js";
+import { CONNECTORS_ICON } from "./connectors.js";
 import * as homeAssistant from "./home-assistant.js";
 import * as media from "./media.js";
 import * as mind from "./mind.js";
@@ -18,9 +20,9 @@ export const PAGE_NAMES: Record<MorePage, string> = {
   usage: "Usage",
   mind: "Rivet's mind",
   machines: "Machines",
-  code: "Code",
   home: "Home Assistant",
   media: "Media",
+  connectors: "Connectors",
   settings: "Settings",
   "what-you-used": "What you used",
 };
@@ -35,7 +37,6 @@ export interface PageRow {
 /** The menu's readings, under the home screen. */
 export const READINGS: PageRow[] = [
   { page: "usage", icon: ICONS.usage },
-  { page: "code", icon: ICONS.code },
   { page: "machines", icon: ICONS.mac },
 ];
 /** The menu's second group, after its rule. Rivet's mind goes first here. */
@@ -43,6 +44,7 @@ export const YOURS: PageRow[] = [
   { page: "mind", icon: ICONS.mind },
   { page: "home", icon: HOME_ICON },
   { page: "media", icon: ICONS.photo },
+  { page: "connectors", icon: CONNECTORS_ICON },
   { page: "settings", icon: ICONS.settings },
 ];
 
@@ -92,8 +94,8 @@ function render(): void {
   root.scrollTop = 0;
   root.replaceChildren();
   if (next === null) return;
-  page = next === "home" ? homeAssistant : next === "media" ? media : next === "settings" ? settings : next === "mind" ? mind : next === "what-you-used" ? whatYouUsed : ops;
-  if (page === ops) setOpsPage(next as Exclude<MorePage, "home" | "media" | "settings" | "mind" | "what-you-used">);
+  page = next === "home" ? homeAssistant : next === "media" ? media : next === "connectors" ? connectors : next === "settings" ? settings : next === "mind" ? mind : next === "what-you-used" ? whatYouUsed : ops;
+  if (page === ops) setOpsPage(next as Exclude<MorePage, "home" | "media" | "connectors" | "settings" | "mind" | "what-you-used">);
   const host = h("div", { class: "more-page", attrs: { "data-page": next } });
   root.append(host);
   page.mount(host);

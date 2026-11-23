@@ -242,11 +242,28 @@ export interface ClaudeLimit {
   /** Codex rows only: the account's credit balance, on its longest window's row; null when not read. */
   credits?: number | null;
   unlimited?: boolean;
+  /** Rows read on their own schedule only: when the row was read, which a stale row keeps. */
+  readAt?: string;
+}
+
+/** The claim states the cloud-credit endpoint answers with. */
+export const CREDIT_STATES = ["not_claimed", "pending", "active", "expired", "claimed_elsewhere"] as const;
+export type CreditState = (typeof CREDIT_STATES)[number];
+
+/** One account's cloud-session credit: its claim state and expiry. The endpoint carries no amount left. */
+export interface ClaudeCredit {
+  /** The masked label the Usage tab uses ("a***"). */
+  account: string;
+  /** Null when the account could not be read. */
+  state: CreditState | null;
+  expiresAt: string | null;
+  readAt: string;
 }
 
 export interface ClaudeUsageSnapshot {
   at: string;
   limits: ClaudeLimit[];
+  credits?: ClaudeCredit[];
 }
 
 export interface FlyRelease {

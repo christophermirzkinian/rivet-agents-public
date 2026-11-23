@@ -8,20 +8,22 @@ import type { Worker } from "../src/shared/workers.js";
 import * as api from "../web/src/api.js";
 import { ApiError } from "../web/src/api.js";
 import * as cmd from "../web/src/command-api.js";
+import { opsData } from "../web/src/ops-data.js";
 import { app, changed } from "../web/src/state.js";
 import { dueText, openChatPeek, type PeekFacts } from "../web/src/views/chat-peek.js";
 import { askTime } from "../web/src/views/your-asks.js";
-import { closeTallSheet } from "../web/src/views/sheet.js";
+import { closeSheet, closeTallSheet } from "../web/src/views/sheet.js";
 
 const MS = "example-org/example-repo" as const;
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 const worker: Worker = { id: "w1", name: "Nina", repo: MS, chat: "search-calls", state: "working", lastOutputAt: Date.now() };
-const facts = (over: Partial<PeekFacts> = {}): PeekFacts => ({ worker, title: "Search box: results move up", project: "example-repo", stage: "In review", time: null, prs: [{ number: 21, repo: worker.repo }], ...over });
+const facts = (over: Partial<PeekFacts> = {}): PeekFacts => ({ worker, title: "Search box: results move up", project: "example-repo", asks: [], stage: "In review", time: null, prs: [{ number: 21, repo: worker.repo }], ...over });
 
 let reads: (LogsResponse | null)[] = [];
 let subscribe: MockInstance<typeof cmd.subscribeLogs>;
 let poll: MockInstance<typeof cmd.getLogsIfChanged>;
 let answered: MockInstance<typeof api.getAnswered>;
+let statuses: MockInstance<typeof api.getOpsStatuses>;
 const logs = (lines: string[], times: (string | null)[] = []): LogsResponse => ({ repo: MS, chat: worker.chat, lines, times, updatedAt: null, leaseUntil: null, screen: screenView(lines), feed: logFeed(lines, times) });
 
 beforeEach(() => {
@@ -30,6 +32,7 @@ beforeEach(() => {
   app.workers = { at: new Date().toISOString(), workers: [worker] };
   subscribe = vi.spyOn(cmd, "subscribeLogs").mockResolvedValue({ leaseUntil: "later" });
   answered = vi.spyOn(api, "getAnswered").mockResolvedValue({ cards: [], reopened: [] });
+  statuses = vi.spyOn(api, "getOpsStatuses").mockResolvedValue({ statuses: [] } as never);
   // Unread, the sheet keeps the list's row; a test that needs the whole ask serves it.
   vi.spyOn(api, "getAsk").mockRejectedValue(new Error("not served"));
   poll = vi.spyOn(cmd, "getLogsIfChanged").mockImplementation(async () => {
@@ -43,6 +46,8 @@ afterEach(() => {
   subscribe.mockRestore();
   poll.mockRestore();
   answered.mockRestore();
+  statuses.mockRestore();
+  opsData.statuses = null;
   app.board = null;
   reads = [];
   app.status = null;
@@ -445,7 +450,7 @@ describe("the chat sheet as a ticket", () => {
 
   it("with no ask and no cards, every part says so instead of showing nothing", async () => {
     reads = [logs([])];
-    openChatPeek(worker, () => facts());
+    openChatPeek(worker, () => facts({ prs: [] }));
     await settle();
     await settle();
     const text = document.querySelector('.peek-pane[data-pane="ticket"]')!.textContent;
@@ -454,5 +459,171 @@ describe("the chat sheet as a ticket", () => {
     expect(text).toContain("No pictures on its cards yet.");
     expect(document.querySelector<HTMLElement>(".peek-meta")!.hidden).toBe(true);
     expect(document.body.textContent).not.toMatch(/\blive\b|refund/i);
+  });
+});
+
+describe("the ticket's Description: every ask, record or PR the row is about", () => {
+  const t = (minutes: number) => new Date(Date.UTC(2026, 10, 21, 20, minutes)).toISOString();
+  const mk = (id: string, minutes: number, extra: Record<string, unknown> = {}) =>
+    ({ id, words: `the words of ${id}`, who: "owner", stage: "building", chat: worker.chat, prs: [], dueHistory: [], timeline: [{ at: t(minutes), stage: "building" }], createdAt: t(minutes), stageAt: t(minutes), updatedAt: t(minutes), version: 1, ...extra }) as never;
+  const ticket = () => document.querySelector<HTMLElement>('.peek-pane[data-pane="ticket"]')!;
+  const description = () => ticket().querySelector<HTMLElement>(".peek-box")!;
+
+  it("lists each linked ask newest first: its writeup, then his words, its id, who asked and a link to where", async () => {
+    const newer = mk("a-2", 30, { why: "One line on what the change is for.", source: "message:m_7" });
+    const older = mk("a-1", 0, { source: `backlog:${MS}#77` });
+    const plan = { id: "plan-2", rev: "r1", kind: "plan", title: "Port change plan", askId: "a-1", chat: worker.chat, since: t(5), points: [] };
+    app.board = { board: { needs: [plan] } } as never;
+    reads = [logs([])];
+    openChatPeek(worker, () => facts({ ask: newer, asks: [newer, older] }));
+    await settle();
+    await settle();
+    expect(ticket().querySelector(".peek-h .peek-aside")!.textContent).toBe("2 asks");
+    const [first, second] = [...description().querySelectorAll<HTMLElement>(".peek-ask")];
+    expect([...first!.children].map((el) => el.className || el.tagName)).toEqual(["peek-writeup", "P", "peek-from", "peek-sources"]);
+    expect(first!.querySelector(".peek-writeup")!.textContent).toBe("One line on what the change is for.");
+    expect(first!.querySelector(".peek-words")!.textContent).toBe("the words of a-2");
+    expect(first!.querySelector(".peek-from")!.textContent).toMatch(/^a-2 · You · /);
+    // No writeup is made up for an ask with none.
+    expect(second!.querySelector(".peek-writeup")).toBeNull();
+    expect(second!.querySelector(".peek-words")!.textContent).toBe("the words of a-1");
+    const issue = second!.querySelector<HTMLAnchorElement>('a[data-use="desks.chat.issue-link"]')!;
+    expect([issue.textContent, issue.getAttribute("href")]).toEqual(["Issue#77 ›", `https://github.com/${MS}/issues/77`]);
+    // The older ask's plan card is on the ticket too.
+    expect(ticket().querySelectorAll(".peek-box")[1]!.querySelector("p")!.textContent).toBe("Port change plan");
+    expect(ticket().textContent).not.toContain("No ask is linked");
+
+    const open = first!.querySelector<HTMLButtonElement>('button[data-use="desks.chat.open-line"]')!;
+    expect(open.textContent).toBe("Open in Chat ›");
+    open.click();
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    expect(document.querySelector(".peek-sheet")).toBeNull();
+    expect(app.tab).toBe("chat");
+  });
+
+  it("one ask's aside: the ask when it has a writeup or is not his, your words when it is only his words", async () => {
+    for (const [extra, aside] of [[{ who: "partner" }, "the ask"], [{ why: "A writeup." }, "the ask"], [{}, "your words"]] as const) {
+      const one = mk("a-2", 30, extra);
+      reads = [logs([])];
+      openChatPeek(worker, () => facts({ ask: one, asks: [one] }));
+      await settle();
+      expect(ticket().querySelector(".peek-h .peek-aside")!.textContent).toBe(aside);
+      expect(description().querySelector('[data-use="desks.chat.open-line"]')).toBeNull();
+      closeTallSheet();
+      await new Promise((resolve) => setTimeout(resolve, 450));
+    }
+  });
+
+  it("an ask linked through a PR shows that PR beside its source; the cards are the chat's own ask's", async () => {
+    const live: Worker = { ...worker, prs: [21] };
+    const mine = mk("a-2", 30);
+    const viaPr = mk("a-1", 0, { chat: "elsewhere", prs: [21], source: "message:m_7" });
+    const plan = { id: "plan-1", rev: "r1", kind: "plan", title: "Port change plan", askId: "a-1", chat: "elsewhere", since: t(5), points: [] };
+    app.board = { board: { needs: [plan] } } as never;
+    reads = [logs([])];
+    openChatPeek(live, () => facts({ worker: live, ask: mine, asks: [mine, viaPr] }));
+    await settle();
+    await settle();
+    const [first, second] = [...description().querySelectorAll<HTMLElement>(".peek-ask")];
+    expect(first!.querySelector(".peek-sources")).toBeNull();
+    const sources = [...second!.querySelector(".peek-sources")!.children].map((el) => el.getAttribute("data-use"));
+    expect(sources).toEqual(["desks.chat.open-line", "desks.chat.pr-link"]);
+    expect(second!.querySelector<HTMLAnchorElement>('a[data-use="desks.chat.pr-link"]')!.getAttribute("href")).toBe(`https://github.com/${MS}/pull/21`);
+    expect(ticket().querySelectorAll(".peek-box")[1]!.textContent).toContain("No plan card");
+    closeTallSheet();
+    await new Promise((resolve) => setTimeout(resolve, 450));
+
+    // With no ask of its own, a PR row's cards are its linked asks'.
+    const pr: Worker = { ...worker, id: `pr:${MS}#21`, chat: "pr-21", prs: [21], what: "#21 Port change" };
+    reads = [logs([])];
+    openChatPeek(pr, () => facts({ worker: pr, ask: viaPr, asks: [viaPr] }));
+    await settle();
+    await settle();
+    expect(ticket().querySelectorAll(".peek-box")[1]!.querySelector("p")!.textContent).toBe("Port change plan");
+    closeTallSheet();
+    await new Promise((resolve) => setTimeout(resolve, 450));
+
+    // The linked ask's chat's newer plan card, which names no ask, is that chat's next ask's, never this PR's.
+    const newer = { id: "plan-2", rev: "r1", kind: "plan", title: "Next ask plan", chat: "elsewhere", since: t(40), points: [] };
+    app.board = { board: { needs: [plan, newer] } } as never;
+    reads = [logs([])];
+    openChatPeek(pr, () => facts({ worker: pr, ask: viaPr, asks: [viaPr] }));
+    await settle();
+    await settle();
+    expect(ticket().querySelectorAll(".peek-box")[1]!.querySelector("p")!.textContent).toBe("Port change plan");
+    closeTallSheet();
+    await new Promise((resolve) => setTimeout(resolve, 450));
+
+    // A chat with no ask of its own lists the ask naming its PR, but its cards stay its own.
+    const own = { id: "plan-3", rev: "r1", kind: "plan", title: "Its own plan", chat: worker.chat, since: t(20), points: [] };
+    app.board = { board: { needs: [plan, own] } } as never;
+    reads = [logs([])];
+    openChatPeek(live, () => facts({ worker: live, asks: [viaPr] }));
+    await settle();
+    await settle();
+    expect(description().querySelector(".peek-from")!.textContent).toContain("a-1");
+    expect(ticket().querySelectorAll(".peek-box")[1]!.querySelector("p")!.textContent).toBe("Its own plan");
+    closeTallSheet();
+    await new Promise((resolve) => setTimeout(resolve, 450));
+
+    // A card it sent naming the linked ask is its own too.
+    const sent = { id: "plan-4", rev: "r1", kind: "plan", title: "Its plan for a-1", askId: "a-1", chat: worker.chat, since: t(30), points: [] };
+    app.board = { board: { needs: [plan, own, sent] } } as never;
+    reads = [logs([])];
+    openChatPeek(live, () => facts({ worker: live, asks: [viaPr] }));
+    await settle();
+    await settle();
+    expect(ticket().querySelectorAll(".peek-box")[1]!.querySelector("p")!.textContent).toBe("Its plan for a-1");
+    closeTallSheet();
+    await new Promise((resolve) => setTimeout(resolve, 450));
+
+    // A map row that borrows its ask's chat name still takes only the cards naming the ask.
+    const borrowed: Worker = { ...pr, chat: "elsewhere" };
+    app.board = { board: { needs: [plan, newer] } } as never;
+    reads = [logs([])];
+    openChatPeek(borrowed, () => facts({ worker: borrowed, ask: viaPr, asks: [viaPr] }));
+    await settle();
+    await settle();
+    expect(ticket().querySelectorAll(".peek-box")[1]!.querySelector("p")!.textContent).toBe("Port change plan");
+  });
+
+  it("a fix chat with no ask shows its ops record: what holds it up, then what it is about, its state and due time", async () => {
+    const fix: Worker = { ...worker, chat: "fix-disk-data-9" };
+    const record = { kind: "disk", key: "data", state: "in-progress", chat: fix.chat, repo: MS, cause: "the volume filled", note: "a note", eta: "by 3:30pm", since: t(0), updatedAt: t(10), version: 2 };
+    statuses.mockResolvedValue({ statuses: [record] } as never);
+    reads = [logs([])];
+    openChatPeek(fix, () => facts({ worker: fix, prs: [] }));
+    await settle();
+    await settle();
+    expect(description().querySelector(".peek-writeup")!.textContent).toBe("the volume filled");
+    expect(description().querySelector(".peek-from")!.textContent).toBe("Red: disk · data · In hand · due by 3:30pm");
+    expect(ticket().textContent).not.toContain("No ask is linked");
+    const open = description().querySelector<HTMLButtonElement>('button[data-use="desks.chat.open-ops"]')!;
+    expect(open.textContent).toBe("Open in Ops ›");
+    open.click();
+    expect(document.querySelector(".sheet:not(.is-tall) .sheet-title")).not.toBeNull();
+    closeSheet();
+  });
+
+  it("a PR row with nothing else linked shows its PR's title and a link to it; a chat shows the link alone", async () => {
+    const pr: Worker = { ...worker, id: `pr:${MS}#34`, chat: "pr-34", what: "#34 Port change" };
+    reads = [logs([])];
+    openChatPeek(pr, () => facts({ worker: pr, prs: [{ number: 34, repo: MS }] }));
+    await settle();
+    await settle();
+    expect(description().querySelector("p")!.textContent).toBe("Port change");
+    const link = description().querySelector<HTMLAnchorElement>('a[data-use="desks.chat.pr-link"]')!;
+    expect(link.getAttribute("href")).toBe(`https://github.com/${MS}/pull/34`);
+    expect(ticket().textContent).not.toContain("No ask is linked");
+    closeTallSheet();
+    await new Promise((resolve) => setTimeout(resolve, 450));
+
+    const live: Worker = { ...worker, what: "Its own words on what it does" };
+    reads = [logs([])];
+    openChatPeek(live, () => facts({ worker: live, prs: [{ number: 34, repo: MS }] }));
+    await settle();
+    await settle();
+    expect([...description().children].map((el) => el.className)).toEqual(["peek-sources"]);
+    expect(description().textContent).not.toContain("Its own words");
   });
 });

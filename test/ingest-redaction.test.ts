@@ -32,7 +32,7 @@ describe("redactText", () => {
       "https://www.instagram.com/reel/Cx2mNp8Qr--/",
       "https://www.instagram.com/p/Cx2mNp8Qr--/",
       "https://www.reddit.com/r/IndieDev/comments/1qwert7/",
-      "https://www.reddit.com/r/IndieDev/comments/1qwert7/a_physics_puzzle_game/",
+      "https://www.reddit.com/r/IndieDev/comments/1qwert7/a_physics_puzzle_app/",
       "https://www.reddit.com/r/IndieDev/s/AbCdEf1234",
       "https://www.tiktok.com/@exampleapp/video/7312345678901234567",
       "https://vm.tiktok.com/ZMkpwRxyz/",

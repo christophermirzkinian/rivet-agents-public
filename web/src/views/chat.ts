@@ -82,9 +82,12 @@ import { BOOKMARK, BOOKMARKED, chatSaved } from "./chat-saved.js";
 import { swipeToReply } from "./chat-swipe.js";
 import { openMore } from "./chat-more.js";
 import { chatReplyStylePicker } from "./chat-reply-style.js";
+import { chatSendDelayRow } from "./chat-send-delay.js";
+import { askDesigns, designsOn } from "./three-designs.js";
 import { applyChatTextSize, chatTextSizePicker } from "./chat-text-size.js";
 import { registerSearchSource } from "./search-sources.js";
 import { askLine, dueLine } from "./due-line.js";
+import { chatNotDoneItem } from "./chat-not-done.js";
 import { closeSheet, openSheet } from "./sheet.js";
 import { flash } from "./toast.js";
 import { stopText, thingFacts } from "./thing.js";
@@ -447,16 +450,24 @@ const COLLECT_TICK_MS = 250;
 /** Reduced motion asked for: the collect bar steps with the countdown's tick rather than draining every frame. */
 const stillMotion = (): boolean =>
   typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+/** The Back to newest button's arrow. */
+const DOWN_ARROW =
+  '<svg viewBox="0 0 24 24"><path d="M12 5v14M6 13l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
 /** When the latest collecting window here goes to Rivet (ms since the epoch, the server's clock); null with none known. */
 function collectUntil(messages: Iterable<ChatMessage>): number | null {
-  let until: number | null = null;
+  return collectWindow(messages)?.until ?? null;
+}
+
+/** The latest collecting window here: when it goes, and its own Send delay (10 s from a server before it). */
+function collectWindow(messages: Iterable<ChatMessage>): { until: number; ms: number } | null {
+  let latest: { until: number; ms: number } | null = null;
   for (const message of messages) {
     if (message.status !== "collecting" || !message.sendsAt) continue;
     const at = Date.parse(message.sendsAt);
-    if (Number.isFinite(at) && (until === null || at > until)) until = at;
+    if (Number.isFinite(at) && (latest === null || at > latest.until)) latest = { until: at, ms: message.windowMs || CHAT_WINDOW_QUIET_MS };
   }
-  return until;
+  return latest;
 }
 
 /** Whole seconds until the latest collecting window here goes to Rivet, by the server's clock; null with none known. */
@@ -470,9 +481,9 @@ export function collectLeft(messages: Iterable<ChatMessage>, now = serverNow()):
  * deadline known.
  */
 export function collectBarWidth(messages: Iterable<ChatMessage>, now = serverNow()): number {
-  const until = collectUntil(messages);
-  if (until === null) return 100;
-  return Math.min(100, Math.max(0, ((until - now) * 100) / CHAT_WINDOW_QUIET_MS));
+  const open = collectWindow(messages);
+  if (open === null) return 100;
+  return Math.min(100, Math.max(0, ((open.until - now) * 100) / open.ms));
 }
 
 /** A collecting line's own status: its seconds left, short enough for a narrow screen; the banner says the rest. */
@@ -736,7 +747,7 @@ export function receiveShare(share: Shared): void {
 
 /**
  * The words a tap sends as his (Stop it, Start it or Drop it from Coming, Fix it, Start work) and a card answer's: they
- * carry agent-written titles, so they read as the rest of the page. Lines from before the typed mark (18 Nov) have no
+ * carry agent-written titles, so they read as the rest of the page. Lines from before the typed mark have no
  * mark, so these words are how a tap's line is told from his own, as the server's Asked-before fill does.
  */
 const TAP_WORDS = /^(?:Stop (?:this|[a-z0-9][a-z0-9-]*): |Start it \(from Coming\)|Drop it \(from Coming\)|Fix it: |Start work on |Approved\b|Dismissed\b|Rejected\b|Chose:|Comment\b|Seen$|Done$)/;
@@ -936,9 +947,28 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     earlierArmed = true;
     earlierRun = 0;
   }
-  const scroller = h("div", { class: "chat-scroll" }, earlier, thread);
+  // Back to newest: read more than a screen up, a round ↓ over the message box brings the newest back in one
+  // tap, counting the lines that landed while he was up. Its dock stands no taller than nothing at the scroller's foot.
+  const newestCount = h("span", { class: "chat-newest-count" });
+  newestCount.hidden = true;
+  const newestBtn = h(
+    "button",
+    {
+      class: "chat-newest",
+      attrs: { type: "button", "aria-label": "Back to newest", "data-use": "chat.newest" },
+      on: { click: () => toNewest() },
+    },
+    svg(DOWN_ARROW),
+    newestCount,
+  );
+  newestBtn.hidden = true;
+  const scroller = h("div", { class: "chat-scroll" }, earlier, thread, h("div", { class: "chat-newest-dock" }, newestBtn));
   watchDepth(scroller, () => "chat");
   const foot = holdFoot(scroller, FOOT_NEAR);
+  /** The newest line when he left the foot: lines after it are counted on the ↓. Null while he is at it. */
+  let upFrom: ChatMessage | null = null;
+  /** The lines as the last paint drew them, in order: the ↓ reads them on every scroll, so they are sorted once a paint. */
+  let shown: ChatMessage[] = [];
   /** Where Chat was when search covered it, to put back when it goes. */
   let covered: { held: boolean; top: number } | null = null;
   /** Chat has drawn its messages: a search over it before then has no place of Chat's to keep. */
@@ -1226,13 +1256,35 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   };
   renderSpeak();
   // Collapse all, Expand all and Mark all read moved to the topics bar over Chat. Read aloud, where the device can
-  // speak, and Text size are the menu's own.
+  // speak, and Text size are the menu's own. Send delay is read from the server as the menu opens.
+  const sendDelay = chatSendDelayRow({ authFail: (error) => authFail(error) });
+  // Chat's own "3 designs" (three-designs.ts): on a phone its sheet covers the menu, and its head has no room for more.
+  const designsItem = h(
+    "button",
+    {
+      class: "chat-menu-item chat-designs",
+      attrs: { type: "button", role: "menuitem", "data-use": "menu.row.designs" },
+      on: {
+        click: () => {
+          closeMenu();
+          void askDesigns({ screen: "chat" });
+        },
+      },
+    },
+    svg(ICONS.photo, "btn-icon"),
+    h("span", { class: "chat-menu-grow" }, "3 designs of this screen"),
+  );
+  designsItem.hidden = true;
   const menu = h(
     "div",
     { class: "chat-menu", attrs: { role: "menu", "aria-label": "Chat options" } },
+    // The Promise keeper's list: your asks still open, late first.
+    chatNotDoneItem(() => closeMenu(), () => signedOut("Your session ended. Sign in again.")),
     canSpeak() ? speakSwitch : null,
     chatTextSizePicker(),
     chatReplyStylePicker(),
+    designsItem,
+    sendDelay.el,
   );
   menu.hidden = true;
   const optionsBtn = h(
@@ -1254,6 +1306,8 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     optionsBtn.focus();
   };
   function openMenu(): void {
+    sendDelay.refresh();
+    designsItem.hidden = !designsOn();
     menu.hidden = false;
     optionsBtn.setAttribute("aria-expanded", "true");
     document.addEventListener("pointerdown", outside, true);
@@ -1413,6 +1467,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   scroller.addEventListener("scroll", () => {
     readChat();
     earlierAtTop();
+    paintNewest();
   });
   // A Chat shorter than the screen never scrolls: dragging or wheeling it down at the top is his scroll away and back,
   // once a drag (a new touch) or once a wheel gesture (after a second's pause), never on every event of one gesture.
@@ -2055,7 +2110,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
             flash(`Asked ${agentName()} to stop it.`);
             // The stream's copy, when it came first, keeps its status, place and deadline (as send() does).
             const had = messages.get(entry.id);
-            if (alive) arrived({ id: entry.id, from: "owner", text: words, at: entry.at, status: had?.status ?? (entry.status === "collecting" ? "collecting" : "sent"), ...(had?.seq !== undefined ? { seq: had.seq } : {}), ...(had?.sendsAt ? { sendsAt: had.sendsAt } : {}), threadId: typeof entry.conversation === "string" ? entry.conversation : id });
+            if (alive) arrived({ id: entry.id, from: "owner", text: words, at: entry.at, status: had?.status ?? (entry.status === "collecting" ? "collecting" : "sent"), ...(had?.seq !== undefined ? { seq: had.seq } : {}), ...(had?.sendsAt ? { sendsAt: had.sendsAt } : {}), ...(had?.windowMs ? { windowMs: had.windowMs } : {}), ...(had?.keeps ? { keeps: true as const } : {}), ...(had?.windowLead ? { windowLead: had.windowLead } : {}), threadId: typeof entry.conversation === "string" ? entry.conversation : id });
           },
           (error: unknown) => {
             if (!authFail(error)) flash(describe(error), "error");
@@ -2148,9 +2203,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     const atBottom =
       !!back?.held || (!lit && scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 40);
     // Updates' seed bubble ("Updates from Rivet") went with the conversation.
-    const sorted = [...messages.values()]
-      .filter((message) => !SEED_IDS.includes(message.id))
-      .sort(byTime);
+    const sorted = (shown = shownLines());
     // A new message keeps the keyboard on the control it was on; dropped to the page, Enter would answer the card.
     const refocus = keepFocus(thread);
     // A first-read Try again goes however the chat loads (its own tap, a refresh, the stream): its keyboard moves on.
@@ -2203,7 +2256,81 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     const showsNewest = (stick || atBottom) && !section.classList.contains("searching");
     if (showsNewest) readChat();
     earlierAtTop();
+    paintNewest();
     return showsNewest;
+  }
+
+  /** Chat's lines in its order, the seed bubble left out, as render draws them. */
+  function shownLines(): ChatMessage[] {
+    return [...messages.values()].filter((message) => !SEED_IDS.includes(message.id)).sort(byTime);
+  }
+
+  /**
+   * The ↓ shows while the newest line is more than one screen below what he reads. On it, the lines that landed since
+   * he left the foot, his own left out. Covered by search or Saved, the scroller reads 0: that is no move, so the mark
+   * and the count stand until Chat shows again.
+   */
+  function paintNewest(): void {
+    const screen = scroller.clientHeight;
+    if (screen === 0) return;
+    const left = scroller.scrollHeight - scroller.scrollTop - screen;
+    if (left < FOOT_NEAR) upFrom = null;
+    else upFrom ??= shown.at(-1) ?? null;
+    if (left <= screen) {
+      // Hidden with the keyboard on it, it would drop to the page, where Enter answers the card (keepFocus, render).
+      if (newestBtn.contains(document.activeElement)) handFocus();
+      newestBtn.hidden = true;
+      newestCount.hidden = true;
+      newestBtn.setAttribute("aria-label", "Back to newest");
+      return;
+    }
+    newestBtn.hidden = false;
+    // From the newest back to the mark: only the lines since, not the whole thread, on every scroll.
+    const mark = upFrom;
+    let landed = 0;
+    for (let at = shown.length - 1; at >= 0; at--) {
+      const line = shown[at]!;
+      if (mark && byTime(line, mark) <= 0) break;
+      if (line.from !== "owner") landed++;
+    }
+    newestCount.hidden = landed === 0;
+    newestCount.textContent = landed > 99 ? "99+" : String(landed);
+    newestBtn.setAttribute("aria-label", landed ? `Back to newest, ${landed} new` : "Back to newest");
+  }
+
+  /** The ↓'s tap: a smooth scroll down to the newest line, which takes the foot's hold again as it gets there. */
+  function toNewest(): void {
+    // A jump's look back at its line would pull the scroll up again as it ends, and its light would keep render from
+    // holding the foot it gets to.
+    unsettle?.();
+    window.clearTimeout(litTimer);
+    lit = null;
+    thread.querySelector(".chat-msg.lit")?.classList.remove("lit");
+    if (stillMotion()) {
+      foot.place(true);
+      paintNewest();
+      return;
+    }
+    scroller.scrollTo({ top: scroller.scrollHeight, behavior: "smooth" });
+    // Lines not drawn yet stand at a guessed height (content-visibility, command.css) and grow as the scroll passes
+    // them, so it can end short of the newest: as it ends, the rest of the way at once, unless his own hand took it.
+    const settle = () => {
+      unsettle?.();
+      if (alive && scroller.clientHeight > 0) foot.place(true);
+      paintNewest();
+    };
+    const late = window.setTimeout(settle, JUMP_SETTLE_MS);
+    const touched = () => unsettle?.();
+    const his = ["pointerdown", "wheel", "touchstart", "keydown"];
+    scroller.addEventListener("scrollend", settle);
+    for (const kind of his) scroller.addEventListener(kind, touched, { passive: true });
+    unsettle = () => {
+      window.clearTimeout(late);
+      scroller.removeEventListener("scrollend", settle);
+      for (const kind of his) scroller.removeEventListener(kind, touched);
+      unsettle = null;
+    };
+    paintNewest();
   }
 
   /**
@@ -2797,6 +2924,11 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
         // Its stored copy, when the stream brought it first, keeps its place among the same millisecond's.
         ...(messages.get(entry.id)?.seq !== undefined ? { seq: messages.get(entry.id)!.seq } : {}),
         ...(messages.get(entry.id)?.sendsAt ? { sendsAt: messages.get(entry.id)!.sendsAt } : {}),
+        // And its window's own Send delay, which the countdown bar drains from.
+        ...(messages.get(entry.id)?.windowMs ? { windowMs: messages.get(entry.id)!.windowMs } : {}),
+        // A Feed Fix it window's mark (no Cancel) and the window's lead, which the stream knows first.
+        ...(messages.get(entry.id)?.keeps ? { keeps: true as const } : {}),
+        ...(messages.get(entry.id)?.windowLead ? { windowLead: messages.get(entry.id)!.windowLead } : {}),
         ...imageFields(images),
         ...(files.length ? { files } : {}),
         // The direct send's answer may not echo the reply: the one sent stands.

@@ -23,6 +23,7 @@ import { cardsSegment, flushHeld, recoverOutbox, resetFeed } from "./views/feed.
 import { mountShell } from "./views/shell.js";
 import { catchStrayDrops } from "./views/attach.js";
 import { applyChatTextSize } from "./views/chat-text-size.js";
+import { loadChatPrefs } from "./views/chat-prefs.js";
 
 // The saved Text size on <html> before anything mounts, so every screen opens at it with no flash of Medium.
 applyChatTextSize();
@@ -149,6 +150,7 @@ async function startApp(): Promise<void> {
   const front = app.front;
   resetSession();
   app.front = front;
+  void loadChatPrefs();
   startUsage(() => ({ tab: app.tab, desk: window.matchMedia?.(DESK_QUERY).matches ?? false, morePage: app.morePage, cards: cardsSegment() }));
   const link = startTab;
   startTab = null;

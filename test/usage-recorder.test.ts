@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MAX_USAGE_EVENTS, USAGE_KEEP_MS } from "../src/shared/usage-ids.js";
+import { MORE_PAGES } from "../web/src/state.js";
 import type { Where } from "../web/src/usage.js";
 
 // What you used: the app's recorder batches ids and numbers, sends them when the app is hidden or 50
@@ -116,6 +117,20 @@ describe("the usage recorder", () => {
       ["more.machines", 3000],
       ["answered", 500],
     ]);
+  });
+
+  it("names every menu page's screen, so none records as unknown", async () => {
+    vi.useFakeTimers({ now: 1_000_000, toFake: ["Date"] });
+    MORE_PAGES.forEach((page, i) => {
+      where = { tab: "more", desk: false, morePage: page, cards: "needs" };
+      usage.screenMoved();
+      vi.setSystemTime(1_001_000 + i * 1000);
+    });
+    usage.usageHidden();
+    await settle();
+    const screens = events().filter(([, kind]) => kind === "screen").map(([, , id]) => id);
+    expect(screens).toContain("more.connectors");
+    expect(screens).not.toContain("unknown");
   });
 
   it("going to the background records the sheet on top before the screens under it, as closing it would (review R5.1)", async () => {
@@ -414,7 +429,8 @@ describe("the usage recorder", () => {
     usage.screenMoved();
     scrolled(list, [300, 740, 200]);
     scrolled(chat, [500]);
-    where = { tab: "more", desk: true, morePage: "code", cards: "needs" };
+    // A page that is no long view records no scroll.
+    where = { tab: "more", desk: true, morePage: "machines", cards: "needs" };
     usage.screenMoved();
     scrolled(list, [960]);
     where = { tab: "more", desk: true, morePage: null, cards: "needs" };
@@ -425,7 +441,6 @@ describe("the usage recorder", () => {
     expect(events().filter(([, kind]) => kind === "scroll").map(([, , id, , value]) => [id, value])).toEqual([
       ["cards", 70],
       ["chat", 50],
-      ["ops.timeline", 90],
     ]);
   });
 });
