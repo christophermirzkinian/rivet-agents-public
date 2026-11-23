@@ -3,8 +3,6 @@ import { z } from "zod";
 import { CARD_CHECKER_ID, cardCheckerSchema, DEFAULT_CARD_CHECKER } from "./card-check.js";
 import { CHAT_CAPS, CHAT_IDLE_MINUTES, CHAT_NIGHTLY, CHATS_ID, chatsSchema, DEFAULT_CHATS } from "./chats.js";
 import { chatSendDelaySchema, DEFAULT_CHAT_SEND_DELAY } from "./command.js";
-import { DEFAULT_DESIGNS, DESIGNS_MODEL_CHOICES, designsSchema, THREE_DESIGNS_ID } from "./designs.js";
-import { modelLabel } from "./models.js";
 import { DEFAULT_READER_FIX_CAP, minutesWords, READER_FIX_CAPS, readerBehaviourId, READERS, READERS_FIX_ID, type ReaderSpec } from "./readers.js";
 
 // Settings › Behaviours, which the owner asked for to adjust and toggle each of these in one place: every
@@ -217,18 +215,6 @@ export const BEHAVIOURS: readonly Behaviour[] = [
     ],
   }),
   cardCheckerBehaviour,
-  behaviour({
-    id: THREE_DESIGNS_ID,
-    group: "Work",
-    name: `"3 designs" button`,
-    line: "3 pictured options on request, from a card or a screen",
-    scope: "all",
-    control: "live",
-    knobs: designsSchema,
-    default: DEFAULT_DESIGNS,
-    chip: (value) => DESIGNS_MODEL_CHOICES.find((choice) => choice.value === value.model)?.label ?? modelLabel(value.model),
-    choices: { key: "model", switch: true, label: "3 designs model", options: DESIGNS_MODEL_CHOICES },
-  }),
   // ops/pickup.ts, ops/late.ts, ops/fixes.ts and ops/auto-clear.ts: none has a switch yet.
   alwaysOn({ id: "ops.pick-up-reds", group: "Ops", name: "Pick up unowned reds", line: "A red nobody is on gets a fix job" }),
   alwaysOn({ id: "ops.ask-late-why", group: "Ops", name: "Ask late work why", line: "Asks a late chat for its new time" }),

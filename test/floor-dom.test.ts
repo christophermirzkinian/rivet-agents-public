@@ -1,10 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { BehaviourRow } from "../src/shared/behaviours.js";
-import { THREE_DESIGNS_ID } from "../src/shared/designs.js";
 import type { OpsResponse } from "../src/shared/ops.js";
-import { noteDesignsRow } from "../web/src/views/three-designs.js";
 import type { OpsStatus } from "../src/shared/ops-status.js";
 import { opsData } from "../web/src/ops-data.js";
 import type { ServedNeed } from "../src/shared/board.js";
@@ -1182,88 +1179,5 @@ describe("the home screen before and between reads", () => {
     app.notice = "Request failed (429)";
     changed();
     expect(sheet()!.querySelector(".feed-offline")!.textContent).toContain(`Can't reach Rivet · cards as of ${when(app.loadedAt)}`);
-  });
-});
-
-describe("3 designs on a phone's sheets", () => {
-  const designsRow = (on: boolean) => noteDesignsRow({ id: THREE_DESIGNS_ID, value: { on }, updatedAt: null } as unknown as BehaviourRow);
-  const asked = (posts: ReturnType<typeof vi.fn>) =>
-    posts.mock.calls.filter(([url]) => url === "/api/designs").map(([, init]) => JSON.parse(String((init as RequestInit).body)).screen);
-  afterEach(() => designsRow(false));
-
-  // A tall sheet covers the menu, whose foot row would only name Main: a page carries its own in the head, Chat in its
-  // options (its head has no room), and Cards in Decide's ⋯ menu.
-  it("a page sheet's head has its own button while the row is on", async () => {
-    const posts = vi.fn(() => new Promise<Response>(() => {}));
-    vi.stubGlobal("fetch", posts);
-    go("usage");
-    mount();
-    await settle();
-    const own = () => sheet()!.querySelector<HTMLButtonElement>('.home-sheet-head [data-use="menu.row.designs"]')!;
-    expect(own().hidden).toBe(true);
-    designsRow(true);
-    expect(own().hidden).toBe(false);
-    own().click();
-    expect(asked(posts)).toEqual(["usage"]);
-  });
-
-  it("Chat's options ask for the Chat screen while the row is on, and its head gains no button", async () => {
-    const posts = vi.fn(() => new Promise<Response>(() => {}));
-    vi.stubGlobal("fetch", posts);
-    go("chat");
-    mount();
-    await settle();
-    expect(sheet()!.querySelector('.home-sheet-head > [data-use="menu.row.designs"]')).toBeNull();
-    const item = () => sheet()!.querySelector<HTMLButtonElement>(".chat-menu .chat-designs")!;
-    const options = sheet()!.querySelector<HTMLButtonElement>('[data-use="chat.options"]')!;
-    options.click();
-    expect(item().hidden).toBe(true);
-    options.click();
-    designsRow(true);
-    options.click();
-    expect([item().hidden, item().textContent]).toEqual([false, "3 designs of this screen"]);
-    item().click();
-    expect(asked(posts)).toEqual(["chat"]);
-    expect(sheet()!.querySelector<HTMLElement>(".chat-menu")!.hidden).toBe(true);
-  });
-
-  it("on Answered, ⋯ shows only while the row is on, and holds 3 designs of this screen alone", async () => {
-    const posts = vi.fn(() => new Promise<Response>(() => {}));
-    vi.stubGlobal("fetch", posts);
-    deal([]);
-    go("cards");
-    mount();
-    await settle();
-    const more = () => sheet()!.querySelector<HTMLButtonElement>(".decide-more")!;
-    expect(more().hidden).toBe(true);
-    designsRow(true);
-    await settle();
-    expect(more().hidden).toBe(false);
-    more().click();
-    expect(document.querySelector(".decide-menu .sheet-title")?.textContent).toBe("Answered");
-    const rows = [...document.querySelectorAll<HTMLElement>(".decide-menu-list .decide-menu-row")];
-    expect(rows.map((one) => one.dataset.use)).toEqual(["menu.row.designs"]);
-    rows[0]!.click();
-    await settle();
-    expect(asked(posts)).toEqual(["cards"]);
-  });
-
-  it("Decide's ⋯ menu asks for the Cards screen while the row is on", async () => {
-    const posts = vi.fn(() => new Promise<Response>(() => {}));
-    vi.stubGlobal("fetch", posts);
-    deal([card("a")]);
-    go("cards");
-    mount();
-    await settle();
-    const screenRow = () => document.querySelector<HTMLButtonElement>('.decide-menu-list .decide-screen[data-use="menu.row.designs"]');
-    sheet()!.querySelector<HTMLButtonElement>(".decide-more")!.click();
-    expect(screenRow()).toBeNull();
-    closeSheet();
-    designsRow(true);
-    sheet()!.querySelector<HTMLButtonElement>(".decide-more")!.click();
-    expect(screenRow()!.textContent).toBe("3 designs of this screen");
-    screenRow()!.click();
-    await settle();
-    expect(asked(posts)).toEqual(["cards"]);
   });
 });

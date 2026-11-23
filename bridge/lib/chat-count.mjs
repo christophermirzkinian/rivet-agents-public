@@ -139,13 +139,14 @@ export function readTerminals(run, app) {
 }
 
 /**
- * The runner's open chats, as count() takes them: none while its switch is off. Throws when it cannot be read. Open as
+ * The runner's open chats, as count() takes them: none while its switch is off, unless `ignoreSwitch` (its sessions
+ * may still be live with the switch off). Throws when it cannot be read. Open as
  * the backlog puller counts them (scripts/backlog-puller.mjs mergeChats): a live pane, a session it cannot see into
  * (another socket, or foreign), or one not finished that is starting or due a restart.
  * @param {(file: string, args: string[]) => string} run
  */
-export function readRunner(run, { on = RUNNER_ON, cli = RUNNER_CLI } = {}) {
-  if (!fs.existsSync(on)) return [];
+export function readRunner(run, { on = RUNNER_ON, cli = RUNNER_CLI, ignoreSwitch = false } = {}) {
+  if (!ignoreSwitch && !fs.existsSync(on)) return [];
   const rows = JSON.parse(run(process.execPath, [cli, "ls", "--json"]));
   if (!Array.isArray(rows)) throw new Error("unexpected runner list");
   return rows.flatMap((row) => {

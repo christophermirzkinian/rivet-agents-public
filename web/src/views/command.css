@@ -896,6 +896,16 @@
   font-weight: 700;
 }
 
+/* Past the wait with no answer: plain words, no face and no dots, so it does not read as typing. */
+.chat-ex-late {
+  margin: 6px 0 0;
+  padding: 2px 4px;
+  color: var(--muted);
+  font-size: var(--fs-s);
+  font-weight: 600;
+  text-align: right;
+}
+
 .chat-ex-dots {
   display: inline-flex;
   gap: 3px;

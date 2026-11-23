@@ -529,6 +529,23 @@ export function connected(plan, ran) {
 export const uncheckedLine = (plan) => `Couldn't check ${PLAN_NAMES[plan]} just now`;
 
 /**
+ * The words for a chat that was not started because its plan is signed out; the caller ends the sentence. Nothing moves
+ * to the other plan by itself, so when that one is connected the words name the Plans page's own way out (Make first),
+ * or say that it already goes first.
+ * @param {Plan} plan @param {boolean} task a task's run, rather than a red check's look or a chat
+ * @param {boolean} [otherOn] the other plan is connected @param {Plan | null} [first] the plan that goes first
+ */
+export const notConnectedLine = (plan, task, otherOn = false, first = plan) => {
+  const [name, other] = [PLAN_NAMES[plan], PLAN_NAMES[otherPlan(plan)]];
+  const fix = !otherOn
+    ? "Connect Claude or ChatGPT on the Plans page"
+    : first === otherPlan(plan)
+      ? `Connect ${name} on the Plans page. ${other} goes first and is connected`
+      : `Connect ${name}, or make ${other} first, on the Plans page`;
+  return `${name} isn't connected${task ? ", so the job did not run" : ""}. ${fix}`;
+};
+
+/**
  * A job chat's driver for each plan: its CLI, its argv, and how its output reads.
  * @typedef {{ plan: Plan, bin: string, args: (id: string, run: string, spec: import("./jobs.mjs").ChatSpec, paths: import("./jobs.mjs").ChatPaths, where: { repo: string, lastMessage: string }) => string[],
  *   read: (lines: string[]) => { lines: string[], error: string | null } }} Driver

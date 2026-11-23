@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ApiError, call } from "../web/src/api.js";
+import { ApiError, call, sendReply } from "../web/src/api.js";
 import { probeCloud, resetCloud } from "../web/src/cloud-agent.js";
 import { fellAsleep, isAsleep, onCap, onWake, resetSleep, watchInput } from "../web/src/rivet-sleep.js";
 
@@ -52,6 +52,20 @@ describe("rivet-sleep", () => {
     expect(isAsleep()).toBe(false);
     await call("GET", "/api/status");
     expect(sent).toHaveLength(1);
+  });
+
+  it("sends a card answer held past its Undo window as a visit, even after the tab heard asleep", async () => {
+    fellAsleep();
+    await sendReply({ clientId: "c1", itemId: "n1", decision: "approve", rev: "r1" });
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.path).toBe("/api/replies");
+    expect(sent[0]!.headers["x-rivet-background"]).toBeUndefined();
+  });
+
+  it("still drops a timer's write while asleep", async () => {
+    fellAsleep();
+    await expect(call("POST", "/api/logs/subscribe", {})).rejects.toBeInstanceOf(ApiError);
+    expect(sent).toHaveLength(0);
   });
 
   it("falls asleep on an answer marked x-rivet-asleep (the cap page)", async () => {

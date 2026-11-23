@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { makeGh } from "../bridge/lib/gh-login.mjs";
 import { formatLog, makeExec, resolveBin } from "../bridge/lib/config.mjs";
 import { NO_RUN } from "../bridge/lib/scheduled-run.mjs";
 import { zoneDay } from "../bridge/lib/spend.mjs";
@@ -323,10 +324,13 @@ async function main() {
 async function pass(repo, dryRun, log) {
   const exec = makeExec();
   const ghBin = resolveBin("gh");
+  const ghExec = makeGh(exec, ghBin, { log });
+  // With no login this run reads, asks and writes nothing, and ends as a skip.
+  await ghExec.ready();
   const gitBin = resolveBin("git");
   const clone = await readerClone(repo, (args) => exec(ghBin, args, { timeout: 600_000 }));
   const result = await recheckPass({
-    gh: async (args) => (await exec(ghBin, ["-R", repo, ...args], { timeout: 120_000, maxBuffer: 64 * 1024 * 1024 })).stdout,
+    gh: async (args) => (await ghExec(["-R", repo, ...args], { timeout: 120_000, maxBuffer: 64 * 1024 * 1024 })).stdout,
     git: async (args) => (await exec(gitBin, ["-C", clone, ...args], { timeout: 120_000, maxBuffer: 64 * 1024 * 1024 })).stdout,
     run: makeReaderRun(resolveBin("claude"), { effort: "medium", system: SYSTEM_PROMPT, timeoutMs: 240_000 }),
     spend: new Spend(JOB, CEILING_USD, { log }),

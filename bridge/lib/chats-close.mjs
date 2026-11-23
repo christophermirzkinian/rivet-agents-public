@@ -17,8 +17,9 @@
 //   no card     no open (non-update) board card from this chat
 //   no ask      no Rivet ask on this chat that is not finished
 //   no sign-in  no Android emulator, iOS simulator or browser started from its tree
-// Close = the app's `terminal close --terminal <h>` for each terminal, then `rivet chat drop <name>` (404 fine). Kills
-// no process. One line per chat to the close log.
+// Close = the app's `terminal close --terminal <h>` for each terminal, then `rivet chat drop <name>` (404 fine), then
+// what it left orphaned in its folder is ended by pid (endLeftovers). One line per chat to the close log, and one for
+// the left-overs it ended.
 //
 // Two closers, one at a time. The bridge (lib/chats-loop.mjs) runs this file with --from bridge every five minutes, and
 // the scheduled cleaner with --from cron; the mode file says which closes:
@@ -417,17 +418,115 @@ export const realIo = (home, bins = {}, { deadline = Infinity, onDeadline = () =
     fs.mkdirSync(path.dirname(p), { recursive: true });
     fs.appendFileSync(p, s);
   },
+  kill: (/** @type {number} */ pid, /** @type {NodeJS.Signals | 0} */ signal) => process.kill(pid, signal),
+  pause: (/** @type {number} */ ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms),
   lastTurnAt: (/** @type {string} */ dir) => lastTurn(transcriptDir(home, dir)),
   mentionsDevice: (/** @type {string} */ dir, /** @type {number} */ now) => transcriptMentionsDevice(transcriptDir(home, dir), now),
-  runner: () =>
+  runner: (/** @type {{ ignoreSwitch?: boolean }} */ opts = {}) =>
     readRunner((file, args) => {
       const left = deadline - Date.now();
       if (left <= 0) onDeadline();
       return String(execFileSync(file, args, { encoding: "utf8", timeout: Math.min(60_000, left), killSignal: "SIGKILL", maxBuffer: 16 << 20, stdio: ["ignore", "pipe", "pipe"] }));
-    }),
+    }, opts),
   holds: () => readHolds(HOLDS_FILE).holds,
   ownerLogins: async () => [],
 });
+
+const LEFTOVER_WAIT_MS = 3_000;
+
+/** `ps -axo pid=,ppid=,tty=,command=`; tty is "??" (macOS) or "?" (Linux) with no controlling terminal.
+ * @param {string} text @returns {(Proc & { tty: string })[]} */
+export const parsePsTty = (text) =>
+  /** @type {RegExpExecArray[]} */ (text.split("\n").map((l) => /^\s*(\d+)\s+(\d+)\s+(\S+)\s*(.*)$/.exec(l)).filter(Boolean)).map((m) => ({ pid: +m[1], ppid: +m[2], tty: m[3], command: m[4] }));
+
+const NO_TTY_RE = /^\?\??$/;
+// Shared daemons, sign-ins and editors, never a chat's left-over: these only spare, never select. The multiplexers, adb
+// and terminal editors (a headless one may hold unsaved buffers) by program name (a shared server daemonises in whatever
+// folder first started it), the rest anywhere in the command line.
+const SPARE_BIN_RE = /^(tmux|screen|zellij|dtach|abduco|adb|n?vim|vi|emacs(client)?|nano|hx|helix|kak|micro)$/i;
+// Any macOS app bundle (an editor `code .` started detached), and ssh's shared connection master and the key agents.
+const SPARE_CMD_RE = new RegExp(`${SIGN_IN.source}|Electron|Code Helper|Cursor|\\.app/Contents/MacOS/|\\[mux\\]|ssh-agent|gpg-agent`, "i");
+/** @param {string} command */
+export const spareLeftover = (command) => SPARE_BIN_RE.test(path.basename(command.split(/\s+/)[0])) || SPARE_CMD_RE.test(command);
+
+/**
+ * Ends what a closed chat left orphaned in its folder (a dev server outlives its terminal and keeps the folder from the
+ * disk reaper), read again now, not from the pass's start. A root is a process with its cwd in the folder, parent pid 1
+ * and no terminal; the targets are the roots and their descendants whose cwd is in the folder too. So an owner's shell or
+ * editor, a split pane, and an open chat's agent (each with a terminal and a live parent) are never touched. Nothing is
+ * ever selected by name; a shared daemon or sign-in (spareLeftover) is spared by name, with everything under it.
+ * By exact pid: SIGTERM, then SIGKILL for one still there after LEFTOVER_WAIT_MS. Never pid 1, this process or an
+ * ancestor of it. An open chat (`others`) at the same folder leaves everything ("shared"); one nested inside keeps its
+ * own, and one enclosing this folder spares nothing. Nothing when the folder is no absolute path three folders deep, is
+ * home or above it, or ps/lsof cannot be read (null). Returns what it signalled.
+ * @param {Io} io @param {string} dir @param {string[]} others
+ * @returns {Proc[] | null | "shared"}
+ */
+export function endLeftovers(io, dir, others) {
+  if (!path.isAbsolute(dir)) return [];
+  const forms = [...new Set([path.resolve(dir), canon(dir)])];
+  const home = canon(os.homedir());
+  if (forms.some((d) => d.split("/").filter(Boolean).length < 3 || home === d || home.startsWith(d + "/"))) return [];
+  const otherForms = others.filter((o) => path.isAbsolute(o)).flatMap((o) => [path.resolve(o), canon(o)]);
+  if (otherForms.some((o) => forms.includes(o))) return "shared";
+  const nested = otherForms.filter((o) => forms.some((d) => o.startsWith(d + "/")));
+  const within = (/** @type {string[]} */ dirs, /** @type {string} */ cwd) => dirs.some((d) => cwd === d || cwd.startsWith(d + "/"));
+  /** @param {(Proc & { tty: string })[]} procs @param {Map<number, string>} cwds */
+  const targets = (procs, cwds) => {
+    const byPid = new Map(procs.map((p) => [p.pid, p]));
+    if (!byPid.has(process.pid)) return null;
+    const spared = new Set([process.pid]);
+    for (let p = byPid.get(process.pid), i = 0; p && p.ppid > 1 && i < 256; p = byPid.get(p.ppid), i++) spared.add(p.ppid);
+    /** @type {Map<number, number[]>} */
+    const kids = new Map();
+    for (const p of procs) kids.set(p.ppid, [...(kids.get(p.ppid) ?? []), p.pid]);
+    const ok = (/** @type {Proc | undefined} */ p) => {
+      const cwd = p && cwds.get(p.pid);
+      return Boolean(p && p.pid > 1 && !spared.has(p.pid) && !spareLeftover(p.command) && cwd !== undefined && within(forms, cwd) && !within(nested, cwd));
+    };
+    const todo = procs.filter((p) => p.ppid === 1 && NO_TTY_RE.test(p.tty) && ok(p)).map((p) => p.pid);
+    const found = new Set();
+    while (todo.length) {
+      const pid = /** @type {number} */ (todo.pop());
+      if (found.has(pid)) continue;
+      found.add(pid);
+      for (const kid of kids.get(pid) ?? []) if (ok(byPid.get(kid))) todo.push(kid);
+    }
+    return procs.filter((p) => found.has(p.pid));
+  };
+  const read = () => {
+    try {
+      return targets(parsePsTty(io.run("ps", ["-axo", "pid=,ppid=,tty=,command="])), parseLsofCwd(io.run("lsof", ["-nP", "-a", "-d", "cwd", "-Fpn"])));
+    } catch {
+      return null;
+    }
+  };
+  const found = read();
+  if (!found) return null;
+  for (const p of found) {
+    try {
+      io.kill(p.pid, "SIGTERM");
+    } catch {}
+  }
+  const running = (/** @type {Proc} */ p) => {
+    try {
+      io.kill(p.pid, 0);
+      return true;
+    } catch (e) {
+      return /** @type {any} */ (e)?.code === "EPERM";
+    }
+  };
+  const until = Date.now() + LEFTOVER_WAIT_MS;
+  while (found.some(running) && Date.now() < until) io.pause(50);
+  // Read again before the SIGKILL: a pid that ended since may be another process's now.
+  const still = new Set((found.some(running) ? read() ?? [] : []).map((p) => p.pid));
+  for (const p of found.filter((f) => still.has(f.pid) && running(f))) {
+    try {
+      io.kill(p.pid, "SIGKILL");
+    } catch {}
+  }
+  return found;
+}
 
 /** @typedef {ReturnType<typeof realIo>} Io */
 /** @typedef {Awaited<ReturnType<typeof chatsConfig>>} ChatsCfg */
@@ -617,6 +716,8 @@ async function gatherAndClose({ st, io, cfg, home, tmp, now, line, result }) {
     }
   };
 
+  /** @type {Array<{ worktree: string }> | undefined} */
+  let runnerAll;
   for (const [dir, terms] of [...byPath].sort(([a], [b]) => a.localeCompare(b))) {
     const w = wtByPath.get(dir);
     /** @type {Chat} */
@@ -659,6 +760,23 @@ async function gatherAndClose({ st, io, cfg, home, tmp, now, line, result }) {
       }
     }
     line(chat.name, verdict, reason);
+    // A partial list may leave out an open chat nested in this folder, whose processes are its own.
+    if (verdict === "closed" && partial) line(chat.name, "left-overs", "not ended: the open chats were not all read");
+    else if (verdict === "closed") {
+      // Read with the runner's switch ignored: its sessions may still be live with the switch off.
+      try {
+        runnerAll ??= io.runner({ ignoreSwitch: true });
+      } catch {}
+      // Give the closed terminal's processes time to exit, so what they leave is orphaned (parent pid 1, no terminal)
+      // when it is read: no later pass sees this chat again.
+      if (runnerAll) io.pause(LEFTOVER_WAIT_MS);
+      // The runner's chats are all open, so one at this very folder means the folder is shared.
+      const ended = runnerAll ? endLeftovers(io, dir, [...[...byPath.keys()].filter((d) => d !== dir), ...runnerAll.map((r) => r.worktree)]) : "unread";
+      if (ended === "unread") line(chat.name, "left-overs", "not ended: the runner chats could not be read");
+      else if (!ended) line(chat.name, "left-overs", "not ended: ps/lsof failed");
+      else if (ended === "shared") line(chat.name, "left-overs", "not ended: another open chat shares the folder");
+      else if (ended.length) line(chat.name, "left-overs", `ended ${ended.map((p) => `${p.pid} ${p.command.replace(/\s+/g, " ").slice(0, 60)}`).join(", ")}`);
+    }
     if (verdict === "keep" && !/^(active\b|protected$)/.test(reason)) result.kept.push({ name: chat.name, reason });
     if (verdict === "closed") result.closed.push(chat.name);
   }

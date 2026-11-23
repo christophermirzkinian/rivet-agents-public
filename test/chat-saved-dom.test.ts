@@ -177,11 +177,15 @@ describe("the Saved list", () => {
     await onChat();
     expect(shown("a010")).toBeNull();
     await openList();
-    inItem("a010", "chat.saved.go").click();
+    const go = inItem("a010", "chat.saved.go");
+    go.focus();
+    go.click();
     await settle();
     expect(panel().hidden).toBe(true);
     expect(shown("a010")!.scrollIntoView).toHaveBeenCalled();
     expect(shown("a010")!.classList.contains("lit")).toBe(true);
+    // The Go that held the keyboard went with the list: it lands in the message box, never on the page.
+    expect(document.activeElement).toBe(root.querySelector(".chat-compose textarea"));
   });
 
   it("Reply closes it and puts the line's reply above the box", async () => {

@@ -23,10 +23,10 @@
   <true/>
   <key>ThrottleInterval</key>
   <integer>30</integer>
-  <key>Nice</key>
-  <integer>10</integer>
+  <!-- No Nice, and Interactive: Home Assistant's rules must run however busy the Mac is. At Nice 10 and Background a
+       loaded Mac gave this job no CPU at all and it stopped answering; with no ProcessType launchd still throttles a job. -->
   <key>ProcessType</key>
-  <string>Background</string>
+  <string>Interactive</string>
   <key>StandardOutPath</key>
   <string>__HA_HOME__/launchd.log</string>
   <key>StandardErrorPath</key>

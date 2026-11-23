@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 
 import { serverError } from "../bridge/lib/board-client.mjs";
 import { makeExec, readToken, resolveBin, serverOrigin, withoutRivetTokens } from "../bridge/lib/config.mjs";
-import { codexSandboxDown, codexVerdict, codexWatch, connected, DRIVERS, FIRST_PLAN_UNREAD, firstPlan, isPlan, limitAsk, limitOf, limitWords, otherPlan, outsideNeed, plansOn, SANDBOX_DOWN_LINE, STATUS_ARGS, uncheckedLine } from "../bridge/lib/job-drivers.mjs";
+import { codexSandboxDown, codexVerdict, codexWatch, connected, DRIVERS, FIRST_PLAN_UNREAD, firstPlan, isPlan, limitAsk, limitOf, limitWords, notConnectedLine, otherPlan, outsideNeed, plansOn, SANDBOX_DOWN_LINE, STATUS_ARGS, uncheckedLine } from "../bridge/lib/job-drivers.mjs";
 import { ACTION_ID_RE, APP_ID_RE, CHECK_SCRIPT_RE, JOB_ID_RE, launchdCron, MISSED_GRACE_MS, onTime, readCommand, TASK_MAX_MINUTES } from "../bridge/lib/jobs.mjs";
 import { redactLine, redactLines } from "../bridge/lib/redact.mjs";
 import { takeLock, tryLock } from "../bridge/lib/token-lock.mjs";
@@ -349,10 +349,20 @@ export async function chat(d, id, run, spec) {
     };
     const driver = plan ? DRIVERS[plan] : null;
     const exe = driver ? bin(driver.bin) : null;
+    const env = withoutRivetTokens(d.env);
+    // A hosted agent's job runs on its owner's own plan, so a plan that is definitely signed out starts nothing: a job
+    // set before the plan was disconnected is refused here. A status that gave no answer runs as it always has. A
+    // status is read from the home folder, never the jobs clone, whose project settings could answer for the plan.
+    const signIn = plan && exe && plansOn(d.env) ? await d.run(exe, [...STATUS_ARGS[plan]], { cwd: d.home, timeoutMs: 15_000, raw: plan === "claude", env }) : null;
     if (!plan || !driver) why = `${FIRST_PLAN_UNREAD.toLowerCase()}, so the chat never started`;
     else if (!exe) why = `${driver.bin} is not installed on this machine, so the chat never started`;
-    else {
-      const env = withoutRivetTokens(d.env);
+    else if (signIn && connected(plan, signIn) === false) {
+      // The other plan's status only chooses the words: the job never moves to it by itself.
+      const other = otherPlan(plan);
+      const otherBin = bin(DRIVERS[other].bin);
+      const status = otherBin ? await d.run(otherBin, [...STATUS_ARGS[other]], { cwd: d.home, timeoutMs: 15_000, raw: other === "claude", env }) : null;
+      why = notConnectedLine(plan, task, status ? connected(other, status) === true : false, firstPlan(d.env));
+    } else {
       // A Codex chat has no network to report with: it writes its verdict as its last message, which this run reports.
       const scratch = plan === "chatgpt" ? fs.mkdtempSync(path.join(os.tmpdir(), "job-codex-")) : null;
       try {
@@ -365,7 +375,7 @@ export async function chat(d, id, run, spec) {
           const other = otherPlan(plan);
           const statusBin = bin(DRIVERS[other].bin);
           // Codex says "Not logged in" on stderr, which only a run that is not raw keeps.
-          const status = statusBin ? await d.run(statusBin, [...STATUS_ARGS[other]], { cwd: repo, timeoutMs: 15_000, raw: other === "claude", env }) : null;
+          const status = statusBin ? await d.run(statusBin, [...STATUS_ARGS[other]], { cwd: d.home, timeoutMs: 15_000, raw: other === "claude", env }) : null;
           const signedIn = status ? connected(other, status) : null;
           // A look's limit is the look's alone: its check's red stands, with Fix it, and asks for the other plan only when that one is connected.
           if (!task) lookLimit = { plan, ...(hit.until ? { until: hit.until } : {}), connected: signedIn === true, first: firstPlan(d.env) ?? undefined };

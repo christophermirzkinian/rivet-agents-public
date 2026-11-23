@@ -111,7 +111,11 @@ function explicit(/** @type {string} */ ask, /** @type {string | null} */ repo, 
     if (p) hit(hits, (sub ? innerOf(p, sub, projects) : p).id, m[0]);
   }
   // "in X": the longest project name that starts right after "in", so "in Rivet Third" is never "in Rivet".
-  const terms = projects.filter((p) => p.id !== GENERAL_ID).flatMap((p) => nameTerms(p, projects));
+  // A short id that is a common word names its project only when that word is the project's whole name (a folder
+  // called "website"): "in home screen" is an app's, and Home Automation is named by its name.
+  const terms = projects
+    .filter((p) => p.id !== GENERAL_ID)
+    .flatMap((p) => nameTerms(p, projects).filter(({ term }) => !(COMMON.has(term.toLowerCase()) && term.toLowerCase() !== p.name.toLowerCase())));
   for (const f of findTerms(ask, terms)) if (/\bin\s+$/i.test(ask.slice(0, f.start))) hit(hits, f.id, `in ${f.term}`);
   return hits;
 }

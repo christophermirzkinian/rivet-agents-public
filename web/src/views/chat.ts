@@ -83,7 +83,6 @@ import { swipeToReply } from "./chat-swipe.js";
 import { openMore } from "./chat-more.js";
 import { chatReplyStylePicker } from "./chat-reply-style.js";
 import { chatSendDelayRow } from "./chat-send-delay.js";
-import { askDesigns, designsOn } from "./three-designs.js";
 import { applyChatTextSize, chatTextSizePicker } from "./chat-text-size.js";
 import { registerSearchSource } from "./search-sources.js";
 import { askLine, dueLine } from "./due-line.js";
@@ -164,6 +163,8 @@ const FIND =
 
 /** A gap this long between two lines starts a new chunk, with its small heading: one hour. */
 export const CHUNK_GAP_MS = 60 * 60_000;
+/** "Rivet is working on it" under his unanswered line goes after this long with no reply. */
+export const WORKING_MS = 30 * 60_000;
 
 /**
  * Whether a line starts a chunk, which a small centred heading names: the first line, a new local day, or an hour
@@ -926,6 +927,8 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   let litTimer = 0;
   /** Lets go of a jump's look back at its line once its scroll ends (jump). */
   let unsettle: (() => void) | null = null;
+  /** A jump's scroll to its line is under way: until it ends in view, or he scrolls himself. */
+  let jumpScrolling = false;
   /** The thread waits for `later`; `heldStick`: a render while it waited asked to stick to the newest. */
   let threadHeld = !!later && !app.chatFocus && !focusOnMount && !pendingLine;
   let heldStick = false;
@@ -1258,23 +1261,6 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   // Collapse all, Expand all and Mark all read moved to the topics bar over Chat. Read aloud, where the device can
   // speak, and Text size are the menu's own. Send delay is read from the server as the menu opens.
   const sendDelay = chatSendDelayRow({ authFail: (error) => authFail(error) });
-  // Chat's own "3 designs" (three-designs.ts): on a phone its sheet covers the menu, and its head has no room for more.
-  const designsItem = h(
-    "button",
-    {
-      class: "chat-menu-item chat-designs",
-      attrs: { type: "button", role: "menuitem", "data-use": "menu.row.designs" },
-      on: {
-        click: () => {
-          closeMenu();
-          void askDesigns({ screen: "chat" });
-        },
-      },
-    },
-    svg(ICONS.photo, "btn-icon"),
-    h("span", { class: "chat-menu-grow" }, "3 designs of this screen"),
-  );
-  designsItem.hidden = true;
   const menu = h(
     "div",
     { class: "chat-menu", attrs: { role: "menu", "aria-label": "Chat options" } },
@@ -1283,7 +1269,6 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     canSpeak() ? speakSwitch : null,
     chatTextSizePicker(),
     chatReplyStylePicker(),
-    designsItem,
     sendDelay.el,
   );
   menu.hidden = true;
@@ -1307,7 +1292,6 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   };
   function openMenu(): void {
     sendDelay.refresh();
-    designsItem.hidden = !designsOn();
     menu.hidden = false;
     optionsBtn.setAttribute("aria-expanded", "true");
     document.addEventListener("pointerdown", outside, true);
@@ -1345,7 +1329,10 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   }
   // Saved lines: a bookmark in the head opens their list over Chat; a line's Save or a pull left keeps one.
   const saved = chatSaved({
-    go: (line) => lineNow(line.conversation, line.id),
+    go: (line) => {
+      lineNow(line.conversation, line.id);
+      handFocus();
+    },
     // A saved line Chat has not loaded replies from what the list holds of it.
     reply: (line) => replyToLine(messages.get(line.id) ?? line),
     // As the line's own Reply: none on his line while it still collects.
@@ -1389,12 +1376,14 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       sendBtn,
     ),
   );
-  // A title hit brings up its conversation's newest line in Chat; a message hit, that message.
+  // A title hit brings up its conversation's newest line in Chat; a message hit, that message. The hit held the
+  // keyboard and went with the results.
   const search = chatSearch(
     (id, whole) => {
       setFinding(false, true);
       if (whole) lineNow(id, null);
       else openHit(id);
+      handFocus();
     },
     () => render(false),
     () => setFinding(false),
@@ -1569,12 +1558,15 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     // passes them, so it can end with the line short of the middle, under the head. Each time a scroll ends
     // while it is lit, a line not wholly in view is brought to the middle again; his own touch lets it be.
     unsettle?.();
+    jumpScrolling = true;
     const settle = () => {
       const line = drawnLine(id);
       if (!alive || lit !== id || !line) return unsettle?.();
       const box = scroller.getBoundingClientRect();
       const at = line.getBoundingClientRect();
       const off = tall(line) ? at.top < box.top || at.top > box.bottom : at.top < box.top || at.bottom > box.bottom;
+      // Brought to the middle again, it is under way again.
+      jumpScrolling = off;
       if (off) line.scrollIntoView?.({ block: tall(line) ? "start" : "center", behavior });
     };
     // A browser with no scrollend looks once, when a long smooth scroll has ended.
@@ -1593,6 +1585,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       scroller.removeEventListener("scrollend", settle);
       for (const kind of his) scroller.removeEventListener(kind, touched);
       unsettle = null;
+      jumpScrolling = false;
     };
     window.clearTimeout(litTimer);
     litTimer = window.setTimeout(() => {
@@ -1676,6 +1669,8 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       timeOf(message.at),
       chatImages(message).map(mediaSrc),
       saved.has(message.id),
+      // An acked line's ack moves from under its words to its strip once the answer is in Chat.
+      message.ack ? answered.has(windowOf(message)) : null,
     ]);
     const was = rows.get(message.id);
     const el = was?.key === key ? was.el : bubble(message, quoted, run);
@@ -1709,10 +1704,63 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     return message.threadId ?? message.id;
   }
 
-  /** His last line in the run is still waiting for Rivet. */
-  function waiting(group: ChatMessage[]): boolean {
-    const last = group.at(-1)!;
-    return last.from === "owner" && !last.card && (last.status === "sent" || last.status === "typed");
+  /** The chat windows a line of Rivet's replies to, by lead: its reply may sit in another conversation's run. */
+  let answered = new Set<string>();
+
+  /**
+   * When Rivet last said something that names no line of his: an update card, a new conversation, a line placed by
+   * its words. Any of those may be the answer to an older line, so that line never says "No answer" after it.
+   */
+  let unlinkedAt = 0;
+
+  /** The window a line went to Rivet in, by its lead. */
+  function windowOf(message: ChatMessage): string {
+    return message.windowLead ?? message.id;
+  }
+
+  function answeredWindows(lines: Iterable<ChatMessage>): Set<string> {
+    const found = new Set<string>();
+    for (const line of lines) {
+      if (line.from === "owner" || !line.replyTo) continue;
+      const target = messages.get(line.replyTo);
+      found.add(target ? windowOf(target) : line.replyTo);
+    }
+    return found;
+  }
+
+  /** When the working note under his line `last` goes with no reply; null for a line that shows none. */
+  function waitEnds(last: ChatMessage): number | null {
+    if (last.from !== "owner" || last.card || (last.status !== "sent" && last.status !== "typed")) return null;
+    // His line says Rivet's ack under its words: the note would only say it twice.
+    if (last.ack || answered.has(windowOf(last))) return null;
+    const at = Date.parse(last.at);
+    return Number.isFinite(at) ? at + WORKING_MS : null;
+  }
+
+  /**
+   * His last line in the run is still waiting for Rivet: not once a reply to it is in Chat, in whichever conversation
+   * it landed, and not past WORKING_MS with none.
+   */
+  function waiting(group: ChatMessage[]): "working" | "late" | null {
+    const ends = waitEnds(group.at(-1)!);
+    if (ends === null) return null;
+    // Past the wait it stops looking like typing and says so plainly: a line Rivet never answered must not read as done.
+    if (serverNow() < ends) return "working";
+    // Only while Rivet has said nothing unlinked since: an old line answered by a card or a new conversation is not late.
+    return unlinkedAt > ends - WORKING_MS ? null : "late";
+  }
+
+  /** Redraws when the oldest working note on screen runs out, so it goes without a new line or a refresh. */
+  let waitTimer: number | undefined;
+  function armWait(groups: ChatMessage[][]): void {
+    window.clearTimeout(waitTimer);
+    const now = serverNow();
+    const next = groups.map((group) => waitEnds(group.at(-1)!)).filter((ends): ends is number => ends !== null && ends > now);
+    if (!next.length) return;
+    // Never longer than one wait: a line dated ahead of this clock would overflow the timer and fire at once, forever.
+    waitTimer = window.setTimeout(() => {
+      if (alive) render(false);
+    }, Math.min(Math.min(...next) - now, WORKING_MS) + 250);
   }
 
   /**
@@ -1806,7 +1854,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     const chrome = kept?.chrome ?? [
       heading ? h("p", { class: "chat-day" }, heading) : null,
       turns,
-      wait
+      wait === "working"
         ? h(
             "p",
             { class: "chat-ex-wait", attrs: { role: "status" } },
@@ -1814,7 +1862,9 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
             h("span", { class: "chat-ex-dots", attrs: { "aria-hidden": "true" } }, h("i"), h("i"), h("i")),
             `${agentName()} is working on it`,
           )
-        : null,
+        : wait === "late"
+          ? h("p", { class: "chat-ex-late", attrs: { role: "status" } }, `No answer from ${agentName()} yet`)
+          : null,
     ].filter((one): one is HTMLElement => one !== null);
     placeChildren(turns, bubbles);
     const el = was?.el ?? h("li", { class: "chat-ex", attrs: { "data-ex": first } });
@@ -1836,16 +1886,16 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     const card = cardOf(message);
     // A line's strip, opened by a tap on it: its time, in Chat its conversation's label, then how his line went.
     // No name: his lines are on the right, Rivet's on the left by his face, an agent's under its own names.
+    // Rivet's ack is under his words without a tap, as it was before the strip, until the answer is in Chat or
+    // while the line says another state there; then it is in the strip, so old acks do not sit on every answered line.
+    const ack = mine && message.ack ? `${agentName()}: ${ackWords(message.ack.text)}` : null;
+    const ackBelow = ack !== null && !state && !answered.has(windowOf(message));
     const said = [
       timeOf(message.at) ?? "",
       label ? ` · ${label}` : null,
       message.card && mine ? " · from a card" : null,
-      mine && message.ack
-        ? h(
-            "span",
-            { class: "chat-status acked" },
-            ` · ${agentName()}: ${ackWords(message.ack.text)}`,
-          )
+      ack !== null && !ackBelow
+        ? h("span", { class: "chat-status acked" }, ` · ${ack}`)
         : mine && message.status === "replied"
           ? // A small tick, not the word.
             [" · ", h("span", { class: "chat-status replied", attrs: { role: "img", "aria-label": STATUS_WORDS.replied, title: STATUS_WORDS.replied } }, svg(ICONS.yes, "chat-tick"))]
@@ -1859,7 +1909,9 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
           { class: "chat-state" },
           h("span", { class: `chat-status ${state}` }, state === "collecting" ? collectLine(collectLeft(messages.values())) : STATUS_WORDS[state]),
         )
-      : null;
+      : ackBelow
+        ? h("p", { class: "chat-state" }, h("span", { class: "chat-status acked" }, ack))
+        : null;
     // In Chat his card answer reads as the answer to its card: "You approved “…”".
     const text = mine && message.card ? answerLine(answeredTitle(message), message.text) : message.text;
     // A line with no plain words to tap (only a photo, a clip or a file, or Rivet's card line, whose words are the
@@ -2198,10 +2250,10 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     // Nothing kept, as Chat had drawn nothing when they covered it: a hold taken under them still holds.
     const back = covers ? null :(covered ?? (wasCovered && foot.held() ? { held: true, top: 0 } : null));
     if (!covers) covered = null;
-    // A line just brought up is still being scrolled to while it is lit: Chat measuring at its foot then is where the
-    // scroll began, and placing it at the foot would end that scroll short of the line.
+    // While a jump's scroll to its line is under way, Chat measuring at its foot is where the scroll began, and placing
+    // it at the foot would end that scroll short of the line.
     const atBottom =
-      !!back?.held || (!lit && scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 40);
+      !!back?.held || (!jumpScrolling && scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 40);
     // Updates' seed bubble ("Updates from Rivet") went with the conversation.
     const sorted = (shown = shownLines());
     // A new message keeps the keyboard on the control it was on; dropped to the page, Enter would answer the card.
@@ -2214,7 +2266,15 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     const next: typeof rows = new Map();
     const nextCards: typeof topicCards = new Map();
     const groups = exchangesOf(sorted);
-    cardGroups = new Map(groups.map((group) => [group[0]!.id, group]));
+    answered = answeredWindows(messages.values());
+    unlinkedAt = 0;
+    for (const line of messages.values()) {
+      if (line.from === "owner" || line.replyTo) continue;
+      const at = Date.parse(line.at);
+      if (at > unlinkedAt) unlinkedAt = at;
+    }
+    armWait(groups);
+    cardGroups =new Map(groups.map((group) => [group[0]!.id, group]));
     // Each line's place in its run, across the groups: a run of Rivet's lines may span two conversations.
     const flat = groups.flat();
     const runs = new Map<string, Run>(
@@ -2346,7 +2406,10 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     if (earlierArmed && loadingEarlier?.into !== messages && earlierMore) void loadEarlier();
   }
 
-  /** The keyboard a Try again held when it went: the message box, or on a touch screen or with the box hidden the chat. */
+  /**
+   * The keyboard a control held when it went (a Try again, a search hit, Saved's Go): the message box, or on a touch
+   * screen or with the box hidden the chat.
+   */
   function handFocus(): void {
     if (!window.matchMedia?.("(pointer: coarse)").matches) text.focus();
     if (document.activeElement !== text) parkFocus(section);
@@ -2623,6 +2686,9 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
    */
   function showTimeline(read: readonly ChatMessage[], olderCursor: string | null, stick: boolean): boolean {
     const page = read.filter((message) => !gone.has(message.id));
+    // A page whose earliest line was not loaded may sit above a gap (a stream drop missed more than a page), which
+    // Earlier then loads from this page down instead of from the earliest loaded.
+    const joins = chatLoaded && (olderCursor === null || !page[0] || messages.has(page[0].id));
     const from = olderCursor === null || !chatLoaded ? "" : (page[0]?.at ?? "");
     // Lines kept from before this page may sit above a gap, so they never prove a thing's replies were on screen.
     unbrokenFrom = from;
@@ -2635,9 +2701,9 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     heardMessages(page);
     take(page);
     for (const message of page) messages.set(message.id, message);
-    if (!chatLoaded) {
+    if (!joins) {
       earlierMore = olderCursor !== null;
-      earliestPage = page[0]?.id ?? null;
+      earliestPage = read[0]?.id ?? null;
     }
     chatLoaded = true;
     loadFailed = false;
@@ -2680,15 +2746,18 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
             messages.set(message.id, message);
           }
         if (hint.textContent === EARLIER_FAILED) hint.textContent = "";
-        earlierMore = page.more;
-        if (page.messages[0]) earliestPage = page.messages[0].id;
+        // A refresh that left a gap while this page loaded moved the cursor up to its own page: it stays there.
+        if (earliestPage === first) {
+          earlierMore = page.more;
+          if (page.messages[0]) earliestPage = page.messages[0].id;
+        }
         // At the newest (Chat shorter than the screen on open), he stays there: held by the top card instead, lines
-        // landing in a card below it would push the newest off the screen.
-        const atNewest = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 40;
+        // landing in a card below it would push the newest off the screen. A jump's scroll begun there is not.
+        const atNewest = !jumpScrolling && scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 40;
         const anchor = atNewest ? null : readingAt();
         render(atNewest);
         holdReading(anchor);
-        return page.more;
+        return earlierMore === true;
       },
       (error: unknown) => {
         if (messages === into) earlierArmed = false;
@@ -3209,6 +3278,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     closeMenu();
     unsettle?.();
     window.clearTimeout(litTimer);
+    window.clearTimeout(waitTimer);
     window.clearTimeout(listTimer);
     window.clearTimeout(detailTimer);
     document.removeEventListener("fullscreenchange", onFullscreen);

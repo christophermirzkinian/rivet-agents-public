@@ -20,7 +20,6 @@ import { stopCardMedia } from "./card-media.js";
 import { answerCard, answerTapsLocked, cardKey, cardMenu, cardOnItsWay, cardsSegment, cheerView, feedKeyUp, guardTaps, offlineBar, releaseKeys, setCardsSegment, showCard } from "./feed.js";
 import { leaveOverlays } from "./navigation.js";
 import { openShortcuts } from "./shortcuts.js";
-import { askDesigns, designsOn } from "./three-designs.js";
 import { cardShown, enterScreen, leaveScreen, screenMoved, watchDepth } from "../usage.js";
 import { closeSheet, closeTallSheet, openSheet, openTallSheet } from "./sheet.js";
 import type { View } from "./view.js";
@@ -197,24 +196,12 @@ function decideView(first: readonly string[], look: { answered?: boolean; untilR
       "div",
       { class: "decide-menu-list" },
       ...(need ? [...cardMenu(need), h("hr", { class: "decide-menu-rule" })] : []),
-      // On Answered itself (⋯ shows there only for 3 designs) the row would lead where he already is.
-      painted === "answered"
-        ? null
-        : h(
-            "button",
-            { class: "btn decide-menu-row decide-seg", attrs: { type: "button", "data-seg": "answered", "data-use": "decide.seg.answered" }, on: { click: () => pick("answered") } },
-            svg(ICONS.list, "menu-icon"),
-            h("span", { class: "menu-word" }, answered === null ? "Answered" : answeredTab(answered)),
-          ),
-      // Cards' own "3 designs" (three-designs.ts): this sheet covers the menu, whose foot row would name Main.
-      designsOn()
-        ? h(
-            "button",
-            { class: "btn decide-menu-row decide-screen", attrs: { type: "button", "data-use": "menu.row.designs" }, on: { click: () => void askDesigns({ screen: "cards" }) } },
-            svg(ICONS.photo, "menu-icon"),
-            h("span", { class: "menu-word" }, "3 designs of this screen"),
-          )
-        : null,
+      h(
+        "button",
+        { class: "btn decide-menu-row decide-seg", attrs: { type: "button", "data-seg": "answered", "data-use": "decide.seg.answered" }, on: { click: () => pick("answered") } },
+        svg(ICONS.list, "menu-icon"),
+        h("span", { class: "menu-word" }, answered === null ? "Answered" : answeredTab(answered)),
+      ),
     );
     // A row's own tap runs once the menu has gone, so what it opens (the reject sheet, a chat) is not under it.
     // The card's rows are for the card it opened on: if that card moved on or changed meanwhile, a tap only closes it.
@@ -224,7 +211,7 @@ function decideView(first: readonly string[], look: { answered?: boolean; untilR
         const row = event.target instanceof Element ? event.target.closest(".decide-menu-row") : null;
         if (!row) return;
         const now = painted && painted === at && shownNeed?.id === at ? shownNeed : null;
-        if (need && !row.classList.contains("decide-seg") && !row.classList.contains("decide-screen") && (now?.id !== need.id || now.rev !== need.rev)) {
+        if (need && !row.classList.contains("decide-seg") && (now?.id !== need.id || now.rev !== need.rev)) {
           event.preventDefault();
           event.stopPropagation();
         }
@@ -232,7 +219,7 @@ function decideView(first: readonly string[], look: { answered?: boolean; untilR
       },
       true,
     );
-    openSheet(need?.title ?? (painted === "answered" ? "Answered" : NEEDS_YOU), { mount: (el) => el.replaceChildren(list), unmount: () => {} }, "Cancel", undefined, { className: "decide-menu", use: "decide.menu" });
+    openSheet(need?.title ?? NEEDS_YOU, { mount: (el) => el.replaceChildren(list), unmount: () => {} }, "Cancel", undefined, { className: "decide-menu", use: "decide.menu" });
   }
   // In the pane the card wears the open card's wide look (desktop.css .desk-detail).
   const slot = h("div", { class: inPane ? "decide-card deck desk-detail" : "decide-card" });
@@ -513,10 +500,10 @@ function decideView(first: readonly string[], look: { answered?: boolean; untilR
     count.hidden = steps.hidden = true;
     bars.replaceChildren();
     skip.hidden = true;
-    // On the phone's Answered, Open N is the way back and ⋯ holds only 3 designs of this screen, while that is on; before
-    // the board has loaded there is no Answered N to give.
+    // On the phone's Answered, Open N is the way back and ⋯ has nothing more to hold; before the board has loaded there
+    // is no Answered N to give.
     segs.open.hidden = !inPane && key !== "answered";
-    more.hidden = (key === "answered" && !designsOn()) || key.startsWith("read-");
+    more.hidden = key === "answered" || key.startsWith("read-");
     if (painted === key && slot.firstElementChild?.outerHTML === list.outerHTML) return;
     if (painted !== key) slot.scrollTop = 0;
     const refocus = keepFocus(slot);

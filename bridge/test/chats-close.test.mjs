@@ -202,7 +202,7 @@ test("a command that ignores SIGTERM is still killed at the deadline", () => {
 });
 
 /** A pass on fakes: one finished chat in the app, with the mode, heartbeat and lock given. */
-function harness({ mode, beat = null, lock = null, knobs = null }) {
+function harness({ mode, beat = null, lock = null, knobs = null, at = "/w", ps = () => "", lsof = () => "", closeFails = false, runner = () => [] }) {
   const base = scratch();
   fs.mkdirSync(base, { recursive: true });
   const heartbeatFile = path.join(base, "closer.json");
@@ -214,20 +214,24 @@ function harness({ mode, beat = null, lock = null, knobs = null }) {
   if (lock === "leftover") fs.writeFileSync(lockFile, "4194311\n");
   const calls = [];
   const lines = [];
+  const signals = [];
+  const termed = new Set();
   const files = new Map([["/mode", `${mode}\n`]]);
   const io = {
     now: () => NOW,
     run: (cmd, args) => {
       calls.push([cmd, ...args].join(" "));
       const a = args.join(" ");
-      if (cmd === "app" && a.startsWith("terminal list")) return JSON.stringify({ result: { terminals: [{ handle: "t1", worktreePath: "/w/done", title: "✳ idle" }, { handle: "t2", worktreePath: "/w/busy", title: "⠋ work" }], truncated: false } });
-      if (cmd === "app" && a.startsWith("worktree ps")) return JSON.stringify({ result: { worktrees: [{ path: "/w/done", agents: [{ state: "done", updatedAt: NOW - 2 * HOUR }] }, { path: "/w/busy", agents: [{ state: "working", updatedAt: NOW }] }] } });
+      if (cmd === "app" && a.startsWith("terminal list")) return JSON.stringify({ result: { terminals: [{ handle: "t1", worktreePath: `${at}/done`, title: "✳ idle" }, { handle: "t2", worktreePath: `${at}/busy`, title: "⠋ work" }], truncated: false } });
+      if (cmd === "app" && a.startsWith("worktree ps")) return JSON.stringify({ result: { worktrees: [{ path: `${at}/done`, agents: [{ state: "done", updatedAt: NOW - 2 * HOUR }] }, { path: `${at}/busy`, agents: [{ state: "working", updatedAt: NOW }] }] } });
+      if (cmd === "app" && a.startsWith("terminal close") && closeFails) throw Object.assign(new Error("no such terminal"), { stderr: "no such terminal" });
       if (a.includes(" board --out ")) {
         files.set(args[args.length - 1], JSON.stringify({ board: { needs: [], chats: [] } }));
         return "";
       }
       if (a.includes(" ask list ")) return "[]";
-      if (cmd === "ps" || cmd === "lsof") return "";
+      if (cmd === "ps") return ps(a);
+      if (cmd === "lsof") return lsof();
       if (cmd === "git") return { "remote get-url origin": "https://github.com/o/r.git", "rev-parse HEAD": "abc", "rev-parse --abbrev-ref HEAD": "feat" }[args.slice(2).join(" ")] ?? "";
       if (cmd === "gh") return "[]";
       return "{}";
@@ -242,14 +246,112 @@ function harness({ mode, beat = null, lock = null, knobs = null }) {
     append: (_p, s) => lines.push(s.trim()),
     lastTurnAt: () => null,
     mentionsDevice: () => false,
-    runner: () => [],
+    // Each process ends on its SIGTERM.
+    kill: (pid, signal) => {
+      if (signal === 0 && termed.has(pid)) throw Object.assign(new Error("ESRCH"), { code: "ESRCH" });
+      if (signal !== 0) signals.push([pid, signal]);
+      if (signal === "SIGTERM") termed.add(pid);
+      return true;
+    },
+    pause: () => {},
+    runner,
     holds: () => [],
     ownerLogins: async () => [],
   };
   const cfg = { protected: [], protectedFolder: null, app: "app", keepListFile: null, modeFile: "/mode", logFile: "/log" };
   const pass = (from, rowClose = true) => closePass({ from, rowClose, io, cfg, home: base, tmp: base, heartbeatFile, lockFile, knobsFile });
-  return { base, pass, calls, lines, closes:() => calls.filter((c) => c.startsWith("app terminal close")) };
+  return { base, pass, calls, lines, signals, closes:() => calls.filter((c) => c.startsWith("app terminal close")) };
 }
+
+/**
+ * A machine for the left-over sweep under `at`: this process under an orphaned ancestor, an orphaned dev server (201) in
+ * the chat's folder with a child in it (202) and one outside it (207), and beside them processes the sweep must leave:
+ * orphans in a sibling folder, another open chat's folder, a nested folder (205) and the temp folder (212), a shell with a
+ * terminal (209), one with a live parent (210) and the tmux server (211), all in the folder. The sweep's own read also
+ * sees shared daemons, sign-ins, editors and ssh's connection master started since the pass began (213-222), each spared with what runs under it.
+ */
+function leftovers(at) {
+  const spare = [
+    [213, 1, "??", "adb -L tcp:5037 fork-server server --reply-fd 4"], [214, 213, "??", "node adb-child"], [215, 1, "??", "qemu-system-aarch64 -avd Pixel"],
+    [216, 1, "??", "SCREEN -dmS dev"], [217, 1, "??", "/Applications/Cursor.app/Contents/MacOS/Cursor Helper"], [218, 201, "??", "chrome --headless"], [219, 218, "??", "node renderer"],
+    [220, 1, "??", "/opt/homebrew/bin/nvim --headless --listen /tmp/o.sock"], [221, 1, "??", "ssh: /h/.ssh/cm-github.com [mux]"],
+    [222, 1, "??", "/Applications/Windsurf.app/Contents/MacOS/Windsurf"],
+  ];
+  const procs = [
+    [process.ppid, 1, "??", "zsh"], [process.pid, process.ppid, "??", "node chats-close.mjs"], [201, 1, "??", "node vite"], [202, 201, "??", "pnpm   dev"],
+    [207, 201, "??", "esbuild --service"], [203, 1, "??", "node other"], [204, 1, "??", "claude"], [205, 1, "??", "tsx watch"], [206, 1, "??", "sleep 1"],
+    [209, 1, "ttys003", "-zsh"], [210, 4321, "??", "node tool"], [211, 1, "??", "/opt/homebrew/bin/tmux -L rivet-chat new-session -d"], [212, 1, "??", "sleep 300"],
+  ];
+  const cwds = [
+    [process.ppid, `${at}/done`], [process.pid, `${at}/done`], [201, `${at}/done`], [202, `${at}/done/client`], [207, "/tmp/elsewhere"], [203, `${at}/done-2`],
+    [204, `${at}/busy`], [205, `${at}/done/nested/x`], [209, `${at}/done`], [210, `${at}/done`], [211, `${at}/done`], [212, os.tmpdir()], [1, `${at}/done`],
+    ...spare.map(([pid]) => [pid, `${at}/done`]),
+  ];
+  return {
+    ps: (/** @type {string} */ a) => (a.includes("tty=") ? [...procs, ...spare].map(([pid, ppid, tty, cmd]) => `${pid} ${ppid} ${tty} ${cmd}`) : procs.map(([pid, ppid, , cmd]) => `${pid} ${ppid} ${cmd}`)).join("\n"),
+    lsof: () => cwds.map(([pid, cwd]) => `p${pid}\nfcwd\nn${cwd}`).join("\n"),
+  };
+}
+
+test("a closed chat's orphaned left-overs in its folder end by pid after its terminals close; a sibling folder, the temp folder, a nested open chat, a terminal, a live parent, tmux, this process and its ancestors are left", async () => {
+  const at = "/w/R/foo";
+  const m = leftovers(at);
+  const h = harness({ mode: "close", at, ...m, runner: () => [{ worktree: `${at}/done/nested` }] });
+  assert.deepEqual((await h.pass("cron")).closed, ["done"]);
+  assert.deepEqual(h.signals, [[201, "SIGTERM"], [202, "SIGTERM"]]);
+  // ps and lsof read again after the close, not only at the pass's start.
+  const close = h.calls.findIndex((c) => c.startsWith("app terminal close"));
+  assert.ok(h.calls.slice(close).some((c) => c.startsWith("lsof ")) && h.calls.slice(close).some((c) => c.startsWith("ps ")));
+  assert.ok(h.lines.some((l) => / close done left-overs ended 201 node vite, 202 pnpm dev$/.test(l)), h.lines.join("\n"));
+});
+
+test("a runner chat at the same folder leaves every left-over though the runner's switch is off; runner chats that cannot be read end none", async () => {
+  const at = "/w/R/foo";
+  // The switch off: the plain read is empty, the sweep's read (switch ignored) sees the live chat.
+  const off = harness({ mode: "close", at, ...leftovers(at), runner: (o) => (o?.ignoreSwitch ? [{ worktree: `${at}/done` }] : []) });
+  assert.deepEqual((await off.pass("cron")).closed, ["done"]);
+  assert.deepEqual(off.signals, []);
+  assert.ok(off.lines.some((l) => / close done left-overs not ended: another open chat shares the folder$/.test(l)), off.lines.join("\n"));
+  const unread = harness({ mode: "close", at, ...leftovers(at), runner: (o) => (o?.ignoreSwitch ? (() => { throw new Error("runner down"); })() : []) });
+  assert.deepEqual((await unread.pass("cron")).closed, ["done"]);
+  assert.deepEqual(unread.signals, []);
+  assert.ok(unread.lines.some((l) => / close done left-overs not ended: the runner chats could not be read$/.test(l)), unread.lines.join("\n"));
+});
+
+test("another open chat at the same folder leaves every left-over; one enclosing the folder spares none", async () => {
+  const at = "/w/R/foo";
+  const shared = harness({ mode: "close", at, ...leftovers(at), runner: () => [{ worktree: `${at}/done` }] });
+  assert.deepEqual((await shared.pass("cron")).closed, ["done"]);
+  assert.deepEqual(shared.signals, []);
+  assert.ok(shared.lines.some((l) => / close done left-overs not ended: another open chat shares the folder$/.test(l)), shared.lines.join("\n"));
+  const enclosing = harness({ mode: "close", at, ...leftovers(at), runner: () => [{ worktree: at }] });
+  assert.deepEqual((await enclosing.pass("cron")).closed, ["done"]);
+  assert.deepEqual(enclosing.signals, [[201, "SIGTERM"], [202, "SIGTERM"], [205, "SIGTERM"]]);
+});
+
+test("no left-over is touched when the chat is only listed, kept, or its close failed, or the open chats or ps/lsof cannot be read", async () => {
+  const at = "/w/R/foo";
+  const listed = harness({ mode: "close", at, ...leftovers(at) });
+  assert.equal((await listed.pass("bridge", false)).stance, "list");
+  const failed = harness({ mode: "close", at, ...leftovers(at), closeFails: true });
+  await failed.pass("cron");
+  assert.ok(failed.lines.some((l) => / close done close-failed no such terminal$/.test(l)));
+  const partial = harness({ mode: "close", at, ...leftovers(at), runner: () => { throw new Error("runner down"); } });
+  await partial.pass("cron");
+  assert.ok(partial.lines.some((l) => / close done left-overs not ended: the open chats were not all read$/.test(l)));
+  let reads = 0;
+  const m = leftovers(at);
+  const unread = harness({ mode: "close", at, ps: m.ps, lsof: () => (++reads > 1 ? (() => { throw new Error("lsof died"); })() : m.lsof()) });
+  await unread.pass("cron");
+  assert.ok(unread.lines.some((l) => / close done left-overs not ended: ps\/lsof failed$/.test(l)));
+  const noPs = harness({ mode: "close", at, lsof: m.lsof, ps: (a) => (a.includes("tty=") ? (() => { throw new Error("ps died"); })() : m.ps(a)) });
+  await noPs.pass("cron");
+  assert.ok(noPs.lines.some((l) => / close done left-overs not ended: ps\/lsof failed$/.test(l)));
+  const shallow = harness({ mode: "close", at: "/w", ...leftovers("/w") });
+  assert.deepEqual((await shallow.pass("cron")).closed, ["done"]);
+  for (const h of [listed, failed, partial, unread, noPs, shallow]) assert.deepEqual(h.signals, []);
+  for (const h of [listed, failed]) assert.equal(h.calls.filter((c) => c.startsWith("lsof ")).length, 1);
+});
 
 test("cron: a fresh heartbeat stands aside and runs nothing; a 16-minute-old one closes", async () => {
   const fresh = harness({ mode: "bridge", beat: NOW - 60_000 });
@@ -388,6 +490,9 @@ test("the runner's open chats count as the backlog puller counts them, not only 
   const open = readRunner(() => JSON.stringify(rows), { on, cli: "/x" }).map((r) => r.worktree);
   assert.deepEqual(open, ["/w/alive", "/w/resumes", "/w/socket", "/w/foreign", "/w/starting", "/w/kept"]);
   assert.equal(count({ terminals: [], runner: readRunner(() => JSON.stringify([rows[1]]), { on, cli: "/x" }) }).chats, 1, "gone with a restart due");
+  fs.rmSync(on);
+  assert.deepEqual(readRunner(() => JSON.stringify(rows), { on, cli: "/x" }), [], "switch off");
+  assert.deepEqual(readRunner(() => JSON.stringify(rows), { on, cli: "/x", ignoreSwitch: true }).map((r) => r.worktree), open, "switch off, ignored");
 });
 
 test("the command line: cron, or the bridge with its switch and absolute command paths", () => {

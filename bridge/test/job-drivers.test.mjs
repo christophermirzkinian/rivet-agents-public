@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { agentName, CHAT_PROVIDER, codexArgs, codexChatArgs, codexPrompt, codexSandboxDown, codexUnreached, codexVerdict, codexWatch, connected, DRIVERS, FIRST_PLAN_UNREAD, firstPlan, limitAsk, limitOf, limitWords, mapCodexEvents, outsideNeed, planOfProvider, plansOn, screenLimit } from "../lib/job-drivers.mjs";
+import { agentName, CHAT_PROVIDER, codexArgs, codexChatArgs, codexPrompt, codexSandboxDown, codexUnreached, codexVerdict, codexWatch, connected, DRIVERS, FIRST_PLAN_UNREAD, firstPlan, limitAsk, limitOf, limitWords, mapCodexEvents, notConnectedLine, outsideNeed, planOfProvider, plansOn, screenLimit } from "../lib/job-drivers.mjs";
 import { chatArgs } from "../lib/jobs.mjs";
 import { main, outputCollector, spawnRun } from "../../scripts/job-run.mjs";
 
@@ -452,7 +452,10 @@ async function chat({ env = {}, plan, results = {}, spec = SPEC, missing = [], a
   try {
     const code = await main(["--chat", ID, RUN, JSON.stringify(spec)], d);
     const paths = { rivet: path.resolve(import.meta.dirname, "..", "..", "scripts", "job-run.mjs"), logDir: path.join(home, ".rivet-agents", "jobs", "logs") };
-    return { code, ran: ran.filter((call) => call.bin !== "/usr/bin/git"), report: puts.at(-1), paths, repo: path.join(home, ".rivet-agents", "jobs", "repo") };
+    const calls = ran.filter((call) => call.bin !== "/usr/bin/git");
+    // `checked` is the status read before the chat, when there was one; `ran` is everything after it.
+    const checked = ["auth", "login"].includes(calls[0]?.args[0]) ? calls.shift() : null;
+    return { code, ran: calls, checked, report: puts.at(-1), paths, home, repo: path.join(home, ".rivet-agents", "jobs", "repo") };
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
@@ -582,4 +585,79 @@ test("job-run: a limit card's answer runs that one task on the plan it names; th
   assert.deepEqual(next.ran.map((call) => call.bin), ["/opt/claude"], "a run without the answer takes the first plan");
   const odd = await chat({ plan: "claude", spec: { ...SPEC, plan: "gemini" }, results: signedIn });
   assert.deepEqual(odd.ran.map((call) => call.bin), ["/opt/claude"], "a plan it does not know is the first plan");
+});
+
+test("job-run: a hosted agent's plan that is signed out starts no chat and says so; one it cannot tell about runs as before", async () => {
+  assert.equal(notConnectedLine("claude", true), "Claude isn't connected, so the job did not run. Connect Claude or ChatGPT on the Plans page");
+  assert.equal(notConnectedLine("chatgpt", false), "ChatGPT isn't connected. Connect Claude or ChatGPT on the Plans page");
+  assert.equal(notConnectedLine("claude", true, true), "Claude isn't connected, so the job did not run. Connect Claude, or make ChatGPT first, on the Plans page");
+  assert.equal(notConnectedLine("chatgpt", false, true, null), "ChatGPT isn't connected. Connect ChatGPT, or make Claude first, on the Plans page", "a first plan it cannot read is not said to go first");
+  assert.equal(notConnectedLine("chatgpt", false, true, "claude"), "ChatGPT isn't connected. Connect ChatGPT on the Plans page. Claude goes first and is connected");
+  assert.equal(notConnectedLine("chatgpt", true, false, "claude"), "ChatGPT isn't connected, so the job did not run. Connect Claude or ChatGPT on the Plans page");
+  const lookSpec = { kind: "check", name: "Tests", check: { script: "test" }, line: "Red: 2 tests failed." };
+  const signedOut = { "claude status": { code: 1, lines: ['{"loggedIn": false}'] }, "codex status": { code: 1, lines: ["Not logged in"] } };
+  const claudeOn = { code: 0, lines: ['{"loggedIn": true}'] };
+  const codexOn = { code: 0, lines: ["Logged in using ChatGPT"] };
+  /** Everything a run started after its plan's status: [bin, args, raw, read from the home folder]. */
+  const after = (r) => r.ran.map((call) => [call.bin, call.args, call.raw, call.cwd === r.home]);
+  const CLAUDE_STATUS = ["/opt/claude", ["auth", "status", "--json"], true, true];
+  const CODEX_STATUS = ["/opt/codex", ["login", "status"], false, true];
+
+  const claude = await chat({ plan: "claude", results: signedOut });
+  assert.deepEqual([claude.checked.bin, claude.checked.args, claude.checked.raw, claude.checked.cwd], ["/opt/claude", ["auth", "status", "--json"], true, claude.home], "read from the home folder, never the jobs clone");
+  assert.deepEqual(after(claude), [CODEX_STATUS], "the other plan's status for the words, and no chat");
+  assert.equal(claude.code, 1);
+  assert.deepEqual(claude.report.body, { run: RUN, state: "red", line: "Claude isn't connected, so the job did not run. Connect Claude or ChatGPT on the Plans page." });
+  const codex = await chat({ plan: "chatgpt", results: signedOut });
+  assert.deepEqual([codex.checked.bin, codex.checked.args, codex.checked.raw, codex.checked.cwd], ["/opt/codex", ["login", "status"], false, codex.home]);
+  assert.deepEqual(after(codex), [CLAUDE_STATUS]);
+  assert.deepEqual(codex.report.body, { run: RUN, state: "red", line: "ChatGPT isn't connected, so the job did not run. Connect Claude or ChatGPT on the Plans page." });
+  const look = await chat({ plan: "claude", spec: lookSpec, results: signedOut });
+  assert.deepEqual(after(look), [CODEX_STATUS]);
+  assert.deepEqual(look.report.body, { run: RUN, state: "red", line: "Red: 2 tests failed. The look into it: Claude isn't connected. Connect Claude or ChatGPT on the Plans page." }, "the check's red stands, with no limit card");
+
+  // With the other plan connected the words say so, and the job still never runs on it.
+  const other = await chat({ plan: "claude", results: { ...signedOut, "codex status": codexOn } });
+  assert.deepEqual(after(other), [CODEX_STATUS], "ChatGPT's status is read, and no chat starts on it");
+  assert.deepEqual(other.report.body, { run: RUN, state: "red", line: "Claude isn't connected, so the job did not run. Connect Claude, or make ChatGPT first, on the Plans page." });
+  const otherLook = await chat({ plan: "chatgpt", spec: lookSpec, results: { ...signedOut, "claude status": claudeOn } });
+  assert.deepEqual(after(otherLook), [CLAUDE_STATUS]);
+  assert.deepEqual(otherLook.report.body, { run: RUN, state: "red", line: "Red: 2 tests failed. The look into it: ChatGPT isn't connected. Connect ChatGPT, or make Claude first, on the Plans page." });
+  const answered = await chat({ plan: "claude", spec: { ...SPEC, plan: "chatgpt" }, results: { ...signedOut, "claude status": claudeOn } });
+  assert.equal(answered.checked.bin, "/opt/codex", "the plan a limit card's answer names is the one checked");
+  assert.deepEqual(after(answered), [CLAUDE_STATUS], "and Claude is not used in its place");
+  assert.deepEqual(answered.report.body, { run: RUN, state: "red", line: "ChatGPT isn't connected, so the job did not run. Connect ChatGPT on the Plans page. Claude goes first and is connected." });
+  const otherUnknown = await chat({ plan: "claude", results: { ...signedOut, "codex status": { code: null, lines: [] } } });
+  assert.equal(otherUnknown.report.body.line, "Claude isn't connected, so the job did not run. Connect Claude or ChatGPT on the Plans page.", "an other plan it cannot tell about is not said to be connected");
+  const otherMissing = await chat({ plan: "claude", results: signedOut, missing: ["codex"] });
+  assert.deepEqual(otherMissing.ran, []);
+  assert.equal(otherMissing.report.body.line, "Claude isn't connected, so the job did not run. Connect Claude or ChatGPT on the Plans page.");
+
+  for (const [plan, name, unknown] of [
+    ["claude", "claude", { code: 1, timedOut: true, lines: [] }],
+    ["claude", "claude", { code: null, lines: [] }],
+    ["claude", "claude", { code: 1, lines: ["not json"] }],
+    ["chatgpt", "codex", { code: 1, lines: ["Error: something else"] }],
+    ["chatgpt", "codex", { code: null, lines: [] }],
+  ]) {
+    const r = await chat({ plan, results: { ...signedOut, [`${name} status`]: unknown } });
+    assert.deepEqual([r.checked?.bin, r.checked?.cwd], [`/opt/${name}`, r.home], `${plan} ${JSON.stringify(unknown)}: the status was read, and gave no answer`);
+    assert.deepEqual(r.ran.map((call) => call.bin), [`/opt/${name}`], `${plan} ${JSON.stringify(unknown)}: can't tell is never signed out`);
+    assert.doesNotMatch(r.report.body.line, /isn't connected/);
+  }
+  const signedIn = await chat({ plan: "claude", results: { ...signedOut, "claude status": claudeOn } });
+  assert.equal(signedIn.checked?.bin, "/opt/claude");
+  assert.deepEqual(signedIn.ran.map((call) => call.bin), ["/opt/claude"]);
+  assert.deepEqual(signedIn.ran[0].args, chatArgs(ID, RUN, SPEC, signedIn.paths));
+  assert.equal(signedIn.ran[0].env, signedIn.checked.env, "the chat runs in the very env its status was read in");
+  const codexIn = await chat({ plan: "chatgpt", results: { ...signedOut, "codex status": codexOn } });
+  assert.equal(codexIn.checked?.bin, "/opt/codex");
+  assert.deepEqual(codexIn.ran.map((call) => call.bin), ["/opt/codex"]);
+  assert.equal(codexIn.ran[0].env, codexIn.checked.env);
+
+  const own = await chat({ results: signedOut });
+  assert.equal(own.checked, null, "with no agent file no status is read");
+  assert.deepEqual(own.ran.map((call) => call.bin), ["/opt/claude"]);
+  assert.deepEqual(own.ran[0].args, chatArgs(ID, RUN, SPEC, own.paths), "byte for byte the argv it ran before");
+  assert.deepEqual(own.report.body, { run: RUN, state: "red", line: "The chat never reported." });
 });

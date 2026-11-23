@@ -148,6 +148,42 @@ describe("a chat search hit", () => {
     expect(flashed).toEqual([]);
   });
 
+  it("in a gap a refresh left above the newest page loads the pages before that page until it is in", async () => {
+    chat.mount(root);
+    await settle();
+    // More lines than a page come while the stream is down, so the refresh's newest page shares none with what shows.
+    server.messages.push(...Array.from({ length: 60 }, (_, i) => message(`c${String(i).padStart(3, "0")}`, "a", 600 + i)));
+    await chat.refresh();
+    await settle();
+    expect(shown("c059")).not.toBeNull();
+    expect(shown("c005")).toBeNull();
+    openTarget({ type: "message", id: "c005" });
+    await settle();
+    expect(shown("c005")!.classList.contains("lit")).toBe(true);
+    expect(flashed).toEqual([]);
+  });
+
+  it("in a gap a refresh left while an earlier page was still loading loads the pages before the refresh's page", async () => {
+    const held: (() => void)[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes("before=")) await new Promise<void>((resolve) => held.push(resolve));
+      return server.fetch(input, init);
+    }));
+    chat.mount(root);
+    await settle();
+    openTarget({ type: "message", id: "a010" });
+    await settle();
+    expect(held).toHaveLength(1);
+    server.messages.push(...Array.from({ length: 60 }, (_, i) => message(`c${String(i).padStart(3, "0")}`, "a", 600 + i)));
+    await chat.refresh();
+    openTarget({ type: "message", id: "c005" });
+    vi.stubGlobal("fetch", vi.fn(server.fetch));
+    for (const release of held.splice(0)) release();
+    await settle();
+    expect(shown("c005")!.classList.contains("lit")).toBe(true);
+    expect(flashed).toEqual([]);
+  });
+
   it("no Earlier messages button; scrolling to the top loads the ones before, and nothing loads once there are none", async () => {
     chat.mount(root);
     await settle();

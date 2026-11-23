@@ -334,6 +334,24 @@ describe("the chat opens on its newest message when the thread grows after it sc
     expect(gap()).toBe(0);
   });
 
+  it("back at the foot by his own hand while the jumped-to line is still lit, a reply landing is followed there", async () => {
+    const server = fakeServer(MESSAGES.map((one) => ({ ...one })));
+    vi.stubGlobal("fetch", vi.fn(server.fetch));
+    await open();
+    openTarget({ type: "message", id: "m1" });
+    expect(line("m1").classList.contains("lit")).toBe(true);
+    scroller().dispatchEvent(new Event("touchstart"));
+    scrollTo(scroller(), 3000);
+    scrollTo(scroller(), tall - SHOWN);
+    server.messages.push(message("m3", "m1", 2, "A long reply"));
+    await chat.refresh();
+    await settle();
+    expect(line("m1").classList.contains("lit")).toBe(true);
+    tall += 120;
+    FakeResizeObserver.grew(thread());
+    expect(gap()).toBe(0);
+  });
+
   it("a jump whose scroll ends short of its line (lines drawn on the way take their own height) brings it to the middle again, once it ends", async () => {
     perMessage = 100;
     const many = Array.from({ length: 20 }, (_, i) => message(`b${String(i).padStart(2, "0")}`, "b", i));

@@ -274,6 +274,32 @@ describe("showLine", () => {
     expect(scroller.scrollTop).toBe(1600);
   });
 
+  it("an older tap's earlier page landing during a newer tap's scroll from the foot does not stick Chat to its bottom", async () => {
+    const news = Array.from({ length: 130 }, (_, i) => rivet(`n${i}`, "g1", 50 + i));
+    server.messages.splice(0, server.messages.length, owner("o1", "o1", 1), rivet("o2", "o1", 2, { text: "Old reply" }), ...news);
+    await onChat();
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes("before=")) await held;
+      return server.fetch(input, init);
+    }));
+    chat.showLine("o1", "o2");
+    await settle();
+    chat.showLine("g1", "n120");
+    await settle();
+    expect(litIds()).toEqual(["n120"]);
+    const scroller = root.querySelector<HTMLElement>(".chat-scroll")!;
+    Object.defineProperty(scroller, "clientHeight", { configurable: true, value: 400 });
+    Object.defineProperty(scroller, "scrollHeight", { configurable: true, value: 2000 });
+    // Still at the foot, where the newer tap's smooth scroll up to its line began.
+    scroller.scrollTop = 1600;
+    release();
+    await settle();
+    expect(litIds()).toEqual(["n120"]);
+    expect(scroller.scrollTop).toBe(1600);
+  });
+
   it("a tap on a line kept from the last visit keeps it in view once the newest page lands", async () => {
     await onChat();
     chat.unmount();

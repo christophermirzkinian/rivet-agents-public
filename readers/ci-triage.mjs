@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { makeGh } from "../bridge/lib/gh-login.mjs";
 import { formatLog, makeExec, resolveBin } from "../bridge/lib/config.mjs";
 import { NO_RUN } from "../bridge/lib/scheduled-run.mjs";
 import { opsStatusKey } from "../bridge/lib/ops-status.mjs";
@@ -463,8 +464,11 @@ async function main() {
 async function pass(repos, dryRun, log) {
   const exec = makeExec();
   const ghBin = resolveBin("gh");
+  const ghExec = makeGh(exec, ghBin, { log });
+  // With no login this run reads, asks and writes nothing, and ends as a skip.
+  await ghExec.ready();
   /** @type {(args: string[], input?: string) => Promise<string>} */
-  const gh = async (args, input) => (await exec(ghBin, args, { timeout: 60_000, maxBuffer: 64 * 1024 * 1024, ...(input === undefined ? {} : { input }) })).stdout;
+  const gh = async (args, input) => (await ghExec(args, { timeout: 60_000, maxBuffer: 64 * 1024 * 1024, ...(input === undefined ? {} : { input }) })).stdout;
   const rivet = makeRivetCli(exec);
   const run = makeReaderRun(resolveBin("claude"), { effort: "medium", system: SYSTEM_PROMPT });
   const spend = new Spend(JOB, CEILING_USD, { log });

@@ -6,7 +6,6 @@ import type { BacklogIssueResponse, BacklogResponse, BacklogStart, IssueWriteSta
 import { CHAT_SEND_DELAY_PATH, type BehaviourRow, type BehavioursResponse, type BehaviourValue } from "../../src/shared/behaviours.js";
 import type { ChatsLineResponse } from "../../src/shared/chats.js";
 import type { ConnectorsResponse, SigninStart, SigninStatus } from "../../src/shared/connectors.js";
-import type { DesignsRequest } from "../../src/shared/designs.js";
 import type { BoardResponse, Decision, FileRef, FileType, PushConfigResponse, Reply, ServedNeed, StatusResponse } from "../../src/shared/board.js";
 import type { OpsDismissal, OpsDismissalsResponse } from "../../src/shared/ops-dismiss.js";
 import type { OpsStatusKind, OpsStatusResponse } from "../../src/shared/ops-status.js";
@@ -83,9 +82,9 @@ const lateError = (read: boolean) =>
  * Sends a request and reads its JSON answer, both inside `ms` (see GET_TIMEOUT_MS, WRITE_TIMEOUT_MS). One that answers
  * after its session ended rejects StaleSession, whatever it answered, so a late 401 never signs a newer session out.
  */
-async function request<T>(path: string, init: RequestInit, ms: number, signal?: AbortSignal, seen?: (response: Response) => void): Promise<T> {
+async function request<T>(path: string, init: RequestInit, ms: number, signal?: AbortSignal, seen?: (response: Response) => void, visit = false): Promise<T> {
   const current = sameSession();
-  const settled = await exchange<T>(path, init, ms, signal, seen).then(
+  const settled = await exchange<T>(path, init, ms, signal, seen, visit).then(
     (value) => ({ value }),
     (error: unknown) => ({ error }),
   );
@@ -98,11 +97,11 @@ async function request<T>(path: string, init: RequestInit, ms: number, signal?: 
 let dateSkew: number | null = null;
 export const serverClockSkew = (): number | null => dateSkew;
 
-async function exchange<T>(path: string, init: RequestInit, ms: number, signal?: AbortSignal, seen?: (response: Response) => void): Promise<T> {
+async function exchange<T>(path: string, init: RequestInit, ms: number, signal?: AbortSignal, seen?: (response: Response) => void, visit = false): Promise<T> {
   const clock = deadline(ms, signal);
   const askedAt = Date.now();
   const read = (init.method ?? "GET") === "GET";
-  const background = isBackground();
+  const background = !visit && isBackground();
   try {
     if (background && isAsleep()) throw new ApiError(0, "Can't reach the server. Check your connection.");
     let response: Response;
@@ -129,7 +128,8 @@ async function exchange<T>(path: string, init: RequestInit, ms: number, signal?:
   }
 }
 
-export function call<T>(method: string, path: string, body?: unknown, keepalive = false, signal?: AbortSignal): Promise<T> {
+/** `visit`: sent for a tap even if later (a card answer held for its Undo window), so never background. */
+export function call<T>(method: string, path: string, body?: unknown, keepalive = false, signal?: AbortSignal, visit = false): Promise<T> {
   return request<T>(
     path,
     {
@@ -143,6 +143,8 @@ export function call<T>(method: string, path: string, body?: unknown, keepalive 
     },
     method === "GET" ? GET_TIMEOUT_MS : WRITE_TIMEOUT_MS,
     signal,
+    undefined,
+    visit,
   );
 }
 
@@ -203,7 +205,7 @@ export const setMinimised = (key: string, rev: string | null) =>
 export const answerAgain = (id: string, rev: string) => call<{ version: number; item: ServedNeed }>("POST", `/api/board/needs/${encodeURIComponent(id)}/again`, { rev });
 
 /** Always `keepalive`: a send still in flight when the page closes outlives the page. Chat's Reply style goes with it. */
-export const sendReply = (input: ReplyInput) => call<Reply>("POST", "/api/replies", { ...input, ...replyStyleField() }, true);
+export const sendReply = (input: ReplyInput) => call<Reply>("POST", "/api/replies", { ...input, ...replyStyleField() }, true, undefined, true);
 
 /** Uploads an attached image as raw bytes; the answer names it by its sha256. */
 export const uploadImage = (image: Blob, signal?: AbortSignal): Promise<{ image: string; type: string; size: number }> =>
@@ -250,8 +252,6 @@ export const startBacklogIssue = (repo: string, issue: number, clientId: string)
 /** Close as not needed, with a comment; a second Close gets the first. */
 export const closeBacklogIssue = (repo: string, issue: number, clientId: string) =>
   call<{ close: IssueWriteState }>("POST", "/api/backlog/close", { repo, issue, clientId });
-/** "3 designs": one ask per card or screen and a line to Rivet. A retry with the same clientId is safe. */
-export const postDesigns = (body: DesignsRequest) => call<{ ask: string; already: boolean }>("POST", "/api/designs", body);
 export const getCardThreads = () => call<CardThreadsResponse>("GET", "/api/card-threads");
 export const getOps = () => call<OpsResponse>("GET", "/api/ops");
 export const getOpsStatuses = (signal: AbortSignal) => call<OpsStatusResponse>("GET", "/api/ops/status", undefined, false, signal);

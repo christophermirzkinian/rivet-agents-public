@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { GhLoginFault, GhLoginUnread } from "../lib/gh-login.mjs";
 import { ExecError } from "../lib/config.mjs";
 
 // when.mjs reads the zone as it loads: a fixed zone, for the day below.
@@ -63,6 +64,24 @@ test("skips turn red after the grace hour, and a good run ends the streak", asyn
   assert.ok(!fs.existsSync(s.streak));
   // The streak starts again from the next refusal.
   assert.equal(await scheduledRun("issue-recheck", async () => { throw refused(); }, later), 0);
+});
+
+test("a run that could not read gh's login is a skip the next run retries, red after the grace hour", async () => {
+  const s = setup();
+  assert.equal(await scheduledRun("ci-triage", async () => { throw new GhLoginUnread(); }, s.deps), 0);
+  assert.match(s.lines[0], /ci-triage-skipped reason=no_login gh login unreadable on this Mac$/);
+  assert.equal(s.resets(), 0);
+  const later = { ...s.deps, now: () => NOW + 61 * 60_000 };
+  assert.equal(await scheduledRun("ci-triage", async () => { throw new GhLoginUnread(); }, later), 1);
+  assert.match(s.lines[1], /ci-triage-failed error=gh_login_unreadable_on_this_Mac_for_61_min reason=no_login$/);
+});
+
+test("a gh that is broken, not slow, turns the run red at once", async () => {
+  const s = setup();
+  const broken = new GhLoginFault(new ExecError("/bin/gh", { code: 1 }, "unknown command \"token\" for \"gh auth\"\n", ""));
+  assert.equal(await scheduledRun("ci-triage", async () => { throw broken; }, s.deps), 1);
+  assert.match(s.lines[0], /ci-triage-failed error=gh_auth_token_failed:_gh_exit_1$/);
+  assert.ok(!fs.existsSync(s.streak));
 });
 
 test("any other failure exits 1 as before, and a run's own exit code is kept", async () => {

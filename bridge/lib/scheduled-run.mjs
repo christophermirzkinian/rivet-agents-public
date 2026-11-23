@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { defaultRepo } from "../../src/shared/repos.ts";
 import { ExecError, formatLog, makeExec, resolveBin } from "./config.mjs";
+import { GhLoginUnread } from "./gh-login.mjs";
 import { endTransientStreak, transientStreak, whyOf } from "./github-classifier.mjs";
 import { isTransientExec } from "./transient-github.mjs";
 import { when } from "./when.mjs";
@@ -55,16 +56,19 @@ export async function scheduledRun(job, run, deps = {}) {
     code = await run();
     if (code === NO_RUN) return 0;
   } catch (err) {
-    if (!isTransientExec(err)) {
+    // A run that made no gh call because this Mac's keychain gave gh no login in time is a skip like GitHub's own: the
+    // next run reads again, and the same grace turns a login that stays unreadable red.
+    const unread = err instanceof GhLoginUnread;
+    if (!unread && !isTransientExec(err)) {
       fail(err);
       return 1;
     }
     // A child's output can hold anything, a credential included: only its status code is logged, never its text.
     // ExecError keeps only the first line of it.
-    const text = err instanceof ExecError ? err.stderrFirstLine : whyOf(err);
+    const text = unread ? "" : err instanceof ExecError ? err.stderrFirstLine : whyOf(err);
     const status = /\bHTTP (\d{3})\b/.exec(text)?.[1];
-    const why = status ? `HTTP ${status}` : "no answer";
-    let words = "GitHub unavailable";
+    const why = unread ? "no login" : status ? `HTTP ${status}` : "no answer";
+    let words = unread ? "gh login unreadable on this Mac" : "GitHub unavailable";
     if (/rate limit/i.test(text)) {
       const reset = await (deps.reset ?? (() => restReset()))().catch(() => null);
       words = reset ? `rate-limited, resets at ${resetWords(reset, (deps.now ?? Date.now)())}` : "rate-limited, reset time unknown";

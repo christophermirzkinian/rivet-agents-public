@@ -2,6 +2,7 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { makeGh } from "../bridge/lib/gh-login.mjs";
 import { formatLog, makeExec, resolveBin } from "../bridge/lib/config.mjs";
 import { NO_RUN } from "../bridge/lib/scheduled-run.mjs";
 import { shown } from "../bridge/lib/redact.mjs";
@@ -479,10 +480,13 @@ async function main() {
   try {
     const exec = makeExec();
     const ghBin = resolveBin("gh");
+    const ghExec = makeGh(exec, ghBin, { log });
+    // With no login this run reads, asks and writes nothing, and ends as a skip.
+    await ghExec.ready();
     const flyBin = resolveBin("flyctl");
     await errorsPass({
       // `gh api` takes no -R: its route names the repository.
-      gh: async (args, input) => (await exec(ghBin, args[0] === "api" ? args : ["-R", repo, ...args], { timeout: 120_000, maxBuffer: 64 * 1024 * 1024, ...(input === undefined ? {} : { input }) })).stdout,
+      gh: async (args, input) => (await ghExec(args[0] === "api" ? args : ["-R", repo, ...args], { timeout: 120_000, maxBuffer: 64 * 1024 * 1024, ...(input === undefined ? {} : { input }) })).stdout,
       fly: async (args) => (await exec(flyBin, args, { timeout: 45_000, maxBuffer: 16 * 1024 * 1024 })).stdout,
       apps,
       repo,

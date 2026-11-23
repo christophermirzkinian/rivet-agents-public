@@ -48,6 +48,8 @@ process.stdin.on("data", (b) => {
   draw();
 });
 `, { mode: 0o755 });
+// A stand-in launchctl that names no ssh agent: a chat's start asks it, and on a Mac the real one is never asked.
+fs.writeFileSync(path.join(bin, "launchctl"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
 
 const env = {
   PATH: `${bin}:${path.dirname(process.execPath)}:${tmuxBin ? `${path.dirname(tmuxBin)}:` : ""}/usr/bin:/bin`,

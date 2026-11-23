@@ -123,6 +123,11 @@ test("say --ack sets the status line on your message: a reply id and the words, 
   assert.deepEqual(parseArgs(["--reply-to", "m1", "--ack", "building it, ~9:45"]), { images: [], replyTo: "m1", ack: "building it, ~9:45" });
   assert.deepEqual(sayBody("", "m1", [], { ack: " building it, ~9:45 " }), { replyTo: "m1", ack: "building it, ~9:45" });
   assert.throws(() => parseArgs(["--ack", "building it"]), /--reply-to/);
+  // A bare --ack, last on the line, is an ack too: refused, it sent nothing and left his line with no status.
+  assert.deepEqual(parseArgs(["--reply-to", "m1", "--ack"]), { images: [], replyTo: "m1", ack: "on it" });
+  assert.throws(() => parseArgs(["--reply-to", "m1", "--text"]), /--text needs a value/);
+  // Only last on the line: before another flag it still names the flag it swallowed, and sends nothing.
+  assert.throws(() => parseArgs(["--ack", "--reply-to", "m1"]), /--ack got "--reply-to" as its value/);
   assert.throws(() => parseArgs(["--reply-to", "m1", "--ack", "x", "--text", "y"]), /nothing else/);
   assert.throws(() => parseArgs(["--reply-to", "m1", "--ack", "x", "--card"]), /nothing else/);
   assert.throws(() => parseArgs(["--reply-to", "m1", "--ack", " "]), /--ack is 1 to 120/);

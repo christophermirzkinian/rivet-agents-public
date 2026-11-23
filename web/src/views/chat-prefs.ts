@@ -6,7 +6,6 @@ import * as api from "../api.js";
 import { onSessionReset } from "../session.js";
 import { isStyle, savedChatReplyStyle, setChatReplyStyle } from "./chat-reply-style.js";
 import { isSize, savedChatTextSize, setChatTextSize } from "./chat-text-size.js";
-import { noteDesignsRow } from "./three-designs.js";
 import { flash } from "./toast.js";
 
 interface Pref {
@@ -23,7 +22,6 @@ function pref(id: string): Pref | null {
 
 /** The phone's copy follows a stored row. */
 export function cacheChatPref(row: BehaviourRow): void {
-  noteDesignsRow(row);
   const found = pref(row.id);
   if (found && row.updatedAt !== null) found.cache(row.value?.[found.key]);
 }
@@ -51,7 +49,6 @@ function carry(row: BehaviourRow, key: string, local: string): Promise<Behaviour
 export async function syncChatPrefs(rows: readonly BehaviourRow[]): Promise<BehaviourRow[]> {
   return Promise.all(
     rows.map(async (row) => {
-      noteDesignsRow(row);
       const found = pref(row.id);
       if (!found) return row;
       const local = found.saved();

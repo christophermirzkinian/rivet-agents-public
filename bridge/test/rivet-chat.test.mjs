@@ -195,6 +195,57 @@ test("a hosted agent's chat starts on its first plan and, at that plan's limit, 
   runner.close(plain, "plain");
 });
 
+test("a hosted agent's chat whose plan is signed out starts nothing and says so; one it cannot tell about starts as before", { skip }, async () => {
+  const home = path.join(root, "home4");
+  fs.mkdirSync(home);
+  const agentFile = path.join(root, "agent-out.json");
+  fs.writeFileSync(agentFile, JSON.stringify({ firstPlan: "claude" }));
+  const reads = path.join(root, "status-reads");
+  // A CLI that answers its status as `status` says, noting the folder it was asked in, and is otherwise the agent.
+  const cli = (name, status) => {
+    const file = path.join(root, `${name}.sh`);
+    fs.writeFileSync(file, `#!/bin/sh\nif [ "$1" = auth ] || [ "$1" = login ]; then pwd >> ${reads}; ${status}; fi\necho "agent up as $RIVET_CHAT_NAME: $*"\nwhile IFS= read -r line; do echo "got:$line"; done\n`, { mode: 0o755 });
+    return file;
+  };
+  const claudeOut = cli("claude-out", `echo '{"loggedIn": false}'; exit 1`);
+  const claudeOn = cli("claude-on", `echo '{"loggedIn": true}'; exit 0`);
+  const codexOut = cli("codex-out", "echo 'Not logged in' >&2; exit 1");
+  const codexOn = cli("codex-on", "echo 'Logged in using ChatGPT'; exit 0");
+  const hosted = (bins) => runner.context({ env: { ...ctx.env, HOME: home, RIVET_AGENT_FILE: agentFile }, home, socket: "rivet-chat-test", bins });
+  const nothingStarted = (c, name) => {
+    assert.equal(runner.readRegistry(c).chats[name], undefined, `${name} has no registry entry`);
+    assert.equal(runner.sessions(c).has(name), false, `${name} has no tmux session`);
+  };
+
+  const both = hosted({ claude: claudeOut, codex: codexOut });
+  await assert.rejects(main(["new", "out-1", "--cwd", workdir, "--prompt", "hello there"], { ctx: both }), { message: "rivet-chat: no chat started. Claude isn't connected. Connect Claude or ChatGPT on the Plans page." });
+  nothingStarted(both, "out-1");
+  assert.deepEqual([...new Set(fs.readFileSync(reads, "utf8").trim().split("\n"))], [fs.realpathSync(home)], "a status is read from the home folder, never the chat's own");
+
+  const other = hosted({ claude: claudeOut, codex: codexOn });
+  assert.throws(() => runner.create(other, { name: "out-2", cwd: workdir }), { message: "rivet-chat: no chat started. Claude isn't connected. Connect Claude, or make ChatGPT first, on the Plans page." });
+  nothingStarted(other, "out-2");
+  assert.deepEqual(runner.list(other), [], "and none on the other plan in its place");
+
+  const named = hosted({ claude: claudeOn, codex: codexOut });
+  assert.throws(() => runner.create(named, { name: "out-3", cwd: workdir, provider: "codex" }), { message: "rivet-chat: no chat started. ChatGPT isn't connected. Connect ChatGPT on the Plans page. Claude goes first and is connected." });
+  nothingStarted(named, "out-3");
+
+  for (const [name, status] of [["unknown-1", "echo 'not json'; exit 1"], ["unknown-2", "sleep 0; exit 3"], ["on-1", `echo '{"loggedIn": true}'; exit 0`]]) {
+    fs.rmSync(reads, { force: true });
+    const c = hosted({ claude: cli(`claude-${name}`, status), codex: codexOut });
+    assert.equal(runner.create(c, { name, cwd: workdir }).status, "running", `${name}: only a definite signed-out answer refuses`);
+    assert.equal(fs.readFileSync(reads, "utf8").trim(), fs.realpathSync(home), `${name}: its status was read once, and the other plan's not at all`);
+    runner.close(c, name);
+  }
+
+  fs.rmSync(reads, { force: true });
+  const plain = runner.context({ env: { ...ctx.env, HOME: home }, home, socket: "rivet-chat-test", bins: { claude: claudeOut, codex: codexOut } });
+  assert.equal(runner.create(plain, { name: "plain-out", cwd: workdir }).provider, "claude");
+  assert.equal(fs.existsSync(reads), false, "with no agent file no status is read");
+  runner.close(plain, "plain-out");
+});
+
 test("projectLists: RIVET_PROJECTS_FILE's list, else one project per work clone, each its RIVET_REPOS repo", () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "rc-lists-"));
   for (const name of ["trip-planner", "recipe-box"]) fs.mkdirSync(path.join(home, ".rivet-agents", "work", name), { recursive: true });

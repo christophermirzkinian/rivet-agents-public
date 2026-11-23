@@ -55,7 +55,6 @@ import { ensureAsk } from "./asks.js";
 import { registerConversations } from "./conversations.js";
 import { writeOpsStatus } from "./ops-status.js";
 import { registerBacklog } from "./backlog.js";
-import { registerDesigns } from "./designs.js";
 import { registerJobs } from "./jobs.js";
 import { registerMedia } from "./media.js";
 import { registerTeamRoom } from "./team.js";
@@ -231,7 +230,6 @@ export function register(router: Router): void {
   registerTeamRoom(router, commands, broadcast);
   const toMonitor = (entry: AuditEntry) => void bridge.sendEvent(EVENT.chat, entry.id, bridgePayload(entry));
   registerBacklog(router, commands, { broadcast, toMonitor });
-  registerDesigns(router, commands, { broadcast, toMonitor });
   const scheduled = registerJobs(router, commands, { dispatch, sentBody });
   function broadcastBatch(id: string): void {
     for (const member of commands.batchIds(id)) {

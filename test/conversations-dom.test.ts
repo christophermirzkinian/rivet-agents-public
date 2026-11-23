@@ -406,6 +406,31 @@ describe("Chat", () => {
     expect(magnifier().hidden).toBe(false);
   });
 
+  it.each([
+    ["message", "message", "message:g2"],
+    ["title", "chat", "conversation:g"],
+  ])("hands the keyboard to the message box when a %s hit chosen from the keyboard goes, never to the page", async (_, kind, key) => {
+    vi.stubGlobal("fetch", vi.fn((url: RequestInfo | URL, init?: RequestInit) =>
+      new URL(String(url), "http://x").pathname === "/api/chat/search"
+        ? Promise.resolve(new Response(JSON.stringify({ results: [{ kind, key, title: "Rivet g2", open: { type: "message", id: "g2" } }] }), { status: 200, headers: { "content-type": "application/json" } }))
+        : server.fetch(url, init),
+    ));
+    await onChat();
+    magnifier().click();
+    const input = root.querySelector<HTMLInputElement>(".chat-search-input")!;
+    input.value = "rivet";
+    input.dispatchEvent(new Event("input"));
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    await settle();
+    const hit = root.querySelector<HTMLButtonElement>(".chat-search-hit")!;
+    hit.focus();
+    hit.click();
+    await settle();
+    expect(hit.isConnected).toBe(false);
+    expect(document.activeElement).not.toBe(document.body);
+    expect(document.activeElement).toBe(root.querySelector(".chat-compose textarea"));
+  });
+
   it("keeps search behind a magnifier in the head: a tap shows the bar with the caret in it, a second tap puts it away and clears it", async () => {
     await onChat();
     const tools = [...root.querySelector(".chat-head .chat-tools")!.children];

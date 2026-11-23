@@ -103,6 +103,9 @@ export function dashRefusal(flag, value) {
   return `${flag} got "${shown}" as its value, a flag; give ${flag} its own value. Nothing was sent`;
 }
 
+/** What a bare --ack, last on the line, says on the owner's message. The usage text is pinned for the public copy, so it is said here. */
+export const BARE_ACK = "on it";
+
 /** A parse error printed on its own, without the usage text after it. */
 export class DashError extends Error {}
 
@@ -115,6 +118,8 @@ export function parseArgs(argv) {
     if (a === "--help" || a === "-h") o.help = true;
     else if (a === "--stdin") o.stdin = true;
     else if (a === "--new") o.new = true;
+    // A bare --ack at the end is an ack all the same: a day of them sent nothing, each refused with the usage text.
+    else if (a === "--ack" && i === argv.length - 1) o.ack = BARE_ACK;
     else if (a === "--card") o.card = true;
     else if (a === "--ask") {
       const value = argv[++i];

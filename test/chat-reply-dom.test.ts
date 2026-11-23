@@ -953,6 +953,120 @@ describe("one chat: every line its own More and Reply, shown at a tap with its t
     expect(run("p1").querySelector(".chat-ex-wait")).toBeNull();
   });
 
+  it("drops the working note once a reply to his line is in Chat, in whichever conversation it landed", async () => {
+    await onChat();
+    expect(run("b1").querySelector(".chat-ex-wait")).not.toBeNull();
+    // His line itself is still "sent": only the reply, filed in another conversation, says it was answered.
+    fire(line("z1", "rivet", "p1", 9, "The row went out.", { replyTo: "b1", quote: { from: "owner", text: "Ship the pear results row" } }));
+    await settle();
+    expect(bubble("z1")).not.toBeNull();
+    expect(run("b1").querySelector(".chat-ex-wait")).toBeNull();
+  });
+
+  it("drops the working note for a whole window when the reply names its lead", async () => {
+    server = fakeServer(
+      [
+        ...MESSAGES().filter((one) => one.id !== "b1"),
+        line("w1", "owner", "w1", 8, "First half", { status: "typed" }),
+        line("w2", "owner", "w1", 9, "second half", { status: "typed", windowLead: "w1" }),
+        line("z2", "rivet", "p1", 10, "Both done.", { replyTo: "w1" }),
+      ],
+      { ...CONVERSATIONS(), w1: { title: "" } },
+    );
+    vi.stubGlobal("fetch", vi.fn(server.fetch));
+    await onChat();
+    expect(root.querySelector(".chat-ex-wait")).toBeNull();
+  });
+
+  it("drops the working note after WORKING_MS with no reply, and not a moment before", async () => {
+    const sent = Date.parse(minute(8));
+    const now = vi.spyOn(Date, "now").mockReturnValue(sent + chat.WORKING_MS - 1_000);
+    try {
+      await onChat();
+      expect(run("b1").querySelector(".chat-ex-wait")).not.toBeNull();
+      expect(run("b1").querySelector(".chat-ex-late")).toBeNull();
+      now.mockReturnValue(sent + chat.WORKING_MS + 1_000);
+      fire(line("z3", "rivet", "p1", 40, "Unrelated.", { replyTo: "another-line" }));
+      await settle();
+      expect(run("b1").querySelector(".chat-ex-wait")).toBeNull();
+      // It does not read as answered either: plain words say there is no answer yet, until one lands.
+      expect(run("b1").querySelector(".chat-ex-late")!.textContent).toBe("No answer from Rivet yet");
+      fire(line("z4", "rivet", "p1", 41, "The row went out.", { replyTo: "b1" }));
+      await settle();
+      expect(run("b1").querySelector(".chat-ex-late, .chat-ex-wait")).toBeNull();
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it("never says No answer once Rivet has said something that names no line: it may be the answer", async () => {
+    const sent = Date.parse(minute(8));
+    const now = vi.spyOn(Date, "now").mockReturnValue(sent + chat.WORKING_MS + 1_000);
+    try {
+      await onChat();
+      expect(run("b1").querySelector(".chat-ex-late")).not.toBeNull();
+      // An update card, a new conversation or a line placed by its words carries no replyTo and marks nothing replied.
+      fire(line("z3", "rivet", "p1", 40, "Card: the row went out ›"));
+      await settle();
+      expect(run("b1").querySelector(".chat-ex-late, .chat-ex-wait")).toBeNull();
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it("ends the working note by its own timer, with no new line and no refresh", async () => {
+    const sent = Date.parse(minute(8));
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"], now: sent + chat.WORKING_MS - 60_000 });
+    try {
+      chat.startDraft("");
+      chat.showRivetChat();
+      chat.mount(root);
+      await vi.advanceTimersByTimeAsync(50);
+      expect(run("b1").querySelector(".chat-ex-wait")).not.toBeNull();
+      await vi.advanceTimersByTimeAsync(61_000);
+      expect(run("b1").querySelector(".chat-ex-wait")).toBeNull();
+      expect(run("b1").querySelector(".chat-ex-late")).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("moves an ack from under his words to the strip once the answer is in Chat, and keeps it beside a shown state", async () => {
+    server = fakeServer(
+      [
+        ...MESSAGES(),
+        line("p3", "owner", "p1", 9, "And on the branch?", { ack: { text: "checking it, ~9:45", at: minute(10) } }),
+        line("f1", "owner", "f1", 11, "Did this go?", { status: "unconfirmed", ack: { text: "on it", at: minute(12) } }),
+      ],
+      { ...CONVERSATIONS(), f1: { title: "" } },
+    );
+    vi.stubGlobal("fetch", vi.fn(server.fetch));
+    await onChat();
+    expect(bubble("p3").querySelector(":scope > p.chat-state > .chat-status.acked")).not.toBeNull();
+    // A line that says another state under its words keeps its ack in the strip: it is shown somewhere.
+    expect(bubble("f1").querySelector(":scope > p.chat-state > .chat-status.unconfirmed")).not.toBeNull();
+    expect(strip("f1").querySelector(".chat-status.acked")!.textContent).toBe(" · Rivet: on it");
+    fire(line("z5", "rivet", "b1", 13, "The branch is green.", { replyTo: "p3" }));
+    await settle();
+    expect(bubble("p3").querySelector(":scope > p.chat-state")).toBeNull();
+    expect(strip("p3").querySelector(".chat-status.acked")!.textContent).toBe(" · Rivet: checking it · ~9:45");
+  });
+
+  it("shows Rivet's ack under his words without a tap, and not again in the strip", async () => {
+    server = fakeServer([...MESSAGES(), line("p3", "owner", "p1", 9, "And on the branch?", { ack: { text: "checking it, ~9:45", at: minute(10) } })], CONVERSATIONS());
+    vi.stubGlobal("fetch", vi.fn(server.fetch));
+    await onChat();
+    expect(strip("p3").hidden).toBe(true);
+    const ack = bubble("p3").querySelector<HTMLElement>(":scope > p.chat-state > .chat-status.acked")!;
+    expect(ack.textContent).toBe("Rivet: checking it · ~9:45");
+    expect(strip("p3").querySelector(".chat-status.acked")).toBeNull();
+    // An acked line needs no working note as well, whatever its status still says.
+    fire(line("b1", "owner", "b1", 8, "Ship the pear results row to everyone please today", { status: "sent", ack: { text: "on it", at: minute(9) } }));
+    await settle();
+    expect(bubble("b1").querySelector(".chat-status.acked")!.textContent).toBe("Rivet: on it");
+    expect(run("b1").querySelector(".chat-ex-wait")).toBeNull();
+  });
+
   describe("on a hosted machine", () => {
     const host = async (name: string | null | undefined) => {
       if (name !== undefined) vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(JSON.stringify({ name, setupDone: true, firstPlan: "claude" }), { status: 200, headers: { "content-type": "application/json" } }))));
@@ -966,7 +1080,8 @@ describe("one chat: every line its own More and Reply, shown at a tap with its t
     const said = async () => {
       await onChat();
       const working = run("b1").querySelector(".chat-ex-wait")!.textContent!;
-      openLine("p3");
+      // The ack sits under his words, no tap needed.
+      expect(strip("p3").hidden).toBe(true);
       const ack = bubble("p3").querySelector(".chat-status.acked")!.textContent;
       return { working, ack, quote: bubble("q1").querySelector(".chat-quote-who")!.textContent };
     };
@@ -974,19 +1089,19 @@ describe("one chat: every line its own More and Reply, shown at a tap with its t
     it("names the agent in its working note, its acks and a quote of its line", async () => {
       await host("Pip");
       const { working, ack, quote } = await said();
-      expect([working.includes("Pip is working on it"), ack, quote]).toEqual([true, " · Pip: checking it · ~9:45", "Pip"]);
+      expect([working.includes("Pip is working on it"), ack, quote]).toEqual([true, "Pip: checking it · ~9:45", "Pip"]);
     });
 
     it("calls an agent with no name yet Agent", async () => {
       await host(null);
       const { working, ack, quote } = await said();
-      expect([working.includes("Agent is working on it"), ack, quote]).toEqual([true, " · Agent: checking it · ~9:45", "Agent"]);
+      expect([working.includes("Agent is working on it"), ack, quote]).toEqual([true, "Agent: checking it · ~9:45", "Agent"]);
     });
 
     it("is still Rivet on the owner's own machine", async () => {
       await host(undefined);
       const { working, ack, quote } = await said();
-      expect([working.includes("Rivet is working on it"), ack, quote]).toEqual([true, " · Rivet: checking it · ~9:45", "Rivet"]);
+      expect([working.includes("Rivet is working on it"), ack, quote]).toEqual([true, "Rivet: checking it · ~9:45", "Rivet"]);
     });
   });
 
@@ -1011,8 +1126,7 @@ describe("one chat: every line its own More and Reply, shown at a tap with its t
     options().click();
     expect(menu.hidden).toBe(false);
     // Send delay's switch is the menu's last row (chat-send-delay-dom.test.ts covers it).
-    // 3 designs of this screen (three-designs.ts) is hidden while its Behaviours row is off.
-    expect([...menu.querySelectorAll(".chat-menu-item:not([hidden])")].map((item) => item.textContent)).toEqual(["Anything I asked not done?", "Read aloud", "Send delay"]);
+    expect([...menu.querySelectorAll(".chat-menu-item")].map((item) => item.textContent)).toEqual(["Anything I asked not done?", "Read aloud", "Send delay"]);
     const toggle = root.querySelector<HTMLButtonElement>(".chat-menu .chat-speak")!;
     expect(toggle.getAttribute("role")).toBe("menuitemcheckbox");
     toggle.click();

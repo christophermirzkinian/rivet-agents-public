@@ -10,7 +10,6 @@ import { PAGE_NAMES, READINGS, YOURS, type PageRow } from "./more.js";
 import { usageStale, weekTotal } from "./ops.js";
 import { navMark, opsStatus } from "./progress-mark.js";
 import { closeSheet, openSheet } from "./sheet.js";
-import { askDesigns, designsOn, screenOnNow } from "./three-designs.js";
 
 // The menu: every page in one list, the home screen first, the readings, then what is yours under a rule. A phone
 // opens it as a drawer from the band's menu button, with Usage at its head; a computer shows it on the rail.
@@ -89,28 +88,6 @@ export function menuList(onPick: () => void = () => {}): HTMLElement {
     h("hr", { class: "menu-rule" }),
     needsPlan() ? connectRow(onPick) : null,
     ...YOURS.map((one) => (one.page === "connectors" && opsData.connectorsAbsent ? null : page(one))),
-    designsOn() ? designsRow(onPick) : null,
-  );
-}
-
-/** "3 designs" of the screen on now, at the list's foot while its Behaviours row is on. */
-function designsRow(onPick: () => void): HTMLElement {
-  const name = "3 designs of this screen";
-  return h(
-    "button",
-    {
-      class: "menu-row",
-      attrs: { type: "button", "data-key": "designs", "data-use": "menu.row.designs", title: name },
-      on: {
-        click: () => {
-          const screen = screenOnNow();
-          onPick();
-          void askDesigns({ screen });
-        },
-      },
-    },
-    svg(ICONS.photo, "menu-icon"),
-    h("span", { class: "menu-name" }, name),
   );
 }
 

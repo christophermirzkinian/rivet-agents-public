@@ -17,7 +17,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { logForced, mismatch, refusal as misplacedRefusal } from "../bridge/lib/chat-guard.mjs";
-import { agentName, CHAT_PROVIDER, codexChatArgs, connected, FIRST_PLAN_UNREAD, firstPlan, limitWords, otherPlan, PLAN_NAMES, planOfProvider, plansOn, screenLimit, STATUS_ARGS } from "../bridge/lib/job-drivers.mjs";
+import { agentName, CHAT_PROVIDER, codexChatArgs, connected, FIRST_PLAN_UNREAD, firstPlan, limitWords, notConnectedLine, otherPlan, PLAN_NAMES, planOfProvider, plansOn, screenLimit, STATUS_ARGS } from "../bridge/lib/job-drivers.mjs";
 import { loadProjects, projectsFromFolders } from "../bridge/lib/projects.mjs";
 import { repoAllowlist } from "../src/shared/repos.ts";
 
@@ -374,9 +374,22 @@ function firstProvider(env) {
 }
 
 /**
+ * A hosted agent's chat runs on its owner's own plan, so one whose plan is definitely signed out is refused before
+ * anything starts; a status that gave no answer starts it as it always has. The other plan's status only chooses the
+ * words: a chat never moves to it by itself.
+ */
+function refuseSignedOut(ctx, provider) {
+  if (!plansOn(ctx.env)) return;
+  const plan = planOfProvider(provider);
+  if (connected(plan, signInStatus(ctx, plan)) !== false) return;
+  const other = otherPlan(plan);
+  throw new Error(`rivet-chat: no chat started. ${notConnectedLine(plan, false, connected(other, signInStatus(ctx, other)) === true, firstPlan(ctx.env))}.`);
+}
+
+/**
  * Starts a chat named `name` running `provider` in the existing directory `cwd`. With no provider named, a hosted
  * agent's chat runs on its first plan (RIVET_AGENT_FILE's firstPlan), any other on Claude; one whose agent file cannot
- * be read starts none. A prompt that plainly belongs to another repo's project than the chat's is refused unless
+ * be read, or whose plan is signed out, starts none. A prompt that plainly belongs to another repo's project than the chat's is refused unless
  * `forceProject` gives a reason, which is logged once the chat runs (bridge/lib/chat-guard.mjs), unless `forceLogged`
  * says its caller logged it. The prompt is checked against `repo` (owner/name) when given and against the project `cwd`
  * is in: the project folder holding it, else its origin.
@@ -416,6 +429,7 @@ export function create(ctx, { name, cwd, provider = plansOn(ctx.env) ? firstProv
   const held = readRegistry(ctx).chats[name];
   if (held && held.status !== "finished") throw new Error(`rivet-chat: ${name} is already a chat (${held.status}); close it first`);
   if (sessions(ctx).has(name)) throw new Error(`rivet-chat: tmux session ${name} already exists`);
+  refuseSignedOut(ctx, provider);
   const entry = {
     name, session: name, worktree: dir, repo: originRepo(dir), provider, socket: ctx.socket, socketPath: ctx.socketPath,
     paneId: null, pid: null, status: "starting", started: iso(ctx.now()),
@@ -511,11 +525,12 @@ export function read(ctx, ref, { lines = 60 } = {}) {
 
 /**
  * A plan's sign-in status from its own CLI, in the environment a pane gets: { code, lines }, stdout then stderr (Codex
- * says "Not logged in" on stderr). A CLI that would not start or ran out of time has code null.
+ * says "Not logged in" on stderr). A CLI that would not start or ran out of time has code null. It is read from the home
+ * folder, never a chat's own, whose project settings could answer for the plan.
  */
 function signInStatus(ctx, plan) {
   const env = Object.fromEntries(PANE_ENV.filter((name) => ctx.env[name] !== undefined).map((name) => [name, ctx.env[name]]));
-  const r = spawnSync(ctx.bins[CHAT_PROVIDER[plan]], [...STATUS_ARGS[plan]], { env, encoding: "utf8", timeout: 15_000, stdio: ["ignore", "pipe", "pipe"] });
+  const r = spawnSync(ctx.bins[CHAT_PROVIDER[plan]], [...STATUS_ARGS[plan]], { cwd: ctx.home, env, encoding: "utf8", timeout: 15_000, stdio: ["ignore", "pipe", "pipe"] });
   if (r.error) return { code: null, lines: [] };
   return { code: r.status, lines: plan === "claude" ? String(r.stdout ?? "").split("\n") : `${r.stdout ?? ""}\n${r.stderr ?? ""}`.split("\n") };
 }

@@ -60,7 +60,6 @@ import { closeLightbox } from "./lightbox.js";
 import { leaveOverlays } from "./navigation.js";
 import { clearWords } from "./progress-mark.js";
 import { closeSheet, openSheet } from "./sheet.js";
-import { askDesigns, designsFor } from "./three-designs.js";
 import { clearUndo, flash, showUndo } from "./toast.js";
 import { closeWorkerSheet, openChatSheet } from "./worker-sheet.js";
 
@@ -323,16 +322,7 @@ function topCard(need: ServedNeed, minimisable = false, sheet = false): HTMLElem
           )
         : null,
       card.error ? h("p", { class: "card-error box", attrs: { role: "alert" } }, card.error) : null,
-      phone
-        ? null
-        : h(
-            "div",
-            { class: "card-tools" },
-            messageButton(need, `Message ${agentName()}`),
-            keyed(cardShareButton(need, "card-share-top"), `share-${need.id}`),
-            designsFor(need) ? keyed(button([svg(ICONS.photo, "card-designs-icon"), h("span", {}, "3 designs")], () => void askDesigns({ card: need.id }), "card-designs", false, "cards.designs"), `designs-${need.id}`) : null,
-            minimisable ? minimiseButton(need, "bottom") : null,
-          ),
+      phone ? null : h("div", { class: "card-tools" }, messageButton(need, `Message ${agentName()}`), keyed(cardShareButton(need, "card-share-top"), `share-${need.id}`), minimisable ? minimiseButton(need, "bottom") : null),
     ),
     h("div", { class: "more-cue", attrs: { "aria-hidden": "true" } }, "More ↓"),
     card.confirm ? confirmOverlay(need, card) : null,
@@ -400,7 +390,6 @@ export function cardMenu(need: ServedNeed): HTMLElement[] {
     message,
     cardShareButton(need, "decide-menu-row"),
     thread ? row(ICONS.list, "Conversation", () => openConversation(thread.thread), "cards.thread.open", "menu-thread", `Round ${thread.round}`) : null,
-    designsFor(need) ? row(ICONS.photo, "3 designs", () => void askDesigns({ card: need.id }), "cards.designs", "menu-designs") : null,
     // The next card slides in under the menu's foot, where its answers sit: a second tap is held, as after an answer.
     row(MINUS, "Put it aside", () => (lockTaps(), minimise(need)), "cards.minimise", "menu-aside-card"),
     // An update takes only Seen or words (http.ts), so it has no Reject.

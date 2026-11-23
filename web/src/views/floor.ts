@@ -1,7 +1,6 @@
 import "./progress.css";
 import "./floor.css";
 
-import type { DesignScreen } from "../../../src/shared/designs.js";
 import { when } from "../../../src/shared/when.js";
 import { agentName } from "../cloud-agent.js";
 import { h, ICONS, keepFocus, svg } from "../dom.js";
@@ -15,7 +14,6 @@ import * as more from "./more.js";
 import * as ops from "./ops.js";
 import { parked } from "./ops-status.js";
 import { afterFirstFrame, afterSlide, closeTallSheet, leaveTallSheet, openTallSheet, swipeOpens } from "./sheet.js";
-import { askDesigns, designsOn } from "./three-designs.js";
 import { mountPaperTown } from "./town-paper.js";
 import { closeWorkerSheet } from "./worker-sheet.js";
 import * as asks from "./your-asks.js";
@@ -254,8 +252,8 @@ function closeButton(): HTMLElement {
   return h("button", { class: "decide-close", attrs: { type: "button", "data-use": "floor.list.close", "aria-label": "Close" }, on: { click: () => closeTallSheet() } }, svg(ICONS.back, "btn-icon"));
 }
 
-function head(title: HTMLElement, lead: HTMLElement | null = null, tool: HTMLElement | null = null): HTMLElement {
-  return h("header", { class: "home-sheet-head" }, lead, title, tool, closeButton());
+function head(title: HTMLElement, lead: HTMLElement | null = null): HTMLElement {
+  return h("header", { class: "home-sheet-head" }, lead, title, closeButton());
 }
 
 const heading = (text: string) => h("h2", { class: "home-sheet-title" }, text);
@@ -306,16 +304,6 @@ function openTabSheet(id: TabSheet): void {
   openPageSheet(closed(id));
 }
 
-/** A sheet's own "3 designs of this screen" (three-designs.ts): a tall sheet covers the menu, whose foot row would only name Main. */
-function designsButton(screen: () => DesignScreen | null): { button: HTMLElement; paint: () => void } {
-  const button = h(
-    "button",
-    { class: "decide-more", attrs: { type: "button", "data-use": "menu.row.designs", "aria-label": "3 designs of this screen" }, on: { click: () => { const on = screen(); if (on) void askDesigns({ screen: on }); } } },
-    svg(ICONS.photo, "btn-icon"),
-  );
-  return { button, paint: () => void (button.hidden = !designsOn() || !screen()) };
-}
-
 function openRivet(onClose: () => void): void {
   const host = h("div", { class: "home-chat" });
   openTallSheet(
@@ -327,7 +315,7 @@ function openRivet(onClose: () => void): void {
         const title = h("span", { class: "home-sheet-title" });
         el.replaceChildren(head(title, rivet("happy", { size: 36, className: "home-sheet-face" })), host);
         chat.mount(host, afterFirstFrame);
-        // One head row: his face, the chat's own title and Read aloud, then Close. Its 3 designs is in Chat's options.
+        // One head row: his face, the chat's own title and Read aloud, then Close.
         const chatHead = host.querySelector(".chat-head");
         if (chatHead) title.replaceWith(chatHead);
       },
@@ -341,11 +329,9 @@ function openRivet(onClose: () => void): void {
 function openPageSheet(onClose: () => void): void {
   const host = h("div", { class: "home-sheet-body" });
   const title = heading("");
-  const designs = designsButton(() => app.morePage);
   let stopHead = () => {};
   const paintHead = () => {
     title.textContent = app.morePage ? more.PAGE_NAMES[app.morePage] : "";
-    designs.paint();
   };
   openTallSheet(
     app.morePage ? more.PAGE_NAMES[app.morePage] : "Page",
@@ -353,7 +339,7 @@ function openPageSheet(onClose: () => void): void {
       mount(el) {
         ops.unmount();
         planHost?.replaceChildren();
-        el.replaceChildren(head(title, null, designs.button), host);
+        el.replaceChildren(head(title), host);
         more.mount(host);
         stopHead = subscribe(paintHead);
         paintHead();
