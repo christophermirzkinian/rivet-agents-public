@@ -1,6 +1,7 @@
 // A hosted machine puts its supervisor in front of the app on the same origin and serves /cloud/*. Its /cloud/agent,
 // for the signed-in owner only, is the one test of a hosted build. Its JSON 404 means the owner's own machine, and nothing here
 // changes what it shows; any other miss (a network error, a 5xx, a redirect, a page in place of JSON) is asked again.
+import { fellAsleep, heardAnswer, isAsleep, isBackground, onWake } from "./rivet-sleep.js";
 import { APP_NAME, appName, checkedAgentName, checkedAppName, RIVET_NAME, nameHostedAgent, UNNAMED_AGENT } from "../../src/shared/names.js";
 
 export interface CloudAgent {
@@ -30,6 +31,8 @@ let notHosted = false;
 let retries = 0;
 let retryTimer: ReturnType<typeof setTimeout> | undefined;
 let onFocus: (() => void) | null = null;
+/** An asleep page's retry: the next read waits for the wake. */
+let unwake: (() => void) | null = null;
 /** The last read's `onChange`: a refused send redraws what a read would. */
 let redraw: (() => void) | null = null;
 /** One per refused write (noPlan): a plans read sent before it is older than what it said. */
@@ -37,6 +40,7 @@ let planSeq = 0;
 const PLAN_POLL_MS = 15_000;
 let planTimer: ReturnType<typeof setInterval> | undefined;
 let onPlanFocus: (() => void) | null = null;
+let planUnwake: (() => void) | null = null;
 let planRead: Promise<void> | null = null;
 let planApplied = 0;
 const STATUS_TIMEOUT_MS = 10_000;
@@ -94,9 +98,23 @@ async function readJson(path: string, ms?: number): Promise<Read> {
   }
 }
 
+/**
+ * A read with no tap or key just before it (the locked desk's plan poll, a retry's timer) says so, as api.ts's reads do:
+ * a hosted machine's idle watch counts it as no visit, so a desk left open sleeps on time. Asleep, it is not sent; a
+ * window's focus is not a visit either (the OS can focus a window no one is at), and the next tap or key reads again.
+ * From an answer only the asleep mark and the cap are taken: the cap band is cleared by the app's answers (api.ts),
+ * never a /cloud read's.
+ */
 async function readOnce(path: string, signal?: AbortSignal): Promise<Read> {
+  const background = isBackground();
+  if (background && isAsleep()) return { absent: false };
+  const headers: Record<string, string> = background ? { accept: "application/json", "x-rivet-background": "1" } : { accept: "application/json" };
   try {
-    const response = await fetch(path, { credentials: "same-origin", headers: { accept: "application/json" }, signal });
+    const response = await fetch(path, { credentials: "same-origin", headers, signal });
+    if (response.headers?.get?.("x-rivet-asleep") === "1") {
+      if (response.headers.get("x-rivet-capped-until") !== null) heardAnswer(response);
+      else fellAsleep();
+    }
     if (response.redirected) return { absent: false };
     const json = (response.headers.get("content-type") ?? "").includes("application/json");
     if (response.ok && json) return { body: await response.json() };
@@ -198,6 +216,8 @@ function watchPlan(): void {
     if (!planRead) planRead = readPlans().finally(() => (planRead = null));
   };
   planTimer ??= setInterval(read, PLAN_POLL_MS);
+  // An asleep page sends no timed or focus read: its wake (a tap or key) reads at once.
+  planUnwake ??= onWake(read);
   if (!onPlanFocus) {
     onPlanFocus = read;
     window.addEventListener("focus", onPlanFocus);
@@ -209,6 +229,8 @@ function stopWatch(): void {
   planTimer = undefined;
   if (onPlanFocus) window.removeEventListener("focus", onPlanFocus);
   onPlanFocus = null;
+  planUnwake?.();
+  planUnwake = null;
 }
 
 /**
@@ -232,11 +254,24 @@ export async function readCloud(onChange: () => void): Promise<void> {
   watchPlan();
 }
 
-/** Besides the app's return (main.ts): its window's focus, and a short backoff. */
+/**
+ * Besides the app's return (main.ts): its window's focus, and a short backoff. Asleep, a timer would send nothing and
+ * spend a retry, so the next read waits for the wake (a tap or key).
+ */
 function retryLater(onChange: () => void): void {
   if (!onFocus) {
     onFocus = () => void readCloud(onChange);
     window.addEventListener("focus", onFocus);
+  }
+  if (isAsleep()) {
+    clearTimeout(retryTimer);
+    retryTimer = undefined;
+    unwake ??= onWake(() => {
+      unwake?.();
+      unwake = null;
+      void readCloud(onChange);
+    });
+    return;
   }
   if (retryTimer !== undefined || retries >= RETRY_MS.length) return;
   retryTimer = setTimeout(() => {
@@ -248,6 +283,8 @@ function retryLater(onChange: () => void): void {
 function stopRetries(): void {
   clearTimeout(retryTimer);
   retryTimer = undefined;
+  unwake?.();
+  unwake = null;
   if (onFocus) window.removeEventListener("focus", onFocus);
   onFocus = null;
 }

@@ -6,6 +6,7 @@ import type { Worker } from "../src/shared/workers.js";
 import { agentName, agentNoun, CONNECT_PATH, hostedPage, leaveCloud, needsPlan, noPlan, ownMachineAfterEnrol, parseAgent, parsePlans, probeCloud, readCloud, readServedApp, resetCloud, tabTitle } from "../web/src/cloud-agent.js";
 import type { Ask } from "../src/shared/asks.js";
 import { opsData } from "../web/src/ops-data.js";
+import { heardAnswer, resetSleep, watchInput } from "../web/src/rivet-sleep.js";
 import { app, changed } from "../web/src/state.js";
 import { mount as mountOps, unmount as unmountOps } from "../web/src/views/ops.js";
 import { openStatus as openRunner, runnerItem } from "../web/src/views/ops-status.js";
@@ -36,7 +37,7 @@ beforeEach(() => {
   document.title = "Rivet Agents";
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (path: string) => {
+    vi.fn(async (path: string, _init?: RequestInit) => {
       asked.push(path);
       return (answers[path] ?? ownServer404)();
     }),
@@ -45,6 +46,7 @@ beforeEach(() => {
 
 afterEach(() => {
   resetCloud();
+  resetSleep();
   vi.useRealTimers();
   vi.unstubAllGlobals();
   document.body.replaceChildren();
@@ -295,6 +297,84 @@ describe("a write refused for want of a plan", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(reads()).toBe(4);
   });
+
+  describe("a hosted machine's idle watch", () => {
+    /** Its own document, so the input listeners stay off the page every other test drives. */
+    let input: Document;
+    const headerOf = (init: RequestInit | undefined) => (init?.headers as Record<string, string> | undefined)?.["x-rivet-background"] ?? null;
+    const sent = (path: string) => vi.mocked(fetch).mock.calls.filter(([p]) => p === path).map(([, init]) => headerOf(init));
+    const asleepAnswer = (body: unknown, status = 200) =>
+      new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", "x-rivet-asleep": "1" } });
+    const key = () => input.dispatchEvent(new KeyboardEvent("keydown"));
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+      input = document.implementation.createHTMLDocument();
+      watchInput(input);
+    });
+
+    it("takes a read with no tap or key just before it as background, so a desk left open sleeps on time, and sends none once asleep", async () => {
+      answers["/cloud/agent"] = () => json({ name: "Pip", setupDone: true, firstPlan: "claude" });
+      answers["/cloud/connect/status"] = () => json({ claude: false, chatgpt: false });
+      key();
+      await readCloud(() => {});
+      expect(sent("/cloud/connect/status")).toEqual([null]);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(sent("/cloud/connect/status")).toEqual([null, "1", "1"]);
+      answers["/cloud/connect/status"] = () => asleepAnswer({ claude: false, chatgpt: false });
+      await vi.advanceTimersByTimeAsync(15_000);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(sent("/cloud/connect/status")).toHaveLength(4);
+      expect(needsPlan()).toBe(true);
+    });
+
+    it("sends nothing at an asleep page's window focus, which the OS can give with no one there, and reads as a visit at the next tap or key", async () => {
+      answers["/cloud/agent"] = () => json({ name: "Pip", setupDone: true, firstPlan: "claude" });
+      answers["/cloud/connect/status"] = () => asleepAnswer({ claude: false, chatgpt: false });
+      await readCloud(() => {});
+      expect(needsPlan()).toBe(true);
+      answers["/cloud/connect/status"] = () => json({ claude: true, chatgpt: false });
+      window.dispatchEvent(new Event("focus"));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(sent("/cloud/connect/status")).toEqual(["1"]);
+      key();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(sent("/cloud/connect/status")).toEqual(["1", null]);
+      expect(needsPlan()).toBe(false);
+    });
+
+    it("spends no retry while asleep: the probe asks again at the wake", async () => {
+      answers["/cloud/agent"] = () => asleepAnswer({}, 503);
+      await readCloud(() => {});
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(sent("/cloud/agent")).toEqual(["1"]);
+      answers["/cloud/agent"] = () => json({ name: "Pip", setupDone: true, firstPlan: "claude" });
+      answers["/cloud/connect/status"] = () => json({ claude: true, chatgpt: false });
+      key();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(sent("/cloud/agent")).toEqual(["1", null]);
+      expect(agentName()).toBe("Pip");
+    });
+
+    it("leaves the month's cap band to the app's answers: a /cloud read never clears it", async () => {
+      heardAnswer(new Response("capped", { status: 503, headers: { "x-rivet-asleep": "1", "x-rivet-capped-until": String(Date.now() + 86_400_000) } }));
+      expect(document.getElementById("rivet-cap")).not.toBeNull();
+      answers["/cloud/agent"] = () => json({ name: "Pip", setupDone: true, firstPlan: "claude" });
+      answers["/cloud/connect/status"] = () => json({ claude: true, chatgpt: false });
+      key();
+      await readCloud(() => {});
+      expect(document.getElementById("rivet-cap")).not.toBeNull();
+    });
+
+    it("shows the cap band when a /cloud read is the first to hear the cap", async () => {
+      answers["/cloud/agent"] = () => json({ name: "Pip", setupDone: true, firstPlan: "claude" });
+      answers["/cloud/connect/status"] = () =>
+        new Response("capped", { status: 503, headers: { "x-rivet-asleep": "1", "x-rivet-capped-until": String(Date.now() + 86_400_000) } });
+      await readCloud(() => {});
+      expect(document.getElementById("rivet-cap")).not.toBeNull();
+    });
+  });
+
 
   it("starts no second read while one is still out", async () => {
     vi.useFakeTimers();
