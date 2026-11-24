@@ -23,6 +23,8 @@ class FakeSource {
 const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
 let server: FakeServer;
 let cloud: Record<string, unknown> = {};
+/** The owner's own server's answer for /cloud/* (http.ts): a JSON 404, the one definite "not hosted". */
+let ownMachine = false;
 
 const settle = async () => {
   for (let i = 0; i < 30; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
@@ -39,11 +41,13 @@ beforeEach(() => {
   vi.resetModules();
   server = fakeServer([]);
   cloud = {};
+  ownMachine = false;
   vi.stubGlobal(
     "fetch",
     vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/me") return Promise.resolve(json({ signedIn: true }));
+      if (path.startsWith("/cloud/") && ownMachine) return Promise.resolve(new Response(JSON.stringify({ error: "not found" }), { status: 404, headers: { "content-type": "application/json" } }));
       if (path.startsWith("/cloud/")) return Promise.resolve(path in cloud ? json(cloud[path]) : new Response("Not found", { status: 404 }));
       return server.fetch(input, init);
     }),
@@ -121,14 +125,143 @@ describe("the agent's name", () => {
   });
 });
 
-describe("the Connect a plan band", () => {
-  it("goes at a sign-out", async () => {
-    cloud = { "/cloud/agent": { name: "Pip", setupDone: true, firstPlan: "claude" }, "/cloud/connect/status": { claude: false, chatgpt: false } };
+describe("a hosted agent with no plan connected", () => {
+  const LOCKED = "Sending is off until Claude or ChatGPT is connected.";
+  const host = (status?: { claude: boolean; chatgpt: boolean }) =>
+    (cloud = { "/cloud/agent": { name: "Pip", setupDone: true, firstPlan: "claude" }, ...(status ? { "/cloud/connect/status": status } : {}) });
+  const pane = () => document.querySelector("aside.side")!;
+  const box = () => pane().querySelector<HTMLTextAreaElement>(".chat-text")!;
+  const sendButton = () => pane().querySelector<HTMLButtonElement>(".chat-send")!;
+  const line = () => pane().querySelector<HTMLAnchorElement>(".chat-compose-box .noplan-line")!;
+  const sends = () => vi.mocked(fetch).mock.calls.filter(([input, init]) => String(input) === "/api/chat" && init?.method === "POST").length;
+  /** The app comes back to the front, which reads the plans again (main.ts). */
+  const comeBack = async () => {
+    document.dispatchEvent(new Event("visibilitychange"));
+    await settle();
+  };
+  const expectOpen = () => {
+    expect(document.querySelector(".noplan-box")).toBeNull();
+    expect(box().disabled).toBe(false);
+    expect(line().hidden).toBe(true);
+    expect(pane().querySelector(".chat-field .noplan-mark")!.hasAttribute("hidden")).toBe(true);
+  };
+  const expectLocked = () => {
+    expect(document.querySelector(".noplan-box")).not.toBeNull();
+    expect(box().disabled).toBe(true);
+    expect(sendButton().disabled).toBe(true);
+    expect(pane().querySelector(".chat-field .noplan-mark")!.hasAttribute("hidden")).toBe(false);
+    expect(line().hidden).toBe(false);
+    expect(line().textContent).toBe(LOCKED);
+    expect(line().getAttribute("href")).toBe("/cloud/setup/connect");
+  };
+
+  it("says to connect one on the home screen, locks the message box and sends nothing", async () => {
+    const assign = vi.spyOn(location, "assign").mockImplementation(() => {});
+    host({ claude: false, chatgpt: false });
+    await start(true);
+    const says = document.querySelector(".home .noplan-box")!;
+    expect(says.querySelector(".noplan-title")!.textContent).toBe("Connect Claude or ChatGPT to start");
+    expect(says.querySelector(".noplan-words")!.textContent).toBe("Pip can't take jobs until one is connected. It takes about a minute.");
+    const connect = says.querySelector<HTMLButtonElement>("button")!;
+    expect(connect.textContent).toBe("Connect now");
+    expect(connect.dataset.use).toBe("cloud.connect-band");
+    connect.click();
+    expect(assign).toHaveBeenCalledWith("/cloud/setup/connect");
+    expectLocked();
+    box().value = "Hello";
+    sendButton().click();
+    await settle();
+    expect(sends()).toBe(0);
+    expect(document.body.textContent).not.toMatch(/Rivet|Rivet/);
+    assign.mockRestore();
+  });
+
+  it("says so on a phone's home screen too, and its chat sheet is locked", async () => {
+    host({ claude: false, chatgpt: false });
     await start();
-    expect(document.getElementById("cloud-connect")).not.toBeNull();
+    expect(document.querySelector(".home .noplan-box")).not.toBeNull();
+    document.querySelector<HTMLElement>('.home-dock [data-key="rivet"]')!.click();
+    await settle();
+    const sheet = document.querySelector(".rivet-sheet")!;
+    expect(sheet.querySelector<HTMLTextAreaElement>(".chat-text")!.disabled).toBe(true);
+    expect(sheet.querySelector(".noplan-line")!.textContent).toBe(LOCKED);
+  });
+
+  it("unlocks with no reload once a plan is connected", async () => {
+    host({ claude: false, chatgpt: false });
+    await start(true);
+    expectLocked();
+    host({ claude: false, chatgpt: true });
+    await comeBack();
+    expectOpen();
+    box().value = "Hello";
+    sendButton().click();
+    await settle();
+    expect(sends()).toBe(1);
+  });
+
+  it("unlocks by itself on the next status read while the desk stays in front", async () => {
+    host({ claude: false, chatgpt: false });
+    await start(true);
+    expectLocked();
+    host({ claude: true, chatgpt: false });
+    vi.advanceTimersByTime(15_000);
+    await settle();
+    expectOpen();
+    expect(document.querySelector(".noplan-box")).toBeNull();
+  });
+
+  it("locks nothing while the status is unread", async () => {
+    host();
+    await start(true);
+    expectOpen();
+  });
+
+  it("locks when a send comes back refused for want of a plan, with no raw error and no second send", async () => {
+    host({ claude: true, chatgpt: false });
+    await start(true);
+    expectOpen();
+    const answered = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation((input, init) =>
+      String(input) === "/api/chat" && init?.method === "POST"
+        ? Promise.resolve(new Response(JSON.stringify({ error: "no-plan", connect: "/cloud/setup/connect" }), { status: 409, headers: { "content-type": "application/json" } }))
+        : answered(input, init),
+    );
+    box().value = "Hello";
+    sendButton().click();
+    await settle();
+    expect(sends()).toBe(1);
+    expectLocked();
+    expect(box().value).toBe("Hello");
+    expect(pane().querySelector(".chat-hint")!.textContent).toBe("");
+    expect(document.body.textContent).not.toContain("no-plan");
+    sendButton().click();
+    await settle();
+    expect(sends()).toBe(1);
+  });
+
+  it("goes at a sign-out", async () => {
+    host({ claude: false, chatgpt: false });
+    await start();
+    expect(document.querySelector(".noplan-box")).not.toBeNull();
     (await import("../web/src/state.js")).signedOut("");
     await settle();
     expect(document.querySelector(".gate")).not.toBeNull();
-    expect(document.getElementById("cloud-connect")).toBeNull();
+    expect(document.querySelector(".noplan-box")).toBeNull();
+  });
+});
+
+describe("the owner's own machine", () => {
+  it("shows no box, locks nothing and asks its server for no plans", async () => {
+    ownMachine = true;
+    await start(true);
+    document.dispatchEvent(new Event("visibilitychange"));
+    await settle();
+    expect(document.querySelector(".noplan-box, .noplan-line:not([hidden])")).toBeNull();
+    const pane = document.querySelector("aside.side")!;
+    expect(pane.querySelector<HTMLTextAreaElement>(".chat-text")!.disabled).toBe(false);
+    expect(pane.querySelector<HTMLButtonElement>(".chat-send")!.disabled).toBe(false);
+    const asked = vi.mocked(fetch).mock.calls.map(([input]) => String(input)).filter((path) => path.startsWith("/cloud/"));
+    expect(asked).toEqual(["/cloud/agent"]);
   });
 });

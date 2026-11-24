@@ -174,7 +174,7 @@ $WHEN
   <key>StandardErrorPath</key>
   <string>$(xml_escape "$LOG")</string>
   <key>ProcessType</key>
-  <string>Background</string>
+  <string>Standard</string>
 </dict>
 </plist>
 PLIST_EOF

@@ -12,7 +12,7 @@ import {
   type UsageStatus,
 } from "../../../src/shared/usage-ids.js";
 import { shortDate } from "../../../src/shared/when.js";
-import { ApiError, askUsage, getUsageReport } from "../api.js";
+import { ApiError, askUsage, getUsageReport, NoPlan } from "../api.js";
 import { h } from "../dom.js";
 import { sameSession } from "../session.js";
 import { readingFrame, readingView } from "./reading.js";
@@ -111,7 +111,7 @@ async function ask(row: UsageFeature, what: UsageAsk): Promise<void> {
     // A refusal's reason is the server's own sentence ("a card already asked about it"); anything else, api's own
     // "Request failed (N)" for a body with no sentence among them, is plain words.
     const coded = err instanceof ApiError && err.status >= 400 && err.status < 500 && err.status !== 401 && err.status !== 403 && !/^Request failed \(\d+\)$/.test(err.message);
-    note = { id: row.id, text: coded ? `Not sent: ${err.message}.` : "Not sent. Try again.", tone: "no" };
+    note = { id: row.id, text: err instanceof NoPlan ? err.message : coded ? `Not sent: ${err.message}.` : "Not sent. Try again.", tone: "no" };
   } finally {
     pending = null;
   }

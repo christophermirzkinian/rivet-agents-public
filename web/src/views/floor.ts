@@ -2,7 +2,7 @@ import "./progress.css";
 import "./floor.css";
 
 import { when } from "../../../src/shared/when.js";
-import { agentName } from "../cloud-agent.js";
+import { agentName, needsPlan } from "../cloud-agent.js";
 import { h, ICONS, keepFocus, svg } from "../dom.js";
 import { opsData, watchOps } from "../ops-data.js";
 import { rivet, setMood, type Mood } from "../rivet/rivet.js";
@@ -12,6 +12,7 @@ import { askingCards, openCards, openDecide } from "./decide-sheet.js";
 import * as feed from "./feed.js";
 import * as more from "./more.js";
 import * as ops from "./ops.js";
+import { planBox } from "./plan-lock.js";
 import { parked } from "./ops-status.js";
 import { afterFirstFrame, afterSlide, closeTallSheet, leaveTallSheet, openTallSheet, swipeOpens } from "./sheet.js";
 import { mountPaperTown } from "./town-paper.js";
@@ -35,12 +36,22 @@ export function mount(el: HTMLElement, wide = false): void {
   const town = mountPaperTown({ flow: true });
   const plan = h("div", { class: "progress-plan" });
   const foot = wide ? h("div", { class: "home-wide-dock" }) : null;
-  const page = h("div", { class: "progress home" }, h("div", { class: "progress-scene" }, town.el), plan, foot);
+  // A hosted agent with no plan connected says so first, over the map (plan-lock.ts); empty otherwise.
+  const connect = h("div", { class: "noplan-slot" });
+  let connectFor: string | null = null;
+  const page = h("div", { class: "progress home" }, connect, h("div", { class: "progress-scene" }, town.el), plan, foot);
   el.replaceChildren(page);
   planHost = plan;
   setOpsPage("plan");
   ops.mount(plan);
   const paint = () => {
+    const name = needsPlan() ? agentName() : null;
+    if (name !== connectFor) {
+      connectFor = name;
+      const refocus = keepFocus(connect);
+      connect.replaceChildren(...(name === null ? [] : [planBox()]));
+      refocus();
+    }
     if (foot) {
       const refocus = keepFocus(foot);
       const decide = dock()[0]!;

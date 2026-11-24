@@ -326,6 +326,10 @@
   font-size: var(--fs-3xl);
 }
 
+.backlog-btn:disabled {
+  opacity: 0.4;
+}
+
 .backlog-btn.is-done {
   border: 1px solid rgba(47, 214, 123, 0.4);
   background: rgba(47, 214, 123, 0.16);

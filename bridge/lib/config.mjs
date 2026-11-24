@@ -194,23 +194,48 @@ export function fingerprint(token) {
  * the name). Read only: nothing here writes the Keychain.
  * @param {Exec} exec
  * @param {"RIVET_BRIDGE_TOKEN" | "RIVET_BOARD_TOKEN"} name
+ * A read that runs out of time (a slow Keychain on a loaded Mac) is tried once more after `retryPauseMs`. A failure
+ * says why: `security`'s exit code or that it timed out, and the first line of its stderr. `-w` prints the secret on
+ * stdout only, so stderr holds no token; stdout is never quoted.
  * @param {NodeJS.ProcessEnv} [env]
+ * @param {{ sleep?: (ms: number) => Promise<unknown>, retryPauseMs?: number }} [opts]
  */
-export async function readToken(exec, name, env = process.env) {
+export async function readToken(exec, name, env = process.env, { sleep = (ms) => new Promise((done) => setTimeout(done, ms)), retryPauseMs = 2_000 } = {}) {
   let token;
   if (env[name]) {
     token = String(env[name]);
   } else {
     let out;
-    try {
-      out = await exec(SECURITY_BIN, ["find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", name, "-w"], { timeout: 10_000, maxBuffer: 64 * 1024 });
-    } catch {
-      throw new Error(`could not read ${name} from the environment or the Keychain`);
+    for (let attempt = 1; !out; attempt++) {
+      try {
+        out = await exec(SECURITY_BIN, ["find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", name, "-w"], { timeout: 10_000, maxBuffer: 64 * 1024 });
+      } catch (err) {
+        const why = keychainFailure(err);
+        if (why.timedOut && attempt === 1) {
+          await sleep(retryPauseMs);
+          continue;
+        }
+        throw new Error(`could not read ${name} from the environment or the Keychain (${why.text}${attempt > 1 ? ", after a retry" : ""})`);
+      }
     }
     token = out.stdout.replace(/\r?\n$/, "");
   }
   if (!TOKEN_RE.test(token)) throw new Error(`${name} is not 64 hex characters`);
   return token;
+}
+
+/**
+ * Why a `security` read failed, in words safe to log: timed out, or its exit code, and its stderr's first line. Never
+ * the child's stdout, which is where the secret would be.
+ * @param {unknown} err
+ */
+function keychainFailure(err) {
+  const e = /** @type {any} */ (err);
+  const timedOut = Boolean(e?.killed) || e?.code === "ETIMEDOUT" || (err instanceof ExecError && err.message.endsWith(" timed out"));
+  const exit = timedOut ? "security timed out" : `security exit ${typeof e?.code === "number" || typeof e?.code === "string" ? e.code : "?"}`;
+  const first = err instanceof ExecError ? err.stderrFirstLine : "";
+  const stderr = first.replace(/[\x00-\x1f\x7f-\x9f]+/g, " ").trim().slice(0, 160);
+  return { timedOut, text: stderr ? `${exit}: ${stderr}` : exit };
 }
 
 /**

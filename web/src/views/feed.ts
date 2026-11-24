@@ -7,7 +7,7 @@ import { canApprove, isGotIt, isPlan, isTodo, isUpdate, MERGE_READY, optionNeeds
 import { isToday, maybeWhen, when } from "../../../src/shared/when.js";
 import { NOTHING_NEEDS_YOU } from "../../../src/shared/words.js";
 import * as api from "../api.js";
-import { agentName } from "../cloud-agent.js";
+import { agentName, needsPlan } from "../cloud-agent.js";
 import { isDesk, pressesControl, typing } from "../desk.js";
 import { stopDictation, withMic } from "../dictation.js";
 import { button, type Child, describe, h, ICONS, isHttps, linkify, linksIn, modalOpen, svg } from "../dom.js";
@@ -51,6 +51,7 @@ import { dropPhotos, photosControl, photosHold, photosPayload, restorePhotos } f
 import { reopenBand } from "./answered.js";
 import { cardAnswered, useTap } from "../usage.js";
 import { sending } from "./mac-wait.js";
+import { planLocks } from "./plan-lock.js";
 import { cardMedia, cardStage, stopCardMedia } from "./card-media.js";
 import { cardShareButton } from "./card-share.js";
 import { showLine } from "./chat.js";
@@ -454,9 +455,11 @@ function openRejectSheet(need: ServedNeed): void {
     useTap("cards.reject.send");
     send();
   });
+  const field = withMic(area);
   const fields = [
     h("p", { class: "sheet-where" }, need.title),
-    withMic(area),
+    field,
+    planLocks(area, null, reject),
     h("p", { class: "sheet-hint" }, "Goes to the card's chat as your words, with the reject."),
     isDesk() ? h("p", { class: "sheet-keys" }, h("span", {}, kbd("⌘↵"), "reject"), h("span", {}, kbd("Esc"), "cancel")) : null,
   ];
@@ -740,7 +743,7 @@ function afterVoice(then: () => void): void {
  */
 function sayLine(
   need: ServedNeed,
-  { placeholder = "Say something, or just tap…", send = false, current = () => need }: { placeholder?: string; send?: boolean; current?: () => ServedNeed } = {},
+  { placeholder = "Say something, or just tap…", send = false, current = () => need, answer = null }: { placeholder?: string; send?: boolean; current?: () => ServedNeed; answer?: HTMLButtonElement | null } = {},
 ): HTMLElement {
   const card = cardState(need.id);
   const area = h("textarea", {
@@ -756,17 +759,14 @@ function sayLine(
     use: "cards.say.attach",
     onSignedOut: () => signedOut("Your session ended. Sign in again."),
   });
+  const field = withMic(area, "cards.say.mic");
+  const sayButton = send ? sending(button("Send", () => afterVoice(() => area.isConnected && decide(current(), "comment")), "say-send", false, "cards.say.send")) : null;
   const line = h(
     "div",
     { class: "say-line", attrs: { "data-need": need.id } },
-    h(
-      "div",
-      { class: "say-row" },
-      withMic(area, "cards.say.mic"),
-      attach.button,
-      send ? sending(button("Send", () => afterVoice(() => area.isConnected && decide(current(), "comment")), "say-send", false, "cards.say.send")) : null,
-    ),
+    h("div", { class: "say-row" }, field, attach.button, sayButton),
     attach.preview,
+    planLocks(area, attach, sayButton, answer),
   );
   const paint = () => line.classList.toggle("has-text", card.text.trim() !== "" || card.attach.photos.length > 0);
   area.addEventListener("input", () => {
@@ -792,7 +792,10 @@ function focusSay(id: string): void {
  * boxes, Reject is the X at its top right, and the "−" there does what Later did. There is no Dismiss: a card is answered, changed, minimised or rejected.
  */
 function actionBar(need: ServedNeed): HTMLElement {
-  const say = sayLine(need, { send: !wantsText(need) });
+  const options = need.options ?? [];
+  const text = wantsText(need);
+  const answer = text && !options.length ? sending(button([svg(ICONS.note, "btn-icon"), "Send answer"], () => afterVoice(() => answerText(need)), "pick yes", false, "cards.send-answer")) : null;
+  const say = sayLine(need, { send: !text, answer });
   if (isTodo(need)) {
     return h(
       "div",
@@ -816,13 +819,7 @@ function actionBar(need: ServedNeed): HTMLElement {
       ),
     );
   }
-  const options = need.options ?? [];
-  const text = wantsText(need);
-  const primary = options.length
-    ? null
-    : text
-      ? sending(button([svg(ICONS.note, "btn-icon"), "Send answer"], () => afterVoice(() => answerText(need)), "pick yes", false, "cards.send-answer"))
-      : sending(button([svg(ICONS.yes, "btn-icon"), yesLabel(need)], () => afterVoice(() => act(need, "approve")), "pick yes", false, "cards.approve"));
+  const primary = options.length ? null : (answer ?? sending(button([svg(ICONS.yes, "btn-icon"), yesLabel(need)], () => afterVoice(() => act(need, "approve")), "pick yes", false, "cards.approve")));
   return h(
     "div",
     { class: "actions", attrs: { "data-need": need.id, "data-rev": need.rev } },
@@ -833,6 +830,8 @@ function actionBar(need: ServedNeed): HTMLElement {
 
 /** A text card's answer is what the say-line holds. */
 function answerText(need: ServedNeed): void {
+  // A key press reaches here past the locked Send answer.
+  if (needsPlan()) return;
   const card = cardState(need.id);
   if (!card.text.trim() && !card.attach.photos.length) {
     flash("Type your answer first", "warn");
@@ -1027,7 +1026,8 @@ async function send(need: ServedNeed, answer: Answer, confirm: boolean): Promise
     if (error instanceof StaleSession) return;
     if (error instanceof api.ApiError && error.answered) return alreadyAnswered(need, answer, pending.clientId, error.answered);
     app.held.delete(need.id);
-    const failure = classifyFailure(error instanceof api.ApiError ? error.status : 0);
+    // No plan connected is no word about the card: its 409 is not "this card changed".
+    const failure = error instanceof api.NoPlan ? "refused" : classifyFailure(error instanceof api.ApiError ? error.status : 0);
     if (failure === "signin") {
       park(need, answer, confirm);
       return signedOut("Your session ended. Sign in again.");
@@ -1193,6 +1193,9 @@ function deskActions(need: ServedNeed): HTMLElement {
   });
   note.value = card.text;
   const attach = photosControl(card.attach, { onChange: changed, use: "cards.desk.attach", onSignedOut: () => signedOut("Your session ended. Sign in again.") });
+  const field = withMic(note, "cards.desk.mic");
+  const comment = text ? null : sending(button(["Send comment", kbd("⌘↵")], () => sendNote(need), "desk-send", false, "cards.desk.comment"));
+  const answer = text && !options.length ? sending(button([svg(ICONS.note, "btn-icon"), "Send answer", kbd("⌘↵")], () => sendNote(need), "pick yes", false, "cards.desk.send")) : null;
   const todo = isTodo(need);
   const picks = todo
     ? [sending(button([svg(ICONS.yes, "btn-icon"), "Done"], () => decide(need, "done"), "pick yes", false, "cards.todo.done"))]
@@ -1209,11 +1212,7 @@ function deskActions(need: ServedNeed): HTMLElement {
         element.title = option.label;
         return element;
       })
-    : [
-        text
-          ? sending(button([svg(ICONS.note, "btn-icon"), "Send answer", kbd("⌘↵")], () => sendNote(need), "pick yes", false, "cards.desk.send"))
-          : sending(button([svg(ICONS.yes, "btn-icon"), yesLabel(need), kbd("A")], () => act(need, "approve"), "pick yes", false, "cards.desk.approve")),
-      ];
+    : [answer ?? sending(button([svg(ICONS.yes, "btn-icon"), yesLabel(need), kbd("A")], () => act(need, "approve"), "pick yes", false, "cards.desk.approve"))];
   return h(
     "div",
     { class: "desk-actions", attrs: { "data-need": need.id, "data-rev": need.rev } },
@@ -1223,8 +1222,9 @@ function deskActions(need: ServedNeed): HTMLElement {
       { class: "desk-answer" },
       h("div", { class: `desk-picks n${picks.length}` }, ...picks),
     ),
-    h("div", { class: "desk-compose" }, withMic(note, "cards.desk.mic"), attach.button, text ? null : sending(button(["Send comment", kbd("⌘↵")], () => sendNote(need), "desk-send", false, "cards.desk.comment"))),
+    h("div", { class: "desk-compose" }, field, attach.button, comment),
     attach.preview,
+    planLocks(note, attach, comment, answer),
   );
 }
 

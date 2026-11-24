@@ -19,6 +19,7 @@ import type { AuditEntry, ChatMessage, ChatSendDelay } from "../../src/shared/co
 import type { ModelPicks, ModelSettingsResponse } from "../../src/shared/models.js";
 import type { UsageAsk, UsageDevice, UsageReport } from "../../src/shared/usage-ids.js";
 import type { WorkersResponse } from "../../src/shared/workers.js";
+import { LOCKED_LINE, noPlan } from "./cloud-agent.js";
 import { heardAnswer, isAsleep, isBackground } from "./rivet-sleep.js";
 import { sameSession, StaleSession } from "./session.js";
 import { replyStyleField } from "./views/chat-reply-style.js";
@@ -33,6 +34,16 @@ export class ApiError extends Error {
     readonly answered: Reply | null = null,
   ) {
     super(message);
+  }
+}
+
+/**
+ * A hosted machine refused the write because no AI plan is connected (cloud-agent.ts noPlan): nothing was sent and
+ * nothing is to be tried again; the message boxes are locked by the time this is thrown.
+ */
+export class NoPlan extends ApiError {
+  constructor() {
+    super(409, LOCKED_LINE);
   }
 }
 
@@ -172,6 +183,7 @@ async function answer<T>(response: Response): Promise<T> {
     if (response.ok) throw new ApiError(0, "The server's answer was cut off. Try again to check.");
     data = {};
   }
+  if (response.status === 409 && data.error === "no-plan" && noPlan()) throw new NoPlan();
   if (!response.ok) throw new ApiError(response.status, data.error ?? `Request failed (${response.status})`, data.undelivered === true, data.answered ?? null);
   return data as T;
 }

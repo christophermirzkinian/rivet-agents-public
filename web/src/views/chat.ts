@@ -36,8 +36,9 @@ function moodOf(text: string): Mood {
   return "clear";
 }
 import { APP_ONLY_PROJECTS, type ThreadProject } from "../../../src/shared/threads.js";
-import { ApiError, serverClockSkew } from "../api.js";
-import { agentName } from "../cloud-agent.js";
+import { ApiError, NoPlan, serverClockSkew } from "../api.js";
+import { agentName, needsPlan } from "../cloud-agent.js";
+import { lockedLine, lockMark } from "./plan-lock.js";
 import * as cmd from "../command-api.js";
 import type { ChatMessage } from "../command-api.js";
 import { dictation, MIC, STOP } from "../dictation.js";
@@ -1203,7 +1204,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   // being too far from the thumb.
   let sendWaits: boolean | null = null;
   const paintSend = () => {
-    sendBtn.disabled = sending || cappedWake !== null;
+    sendBtn.disabled = sending || cappedWake !== null || needsPlan();
     const waits = macOffline();
     if (waits === sendWaits) return;
     sendWaits = waits;
@@ -1362,6 +1363,10 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     text.setAttribute("aria-label", `Message ${agentName()}`);
     if (alive) render(false);
   };
+  // A hosted agent with no plan connected (plan-lock.ts): a lock where the mic was, and under the box the way to Connect.
+  const planMark = lockMark();
+  const planLine = lockedLine();
+  planMark.hidden = planLine.hidden = true;
   const composeBox = h(
     "div",
     { class: "chat-compose-box" },
@@ -1372,9 +1377,10 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       "div",
       { class: "chat-compose" },
       attach.button,
-      h("div", { class: "chat-field" }, text, micBtn),
+      h("div", { class: "chat-field" }, text, micBtn, planMark),
       sendBtn,
     ),
+    planLine,
   );
   // A title hit brings up its conversation's newest line in Chat; a message hit, that message. The hit held the
   // keyboard and went with the results.
@@ -1480,7 +1486,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   // pane takes the drop, past the column's edges; a read-only conversation, with no composer, takes none.
   // Only while the composer is on screen and takes files: not over a search, which hides it, nor while Rivet is asleep,
   // when the clip is off too.
-  const composing = () => !composeBox.hidden && cappedWake === null && !section.classList.contains("searching");
+  const composing = () => !composeBox.hidden && cappedWake === null && !needsPlan() && !section.classList.contains("searching");
   const unzone = dropZone(el, (files) => attach.add(files), composing);
   // On the composer, so a screenshot pasted into the search field is not taken unseen.
   composeBox.addEventListener("paste", (event) => {
@@ -2939,7 +2945,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     const { images, files } = photosPayload(photos);
     if (!body && !images.length && !files.length) return text.focus();
     // Not while a Cancel is out: its answer puts words back in this box.
-    if (sending || cancelling || cappedWake !== null) return;
+    if (sending || cancelling || cappedWake !== null || needsPlan()) return;
     sending = true;
     sendBtn.disabled = true;
     changed();
@@ -3013,7 +3019,8 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       if (alive) arrived(sent);
     } catch (error) {
       if (authFail(error)) return;
-      hint.textContent = describe(error);
+      // No plan connected: the box is locked by now and the line under it says so.
+      hint.textContent = error instanceof NoPlan ? "" : describe(error);
       if (error instanceof ApiError && error.status === 424)
         flash(describe(error), "error", 6000);
     } finally {
@@ -3184,6 +3191,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     seek();
     paintSend();
     paintName();
+    paintPlan();
   });
   seek();
   goLine = (conversation, message) => lineNow(conversation, message);
@@ -3213,23 +3221,39 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   const unwake = onWake(() => {
     if (alive && !stream && !poll && document.visibilityState !== "hidden") startStream();
   });
-  // The mic's own disabled state is kept to give back when the cap lifts.
+  // The mic's own disabled state is kept to give back when the box unlocks.
   let micWasDisabled = micBtn.disabled;
+  let planLocked = false;
+  /** The box locked: asleep (rivet-sleep.ts), or a hosted agent with no plan connected. */
+  const lockBox = () => {
+    const on = cappedWake !== null || planLocked;
+    attach.lock(on);
+    if (on) voice?.stop();
+    text.disabled = on;
+    micBtn.disabled = on || micWasDisabled;
+    composeBox.classList.toggle("capped", cappedWake !== null);
+    composeBox.classList.toggle("no-plan", planLocked);
+    planMark.hidden = planLine.hidden = !planLocked;
+    paintSend();
+    paintPlaceholder();
+  };
+  // It unlocks with no reload when a read finds a plan (cloud-agent.ts readCloud), and locks on a refused send.
+  const paintPlan = () => {
+    if (needsPlan() === planLocked) return;
+    if (!planLocked && cappedWake === null) micWasDisabled = micBtn.disabled;
+    planLocked = !planLocked;
+    lockBox();
+  };
+  paintPlan();
   const uncap = onCap((wake) => {
     const was = cappedWake;
     cappedWake = wake;
-    if (wake !== null && was === null) micWasDisabled = micBtn.disabled;
+    if (wake !== null && was === null && !planLocked) micWasDisabled = micBtn.disabled;
     // The band above the app takes or gives back height: the thread keeps what was at its foot there. One within 160 px
     // of its end goes to the end, so the newest message shows whole with its time on a short screen.
     const left = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
     const fromBottom = left <= 160 ? 0 : left;
-    attach.lock(wake !== null);
-    if (wake !== null) voice?.stop();
-    text.disabled = wake !== null;
-    micBtn.disabled = wake !== null || micWasDisabled;
-    composeBox.classList.toggle("capped", wake !== null);
-    paintSend();
-    paintPlaceholder();
+    lockBox();
     if ((wake === null) !== (was === null)) requestAnimationFrame(() => (scroller.scrollTop = scroller.scrollHeight - scroller.clientHeight - fromBottom));
   });
   const onVisible = () => {

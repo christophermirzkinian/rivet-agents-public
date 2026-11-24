@@ -18,7 +18,8 @@ export interface Plans {
 
 /** The supervisor's own page: a full page load, never the app's router. */
 export const CONNECT_PATH = "/cloud/setup/connect";
-const BAND_ID = "cloud-connect";
+/** Under every message box while no plan is connected, and what a refused send says. */
+export const LOCKED_LINE = "Sending is off until Claude or ChatGPT is connected.";
 const RETRY_MS = [5_000, 15_000, 60_000];
 const ENROL_RETRY_MS = [1_000, 2_000, 4_000];
 
@@ -29,6 +30,16 @@ let notHosted = false;
 let retries = 0;
 let retryTimer: ReturnType<typeof setTimeout> | undefined;
 let onFocus: (() => void) | null = null;
+/** The last read's `onChange`: a refused send redraws what a read would. */
+let redraw: (() => void) | null = null;
+/** One per refused write (noPlan): a plans read sent before it is older than what it said. */
+let planSeq = 0;
+const PLAN_POLL_MS = 15_000;
+let planTimer: ReturnType<typeof setInterval> | undefined;
+let onPlanFocus: (() => void) | null = null;
+let planRead: Promise<void> | null = null;
+let planApplied = 0;
+const STATUS_TIMEOUT_MS = 10_000;
 /** One per signed-in stretch: a read still on its way at a sign-out shows nothing. */
 let session = 0;
 
@@ -70,9 +81,22 @@ export function parsePlans(body: unknown): Plans | null {
  */
 type Read = { body: unknown } | { absent: boolean };
 
-async function readJson(path: string): Promise<Read> {
+/** With `ms`, a read still out after it says nothing either way. */
+async function readJson(path: string, ms?: number): Promise<Read> {
+  if (ms === undefined) return readOnce(path);
+  const stop = new AbortController();
+  const late = new Promise<Read>((done) => stop.signal.addEventListener("abort", () => done({ absent: false })));
+  const timer = setTimeout(() => stop.abort(), ms);
   try {
-    const response = await fetch(path, { credentials: "same-origin", headers: { accept: "application/json" } });
+    return await Promise.race([readOnce(path, stop.signal), late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function readOnce(path: string, signal?: AbortSignal): Promise<Read> {
+  try {
+    const response = await fetch(path, { credentials: "same-origin", headers: { accept: "application/json" }, signal });
     if (response.redirected) return { absent: false };
     const json = (response.headers.get("content-type") ?? "").includes("application/json");
     if (response.ok && json) return { body: await response.json() };
@@ -122,43 +146,90 @@ export const agentNoun = (): string => (hostedPage() ? "agent" : RIVET_NAME);
 export const tabTitle = (name: string): string => name;
 
 /** Only once the supervisor has said neither plan is connected; an unread status shows nothing. */
-export const needsPlan = (): boolean => hosted !== null && plans !== null && !plans.claude && !plans.chatgpt;
+export const needsPlan = (): boolean => hostedPage() && plans !== null && !plans.claude && !plans.chatgpt;
 
 export function connectPlan(): void {
   location.assign(CONNECT_PATH);
 }
 
-function showBand(on: boolean): void {
-  const band = document.getElementById(BAND_ID);
-  if (!on) return band?.remove();
-  if (band) return;
-  const link = document.createElement("a");
-  link.id = BAND_ID;
-  link.href = CONNECT_PATH;
-  link.setAttribute("data-use", "cloud.connect-band");
-  link.textContent = "Connect a plan →";
-  // Over the app in the body's flow, not beside the body as the cap band is: sheets keep the whole screen (styles.css).
-  document.body.prepend(link);
+/**
+ * The hosted proxy refused a write for want of a plan (api.ts): the plan was signed out while the page was open, so the
+ * plans read is none connected from here until the next read. False, with nothing changed, on the owner's own machine.
+ */
+export function noPlan(): boolean {
+  if (!hostedPage()) return false;
+  planApplied = ++planSeq;
+  plans = { claude: false, chatgpt: false };
+  redraw?.();
+  watchPlan();
+  return true;
 }
 
 /**
- * On a hosted machine, its agent's name, the tab's title and the Connect a plan band, read again at each call (the
- * app's start and each return to it); `onChange` redraws what shows the name. On the owner's own machine, one probe at
- * start and nothing after; a probe that missed is asked again until one answers either way.
+ * The plans read. Each read and each refused write takes the next number, and an answer older than the newest applied
+ * is dropped. True when it changed the plans.
+ */
+async function readStatus(): Promise<boolean> {
+  const at = session;
+  const seq = ++planSeq;
+  const status = parsePlans(bodyOf(await readJson("/cloud/connect/status", STATUS_TIMEOUT_MS)));
+  if (at !== session || !status || seq <= planApplied) return false;
+  planApplied = seq;
+  const changed = status.claude !== plans?.claude || status.chatgpt !== plans?.chatgpt;
+  plans = status;
+  return changed;
+}
+
+/** A locked desk's status read: the page redraws only when a plan came or went. */
+async function readPlans(): Promise<void> {
+  if (await readStatus()) redraw?.();
+  watchPlan();
+}
+
+/**
+ * While no plan is connected and the tab is in front: the plans read again every PLAN_POLL_MS and at the window's
+ * focus, so a plan connected elsewhere lifts the lock with no reload. A hidden tab stops; its return reads (main.ts).
+ */
+function watchPlan(): void {
+  const on = needsPlan() && !!redraw && document.visibilityState !== "hidden";
+  if (!on) return stopWatch();
+  const read = () => {
+    if (document.visibilityState === "hidden") return stopWatch();
+    if (!planRead) planRead = readPlans().finally(() => (planRead = null));
+  };
+  planTimer ??= setInterval(read, PLAN_POLL_MS);
+  if (!onPlanFocus) {
+    onPlanFocus = read;
+    window.addEventListener("focus", onPlanFocus);
+  }
+}
+
+function stopWatch(): void {
+  clearInterval(planTimer);
+  planTimer = undefined;
+  if (onPlanFocus) window.removeEventListener("focus", onPlanFocus);
+  onPlanFocus = null;
+}
+
+/**
+ * On a hosted machine, its agent's name, the tab's title and whether a plan is connected, read again at each call (the
+ * app's start and each return to it); `onChange` redraws what shows the name, the home screen's connect box and the locked
+ * message boxes (views/plan-lock.ts). On the owner's own machine, one probe at start and nothing after; a probe that
+ * missed is asked again until one answers either way.
  */
 export async function readCloud(onChange: () => void): Promise<void> {
   if (notHosted) return;
+  redraw = onChange;
   const at = session;
   const agent = await probeCloud();
   if (at !== session) return;
   if (!agent) return notHosted ? stopRetries() : retryLater(onChange);
   stopRetries();
   document.title = tabTitle(agentName());
-  const status = parsePlans(bodyOf(await readJson("/cloud/connect/status")));
+  await readStatus();
   if (at !== session) return;
-  plans = status ?? plans;
-  showBand(needsPlan());
   onChange();
+  watchPlan();
 }
 
 /** Besides the app's return (main.ts): its window's focus, and a short backoff. */
@@ -182,23 +253,25 @@ function stopRetries(): void {
 }
 
 /**
- * At a sign-out: the agent's name, the band and the plans read are the signed-in owner's, and the next sign-in reads
- * them again; the tab and the page go back to the served app's name.
+ * At a sign-out: the agent's name and the plans read are the signed-in owner's, and the next sign-in reads them again;
+ * the tab and the page go back to the served app's name.
  */
 export function leaveCloud(): void {
   session += 1;
   stopRetries();
+  stopWatch();
   retries = 0;
   plans = null;
   hosted = null;
+  redraw = null;
   nameNoAgent();
   document.title = appName();
-  document.getElementById(BAND_ID)?.remove();
 }
 
 /** For tests. */
 export function resetCloud(): void {
   stopRetries();
+  stopWatch();
   hosted = null;
   servedApp = null;
   servedHosted = false;
@@ -206,5 +279,6 @@ export function resetCloud(): void {
   plans = null;
   notHosted = false;
   retries = 0;
-  if (typeof document !== "undefined") document.getElementById(BAND_ID)?.remove();
+  redraw = null;
+  planRead = null;
 }

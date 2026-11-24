@@ -2933,6 +2933,32 @@ describe("the desktop layout", () => {
     expect(topId()).toBe("b");
   });
 
+  it("A on a question card sends no kept answer while a hosted agent has no plan, and sends it once one is connected", async () => {
+    const { noPlan, readServedApp, resetCloud } = await import("../web/src/cloud-agent.js");
+    needs = [{ ...need("q", "q1"), kind: "question", reply: "text" }];
+    await signIn();
+    cardState("q").text = "Blue";
+    document.head.insertAdjacentHTML("beforeend", `<meta name="hosted-agent" content="1" />`);
+    try {
+      readServedApp();
+      noPlan();
+      changed();
+      await press("a");
+      await settle(6000);
+      expect(root.querySelector(".toast.undo")).toBeNull();
+      expect(posts).toEqual([]);
+
+      resetCloud();
+      changed();
+      await press("a");
+      await settle(6000);
+      expect(posts.map((post) => post.body)).toMatchObject([{ itemId: "q", decision: "comment", text: "Blue" }]);
+    } finally {
+      document.head.querySelector('meta[name="hosted-agent"]')?.remove();
+      resetCloud();
+    }
+  });
+
   it("keeps chat open alongside, and a narrow window goes back to the phone layout", async () => {
     localStorage.setItem("rivet.desk.layout", JSON.stringify({ chat: true }));
     vi.stubGlobal("EventSource", undefined);

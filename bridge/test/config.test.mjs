@@ -62,6 +62,46 @@ test("readToken rejects malformed tokens without echoing them", async () => {
   await assert.rejects(readToken(failing, "RIVET_BOARD_TOKEN", {}), /could not read RIVET_BOARD_TOKEN/);
 });
 
+test("readToken says why security failed: its exit code and stderr's first line, never stdout, with no retry", async () => {
+  let calls = 0;
+  const denied = async () => {
+    calls++;
+    throw new ExecError("/usr/bin/security", { code: 51 }, "\nsecurity: SecKeychainSearchCopyNext: User interaction is not allowed.\nmore", TOKEN);
+  };
+  const sleeps = [];
+  await assert.rejects(readToken(denied, "RIVET_BOARD_TOKEN", {}, { sleep: async (ms) => sleeps.push(ms) }), (err) => {
+    const message = /** @type {Error} */ (err).message;
+    assert.equal(message, "could not read RIVET_BOARD_TOKEN from the environment or the Keychain (security exit 51: security: SecKeychainSearchCopyNext: User interaction is not allowed.)");
+    assert.equal(message.includes(TOKEN), false);
+    return true;
+  });
+  assert.equal(calls, 1);
+  assert.deepEqual(sleeps, []);
+});
+
+test("readToken tries a timed-out read once more after a pause, and says when both timed out", async () => {
+  const sleeps = [];
+  const sleep = async (/** @type {number} */ ms) => sleeps.push(ms);
+  let calls = 0;
+  const slowOnce = async () => {
+    if (calls++ === 0) throw new ExecError("/usr/bin/security", { killed: true, signal: "SIGTERM" }, "");
+    return { stdout: `${TOKEN}\n`, stderr: "" };
+  };
+  assert.equal(await readToken(slowOnce, "RIVET_BOARD_TOKEN", {}, { sleep }), TOKEN);
+  assert.equal(calls, 2);
+  assert.deepEqual(sleeps, [2_000]);
+
+  calls = 0;
+  const alwaysSlow = async () => {
+    calls++;
+    throw new ExecError("/usr/bin/security", { killed: true, signal: "SIGTERM" }, "");
+  };
+  await assert.rejects(readToken(alwaysSlow, "RIVET_BOARD_TOKEN", {}, { sleep }), {
+    message: "could not read RIVET_BOARD_TOKEN from the environment or the Keychain (security timed out, after a retry)",
+  });
+  assert.equal(calls, 2);
+});
+
 test("ExecError never carries the argument list", () => {
   const e = new ExecError("/opt/homebrew/bin/gh", { code: 1 }, "\nHTTP 404: Not Found\nmore");
   assert.equal(e.message, "gh exit 1");

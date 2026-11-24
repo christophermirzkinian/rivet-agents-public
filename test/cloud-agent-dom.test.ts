@@ -3,15 +3,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { APP_NAME, appName, chatName, RIVET_NAME, rivetWords, STORED_NAME, UNNAMED_AGENT } from "../src/shared/names.js";
 import type { Worker } from "../src/shared/workers.js";
-import { agentName, agentNoun, CONNECT_PATH, hostedPage, leaveCloud, needsPlan, ownMachineAfterEnrol, parseAgent, parsePlans, probeCloud, readCloud, readServedApp, resetCloud, tabTitle } from "../web/src/cloud-agent.js";
+import { agentName, agentNoun, CONNECT_PATH, hostedPage, leaveCloud, needsPlan, noPlan, ownMachineAfterEnrol, parseAgent, parsePlans, probeCloud, readCloud, readServedApp, resetCloud, tabTitle } from "../web/src/cloud-agent.js";
 import type { Ask } from "../src/shared/asks.js";
 import { opsData } from "../web/src/ops-data.js";
-import { app } from "../web/src/state.js";
+import { app, changed } from "../web/src/state.js";
 import { mount as mountOps, unmount as unmountOps } from "../web/src/views/ops.js";
 import { openStatus as openRunner, runnerItem } from "../web/src/views/ops-status.js";
 import { openMore } from "../web/src/views/chat-more.js";
 import { activityRows, askedBy, WHO_CHIPS, WHO_EMPTY } from "../web/src/views/chat-ticket.js";
-import { offlineBar } from "../web/src/views/feed.js";
+import { answerCard, offlineBar } from "../web/src/views/feed.js";
 import { menuList } from "../web/src/views/menu.js";
 import { mindNameless } from "../web/src/views/mind.js";
 import { PAGE_NAMES } from "../web/src/views/more.js";
@@ -135,7 +135,7 @@ describe("the probe", () => {
     await readCloud(() => {});
     expect(agentName()).toBe("Agent");
     expect(assign).not.toHaveBeenCalled();
-    expect(document.getElementById("cloud-connect")).toBeNull();
+    expect(needsPlan()).toBe(false);
     assign.mockRestore();
   });
 
@@ -226,12 +226,12 @@ describe("readCloud", () => {
     expect(asked).toEqual(["/cloud/agent"]);
     expect(onChange).not.toHaveBeenCalled();
     expect(document.title).toBe("Rivet Agents");
-    expect(document.getElementById("cloud-connect")).toBeNull();
+    expect(needsPlan()).toBe(false);
     expect(PAGE_NAMES.mind).toBe("Rivet's mind");
     expect(menuList().querySelector('[data-key="connect"]')).toBeNull();
   });
 
-  it("with no plan connected shows the band and the menu row to the connect page, then drops both once one is", async () => {
+  it("with no plan connected needs one and shows the menu row to the connect page, then neither once one is", async () => {
     const onChange = vi.fn();
     answers["/cloud/agent"] = () => json({ name: "Pip", setupDone: true, firstPlan: "claude" });
     answers["/cloud/connect/status"] = () => json({ claude: false, chatgpt: false, github: false, loggedIn: false });
@@ -240,25 +240,153 @@ describe("readCloud", () => {
     expect(document.title).toBe("Pip");
     expect(PAGE_NAMES.mind).toBe("Pip's mind");
     expect(needsPlan()).toBe(true);
-    const band = document.getElementById("cloud-connect") as HTMLAnchorElement;
-    expect(band.textContent).toBe("Connect a plan →");
-    expect(band.getAttribute("href")).toBe(CONNECT_PATH);
     const row = menuList().querySelector<HTMLElement>('[data-key="connect"]')!;
     expect(row.textContent).toBe("Connect a plan");
     expect(row.dataset.use).toBe("menu.row.connect");
 
     answers["/cloud/connect/status"] = () => json({ claude: false, chatgpt: true, github: false, loggedIn: false });
     await readCloud(onChange);
-    expect(document.getElementById("cloud-connect")).toBeNull();
+    expect(needsPlan()).toBe(false);
     expect(menuList().querySelector('[data-key="connect"]')).toBeNull();
   });
 
-  it("shows no band while the status cannot be read", async () => {
+  it("needs no plan while the status cannot be read", async () => {
     answers["/cloud/agent"] = () => json({ name: null, setupDone: true, firstPlan: "claude" });
     await readCloud(() => {});
     expect(document.title).toBe("Agent");
     expect(needsPlan()).toBe(false);
-    expect(document.getElementById("cloud-connect")).toBeNull();
+  });
+});
+
+describe("a write refused for want of a plan", () => {
+  it("is none connected from then on, redrawn as a read would, until a read finds one", async () => {
+    const onChange = vi.fn();
+    answers["/cloud/agent"] = () => json({ name: "Pip", setupDone: true, firstPlan: "claude" });
+    answers["/cloud/connect/status"] = () => json({ claude: true, chatgpt: false });
+    await readCloud(onChange);
+    expect(needsPlan()).toBe(false);
+    expect(noPlan()).toBe(true);
+    expect(needsPlan()).toBe(true);
+    expect(onChange).toHaveBeenCalledTimes(2);
+    await readCloud(onChange);
+    expect(needsPlan()).toBe(false);
+  });
+
+  it("is read again every 15 seconds and at the window's focus while none is connected, and lifts by itself", async () => {
+    vi.useFakeTimers();
+    const reads = () => asked.filter((path) => path === "/cloud/connect/status").length;
+    answers["/cloud/agent"] = () => json({ name: "Pip", setupDone: true, firstPlan: "claude" });
+    answers["/cloud/connect/status"] = () => json({ claude: false, chatgpt: false });
+    const onChange = vi.fn();
+    await readCloud(onChange);
+    expect(needsPlan()).toBe(true);
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(reads()).toBe(2);
+    window.dispatchEvent(new Event("focus"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(reads()).toBe(3);
+    expect(onChange).toHaveBeenCalledTimes(1);
+    answers["/cloud/connect/status"] = () => json({ claude: false, chatgpt: true });
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(needsPlan()).toBe(false);
+    expect(onChange).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(120_000);
+    window.dispatchEvent(new Event("focus"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(reads()).toBe(4);
+  });
+
+  it("starts no second read while one is still out", async () => {
+    vi.useFakeTimers();
+    const reads = () => asked.filter((path) => path === "/cloud/connect/status").length;
+    answers["/cloud/agent"] = () => json({ name: "Pip", setupDone: true, firstPlan: "claude" });
+    answers["/cloud/connect/status"] = () => json({ claude: false, chatgpt: false });
+    await readCloud(() => {});
+    let answer: (response: Response) => void = () => {};
+    answers["/cloud/connect/status"] = () => new Promise<Response>((done) => (answer = done)) as unknown as Response;
+    window.dispatchEvent(new Event("focus"));
+    await vi.advanceTimersByTimeAsync(5_000);
+    window.dispatchEvent(new Event("focus"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(reads()).toBe(2);
+    answer(json({ claude: true, chatgpt: false }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(needsPlan()).toBe(false);
+  });
+
+  it("gives up a read that never answers, so a later read still lifts the lock", async () => {
+    vi.useFakeTimers();
+    const reads = () => asked.filter((path) => path === "/cloud/connect/status").length;
+    answers["/cloud/agent"] = () => json({ name: "Pip", setupDone: true, firstPlan: "claude" });
+    answers["/cloud/connect/status"] = () => json({ claude: false, chatgpt: false });
+    await readCloud(() => {});
+    answers["/cloud/connect/status"] = () => new Promise<Response>(() => {}) as unknown as Response;
+    window.dispatchEvent(new Event("focus"));
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(reads()).toBe(2);
+    answers["/cloud/connect/status"] = () => json({ claude: true, chatgpt: false });
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(reads()).toBe(3);
+    expect(needsPlan()).toBe(false);
+  });
+
+  it("drops an answer older than one already applied", async () => {
+    answers["/cloud/agent"] = () => json({ name: "Pip", setupDone: true, firstPlan: "claude" });
+    let answer: (response: Response) => void = () => {};
+    answers["/cloud/connect/status"] = () => new Promise<Response>((done) => (answer = done)) as unknown as Response;
+    const older = readCloud(() => {});
+    await vi.waitFor(() => expect(asked).toContain("/cloud/connect/status"));
+    const late = answer;
+    answers["/cloud/connect/status"] = () => json({ claude: true, chatgpt: false });
+    await readCloud(() => {});
+    expect(needsPlan()).toBe(false);
+    late(json({ claude: false, chatgpt: false }));
+    await older;
+    expect(needsPlan()).toBe(false);
+  });
+
+  it("stops reading while the tab is hidden", async () => {
+    vi.useFakeTimers();
+    const reads = () => asked.filter((path) => path === "/cloud/connect/status").length;
+    answers["/cloud/agent"] = () => json({ name: "Pip", setupDone: true, firstPlan: "claude" });
+    answers["/cloud/connect/status"] = () => json({ claude: false, chatgpt: false });
+    await readCloud(() => {});
+    const hidden = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(reads()).toBe(1);
+    hidden.mockRestore();
+  });
+
+  it("keeps the lock against a read sent before the refusal, and a newer read lifts it", async () => {
+    answers["/cloud/agent"] = () => json({ name: "Pip", setupDone: true, firstPlan: "claude" });
+    let answer: (response: Response) => void = () => {};
+    answers["/cloud/connect/status"] = () => new Promise<Response>((done) => (answer = done)) as unknown as Response;
+    const read = readCloud(() => {});
+    await vi.waitFor(() => expect(asked).toContain("/cloud/connect/status"));
+    expect(noPlan()).toBe(true);
+    answer(json({ claude: true, chatgpt: false }));
+    await read;
+    expect(needsPlan()).toBe(true);
+    answers["/cloud/connect/status"] = () => json({ claude: true, chatgpt: false });
+    await readCloud(() => {});
+    expect(needsPlan()).toBe(false);
+  });
+
+  it("locks on a hosted page whose probe has not answered yet", () => {
+    document.head.innerHTML = `<meta name="hosted-agent" content="1" />`;
+    readServedApp();
+    expect(noPlan()).toBe(true);
+    expect(needsPlan()).toBe(true);
+    document.head.replaceChildren();
+  });
+
+  it("changes nothing on the owner's own machine", async () => {
+    const onChange = vi.fn();
+    await readCloud(onChange);
+    expect(noPlan()).toBe(false);
+    expect(needsPlan()).toBe(false);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(asked).toEqual(["/cloud/agent"]);
   });
 });
 
@@ -268,15 +396,14 @@ describe("a sign-out", () => {
     answers["/cloud/connect/status"] = () => json({ claude: false, chatgpt: false });
   });
 
-  it("takes the Connect a plan band and menu row away, and the next sign-in reads them again", async () => {
+  it("takes the plans read and the Connect a plan menu row away, and the next sign-in reads them again", async () => {
     await readCloud(() => {});
-    expect(document.getElementById("cloud-connect")).not.toBeNull();
+    expect(needsPlan()).toBe(true);
     leaveCloud();
-    expect(document.getElementById("cloud-connect")).toBeNull();
     expect(needsPlan()).toBe(false);
     expect(menuList().querySelector('[data-key="connect"]')).toBeNull();
     await readCloud(() => {});
-    expect(document.getElementById("cloud-connect")).not.toBeNull();
+    expect(needsPlan()).toBe(true);
   });
 
   it("puts the tab and the name back to the served app's, with the unnamed agent and never the build's own name", async () => {
@@ -311,7 +438,6 @@ describe("a sign-out", () => {
     const reading = readCloud(onChange);
     leaveCloud();
     await reading;
-    expect(document.getElementById("cloud-connect")).toBeNull();
     expect(needsPlan()).toBe(false);
     expect(onChange).not.toHaveBeenCalled();
     expect(RIVET_NAME).toBe(STORED_NAME);
@@ -591,6 +717,63 @@ describe("the monitor's name everywhere it is read (RIVET_NAME)", () => {
     await probeCloud();
     expect(shown()).toEqual(said("Agent"));
     expect(html.join("").match(/.{0,60}Rivet.{0,40}/g)).toBeNull();
+  });
+
+  it("locks the worker sheet's message box while a hosted agent has no plan, its line the way to Connect, and unlocks it once one is connected", async () => {
+    answers["/cloud/agent"] = () => json({ name: "Pip", setupDone: true, firstPlan: "claude" });
+    answers["/cloud/connect/status"] = () => json({ claude: false, chatgpt: false });
+    vi.stubGlobal("SpeechRecognition", class {});
+    await readCloud(changed);
+    shown();
+    const text = document.querySelector<HTMLTextAreaElement>(".cmd-send .cmd-text")!;
+    const send = document.querySelector<HTMLButtonElement>('.cmd-send [data-use="worker.send"]')!;
+    const mic = document.querySelector<HTMLButtonElement>(".cmd-send .dictate-mic")!;
+    const line = document.querySelector<HTMLAnchorElement>(".cmd-send .sheet-where .noplan-line")!;
+    expect([text.disabled, send.disabled, mic.disabled]).toEqual([true, true, true]);
+    expect(mic.getAttribute("aria-label")).toBe(`Dictate ${text.getAttribute("aria-label")}`);
+    expect(mic.getAttribute("aria-label")).not.toBe("Dictate text");
+    expect(document.querySelectorAll(".cmd-send .noplan-line")).toHaveLength(1);
+    expect(line.textContent).toBe("Sending is off until Claude or ChatGPT is connected.");
+    expect(line.getAttribute("href")).toBe(CONNECT_PATH);
+    expect(line.querySelector(".noplan-mark")).not.toBeNull();
+
+    answers["/cloud/connect/status"] = () => json({ claude: true, chatgpt: false });
+    await readCloud(changed);
+    expect([text.disabled, send.disabled, mic.disabled]).toEqual([false, false, false]);
+    expect(document.querySelector(".cmd-send .sheet-where")!.textContent).toBe(said("Pip").where);
+  });
+
+  it("locks a card's message box, its mic, photos and Send while a hosted agent has no plan, and unlocks it once one is connected", async () => {
+    vi.stubGlobal("SpeechRecognition", class {});
+    answers["/cloud/agent"] = () => json({ name: "Pip", setupDone: true, firstPlan: "claude" });
+    answers["/cloud/connect/status"] = () => json({ claude: false, chatgpt: false });
+    await readCloud(changed);
+    const need = { id: "n-plan", kind: "approval", title: "Card", ask: "Ship it?", rev: "1" } as const;
+    document.body.replaceChildren(answerCard(need));
+    const parts = () => [".say-text", ".dictate-mic", ".attach-btn", ".say-send"].map((one) => document.querySelector<HTMLButtonElement>(`.say-line ${one}`)!.disabled);
+    const line = document.querySelector<HTMLAnchorElement>(".say-line .noplan-line")!;
+    expect(parts()).toEqual([true, true, true, true]);
+    expect([line.hidden, line.textContent, line.getAttribute("href")]).toEqual([false, "Sending is off until Claude or ChatGPT is connected.", CONNECT_PATH]);
+    expect(line.querySelector(".noplan-mark")).not.toBeNull();
+
+    answers["/cloud/connect/status"] = () => json({ claude: true, chatgpt: false });
+    await readCloud(changed);
+    expect(parts()).toEqual([false, false, false, false]);
+    expect(line.hidden).toBe(true);
+  });
+
+  it("locks a question card's Send answer with its box, and unlocks it once a plan is connected", async () => {
+    answers["/cloud/agent"] = () => json({ name: "Pip", setupDone: true, firstPlan: "claude" });
+    answers["/cloud/connect/status"] = () => json({ claude: false, chatgpt: false });
+    await readCloud(changed);
+    const need = { id: "n-question", kind: "question", title: "Card", ask: "Which colour?", rev: "1" } as const;
+    document.body.replaceChildren(answerCard(need));
+    const answer = () => document.querySelector<HTMLButtonElement>('[data-use="cards.send-answer"]')!;
+    expect([answer().disabled, document.querySelector<HTMLTextAreaElement>(".say-text")!.disabled]).toEqual([true, true]);
+
+    answers["/cloud/connect/status"] = () => json({ claude: true, chatgpt: false });
+    await readCloud(changed);
+    expect([answer().disabled, document.querySelector<HTMLTextAreaElement>(".say-text")!.disabled]).toEqual([false, false]);
   });
 
   it("is Rivet again once the machine is the owner's own", async () => {

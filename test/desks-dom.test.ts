@@ -5,6 +5,7 @@ import { NEEDS_YOU, NOTHING_NEEDS_YOU } from "../src/shared/words.js";
 import type { Ask } from "../src/shared/asks.js";
 import type { PullRequest, TimelineEvent } from "../src/shared/ops.js";
 import type { PushQueueRow, Worker } from "../src/shared/workers.js";
+import type * as Api from "../web/src/api.js";
 import type * as State from "../web/src/state.js";
 
 const CARDS = vi.hoisted(() => ({ waiting: 0, minimised: 0 }));
@@ -26,23 +27,27 @@ vi.mock("../web/src/views/your-asks.js", async (importOriginal) => ({
   openAsks: () => ASKS.open,
 }));
 
-const BACKLOG = vi.hoisted(() => ({ reads: 0, answer: null as unknown, issue: null as unknown, started: [] as unknown[][], closed: [] as unknown[][] }));
-vi.mock("../web/src/api.js", async (importOriginal) => ({
-  ...(await importOriginal<object>()),
-  getBacklog: async () => {
-    BACKLOG.reads += 1;
-    return BACKLOG.answer;
-  },
-  getBacklogIssue: async () => BACKLOG.issue,
-  startBacklogIssue: async (...args: unknown[]) => {
-    BACKLOG.started.push(args);
-    return { ask: "a-9", already: false, start: { repo: args[0], issue: args[1], ask: "a-9", words: "", at: new Date().toISOString(), stage: "queued" } };
-  },
-  closeBacklogIssue: async (...args: unknown[]) => {
-    BACKLOG.closed.push(args);
-    return { close: { id: "act-1", status: "waiting", at: new Date().toISOString() } };
-  },
-}));
+const BACKLOG = vi.hoisted(() => ({ reads: 0, answer: null as unknown, issue: null as unknown, started: [] as unknown[][], closed: [] as unknown[][], noPlan: false }));
+vi.mock("../web/src/api.js", async (importOriginal) => {
+  const api = await importOriginal<typeof Api>();
+  return {
+    ...api,
+    getBacklog: async () => {
+      BACKLOG.reads += 1;
+      return BACKLOG.answer;
+    },
+    getBacklogIssue: async () => BACKLOG.issue,
+    startBacklogIssue: async (...args: unknown[]) => {
+      BACKLOG.started.push(args);
+      if (BACKLOG.noPlan) throw new api.NoPlan();
+      return { ask: "a-9", already: false, start: { repo: args[0], issue: args[1], ask: "a-9", words: "", at: new Date().toISOString(), stage: "queued" } };
+    },
+    closeBacklogIssue: async (...args: unknown[]) => {
+      BACKLOG.closed.push(args);
+      return { close: { id: "act-1", status: "waiting", at: new Date().toISOString() } };
+    },
+  };
+});
 
 const CHATS = vi.hoisted(() => ({ opened: [] as unknown[][] }));
 vi.mock("../web/src/views/worker-sheet.js", async (importOriginal) => ({
@@ -295,6 +300,76 @@ describe("the desks", () => {
       await vi.waitFor(() => expect(sheet.querySelector(".home-sheet-title")!.textContent).toBe("example-repo"));
       expect(document.querySelector(".sheet.backlog-sheet")).not.toBeNull();
     } finally {
+      closeTallSheet();
+    }
+  });
+
+  it("keeps Start work off while a hosted agent has no plan, its line the way to Connect, and turns it on once one is", async () => {
+    const { closeTallSheet } = await import("../web/src/views/sheet.js");
+    const { CONNECT_PATH, noPlan, readServedApp, resetCloud } = await import("../web/src/cloud-agent.js");
+    knownProjects();
+    BACKLOG.started = [];
+    document.head.innerHTML = `<meta name="hosted-agent" content="1" />`;
+    readServedApp();
+    noPlan();
+    const recent = [{ number: 74, title: "A locked job", updatedAt: at(-60), labels: [] }];
+    BACKLOG.answer = { at: at(-1), stale: false, repos: { [MS]: { repo: MS, total: 1, logs: 0, ownerTotal: 0, owner: [], recent, bugs: [], at: at(-1), stale: false } }, asks: [] };
+    BACKLOG.issue = {
+      detail: { repo: MS, number: 74, title: "A locked job", body: "Do it.", author: "sam", createdAt: at(-120), state: "open", url: `https://github.com/${MS}/issues/74`, comments: 0, labels: [], at: at(0) },
+      pending: false,
+      start: null,
+      close: null,
+      chat: null,
+    };
+    try {
+      const el = mount();
+      el.querySelector<HTMLButtonElement>(`.desk-slot[data-place="${MS}"]`)!.click();
+      const sheet = document.querySelector<HTMLElement>(".sheet.backlog-sheet")!;
+      await vi.waitFor(() => expect(sheet.querySelector('.backlog-row[data-key="issue-74"]')).not.toBeNull());
+      sheet.querySelector<HTMLButtonElement>('.backlog-row[data-key="issue-74"]')!.click();
+      const start = await vi.waitFor(() => sheet.querySelector<HTMLButtonElement>('[data-use="backlog.issue.start"]')!);
+      const line = sheet.querySelector<HTMLAnchorElement>(".backlog-issue-foot .noplan-line")!;
+      expect([start.disabled, line.textContent, line.getAttribute("href")]).toEqual([true, "Sending is off until Claude or ChatGPT is connected.", CONNECT_PATH]);
+      start.click();
+      expect(BACKLOG.started).toHaveLength(0);
+
+      resetCloud();
+      changed();
+      expect([start.disabled, line.isConnected]).toEqual([false, false]);
+    } finally {
+      resetCloud();
+      document.head.replaceChildren();
+      closeTallSheet();
+    }
+  });
+
+  it("leaves Start work as it was when a start is refused for want of a plan", async () => {
+    const { closeTallSheet } = await import("../web/src/views/sheet.js");
+    knownProjects();
+    BACKLOG.started = [];
+    BACKLOG.noPlan = true;
+    const recent = [{ number: 75, title: "A first job", updatedAt: at(-60), labels: [] }];
+    BACKLOG.answer = { at: at(-1), stale: false, repos: { [MS]: { repo: MS, total: 1, logs: 0, ownerTotal: 0, owner: [], recent, bugs: [], at: at(-1), stale: false } }, asks: [] };
+    BACKLOG.issue = {
+      detail: { repo: MS, number: 75, title: "A first job", body: "Do it.", author: "sam", createdAt: at(-120), state: "open", url: `https://github.com/${MS}/issues/75`, comments: 0, labels: [], at: at(0) },
+      pending: false,
+      start: null,
+      close: null,
+      chat: null,
+    };
+    try {
+      const el = mount();
+      el.querySelector<HTMLButtonElement>(`.desk-slot[data-place="${MS}"]`)!.click();
+      const sheet = document.querySelector<HTMLElement>(".sheet.backlog-sheet")!;
+      await vi.waitFor(() => expect(sheet.querySelector('.backlog-row[data-key="issue-75"]')).not.toBeNull());
+      sheet.querySelector<HTMLButtonElement>('.backlog-row[data-key="issue-75"]')!.click();
+      const start = await vi.waitFor(() => sheet.querySelector<HTMLButtonElement>('[data-use="backlog.issue.start"]')!);
+      start.click();
+      await vi.waitFor(() => expect(BACKLOG.started).toHaveLength(1));
+      await vi.waitFor(() => expect(start.getAttribute("aria-busy")).toBeNull());
+      expect(start.textContent).toBe("Start work");
+    } finally {
+      BACKLOG.noPlan = false;
       closeTallSheet();
     }
   });

@@ -181,6 +181,13 @@ describe("What you used", () => {
     await flush();
     await flush();
     expect(host.querySelector(".used-note.no")!.textContent).toBe("Not sent. Try again.");
+    // A hosted agent with no plan: the locked line on its own.
+    const { NoPlan } = await import("../web/src/api.js");
+    api.askUsage.mockRejectedValueOnce(new NoPlan());
+    host.querySelector<HTMLButtonElement>('[data-id="chat.aloud"] [data-use="used.rework"]')!.click();
+    await flush();
+    await flush();
+    expect(host.querySelector(".used-note.no")!.textContent).toBe("Sending is off until Claude or ChatGPT is connected.");
   });
 
   it("switches to the computer's counts and keeps the open folds", async () => {

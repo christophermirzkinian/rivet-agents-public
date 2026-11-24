@@ -1,12 +1,14 @@
 import type { BacklogIssueResponse, BacklogStart, IssueDetail } from "../../../src/shared/backlog.js";
 import { shortDate } from "../../../src/shared/when.js";
-import { closeBacklogIssue, getBacklogIssue, startBacklogIssue } from "../api.js";
+import { closeBacklogIssue, getBacklogIssue, NoPlan, startBacklogIssue } from "../api.js";
 import { startedWords } from "../backlog-logic.js";
-import { agentName } from "../cloud-agent.js";
+import { subscribe } from "../state.js";
+import { agentName, needsPlan } from "../cloud-agent.js";
 import { h, ICONS, svg } from "../dom.js";
 import { app, changed as appChanged } from "../state.js";
 import { projectName } from "../backlog-logic.js";
 import { startDraft } from "./chat.js";
+import { lockedLine } from "./plan-lock.js";
 import { flash } from "./toast.js";
 import { leaveTallSheet } from "./sheet.js";
 import { formattable, lexMarkdown, markdownDom } from "./text-pages.js";
@@ -79,6 +81,7 @@ export function openIssuePage(content: HTMLElement, list: HTMLElement[], open: I
   const closeButton = h("button", { class: "backlog-btn is-close", attrs: { type: "button", "data-use": "backlog.issue.close" }, on: { click: () => void doClose() } }, "Close issue");
   const note = h("p", { class: "backlog-issue-note" });
   note.hidden = true;
+  const planLine = lockedLine(true);
   const foot = h(
     "div",
     { class: "backlog-foot backlog-issue-foot" },
@@ -124,6 +127,15 @@ export function openIssuePage(content: HTMLElement, list: HTMLElement[], open: I
       closeButton.textContent = close.status === "done" ? "Closed" : "Closing…";
       closeButton.setAttribute("aria-disabled", "true");
     }
+    paintPlan();
+  }
+
+  /** A hosted agent with no plan connected: Start work is off, and the line under it is the way to Connect. */
+  function paintPlan(): void {
+    const locked = !start && needsPlan();
+    startButton.disabled = locked;
+    if (!locked) planLine.remove();
+    else if (!planLine.isConnected) note.before(planLine);
   }
 
   async function paintBody(source: string): Promise<void> {
@@ -162,8 +174,8 @@ export function openIssuePage(content: HTMLElement, list: HTMLElement[], open: I
       if (!alive) return;
       changed = true;
       start = got.start ?? { repo, issue, ask: got.ask, words: "", at: new Date().toISOString(), stage: "queued" };
-    } catch {
-      if (alive) startButton.textContent = "Could not start. Tap to try again.";
+    } catch (error) {
+      if (alive) startButton.textContent = error instanceof NoPlan ? "Start work" : "Could not start. Tap to try again.";
     } finally {
       startButton.removeAttribute("aria-busy");
     }
@@ -218,6 +230,7 @@ export function openIssuePage(content: HTMLElement, list: HTMLElement[], open: I
 
   function stop(): void {
     alive = false;
+    unplan();
     clearTimeout(poll);
     clearTimeout(armed);
     window.removeEventListener("popstate", onPop);
@@ -262,6 +275,7 @@ export function openIssuePage(content: HTMLElement, list: HTMLElement[], open: I
   }
   window.addEventListener("popstate", onPop);
   window.addEventListener("keydown", onKey, true);
+  const unplan = subscribe(paintPlan);
   paint();
   void fetchIssue();
   backButton.focus({ preventScroll: true });

@@ -7,6 +7,7 @@ import { chatRepo } from "../../../src/shared/board.js";
 import { maybeWhen, when } from "../../../src/shared/when.js";
 import type { Worker } from "../../../src/shared/workers.js";
 import * as api from "../api.js";
+import { needsPlan } from "../cloud-agent.js";
 import * as cmd from "../command-api.js";
 import { stopDictation, withMic } from "../dictation.js";
 import { button, describe, h, inertBehind, keepFocus } from "../dom.js";
@@ -14,6 +15,7 @@ import { enterScreen, leaveScreen } from "../usage.js";
 import { STATE_WORDS } from "../crew-words.js";
 import { app, MAC_WAITS, crewLapsed, macOffline, signedOut, subscribe } from "../state.js";
 import { discussButton, discussPrefix, tooLong } from "./discuss.js";
+import { lockedLine } from "./plan-lock.js";
 import { holdFoot } from "./hold-foot.js";
 import { fitAboveKeyboard, leaveSheet } from "./sheet.js";
 import { RIVET_NAME, chatName } from "../../../src/shared/names.js";
@@ -45,6 +47,7 @@ export function actionError(error: unknown): string {
     return "Signed out.";
   }
   if (error instanceof api.ApiError && error.status === 503) return "The Mac is offline.";
+  if (error instanceof api.NoPlan) return describe(error);
   if (error instanceof api.ApiError && error.status === 409) return "That chat is not running right now.";
   return describe(error);
 }
@@ -285,11 +288,17 @@ function sendBox(getWorker: () => Worker, onStop: (stop: () => void) => void, ab
     const worker = getWorker();
     const label = worker.rivet ? `Message ${RIVET_NAME}` : `Message ${RIVET_NAME} about ${worker.name}`;
     heading.textContent = label;
-    where.textContent = worker.rivet ? `Goes to ${RIVET_NAME} now, in Chat.` : `Goes to ${RIVET_NAME} in Chat, tagged ${chatName(worker.chat)}. He passes it on.`;
+    // A hosted agent with no plan connected: the box is locked and its line is the way to Connect (plan-lock.ts).
+    const locked = needsPlan();
+    if (!locked) where.textContent = worker.rivet ? `Goes to ${RIVET_NAME} now, in Chat.` : `Goes to ${RIVET_NAME} in Chat, tagged ${chatName(worker.chat)}. He passes it on.`;
+    else if (!where.querySelector(".noplan-line")) where.replaceChildren(lockedLine(true));
+    if (locked && !text.disabled) stopDictation();
+    text.disabled = locked;
+    if (mic) mic.disabled = locked;
     text.maxLength = MAX_CHAT_TEXT - tagFor(worker, about).length;
     text.placeholder = worker.rivet ? `Ask ${RIVET_NAME} anything` : `What should ${worker.name} do?`;
     text.setAttribute("aria-label", label);
-    send.disabled = sending;
+    send.disabled = sending || locked;
     send.textContent = macOffline() ? `Send ${MAC_WAITS}` : "Send";
   };
   const send = button(
@@ -348,7 +357,8 @@ function sendBox(getWorker: () => Worker, onStop: (stop: () => void) => void, ab
           sending = false;
           paint();
           progress.el.hidden = true;
-          status.textContent = actionError(error);
+          // No plan connected: the line above the box says so.
+          status.textContent = error instanceof api.NoPlan ? "" : actionError(error);
         },
       );
     },
@@ -356,6 +366,11 @@ function sendBox(getWorker: () => Worker, onStop: (stop: () => void) => void, ab
     false,
     "worker.send",
   );
+  // withMic names its mic from the field's label.
+  const first = getWorker();
+  text.setAttribute("aria-label", first.rivet ? `Message ${RIVET_NAME}` : `Message ${RIVET_NAME} about ${first.name}`);
+  const field = withMic(text);
+  const mic = field.querySelector<HTMLButtonElement>(".dictate-mic");
   paint();
   text.addEventListener("input", paint);
   onStop(subscribe(paint));
@@ -364,7 +379,7 @@ function sendBox(getWorker: () => Worker, onStop: (stop: () => void) => void, ab
     { class: "cmd-send" },
     heading,
     where,
-    withMic(text),
+    field,
     h("div", { class: "cmd-send-row" }, progressEl, send),
     status,
   );
