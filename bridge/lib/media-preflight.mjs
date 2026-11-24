@@ -28,7 +28,7 @@ const STILL_RE = /\.(png|jpe?g)$/i;
  * @typedef {{ role: "before" | "after" | "poster" | "still" | "video", file: string }} MediaFile
  * @typedef {{ width: number, height: number }} Viewport
  * @typedef {{ exec: import("./config.mjs").Exec, ffprobe?: string, ffmpeg?: string, viewport?: Viewport,
- *   allowWebm?: boolean, skipCorner?: boolean, tmpdir?: string }} PreflightOptions
+ *   allowWebm?: boolean, skipCorner?: boolean, tmpdir?: string, maxStill?: number }} PreflightOptions
  */
 
 /**
@@ -197,12 +197,12 @@ function why(err) {
 
 /**
  * Checks every video and still before a card is made. Audio and PDFs are not checked here. A warning (a thick
- * coloured edge) never refuses the media.
+ * coloured edge) never refuses the media. `maxStill` refuses a still longer than it on either side.
  * @param {MediaFile[]} files
  * @param {PreflightOptions} opts
  * @returns {Promise<{ ok: boolean, problems: string[], warnings: string[] }>}
  */
-export async function preflight(files, { exec, ffprobe, ffmpeg, viewport, allowWebm = false, skipCorner = false, tmpdir = os.tmpdir() }) {
+export async function preflight(files, { exec, ffprobe, ffmpeg, viewport, allowWebm = false, skipCorner = false, tmpdir = os.tmpdir(), maxStill }) {
   const missing = [!ffprobe && "ffprobe", !ffmpeg && "ffmpeg"].filter(Boolean);
   if (missing.length) return { ok: false, warnings: [], problems: [`${missing.join(" and ")} not found on PATH: media is not sent unchecked (brew install ffmpeg)`] };
   /** @type {string[]} */
@@ -275,6 +275,8 @@ export async function preflight(files, { exec, ffprobe, ffmpeg, viewport, allowW
           problems.push(`${name}: a ${format || "unknown"} file, not a single ${want === "png" ? "png" : "jpg"} image`);
           continue;
         }
+        if (maxStill && role === "still" && Math.max(width, height) > maxStill)
+          problems.push(`${name}: ${width}x${height}, over ${maxStill} px on its longest side; scale it down (sips -Z ${maxStill} ${name})`);
       }
       if (viewport && !fitsViewport(width, height, viewport))
         problems.push(`${name}: ${width}x${height} is not the ${viewport.width}x${viewport.height} viewport at DPR 1 to ${MAX_DPR}; expected ${viewportSizes(viewport)}`);

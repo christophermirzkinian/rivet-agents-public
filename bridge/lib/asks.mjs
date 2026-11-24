@@ -13,6 +13,11 @@ export const MAX_ASK_WORDS = 4000;
 export const MAX_ASK_NOTE = 2000;
 export const MAX_ASK_CHAT = 300;
 export const MAX_ASK_WHY = 200;
+/** src/shared/asks.ts MAX_DONE_ITEMS and MAX_DONE_ITEM: what a done card says is done. */
+export const MAX_DONE_ITEMS = 3;
+export const MAX_DONE_ITEM = 160;
+/** The longest side of a done card's still, in pixels: bigger ones are slow on the owner's phone and no sharper. */
+export const MAX_DONE_STILL = 1600;
 const MAX_ASK_PRS = 50;
 /** src/shared/asks.ts MAX_DUE_AHEAD_MS. */
 const MAX_DUE_AHEAD_MS = 7 * 86_400_000;
@@ -38,7 +43,7 @@ export function stageOfAsk(ask) {
 
 /**
  * @typedef {{ at: string, stage?: string, note?: string, by?: string }} AskEvent
- * @typedef {{ at: string, dueAt: string, was: string, why?: string }} DueMove
+ * @typedef {{ at: string, dueAt: string, was: string, why?: string, by?: string }} DueMove
  * @typedef {{ id: string, words: string, who: string, source?: string, replyId?: string, cardId?: string, stage: string,
  *   status?: string, chat?: string, prs: number[], repo?: string, issue?: number, progress?: number, dueAt?: string,
  *   dueHistory?: DueMove[], why?: string, askedForTimeAt?: string, timeline: AskEvent[], createdAt: string, stageAt: string,

@@ -3,6 +3,9 @@
 # install run from a checkout would otherwise put that checkout's node_modules/.bin first in the job's PATH, where it
 # outlives the checkout, and a path under ~/Documents stalls a launchd job while a macOS privacy prompt is pending.
 launchd_path() {
+  # ~/.local/bin, when the PATH has it, goes first: a wrapper installed there (a CLI shim, say) must win over the
+  # Homebrew binary of the same name, whatever order the installing shell had.
+  local local_bin="$HOME/.local/bin"
   local out="" dir
   while IFS= read -r dir; do
     case "$dir" in
@@ -14,5 +17,12 @@ launchd_path() {
     esac
     [[ ":$out:" == *":$dir:"* ]] || out="${out:+$out:}$dir"
   done < <(printf '%s\n' "$1" | tr ':' '\n')
+  if [[ ":$out:" == *":$local_bin:"* ]]; then
+    out=":$out:"
+    out="${out/":$local_bin:"/:}"
+    out="${out#:}"
+    out="${out%:}"
+    out="$local_bin${out:+:$out}"
+  fi
   printf '%s' "$out"
 }

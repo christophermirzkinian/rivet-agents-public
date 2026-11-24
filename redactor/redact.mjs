@@ -117,6 +117,15 @@ const RULES = [
   [new RegExp(`(\\b(?:ldapsearch|ldapadd|ldapmodify|ldapdelete|ldappasswd|ldapwhoami)\\b.*?\\s-w)\\s*${WORD}`, "g"), "$1 [redacted]"],
   [new RegExp(`(\\bsqlcmd\\b.*?\\s-P)\\s*${WORD}`, "g"), "$1 [redacted]"],
 ];
+// A credential named by its shape starts after any character but a letter or digit, and an AWS key ends before one,
+// not at a word boundary: a joining `_` (`x_AKIA…`, `AKIA…_old`) is no boundary, and the long-token pass reads an
+// all-capitals key as a name. The rules keep their `\b` as written above; this is where it is replaced.
+const SHAPE_START = "(?<![A-Za-z0-9])";
+const SHAPE_END = "(?![A-Za-z0-9])";
+for (const rule of RULES) {
+  if (typeof rule[1] !== "string" || !rule[1].startsWith("[redacted ")) continue;
+  rule[0] = new RegExp(rule[0].source.replace(/^\\b/, SHAPE_START).replace(/\\b$/, SHAPE_END), rule[0].flags);
+}
 /**
  * The credentials RULES names by their shape (`[redacted github token]`), each found after any character but a letter or
  * digit: Rivet reads an id with them, where a joining `_` (`x_ghp_…`) keeps the word boundary from matching, while a
@@ -126,6 +135,92 @@ const RULES = [
 export const NAMED_SHAPES = RULES.filter(([, to]) => typeof to === "string" && to.startsWith("[redacted ")).map(
   ([shape]) => new RegExp(shape.source.replace(/^\\b/, "(?<![A-Za-z0-9])"), shape.flags.replace("g", "")),
 );
+
+/** A run of the long-token pass's characters and the two a path goes on with that it leaves out, `%` and `~`. */
+const SPLIT_RUN = /[A-Za-z0-9+/_.@%~-]{16,}={0,2}/g;
+/**
+ * Each named shape read from one place, its start and end tested by `shapeAcross`; `ends` when the shape has an end,
+ * `dotted` when it is parts joined by dots (a signed token, `eyJ….….…`), the one shape that can fail far from its start.
+ */
+const SHAPE_CORES = NAMED_SHAPES.filter((shape) => shape.source.startsWith(SHAPE_START)).map((shape) => {
+  const ends = shape.source.endsWith(SHAPE_END);
+  const source = shape.source.slice(SHAPE_START.length, ends ? -SHAPE_END.length : undefined);
+  // `lead`: the letters a dotted shape opens with (`eyJ`), written before its first character class.
+  return { core: new RegExp(source, `${shape.flags}y`), ends, dotted: source.includes("\\."), lead: source.slice(0, source.indexOf("[")) };
+});
+/** The characters of one part of a dotted shape, read from one place to the part's end. */
+const SHAPE_PART = /[A-Za-z0-9_-]*/y;
+const SHAPE_CHAR = /[A-Za-z0-9]/;
+
+/**
+ * `run` with its `%XX` escapes decoded, as many times over as they are written (`%2534` is a `4`), in one pass. With
+ * `marksOnly`, an escape of a letter or digit stays as written: no link writes one, so its `%` may be a stray one in
+ * front of two of a key's own characters.
+ * @param {string} run
+ * @param {boolean} [marksOnly]
+ */
+function percentDecoded(run, marksOnly = false) {
+  /** @type {string[]} */
+  const out = [];
+  for (const char of run) {
+    out.push(char);
+    while (out.length >= 3 && out[out.length - 3] === "%" && /^[0-7][0-9A-Fa-f]$/.test(out[out.length - 2] + out[out.length - 1])) {
+      const decoded = String.fromCharCode(parseInt(out[out.length - 2] + out[out.length - 1], 16));
+      if (marksOnly && SHAPE_CHAR.test(decoded)) break;
+      out.length -= 3;
+      out.push(decoded);
+    }
+  }
+  return out.join("");
+}
+
+/**
+ * Whether `text` holds a named shape once its `%` and `~` are taken out. Where one was taken out still counts as the
+ * shape's start or end, so a word joined on by one (`x~AKIA…~…`, `AKIA…~…~v2`) does not hide the key beside it.
+ * @param {string} text
+ */
+function shapeAcross(text) {
+  let glued = "";
+  const joints = new Set();
+  for (const char of text) {
+    if (char === "%" || char === "~") joints.add(glued.length);
+    else glued += char;
+  }
+  // A dotted shape that opens at one place and fails there fails from every later place in the same part: each reads to
+  // that part's end and then the same text. So one failed read covers the part, and a long run of starts is read once.
+  let failedTo = 0;
+  for (let at = 0; at < glued.length; at++) {
+    if (at > 0 && !joints.has(at) && SHAPE_CHAR.test(glued[at - 1])) continue;
+    for (const { core, ends, dotted, lead } of SHAPE_CORES) {
+      if (dotted && at < failedTo) continue;
+      core.lastIndex = at;
+      const found = core.exec(glued);
+      if (found) {
+        const end = at + found[0].length;
+        if (!ends || end === glued.length || joints.has(end) || !SHAPE_CHAR.test(glued[end])) return true;
+      } else if (dotted && lead && glued.startsWith(lead, at)) {
+        SHAPE_PART.lastIndex = at;
+        SHAPE_PART.exec(glued);
+        failedTo = SHAPE_PART.lastIndex;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Whether a run holds a named credential split at a `%` or `~`: the long-token pass ends its runs at either, so each
+ * piece of a key is too short for it to read (`AKIA…%34…`, a `4` as a link writes it). The run is read with
+ * its `%XX` escapes decoded, and again with those of a letter or digit left as written (`…%4F…`: an `O`, or a stray `%`
+ * before the key's own `4F`), each with the `%` and `~` it then holds taken out (`shapeAcross`). An escape of anything
+ * else is always that character, so a link's `%20` never lends its digits to a shape.
+ * @param {string} run
+ */
+function splitShape(run) {
+  if (!/[%~]/.test(run)) return false;
+  const decoded = percentDecoded(run);
+  return NAMED_SHAPES.some((shape) => shape.test(decoded)) || shapeAcross(decoded) || shapeAcross(percentDecoded(run, true));
+}
 
 /** A marker as this file writes one, by its exact name, or left unfinished; any other text after `[redacted` is the line's own. */
 const MARKER_NAMES = [...new Set(RULES.map(([, to]) => to).filter((to) => typeof to === "string" && to.startsWith("[redacted ")))];
@@ -319,7 +414,8 @@ function harmlessControlEscapes(text, structuralOnly = false) {
   // All identity letters belong to the token alphabet. Replacing them with a
   // control/empty string cannot create a longer candidate than this reading.
   // Name-shape judgements are not monotonic and are intentionally not used.
-  if (!structuralOnly && /[A-Za-z0-9+/_.@-]{16,}/.test(identity)) return false;
+  // `%` and `~` count too: a named credential is read across them (`splitShape`).
+  if (!structuralOnly && /[A-Za-z0-9+/_.@%~-]{16,}/.test(identity)) return false;
   // A control escape dropped by display cleanup joins the address characters either side of it (`203.0\b.113.42`): a
   // run of them through one, with an address's dots or colons, is read out like any other escape.
   if (!structuralOnly && Array.from(text.replace(controls, "\0").matchAll(/[0-9A-Fa-f.:\0]+/g), ([run]) => run)
@@ -749,6 +845,8 @@ function inspectEscapes(line, context = null, home = "", options = {}) {
         // The raw rule may have masked only an escape that decodes to a
         // separator. Any newly masked character that was published is a leak.
         if (display.exposed.some((one, i) => one && !masked.exposed[i]) ||
+            [...visible.matchAll(SPLIT_RUN)].some((match) =>
+              splitShape(match[0]) && display.exposed.slice(match.index, match.index + match[0].length).some(Boolean)) ||
             [...visible.matchAll(/[A-Za-z0-9+/_.@-]{16,}={0,2}/g)].some((match) =>
               looksSecret(match[0], visible.slice(match.index + match[0].length)) && display.exposed.slice(match.index, match.index + match[0].length).some(Boolean))) result = Math.max(result, 1);
         // An address the decoded reading shows and the line as written does not, published in part.
@@ -949,6 +1047,7 @@ function display(line, home, max) {
 /** @param {string} out a displayed line @param {number} max */
 function scrub(out, max) {
   for (const [pattern, replacement] of RULES) out = out.replace(pattern, /** @type {any} */ (replacement));
+  out = out.replace(SPLIT_RUN, (run) => (splitShape(run) ? "[redacted]" : run));
   out = out.replace(/[A-Za-z0-9+/_.@-]{16,}={0,2}/g, (token, at, all) => (looksSecret(token, all.slice(at + token.length)) ? "[redacted]" : token));
   return clipUnits(out, max);
 }

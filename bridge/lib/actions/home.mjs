@@ -64,6 +64,14 @@ export function createHomeFamily(options = {}) {
     await res.body?.cancel().catch(() => {});
   }
 
+  /**
+   * The family's own line: the bridge hands a press over as it arrives, outside its delivery queue, so two presses
+   * are kept in order here and never race. A press's time in this line counts against its deadline, which `control`
+   * reads when its turn comes.
+   * @type {Promise<unknown>}
+   */
+  let line = Promise.resolve();
+
   return {
     family: "home",
     events: Object.freeze(["home-control"]),
@@ -73,7 +81,22 @@ export function createHomeFamily(options = {}) {
      * @param {ActionContext} ctx
      * @returns {Promise<ActionResult>}
      */
-    async handle(_event, raw, ctx) {
+    handle(_event, raw, ctx) {
+      const run = line.then(() => control(raw, ctx));
+      // A press that throws is the caller's to log; the next press still gets its turn.
+      line = run.catch(() => {});
+      return run;
+    },
+  };
+
+  /**
+   * One press, start to ack.
+   * @param {unknown} raw
+   * @param {ActionContext} ctx
+   * @returns {Promise<ActionResult>}
+   */
+  async function control(raw, ctx) {
+    {
       const { origin, token, log } = ctx.deps;
       const r = /** @type {any} */ (raw && typeof raw === "object" ? raw : {});
       const id = typeof r.id === "string" && UUID_RE.test(r.id) ? r.id : null;
@@ -81,7 +104,7 @@ export function createHomeFamily(options = {}) {
         log("drop", { id: "?", reason: "bad-home-control" });
         return "dropped";
       }
-      // The server says when its wait ends; time spent behind other work in the bridge's queue counts against it.
+      // The server says when its wait ends; time spent behind an earlier press counts against it.
       const own = Date.now() + PRESS_BUDGET_MS;
       const until = Number.isSafeInteger(r.until) ? Math.min(own, r.until) : own;
       if (until - Date.now() < MIN_LEFT_MS) {
@@ -115,8 +138,8 @@ export function createHomeFamily(options = {}) {
         log("ack-failed", { id, error: err instanceof Error ? err.message.slice(0, 120) : "error" });
       }
       return result.ok ? "delivered" : "dropped";
-    },
-  };
+    }
+  }
 }
 
 export const home = createHomeFamily();

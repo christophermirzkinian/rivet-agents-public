@@ -567,6 +567,63 @@ describe("writing on a card, the next cards, and risky cards", () => {
     expect(root.querySelector(".card.top .choice-rec")).toBeNull();
   });
 
+  it("a done card reads as two labelled parts, what was asked then what is done; a Got it card with plain text keeps its one line", async () => {
+    const gotIt = (id: string, ask: string, cardId = `ask-${id}-done`): ServedNeed => ({ ...need(cardId, `${id}1`, ask), kind: "decision", options: [{ label: "Got it" }] });
+    const top = () => root.querySelector<HTMLElement>(".card.top")!;
+    const labels = () => [...top().querySelectorAll(".done-ask .done-label")].map((label) => label.textContent);
+
+    needs = [gotIt("three", "You asked: Make the cards bigger\nDone:\n- The cards are bigger\n- The chips match\n- See https://example.com/lab")];
+    await signIn();
+    const ask = top().querySelector<HTMLElement>("div.card-ask.done-ask")!;
+    expect(top().querySelectorAll(".card-ask")).toHaveLength(1);
+    expect(labels()).toEqual(["You asked", "Done"]);
+    expect(ask.querySelector("p.done-part")!.textContent).toBe("You askedMake the cards bigger");
+    expect([...ask.querySelectorAll("div.done-part ul.done-points > li")].map((item) => item.textContent)).toEqual(["The cards are bigger", "The chips match", "See https://example.com/lab"]);
+    expect(ask.querySelector<HTMLAnchorElement>("li a")?.href).toBe("https://example.com/lab");
+    expect(ask.textContent).not.toContain("- ");
+
+    needs = [gotIt("one", "You asked: Make the cards bigger\nDone: The cards are bigger")];
+    await signIn();
+    expect(labels()).toEqual(["You asked", "Done"]);
+    expect(top().querySelector(".done-ask ul")).toBeNull();
+    expect(top().querySelector(".done-ask div.done-part > span:not(.done-label)")!.textContent).toBe("The cards are bigger");
+
+    // Nothing said of what is done: what was asked alone, with no Done label.
+    needs = [gotIt("none", "You asked: Make the cards bigger")];
+    await signIn();
+    expect(labels()).toEqual(["You asked"]);
+    expect(top().querySelector(".done-ask div.done-part")).toBeNull();
+
+    // An ask the owner did not make reads Asked.
+    needs = [gotIt("other-ask", "Asked: Make the cards bigger\nDone: The cards are bigger")];
+    await signIn();
+    expect(labels()).toEqual(["Asked", "Done"]);
+    expect(top().querySelector(".done-ask p.done-part")!.textContent).toBe("AskedMake the cards bigger");
+
+    // The same words on a Got it card whose id is not an ask's Done card keep the plain line.
+    for (const cardId of ["report-look", "ask-a-1-done-again", "a-1-done"]) {
+      needs = [gotIt("other", "You asked: Make the cards bigger\nDone: The cards are bigger", cardId)];
+      await signIn();
+      expect(top().querySelector(".done-ask"), cardId).toBeNull();
+      expect(top().querySelector(".done-label"), cardId).toBeNull();
+      expect(top().querySelector("p.card-ask")!.textContent, cardId).toBe("You asked: Make the cards bigger\nDone: The cards are bigger");
+    }
+
+    // A card from before the two parts, and a Got it card that is not a done card.
+    for (const plain of ["Finished.", "The round two look is on the test build."]) {
+      needs = [gotIt("plain", plain)];
+      await signIn();
+      expect(top().querySelector(".done-ask")).toBeNull();
+      expect(top().querySelector("p.card-ask")!.textContent).toBe(plain);
+    }
+
+    // The same words on a card that is not Got it are not a done card.
+    needs = [{ ...need("pick", "p1", "You asked: Make the cards bigger\nDone: The cards are bigger"), kind: "decision", options: [{ label: "Keep" }, { label: "Undo" }] }];
+    await signIn();
+    expect(top().querySelector(".done-ask")).toBeNull();
+    expect(top().querySelector(".card-ask")).not.toBeNull();
+  });
+
   it("every card reads title, ask, then who sent it", async () => {
     needs = [{ ...need("d", "d1"), kind: "decision", chat: "schedules-retime", options: [{ label: "Keep" }] }];
     await signIn();

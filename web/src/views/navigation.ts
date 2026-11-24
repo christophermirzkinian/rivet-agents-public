@@ -2,7 +2,7 @@ import { stopDictation } from "../dictation.js";
 import { navigated } from "../state.js";
 import { closeAnswerSheet } from "./feed.js";
 import { leaveLightbox } from "./lightbox.js";
-import { closeSheet, leaveTallSheet } from "./sheet.js";
+import { leavePlainSheet, leaveTallSheet } from "./sheet.js";
 import { closeWorkerSheet } from "./worker-sheet.js";
 
 let pending: { next: () => void } | null = null;
@@ -29,12 +29,14 @@ function dismissOverlays(next: () => void): void {
   pending = request;
   // A viewer can sit over a sheet. Restore their inert state from the outside in.
   leaveLightbox(() => {
-    closeSheet();
-    closeWorkerSheet();
-    closeAnswerSheet();
-    leaveTallSheet(() => {
-      pending = null;
-      request.next();
+    // An ordinary sheet off a tall one has an entry of its own: its Back lands before the rest goes.
+    leavePlainSheet(() => {
+      closeWorkerSheet();
+      closeAnswerSheet();
+      leaveTallSheet(() => {
+        pending = null;
+        request.next();
+      });
     });
   });
 }

@@ -43,11 +43,11 @@ export interface RouteDeps {
    * Adds an update card as `PUT /api/board/needs/<id>?create=only` does, its push included: 200, or the refusal (409
    * when the id is taken). `replaces`: the pattern of the caller's own ids alone; the cards it matches leave in the same write.
    * `check`: the card checker runs on the card, its warnings returned. `sent`: the card's fields as the chat sent them,
-   * before redaction, for the checker's links rule.
+   * before redaction, for the checker's links rule. `silent`: the card is not pushed.
    */
   addUpdate(
     card: { id: string } & Record<string, unknown>,
-    options?: { progress?: boolean; replaces?: RegExp; check?: boolean; sent?: { id: string } & Partial<Need> },
+    options?: { progress?: boolean; replaces?: RegExp; check?: boolean; sent?: { id: string } & Partial<Need>; silent?: boolean },
   ): { status: number; error?: string; warnings?: string[] };
   /** Makes the wait cards again after a write outside the board (asks/waits.ts). */
   refreshWaits(): void;

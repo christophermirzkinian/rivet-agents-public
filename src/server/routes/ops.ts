@@ -12,6 +12,7 @@ import {
   OPS_MAX_BYTES,
 } from "../ops/schema.js";
 import { promiseKeeper } from "../asks/promises.js";
+import { doneCardPoster } from "../asks/done-card.js";
 import { BehavioursStore } from "../behaviours.js";
 import { createOps } from "../ops/service.js";
 import { NEWS_MS } from "../../shared/short-titles.js";
@@ -23,7 +24,7 @@ import type { Router } from "./router.js";
 const SMALL_BODY_MAX = 16 * 1024;
 
 export function register(router: Router): void {
-  const { config, store, bridge, requireSession, push, now, addUpdate, refreshWaits, workers, titles } = router.deps;
+  const { config, store, bridge, requireSession, push, logger, now, addUpdate, refreshWaits, workers, titles } = router.deps;
   // Settings › Behaviours' Promise keeper, read by the ask sweep each minute.
   const behaviours = new BehavioursStore(config.dataDir);
   const ops = createOps({
@@ -39,6 +40,7 @@ export function register(router: Router): void {
     refreshWaits,
     pickup: { send: (pickup) => bridge.sendOpsPickup(pickup), monitorChat: config.monitorChat },
     promiseKeeper: () => promiseKeeper(behaviours),
+    askDone: doneCardPoster({ store, addUpdate, titles, logger, now }),
   });
   router.onClose(() => ops.close());
   router.onClose(() => behaviours.close());

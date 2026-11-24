@@ -5,7 +5,7 @@ import { asksOfChat } from "../../../src/shared/ask-stages.js";
 import type { Ask } from "../../../src/shared/asks.js";
 import type { ServedNeed } from "../../../src/shared/board.js";
 import { NO_REPO } from "../../../src/shared/repos.js";
-import { allMinimised, answeredTab, NEEDS_YOU, NOTHING_NEEDS_YOU, openTab, showMinimised } from "../../../src/shared/words.js";
+import { allMinimised, alsoMinimised, answeredTab, NEEDS_YOU, NOTHING_NEEDS_YOU, openTab, SHOW_MINIMISED_OPEN, showMinimised } from "../../../src/shared/words.js";
 import type { Worker } from "../../../src/shared/workers.js";
 import { chatFor, seedKey } from "../agents-logic.js";
 import { homeOf, projectName } from "../backlog-logic.js";
@@ -94,8 +94,15 @@ export function openDecideFor(w: Worker, crew: readonly Worker[], asks: readonly
  * Opens the sheet on `first[0]` (a wide window: the pane); the order is `first`, then the deck's other open cards in deck order. Its switch is
  * Cards' Open N | Answered N; `look.answered` opens on Answered.
  * `look.untilRead`: Answered only stands in for an Open with nothing yet, so the first board read's open cards replace it.
+ * `look.picked`: `first[0]` was opened on purpose (a push or link tapped), so a minimised one opens in full and
+ * counts again; without it a minimised card stays small and nothing opens (a sign-in reopening the card it left).
  */
-export function openDecide(first: readonly string[], look: { answered?: boolean; untilRead?: boolean; onClose?: () => void } = {}): void {
+export function openDecide(first: readonly string[], look: { answered?: boolean; untilRead?: boolean; picked?: boolean; onClose?: () => void } = {}): void {
+  if (look.picked && !look.answered && first[0] && minimisedWaiting().some((need) => need.id === first[0])) {
+    unminimise(first[0]);
+    // Every count hears it, as showFirstMinimised's tap does.
+    changed();
+  }
   if (!look.answered && !openCards().some((need) => need.id === first[0])) return;
   // A wide window has no sheet for it: Decide opens in the middle pane.
   if (isDesk()) {
@@ -268,6 +275,25 @@ function decideView(first: readonly string[], look: { answered?: boolean; untilR
   // The sheet and the pane say when the cards shown are as of the last load; before one, the failed read says it.
   const offline = h("div", { class: "decide-offline" });
   const segsRow = h("div", { class: "decide-segs", attrs: { role: "group", "aria-label": "Decide" } }, segs.open, segs.answered);
+  // A card minimised beside open ones is out of Open N but still waits for an answer, so it is named here.
+  const minWords = h("span", { class: "decide-min-words" });
+  const minLine = h(
+    "p",
+    { class: "decide-min" },
+    minWords,
+    h("button", { class: "decide-min-show", attrs: { type: "button", "data-key": "show-minimised", "data-use": "decide.show-minimised" }, on: { click: () => showFirstMinimised() } }, SHOW_MINIMISED_OPEN),
+  );
+  minLine.hidden = true;
+  /** Unminimises the first minimised card still waiting and shows it here. */
+  function showFirstMinimised(): void {
+    // Read again at the tap: a redraw that changed nothing keeps this button.
+    const first = minimisedWaiting()[0];
+    if (!first) return paint();
+    unminimise(first.id);
+    [mode, at] = ["open", first.id];
+    // Every count hears it, so Decide N on the dock and the map's ? show the card as the sheet does (its paint too).
+    changed();
+  }
   /** A clip leaving full screen lets the pane draw what came meanwhile. */
   function fullScreenEnded(): void {
     if (!fullScreenElement()) paint();
@@ -394,6 +420,9 @@ function decideView(first: readonly string[], look: { answered?: boolean; untilR
     count.hidden = steps.hidden = false;
     segs.open.hidden = !inPane;
     more.hidden = false;
+    const aside = minimisedWaiting().length;
+    minLine.hidden = !aside;
+    minWords.textContent = aside ? alsoMinimised(aside) : "";
     const need = cards.find((one) => one.id === at)!;
     const shown = order.filter((id) => open.has(id));
     const repo = need.repo ?? NO_REPO;
@@ -458,20 +487,11 @@ function decideView(first: readonly string[], look: { answered?: boolean; untilR
   function noneOpen(): HTMLElement {
     const waiting = minimisedWaiting();
     if (!waiting.length) return h("p", { class: "feed-quiet decide-none" }, NOTHING_NEEDS_YOU);
-    const show = () => {
-      // Read again at the tap: a redraw that changed nothing keeps this button.
-      const first = minimisedWaiting()[0];
-      if (!first) return paint();
-      unminimise(first.id);
-      [mode, at] = ["open", first.id];
-      // Every count hears it, so Decide N on the dock and the map's ? show the card as the sheet does (its paint too).
-      changed();
-    };
     return h(
       "div",
       { class: "decide-none" },
       h("p", { class: "feed-quiet decide-none-line" }, allMinimised(waiting.length)),
-      h("p", { class: "clear-show" }, h("button", { class: "clear-min", attrs: { type: "button", "data-key": "show-minimised", "data-use": "decide.show-minimised" }, on: { click: show } }, showMinimised(waiting.length))),
+      h("p", { class: "clear-show" }, h("button", { class: "clear-min", attrs: { type: "button", "data-key": "show-minimised", "data-use": "decide.show-minimised" }, on: { click: showFirstMinimised } }, showMinimised(waiting.length))),
     );
   }
 
@@ -500,6 +520,7 @@ function decideView(first: readonly string[], look: { answered?: boolean; untilR
     count.hidden = steps.hidden = true;
     bars.replaceChildren();
     skip.hidden = true;
+    minLine.hidden = true;
     // On the phone's Answered, Open N is the way back and ⋯ has nothing more to hold; before the board has loaded there
     // is no Answered N to give.
     segs.open.hidden = !inPane && key !== "answered";
@@ -531,7 +552,7 @@ function decideView(first: readonly string[], look: { answered?: boolean; untilR
       const head = inPane
         ? h("header", { class: "decide-head" }, face, h("div", { class: "decide-who" }, h("span", { class: "decide-at" }, count, steps), name), segsRow, keysBtn, skip)
         : h("header", { class: "decide-head" }, closeBtn, face, h("div", { class: "decide-who" }, name, count), segs.open, skip, more);
-      const parts: HTMLElement[] = [inPane ? null : bars, head, offline, slot].filter((part) => part !== null);
+      const parts: HTMLElement[] = [inPane ? null : bars, head, offline, minLine, slot].filter((part) => part !== null);
       el.replaceChildren(...parts);
       // A poll that read nothing new leaves the card alone (as the Feed's does): building it again would move its clip.
       // Before the first board, every poll is news: it read the board or failed to.
@@ -584,7 +605,7 @@ export function showPushed(id: string, picked = true): void {
     if (picked) unminimise(id);
     app.tab = "progress";
     changed();
-    if (need) return openDecide([id]);
+    if (need) return openDecide([id], { picked });
     // A card added a moment ago may not be on the board this app last read: read it again and open it, unless the owner
     // has moved on meanwhile.
     const stamp = navStamp();

@@ -2,6 +2,7 @@ import { isFinished, MAX_ASKS, type Ask } from "../../shared/asks.js";
 import type { OpsStatus } from "../../shared/ops-status.js";
 import { newAsk, nextAskId, patched } from "../routes/asks.js";
 import type { Store } from "../store.js";
+import type { AskDone } from "./done-card.js";
 
 // Asks the server makes itself: Rivet's own pick-ups, so what it is on shows beside your asks with the same stage and
 // time. Your messages become asks through POST /api/asks (`from`).
@@ -51,8 +52,8 @@ export function reopenPickupAsk(store: Pick<Store, "listAsks" | "replaceAsk">, i
   if (newest?.stage === "parked" && newest.why === DISMISSED_WHY) store.replaceAsk(patched(newest, { stage: "building", why: null }, now), newest.version);
 }
 
-/** Each open pick-up ask whose Ops record now says fixed or parked, finished to match: done or parked. */
-export function settlePickupAsks(store: AskStore, statuses: readonly OpsStatus[], now: Date): void {
+/** Each open pick-up ask whose Ops record now says fixed or parked, finished to match: done (its done card through `done`) or parked. */
+export function settlePickupAsks(store: AskStore, statuses: readonly OpsStatus[], now: Date, done?: AskDone): void {
   const open = new Map<string, Ask>();
   for (const ask of store.listAsks({ limit: MAX_ASKS })) if (ask.source?.startsWith("pickup:") && !isFinished(ask.stage) && !open.has(ask.source)) open.set(ask.source, ask);
   if (!open.size) return;
@@ -60,6 +61,7 @@ export function settlePickupAsks(store: AskStore, statuses: readonly OpsStatus[]
     if (status.state !== "fixed" && status.state !== "parked") continue;
     const ask = open.get(pickupSource(status));
     if (!ask) continue;
-    store.replaceAsk(patched(ask, { stage: status.state === "fixed" ? "done" : "parked" }, now), ask.version);
+    const next = patched(ask, { stage: status.state === "fixed" ? "done" : "parked" }, now);
+    if (store.replaceAsk(next, ask.version)) done?.(ask, next);
   }
 }

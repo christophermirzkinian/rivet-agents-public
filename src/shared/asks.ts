@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { ID_PATTERN, isRealTime } from "./board.js";
+import { ID_PATTERN, isRealTime, mediaSchema } from "./board.js";
 import { REPO_RE } from "./repos.js";
 
 // Your asks, one record each: the spine every screen, card and push reads.
@@ -17,6 +17,40 @@ export const MAX_ASK_CHAT = 300;
 export const MAX_ASK_PRS = 50;
 export const MAX_ASK_WHY = 200;
 export const MAX_ASK_SOURCE = 200;
+/** A done card says what is done in at most this many short items (the card rule: a heading and up to 3). */
+export const MAX_DONE_ITEMS = 3;
+export const MAX_DONE_ITEM = 160;
+/** The two labels a done card's text leads its lines with; the app draws them as labels (web/src/views/feed.ts). */
+export const YOU_ASKED_LABEL = "You asked:";
+/** The id of an ask's Done card (`doneCardId` on the server). */
+export const DONE_CARD = /^ask-.+-done$/;
+/** The label over an ask the owner did not make (a pick-up). */
+export const ASKED_LABEL = "Asked:";
+export const DONE_LABEL = "Done:";
+
+/**
+ * A done card's text: what was asked, then what is done. One item sits on the Done line, more are "- " lines under
+ * it; with none the text is the ask alone. `own` is false for an ask the owner did not make: it reads "Asked:".
+ */
+export function doneCardText(asked: string, items: readonly string[], own = true): string {
+  const done = items.length === 1 ? [`${DONE_LABEL} ${items[0]}`] : items.length ? [DONE_LABEL, ...items.map((item) => `- ${item}`)] : [];
+  return [`${own ? YOU_ASKED_LABEL : ASKED_LABEL} ${asked}`, ...done].join("\n");
+}
+
+/** A done card's text back in its parts, or null for text that is not one (a card from before 2026-11-24, say). */
+export function doneCardParts(text: string): { asked: string; done: string[]; own: boolean } | null {
+  const [first = "", ...rest] = text.split("\n");
+  const label = [YOU_ASKED_LABEL, ASKED_LABEL].find((each) => first.startsWith(`${each} `));
+  if (label === undefined) return null;
+  const own = label === YOU_ASKED_LABEL;
+  const asked = first.slice(label.length + 1);
+  if (!rest.length) return { asked, done: [], own };
+  const [head = "", ...lines] = rest;
+  if (head === DONE_LABEL && lines.length && lines.every((line) => line.startsWith("- "))) return { asked, done: lines.map((line) => line.slice(2)), own };
+  if (head.startsWith(`${DONE_LABEL} `) && !lines.length) return { asked, done: [head.slice(DONE_LABEL.length + 1)], own };
+  return null;
+}
+
 /** Older events drop off the front past this. */
 export const MAX_ASK_TIMELINE = 100;
 /** Older moves drop off the front past this, so a count of moves stops here (moved twice reads only the last two). */
@@ -44,6 +78,7 @@ const time = z.string().datetime({ offset: true }).refine(isRealTime, "a time wi
 const words = z.string().min(1).max(MAX_ASK_WORDS).regex(TEXT, "words hold no control characters").refine((text) => text.trim() !== "", "words must not be blank");
 const note = z.string().min(1).max(MAX_ASK_NOTE).regex(TEXT, "a note holds no control characters").refine((text) => text.trim() !== "", "a note must not be blank");
 const why = z.string().min(1).max(MAX_ASK_WHY).regex(LINE, "a why is one line").refine((text) => text.trim() !== "", "a why must not be blank");
+const doneItem = z.string().min(1).max(MAX_DONE_ITEM).regex(LINE, "a done item is one line").refine((text) => text.trim() !== "", "a done item must not be blank");
 const source = z.string().min(1).max(MAX_ASK_SOURCE).regex(LINE);
 const chat = z.string().max(MAX_ASK_CHAT).regex(LINE);
 const by = z.string().max(100).regex(LINE);
@@ -57,8 +92,8 @@ export const askEventSchema = z
   .object({ at: time, stage: stage.optional(), note: note.optional(), by: by.optional() })
   .strict();
 
-/** One move of the promised time: `was` is the time it replaced, `why` the reason given. */
-export const dueMoveSchema = z.object({ at: time, dueAt: time, was: time, why: why.optional() }).strict();
+/** One move of the promised time: `was` is the time it replaced, `why` the reason given, `by` who moved it. */
+export const dueMoveSchema = z.object({ at: time, dueAt: time, was: time, why: why.optional(), by: by.optional() }).strict();
 
 export const askSchema = z
   .object({
@@ -126,7 +161,9 @@ export const askCreateSchema = z
 
 /**
  * PATCH /api/asks/:id. A null removes an optional field; `prs` are added to the ask's; `note` appends an event; `due`
- * promises a time (a later one is a move and needs `why`).
+ * promises a time (a later one is a move and needs `why`). `done` and `doneMedia` go with a move to done and are the
+ * done card's alone, never stored on the ask: what is done in up to MAX_DONE_ITEMS short items, and a still or a clip
+ * already in the media store.
  */
 export const askPatchSchema = z
   .object({
@@ -141,8 +178,12 @@ export const askPatchSchema = z
     progress: progress.nullable().optional(),
     due: time.nullable().optional(),
     why: why.nullable().optional(),
+    done: z.array(doneItem).min(1).max(MAX_DONE_ITEMS).optional(),
+    doneMedia: mediaSchema.optional(),
   })
-  .strict();
+  .strict()
+  .refine((input) => (input.done === undefined && input.doneMedia === undefined) || input.stage === "done", "done and doneMedia go with a move to done")
+  .refine((input) => input.doneMedia === undefined || input.doneMedia.kind === "stills" || input.doneMedia.kind === "video", "doneMedia is one still or one clip");
 
 export type AskEvent = z.infer<typeof askEventSchema>;
 export type DueMove = z.infer<typeof dueMoveSchema>;

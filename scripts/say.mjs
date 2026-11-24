@@ -8,11 +8,12 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { CARD_REFUSAL_MAX, documentName, MAX_MEDIA_BYTES, readClip, uploadClips } from "../bridge/lib/board-client.mjs";
 import { definitiveRefusal, dropCardHold, holdForCard, isVideoCard, rekeyCardHold } from "../bridge/lib/card-holds.mjs";
 import { makeExec, readToken, resolveBin, serverOrigin } from "../bridge/lib/config.mjs";
-import { folderRepo, prRepo } from "../bridge/lib/folder-repo.mjs";
+import { chatPrRepo, folderRepo, prRepo } from "../bridge/lib/folder-repo.mjs";
 import { HOLDS_FILE } from "../bridge/lib/holds-file.mjs";
 import { preflight } from "../bridge/lib/media-preflight.mjs";
+import { sendRefusal } from "../bridge/lib/redact-check.mjs";
 import { sanitizeLine } from "../bridge/lib/templates.mjs";
-import { isId } from "../bridge/lib/validate.mjs";
+import { isChatName, isId } from "../bridge/lib/validate.mjs";
 import { defaultRepo } from "../src/shared/repos.ts";
 
 const REPO_RE = /^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/;
@@ -23,7 +24,7 @@ const USAGE = `Answer you in the Rivet Agents app: a chat reply, a card you must
   node say.mjs --stdin [--reply-to <message id>]       read the message from stdin
   node say.mjs --image <abs path> [--reply-to <message id>]   a photo alone
   node say.mjs --new [--title "<title>"] --text "<message>"   start a conversation of its own
-  node say.mjs --reply-to <message id> --card --text "<result>" [--image <abs path> ...] [--video <abs path>] [--pr <n> [--repo <owner/name>]] [--ask <ask id>]
+  node say.mjs --reply-to <message id> --card --text "<result>" [--image <abs path> ...] [--video <abs path>] [--pr <n> [--repo <owner/name> | --chat <name>]] [--ask <ask id>]
   node say.mjs --reply-to <message id> --ack "building it, ~9:45"
 
 Where it lands: --reply-to <id> is a chat reply (acks and talk) in the
@@ -46,9 +47,13 @@ you must (a video waiting on your OK, a report you have to judge): a decision
 card in Needs you with "Yes, keep it" and "Change it", its photos or video kept,
 and one line in the conversation that opens it ("Card: <title> >"); a --tag or
 --thread on it is dropped. Finished work takes no card: rivet ask close records
-it. Nor does an answer to you go as an update card: the board refuses an update
-card that answers one of your messages. --pr <n> (with --repo <owner/name>, or
-the working folder's repo when that is left off) names the PR it is about, and
+it, and a close to done posts its own short Done card. Nor does an answer to you
+go as an update card: the board refuses an update
+card that answers one of your messages. --pr <n> names the PR it is about, in
+--repo <owner/name>; with that left off, in the repo of the chat it is for
+(--chat <name>, else the --ask's own repo or its chat's) when the board's chat
+names one, else in the working folder's repo. A chat that may be in more than
+one repo is refused until --repo names it. With a --pr,
 your yes is that PR's decision of record. Pass --ask a-N, the ask the card is
 about, so the card stays "under way" until the ask closes: your answer makes it
 that ask's card, and Cards shows it under way at the ask's stage, then Done or
@@ -59,6 +64,10 @@ the moment it is posted until your yes on it (by hand: rivet unhold --card <id>)
 --reply-to <id> --ack "<words>" sets the status line on your message
 ("Rivet: building it · ~9:45") instead of posting a bubble: no unread, no push.
 A later --ack replaces it. Use it for acks; real answers stay --text.
+
+Text, a title, an ack, a tag or a thread the redactor would change (a key, a
+token, a password, an escape code, a line it would hide whole) is refused before
+anything is sent: the refusal names only the field, the line and the rule.
 
 --image puts a jpg or png in the chat bubble (up to 3; tap it for full size).
 --video puts one H.264 mp4 there (25 MB at most). Both are checked as card media
@@ -111,7 +120,7 @@ export class DashError extends Error {}
 
 /** @param {string[]} argv */
 export function parseArgs(argv) {
-  /** @type {{ text?: string, replyTo?: string, stdin?: boolean, help?: boolean, images: string[], video?: string, file?: string, new?: boolean, title?: string, card?: boolean, tag?: string, thread?: string, ack?: string, pr?: number, repo?: string, ask?: string }} */
+  /** @type {{ text?: string, replyTo?: string, stdin?: boolean, help?: boolean, images: string[], video?: string, file?: string, new?: boolean, title?: string, card?: boolean, tag?: string, thread?: string, ack?: string, pr?: number, repo?: string, chat?: string, ask?: string }} */
   const o = { images: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -125,6 +134,10 @@ export function parseArgs(argv) {
       const value = argv[++i];
       if (value === undefined || !/^[a-z0-9-]{1,40}$/.test(value)) throw new Error("--ask takes an ask id, as a-1");
       o.ask = value;
+    } else if (a === "--chat") {
+      const value = argv[++i];
+      if (value === undefined || !isChatName(value)) throw new Error("--chat takes a chat name");
+      o.chat = value;
     } else if (a === "--pr" || a === "--repo") {
       const value = argv[++i];
       if (value === undefined) throw new Error(`${a} needs a value`);
@@ -180,6 +193,7 @@ export function parseArgs(argv) {
   if (o.card && o.replyTo === undefined) throw new Error("--card answers a message: give --reply-to <id>");
   if ((o.pr !== undefined || o.repo !== undefined) && !o.card) throw new Error("--pr names the PR of an outcome card: give --reply-to <id> --card");
   if (o.repo !== undefined && o.pr === undefined) throw new Error("--repo names the PR's repo: give --pr <n>");
+  if (o.chat !== undefined && (!o.card || o.pr === undefined)) throw new Error("--chat names the chat whose repo the PR is in: give --reply-to <id> --card --pr <n>");
   if (o.ask !== undefined && !o.card) throw new Error("--ask names the ask of an outcome card: give --reply-to <id> --card");
   // An outcome (--card) takes no tag or thread, but an older call that passes them still posts it: the server drops them.
   const card = o.card || (o.replyTo === undefined && !o.new);
@@ -221,6 +235,46 @@ export function sayBody(text, replyTo, clips, start = {}) {
     ...(start.thread ? { thread: start.thread.trim() } : {}),
     ...(start.ack ? { ack: start.ack.trim() } : {}),
   };
+}
+
+/**
+ * The repo a --card's --pr with no --repo names by its chat (chatPrRepo): the chat is --chat, else the --ask's, whose
+ * own repo decides when it has one. No `repo` is nothing learnt, so the folder decides; `error` is a refusal with its
+ * exit code. A read that fails is refused, never left to the folder: from the monitor's main checkout that would name
+ * the main repo's PR of that number.
+ * @param {{ pr: number, chat?: string, ask?: string }} card
+ * @param {{ origin: string, token: string, fetch: typeof fetch }} server
+ * @returns {Promise<{ repo?: string, note?: string } | { error: string, code: number }>}
+ */
+export async function cardChatRepo({ pr, chat, ask }, { origin, token, fetch: fetchFn }) {
+  const read = async (/** @type {string} */ pathname) => {
+    const res = await fetchFn(`${origin}${pathname}`, { headers: { authorization: `Bearer ${token}` }, redirect: "error", signal: AbortSignal.timeout(30_000) });
+    if (!res.ok) throw new Error(`http ${res.status}`);
+    return res.json();
+  };
+  const unread = (/** @type {string} */ what, /** @type {unknown} */ e) =>
+    ({ error: `--pr ${pr} has no --repo and ${what} could not be read (${sanitizeLine(/** @type {Error} */ (e).message, 200)}): give --repo; nothing was sent`, code: 1 });
+  let of = chat;
+  if (of === undefined && ask !== undefined) {
+    let doc;
+    try {
+      doc = await read(`/api/asks/${encodeURIComponent(ask)}`);
+    } catch (e) {
+      return unread(`ask ${ask}`, e);
+    }
+    if (typeof doc?.repo === "string" && doc.repo) return { repo: doc.repo, note: `--pr ${pr} is ${doc.repo}#${pr}, ask ${ask}'s repo; pass --repo for another` };
+    if (typeof doc?.chat === "string") of = doc.chat;
+  }
+  if (!of) return {};
+  let chats;
+  try {
+    chats = (await read("/api/board"))?.board?.chats;
+  } catch (e) {
+    return unread("the board", e);
+  }
+  const { repo, among } = chatPrRepo(chats, of, pr);
+  if (among) return { error: `--pr ${pr} has no --repo and chat ${of} may be in more than one repo: give --repo, one of ${among.join(", ")}; nothing was sent`, code: 2 };
+  return repo ? { repo, note: `--pr ${pr} is ${repo}#${pr}, chat ${of}'s repo; pass --repo for another` } : {};
 }
 
 /**
@@ -371,9 +425,35 @@ async function main() {
   if (text.length > MAX_SAY_TEXT) return fail(`the message is over ${MAX_SAY_TEXT} characters`, 2);
   const dash = dashRefusal(o.stdin ? "--stdin" : "--text", text);
   if (dash) return fail(dash, 2);
+  const redaction = sendRefusal([
+    [o.stdin ? "--stdin" : "--text", text],
+    ["--title", o.title],
+    ["--ack", o.ack],
+    ["--tag", o.tag],
+    ["--thread", o.thread],
+  ]);
+  if (redaction.refusal) return fail(redaction.refusal);
+  for (const note of redaction.notes) process.stderr.write(`say: note: ${note}\n`);
+
   const exec = makeExec();
+  const connect = async () => ({ origin: serverOrigin(process.env.RIVET_URL || undefined), token: await readToken(exec, "RIVET_BOARD_TOKEN") });
+  /** @type {{ origin: string, token: string } | undefined} */
+  let server;
+  let ofChat = false;
+  // The chat the card is for comes first (--chat, else the --ask's): the monitor posts another repo's chat's card from
+  // the main checkout.
+  if (o.pr !== undefined && o.repo === undefined && (o.chat !== undefined || o.ask !== undefined)) {
+    server = await connect();
+    const found = await cardChatRepo({ pr: o.pr, chat: o.chat, ask: o.ask }, { ...server, fetch });
+    if ("error" in found) return fail(found.error, found.code);
+    if (found.repo) {
+      ofChat = true;
+      if (found.repo !== defaultRepo()) o.repo = found.repo;
+      process.stderr.write(`say: note: ${found.note}\n`);
+    }
+  }
   // A --pr with no --repo is this folder's repo's PR.
-  if (o.pr !== undefined && o.repo === undefined) {
+  if (o.pr !== undefined && o.repo === undefined && !ofChat) {
     try {
       o.repo = prRepo(o.pr, await folderRepo(exec, () => resolveBin("git"), process.cwd()));
     } catch (err) {
@@ -407,8 +487,7 @@ async function main() {
     }
   }
 
-  const origin = serverOrigin(process.env.RIVET_URL || undefined);
-  const token = await readToken(exec, "RIVET_BOARD_TOKEN");
+  const { origin, token } = server ?? (await connect());
   await uploadClips(clips, { origin, token, fetch, log: (msg) => process.stderr.write(`say: ${msg}\n`) });
   const video = o.card ? clips.find((clip) => clip.role === "video") : undefined;
   const { code, posted } = await postSay(sayBody(text, o.replyTo, clips, { new: o.new, title: o.title, card: o.card, pr: o.pr, repo: o.repo, ask: o.ask, tag: o.tag, thread: o.thread, ack: o.ack }), {

@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { DashError, dashRefusal, holdSayCard, MAX_SAY_IMAGES, parseArgs, postSay, readPdf, sayBody } from "../../scripts/say.mjs";
+import { cardChatRepo, DashError, dashRefusal, holdSayCard, MAX_SAY_IMAGES, parseArgs, postSay, readPdf, sayBody } from "../../scripts/say.mjs";
 import { releaseForYes } from "../lib/card-holds.mjs";
 
 const SAY = fileURLToPath(new URL("../../scripts/say.mjs", import.meta.url));
@@ -119,6 +119,98 @@ test("say --card --ask names the ask an outcome card is about, so it stays under
   assert.throws(() => parseArgs(["--reply-to", "m1", "--card", "--text", "x", "--ask"]), /--ask takes an ask id/);
 });
 
+test("say --card --pr with no --repo is a PR of the repo of --chat, else of the --ask or its chat; two candidates and a failed read are refused", async () => {
+  const OTHER = "example-org/other-repo";
+  const MAIN = "example-org/example-repo";
+  assert.deepEqual(parseArgs(["--reply-to", "m1", "--card", "--text", "x", "--pr", "42", "--chat", "side-plan"]), { images: [], replyTo: "m1", card: true, text: "x", pr: 42, chat: "side-plan" });
+  assert.throws(() => parseArgs(["--reply-to", "m1", "--card", "--text", "x", "--chat", "side-plan"]), /--chat names the chat whose repo the PR is in: give --reply-to <id> --card --pr <n>/);
+  assert.throws(() => parseArgs(["--text", "x", "--chat", "side-plan"]), /--chat names the chat whose repo the PR is in/);
+  assert.throws(() => parseArgs(["--reply-to", "m1", "--card", "--text", "x", "--pr", "42", "--chat", "side plan"]), /--chat takes a chat name/);
+  assert.throws(() => parseArgs(["--reply-to", "m1", "--card", "--text", "x", "--pr", "42", "--chat"]), /--chat takes a chat name/);
+
+  /** @type {Record<string, unknown>} */
+  const docs = {
+    "/api/board": { version: 3, board: { needs: [], coming: [], chats: [{ name: "side-plan", repo: OTHER }, { name: "twin", repo: OTHER }, { name: "twin", repo: MAIN }, { name: "loose" }] } },
+    "/api/asks/a-1": { id: "a-1", chat: "side-plan" },
+    "/api/asks/a-2": { id: "a-2", chat: "side-plan", repo: MAIN },
+    "/api/asks/a-3": { id: "a-3" },
+    "/api/asks/a-4": { id: "a-4", chat: "twin" },
+  };
+  /** @type {string[]} */
+  const reads = [];
+  const fetchFn = /** @type {typeof fetch} */ (async (url, init) => {
+    assert.equal(/** @type {any} */ (init?.headers).authorization, "Bearer t");
+    const pathname = new URL(String(url)).pathname;
+    reads.push(pathname);
+    return pathname in docs ? new Response(JSON.stringify(docs[pathname]), { status: 200 }) : new Response('{"error":"not found"}', { status: 404 });
+  });
+  const server = { origin: "http://127.0.0.1:1", token: "t", fetch: fetchFn };
+  const read = async (/** @type {{ pr: number, chat?: string, ask?: string }} */ card) => {
+    reads.length = 0;
+    return [await cardChatRepo(card, server), [...reads]];
+  };
+
+  assert.deepEqual(await read({ pr: 42, chat: "side-plan" }), [{ repo: OTHER, note: `--pr 42 is ${OTHER}#42, chat side-plan's repo; pass --repo for another` }, ["/api/board"]]);
+  // --chat comes before the ask, which is not read.
+  assert.deepEqual(await read({ pr: 42, chat: "side-plan", ask: "a-2" }), [{ repo: OTHER, note: `--pr 42 is ${OTHER}#42, chat side-plan's repo; pass --repo for another` }, ["/api/board"]]);
+  assert.deepEqual(await read({ pr: 42, ask: "a-1" }), [{ repo: OTHER, note: `--pr 42 is ${OTHER}#42, chat side-plan's repo; pass --repo for another` }, ["/api/asks/a-1", "/api/board"]]);
+  // An ask that has its repo decides without the board.
+  assert.deepEqual(await read({ pr: 42, ask: "a-2" }), [{ repo: MAIN, note: `--pr 42 is ${MAIN}#42, ask a-2's repo; pass --repo for another` }, ["/api/asks/a-2"]]);
+
+  assert.deepEqual(await read({ pr: 42, chat: "twin" }), [{ error: `--pr 42 has no --repo and chat twin may be in more than one repo: give --repo, one of ${OTHER}, ${MAIN}; nothing was sent`, code: 2 }, ["/api/board"]]);
+  assert.deepEqual((await read({ pr: 42, ask: "a-4" }))[0], { error: `--pr 42 has no --repo and chat twin may be in more than one repo: give --repo, one of ${OTHER}, ${MAIN}; nothing was sent`, code: 2 });
+
+  // Nothing learnt, so the folder decides: a chat whose row names no repo, one not on the board, an ask with no chat.
+  assert.deepEqual(await read({ pr: 42, chat: "loose" }), [{}, ["/api/board"]]);
+  assert.deepEqual(await read({ pr: 42, chat: "nowhere" }), [{}, ["/api/board"]]);
+  assert.deepEqual(await read({ pr: 42, ask: "a-3" }), [{}, ["/api/asks/a-3"]]);
+  assert.deepEqual(await read({ pr: 42 }), [{}, []]);
+
+  // A read that fails is refused, never left to the folder.
+  assert.deepEqual((await read({ pr: 42, ask: "a-9" }))[0], { error: "--pr 42 has no --repo and ask a-9 could not be read (http 404): give --repo; nothing was sent", code: 1 });
+  delete docs["/api/board"];
+  assert.deepEqual((await read({ pr: 42, chat: "side-plan" }))[0], { error: "--pr 42 has no --repo and the board could not be read (http 404): give --repo; nothing was sent", code: 1 });
+  const down = /** @type {typeof fetch} */ (async () => { throw new Error("fetch failed"); });
+  assert.deepEqual(await cardChatRepo({ pr: 42, ask: "a-1" }, { ...server, fetch: down }), { error: "--pr 42 has no --repo and ask a-1 could not be read (fetch failed): give --repo; nothing was sent", code: 1 });
+});
+
+test("say --card --pr --chat posts the card as the chat's repo's PR and never sends the chat; with neither --chat nor --ask nothing is read", async () => {
+  const OTHER = "example-org/other-repo";
+  const gets = {
+    "/api/board": { version: 3, board: { needs: [], coming: [], chats: [{ name: "side-plan", repo: OTHER }, { name: "twin", repo: OTHER }, { name: "twin", repo: "example-org/example-repo" }, { name: "loose" }] } },
+    "/api/asks/a-1": { id: "a-1", chat: "side-plan" },
+  };
+  const card = ["--reply-to", "m1", "--card", "--text", "The panel is wider", "--pr", "42"];
+
+  const sent = await runSay([...card, "--chat", "side-plan"], "", gets);
+  assert.deepEqual([sent.code, sent.stderr], [0, `say: note: --pr 42 is ${OTHER}#42, chat side-plan's repo; pass --repo for another\n`]);
+  assert.deepEqual(sent.posts, [{ url: "/api/bridge/say", body: { text: "The panel is wider", replyTo: "m1", card: true, pr: 42, repo: OTHER } }]);
+  const asked = await runSay([...card, "--ask", "a-1"], "", gets);
+  assert.equal(asked.code, 0, asked.stderr);
+  assert.deepEqual(asked.posts, [{ url: "/api/bridge/say", body: { text: "The panel is wider", replyTo: "m1", card: true, pr: 42, repo: OTHER, ask: "a-1" } }]);
+  assert.deepEqual(asked.reads, ["/api/asks/a-1", "/api/board"]);
+
+  const twin = await runSay([...card, "--chat", "twin"], "", gets);
+  assert.equal(twin.code, 2);
+  assert.match(twin.stderr, /^say: --pr 42 has no --repo and chat twin may be in more than one repo: give --repo, one of /);
+  assert.deepEqual(twin.posts, []);
+  const unread = await runSay([...card, "--ask", "a-9"], "", gets);
+  assert.equal(unread.code, 1);
+  assert.equal(unread.stderr, "say: --pr 42 has no --repo and ask a-9 could not be read (http 404): give --repo; nothing was sent\n");
+  assert.deepEqual(unread.posts, []);
+
+  // Nothing learnt, and neither flag: the folder decides as before (here no repo's folder, so the PR goes as it is).
+  const plain = await runSay(card, "", gets);
+  const unknown = await runSay([...card, "--chat", "loose"], "", gets);
+  assert.deepEqual([plain.code, plain.stderr, plain.reads], [0, "", []]);
+  assert.deepEqual([unknown.code, unknown.stderr, unknown.reads], [0, "", ["/api/board"]]);
+  assert.deepEqual(unknown.posts, plain.posts);
+  assert.deepEqual(plain.posts, [{ url: "/api/bridge/say", body: { text: "The panel is wider", replyTo: "m1", card: true, pr: 42 } }]);
+  // --repo names it without a read.
+  const named = await runSay([...card, "--repo", OTHER, "--chat", "twin"], "", gets);
+  assert.deepEqual([named.code, named.stderr, named.reads], [0, "", []]);
+});
+
 test("say --ack sets the status line on your message: a reply id and the words, nothing else", () => {
   assert.deepEqual(parseArgs(["--reply-to", "m1", "--ack", "building it, ~9:45"]), { images: [], replyTo: "m1", ack: "building it, ~9:45" });
   assert.deepEqual(sayBody("", "m1", [], { ack: " building it, ~9:45 " }), { replyTo: "m1", ack: "building it, ~9:45" });
@@ -196,15 +288,22 @@ test("say refuses a flag swallowed as the message: --text --stdin, --ack --stdin
 
 /**
  * Runs say.mjs against a stub board on 127.0.0.1 (never the real thread or the Keychain) with the message on stdin.
- * @param {string[]} args @param {string} stdin
+ * @param {string[]} args @param {string} stdin @param {Record<string, unknown>} [gets] what a GET of each path answers; any other is a 404
  */
-async function runSay(args, stdin) {
+async function runSay(args, stdin, gets = {}) {
   /** @type {unknown[]} */
   const posts = [];
+  /** @type {(string | undefined)[]} */
+  const reads = [];
   const server = http.createServer((req, res) => {
     let body = "";
     req.on("data", (chunk) => (body += chunk));
     req.on("end", () => {
+      if (req.method === "GET") {
+        reads.push(req.url);
+        const doc = gets[req.url ?? ""];
+        return res.writeHead(doc ? 200 : 404, { "content-type": "application/json" }).end(JSON.stringify(doc ?? { error: "not found" }));
+      }
       posts.push({ url: req.url, body: JSON.parse(body || "null") });
       res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ id: "stub-1" }));
     });
@@ -215,7 +314,7 @@ async function runSay(args, stdin) {
     const port = /** @type {import("node:net").AddressInfo} */ (server.address()).port;
     const child = spawn(process.execPath, [SAY, ...args], {
       cwd: dir,
-      env: { PATH: process.env.PATH, HOME: dir, RIVET_URL: `http://127.0.0.1:${port}`, RIVET_BRIDGE_DEV: "1", RIVET_BOARD_TOKEN: "0".repeat(64) },
+      env: { PATH: process.env.PATH, HOME: dir, RIVET_URL: `http://127.0.0.1:${port}`, RIVET_BRIDGE_DEV: "1", RIVET_BOARD_TOKEN: "0".repeat(64), RIVET_REPOS: process.env.RIVET_REPOS },
     });
     let stdout = "";
     let stderr = "";
@@ -223,7 +322,7 @@ async function runSay(args, stdin) {
     child.stderr.on("data", (chunk) => (stderr += chunk));
     child.stdin.end(stdin);
     const code = await new Promise((resolve) => child.on("close", resolve));
-    return { code, stdout, stderr, posts };
+    return { code, stdout, stderr, posts, reads };
   } finally {
     server.close();
     fs.rmSync(dir, { recursive: true, force: true });
@@ -246,6 +345,38 @@ test("say sends nothing when the message on stdin starts with --, and sends one 
   assert.equal(sent.code, 0);
   assert.equal(sent.stdout, "sent stub-1\n");
   assert.deepEqual(sent.posts, [{ url: "/api/bridge/say", body: { text: "Merged -- the gate was green", replyTo: "m1" } }]);
+});
+
+test("say sends nothing when the redactor would take something out of its words, and sends a long id with a note", async () => {
+  // A made-up token shape and a made-up 64-hex id, built at run time.
+  const token = `${["gh", "p_"].join("")}${"A1b2".repeat(9)}`;
+  const id = "a1b2c3d4".repeat(8);
+  const refusal = (/** @type {string} */ found) =>
+    `say: refused, nothing was sent: the redactor would take this out (a key, token, password, escape code or hidden line), and the board would show [redacted] there. Take it out and send it again:\n  ${found}\n`;
+
+  const refused = await runSay(["--reply-to", "m1", "--text", `Done.\n\nIt is ${token}`], "");
+  assert.equal(refused.code, 1);
+  assert.equal(refused.stderr, refusal("--text: line 3 (github token)"));
+  assert.equal(refused.stdout, "");
+  assert.deepEqual(refused.posts, []);
+
+  // Words passed on as they are (--quoted) and the labels around them are held to it too.
+  const quoted = await runSay(["--new", "--quoted", "--title", `Key ${token}`, "--stdin"], `He wrote:\n${token}\n`);
+  assert.equal(quoted.code, 1);
+  assert.equal(quoted.stderr, refusal("--stdin: line 2 (github token)\n  --title: line 1 (github token)"));
+  assert.deepEqual(quoted.posts, []);
+
+  const ack = await runSay(["--reply-to", "m1", "--ack", "API_TOKEN=abcdef1abcdef"], "");
+  assert.equal(ack.code, 1);
+  assert.equal(ack.stderr, refusal("--ack: line 1 (a value named as a secret)"));
+  assert.deepEqual(ack.posts, []);
+  for (const { stderr } of [refused, quoted, ack]) assert.doesNotMatch(stderr, /A1b2|abcdef|p_/);
+
+  const sent = await runSay(["--reply-to", "m1", "--text", `The build ${id} is up`], "");
+  assert.equal(sent.stderr, "say: note: --text: line 1 holds a long token-shaped value; the board shows [redacted] in its place\n");
+  assert.equal(sent.code, 0);
+  assert.equal(sent.stdout, "sent stub-1\n");
+  assert.deepEqual(sent.posts, [{ url: "/api/bridge/say", body: { text: `The build ${id} is up`, replyTo: "m1" } }]);
 });
 
 test("say --card with a video holds the merge of the PR the server stored on the card, and throws when it cannot", async (t) => {

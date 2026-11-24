@@ -86,11 +86,17 @@ export function githubReading(github: GithubSnapshot | null | undefined, now: Da
   return { at, ...(!github.runs.length && !github.prs.length ? { empty: "no runs and no PRs" } : {}) };
 }
 
+const FLY_AUTH = "flyctl failed for every app (auth?)";
+
 export function flyReading(fly: FlySnapshot | null | undefined, now: Date): ReaderReading | null {
   if (!fly) return null;
   const at = fly.source?.failed.length ? fly.source.at : fly.at;
   if (ahead(at, now.getTime())) return { at: null, wrong: AHEAD };
   if (new Set(fly.apps.map((app) => app.app)).size < fly.apps.length) return { at, wrong: "an app listed twice" };
+  // No app kept and every fetch failed is flyctl with no login, never an empty Fly: say auth, not no
+  // apps. Kept data stays quiet until it is older than the reader's window; a bridge just restarted has none, so its
+  // first failed pass (an outage, say) reads the same, hence the question mark.
+  if (!fly.apps.length && fly.source?.failed.length) return { at, wrong: FLY_AUTH };
   return { at, ...(!fly.apps.length ? { empty: "no apps" } : {}) };
 }
 

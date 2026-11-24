@@ -6,7 +6,7 @@
 import "../styles.css";
 
 import { isUpdate } from "../../../src/shared/answers.js";
-import type { Ask } from "../../../src/shared/asks.js";
+import { doneCardText, type Ask } from "../../../src/shared/asks.js";
 import { boardSchema, type Reply } from "../../../src/shared/board.js";
 import type { ChatMessage } from "../../../src/shared/command.js";
 import {
@@ -423,6 +423,31 @@ if (new URLSearchParams(location.search).get("pictured") === "1")
       { label: "Keep as is", short: "Keep", detail: "No change this week" },
     ],
   } as (typeof board.needs)[number]);
+
+// ?donecard=1: the card an ask's close posts, first on the deck: what was asked, three done items and the closer's
+// still. ?donecard=one is the one-line Done with no picture; ?donecard=old the card as it read before the two parts.
+const doneCardKind = new URLSearchParams(location.search).get("donecard");
+if (doneCardKind)
+  board.needs.unshift({
+    id: "ask-a-12-done",
+    kind: "decision",
+    title: "Done: Done cards say what was asked and done",
+    ask:
+      doneCardKind === "old"
+        ? "Finished."
+        : doneCardKind === "one"
+          ? doneCardText("Make the done cards say what was asked and what is done, with a picture", ["Each done card now says what you asked and what changed."])
+          : doneCardText("Make the done cards say what was asked and what is done, with a picture", [
+              "Each done card now leads with what you asked.",
+              "Under it: what changed and where, in up to three short points.",
+              "A still or a clip sits on the card when there is one.",
+            ]),
+    chat: "done-card-details",
+    since: ago(1),
+    options: [{ label: "Got it" }],
+    push: "fyi",
+    ...(doneCardKind === "1" ? { media: { kind: "stills", stills: [{ sha256: appStill("d1".repeat(32), "Done", 120), type: "image/png" }] } } : {}),
+  });
 
 // ?longask=1: a decision with a long ask, five stills and four options, first on the deck: the card that read in a
 // three-line box over its pinned answers on a phone-sized viewport.

@@ -9,7 +9,7 @@ import * as home from "./home.js";
 import { PAGE_NAMES, READINGS, YOURS, type PageRow } from "./more.js";
 import { usageStale, weekTotal } from "./ops.js";
 import { navMark, opsStatus } from "./progress-mark.js";
-import { closeSheet, openSheet } from "./sheet.js";
+import { closeSheet, leavePlainSheet, openSheet } from "./sheet.js";
 
 // The menu: every page in one list, the home screen first, the readings, then what is yours under a rule. A phone
 // opens it as a drawer from the band's menu button, with Usage at its head; a computer shows it on the rail.
@@ -24,10 +24,12 @@ function lit(key: MenuKey): boolean {
 
 /** A hosted agent with no plan connected yet: the supervisor's connect page (cloud-agent.ts). */
 function connectRow(onPick: () => void): HTMLElement {
-  const connect = () => {
-    onPick();
-    connectPlan();
-  };
+  // The drawer's Back lands first: taken while the connect page loads, it would stop the load.
+  const connect = () =>
+    leavePlainSheet(() => {
+      onPick();
+      connectPlan();
+    });
   return h(
     "button",
     {

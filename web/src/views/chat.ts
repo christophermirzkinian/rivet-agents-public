@@ -2,6 +2,7 @@ import "./command.css";
 import "./conversations.css";
 
 import { isUpdate } from "../../../src/shared/answers.js";
+import { DONE_CARD } from "../../../src/shared/asks.js";
 import type { ServedNeed } from "../../../src/shared/board.js";
 import {
   CHAT_WINDOW_QUIET_MS,
@@ -501,8 +502,13 @@ const POSTED_KINDS: Record<string, string> = {
   question: "Question",
 };
 
-/** A posted card's kind, as its bubble names it. */
-function postedKind(kind: string): string {
+/**
+ * A posted card's kind, as its bubble names it. An ask's Done card is a Got it decision on the board (its answer, push
+ * and filters stay those of one) but reads "Outcome", known by its id as feed.ts knows it.
+ */
+function postedKind(posted: { id: string; kind: string }): string {
+  if (DONE_CARD.test(posted.id)) return "Outcome";
+  const { kind } = posted;
   return POSTED_KINDS[kind] ?? kind.charAt(0).toUpperCase() + kind.slice(1);
 }
 
@@ -2078,7 +2084,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
         ? h(
             "div",
             { class: "chat-posted" },
-            h("span", { class: "chat-posted-kind" }, postedKind(posted.kind)),
+            h("span", { class: "chat-posted-kind" }, postedKind(posted)),
             h("strong", { class: "chat-posted-title" }, posted.title),
             posted.ask
               ? h("p", { class: "chat-posted-ask" }, posted.ask)

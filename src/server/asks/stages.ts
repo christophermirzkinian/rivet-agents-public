@@ -6,6 +6,7 @@ import { NO_REPO } from "../../shared/repos.js";
 import { SNAPSHOT_STALE_MS, type Worker } from "../../shared/workers.js";
 import { isStale } from "../ops/view.js";
 import { patched } from "../routes/asks.js";
+import type { AskDone } from "./done-card.js";
 import type { Store } from "../store.js";
 
 /** The readings as they stand: a queue from a lapsed snapshot, or PRs from a lapsed or failed GitHub reading, say nothing. */
@@ -20,8 +21,8 @@ export function stageReadings(store: Pick<Store, "getWorkers">, github: GithubSn
 }
 
 /**
- * Moves the asks' stages by what the bridge just read. Writes only what changes, with no card, update or time: a hand
- * `rivet ask set` still works.
+ * Moves the asks' stages by what the bridge just read. Writes only what changes, with no card, update or time (askMoves
+ * never moves one into done): a hand `rivet ask set` still works.
  */
 export function syncAskStages(store: Pick<Store, "listAsks" | "replaceAsk">, workers: readonly Worker[], readings: StageReadings, now: Date): void {
   for (const { ask, stage, pr } of askMoves(store.listAsks({ limit: MAX_ASKS, doneSince: now.toISOString() }), workers, readings)) {
@@ -52,10 +53,14 @@ export function issueCloseMoves(asks: readonly Ask[], repos: readonly Pick<Backl
   });
 }
 
-/** Finishes the asks whose issues the bridge just read closed, Rivet's own move, with no card, update or time. */
-export function syncIssueCloses(store: Pick<Store, "listAsks" | "replaceAsk">, repos: readonly Pick<BacklogRepo, "repo" | "closed">[], now: Date): void {
+/**
+ * Finishes the asks whose issues the bridge just read closed, Rivet's own move, with no update or time. One moved into
+ * done posts its done card through `done`, its line the move's note.
+ */
+export function syncIssueCloses(store: Pick<Store, "listAsks" | "replaceAsk">, repos: readonly Pick<BacklogRepo, "repo" | "closed">[], now: Date, done?: AskDone): void {
   if (!repos.some((one) => one.closed?.length)) return;
   for (const { ask, stage, note } of issueCloseMoves(store.listAsks({ limit: MAX_ASKS, doneSince: now.toISOString() }), repos)) {
-    store.replaceAsk(patched(ask, { stage, note, by: "rivet" }, now), ask.version);
+    const next = patched(ask, { stage, note, by: "rivet" }, now);
+    if (store.replaceAsk(next, ask.version)) done?.(ask, next, note);
   }
 }

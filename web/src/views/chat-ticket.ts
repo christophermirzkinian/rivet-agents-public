@@ -240,8 +240,8 @@ export function activityRows(ask: Ask | undefined, chat: string, cards: readonly
       const text = [head, note].filter(Boolean).join(": ");
       if (text) rows.push({ at: event.at, ...from, text });
     });
-    // A due move names no author.
-    for (const move of ask.dueHistory) rows.push({ at: move.at, who: "other", name: "Due", role: "time moved", text: `Due moved ${when(move.was, move.at)} → ${when(move.dueAt, move.at)}${move.why ? `: ${move.why}` : ""}` });
+    // A due move names its mover when it records one ("by cards-fix"), as the Promise keeper's do.
+    for (const move of ask.dueHistory) rows.push({ at: move.at, who: "other", name: "Due", role: "time moved", text: `Due moved ${when(move.was, move.at)} → ${when(move.dueAt, move.at)}${move.by ? ` by ${move.by}` : ""}${move.why ? `: ${move.why}` : ""}` });
   }
   for (const { card, reply } of cards) {
     const pictures = cardImages(card).length;

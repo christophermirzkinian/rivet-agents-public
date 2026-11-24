@@ -866,3 +866,87 @@ test("--if-match and --replace push the file as it is, with no read and no merge
   assert.match(stray.stderr, /--replace only applies to a board push/);
   b.done();
 });
+
+test("a card with a pr, a chat and no repo is its chat's repo's PR, and one the server holds keeps the repo it is held as", async () => {
+  const otherRepo = "example-org/other-repo";
+  const mainRepo = "example-org/example-repo";
+  const card = { id: "width", kind: "decision", title: "Panel width", pr: 42, chat: "side-plan" };
+  const repos = (/** @type {any} */ board) => board.needs.map((/** @type {any} */ one) => one.repo);
+
+  // The chat's row may be one another chat added: the chats the push leaves are read.
+  const b = boardFile({ needs: [card, { id: "plain", kind: "decision", title: "No chat", pr: 44 }, { id: "main", kind: "decision", title: "Main", pr: 45, chat: "web" }] });
+  serve(6, { needs: [], coming: [], chats: [{ name: "side-plan", repo: otherRepo }, { name: "web" }] });
+  const pushed = await run([b.file]);
+  assert.equal(pushed.code, 0, pushed.stderr);
+  assert.match(pushed.stderr, new RegExp(`push-board: note: card width's pr 42 is ${otherRepo}#42, chat side-plan's repo; give the card a repo for another\n`));
+  assert.deepEqual(repos(stub.board), [otherRepo, undefined, undefined]);
+  assert.deepEqual(repos(b.read()), [otherRepo, undefined, undefined], "the repo is written into board.json");
+  const again = await run([b.file]);
+  assert.deepEqual([again.code, /note: card/.test(again.stderr), stub.board.needs[0].repo], [0, false, otherRepo]);
+  // board.json written again without the repo: the card the server holds as the other repo's is not moved to the main
+  // repo's PR, whatever the chats say now: the chat's row gone, or naming two repos.
+  for (const chats of [b.read().chats, [], [{ name: "side-plan", repo: otherRepo }, { name: "side-plan" }], [{ name: "side-plan", repo: mainRepo }]]) {
+    fs.writeFileSync(b.file, JSON.stringify({ ...b.read(), needs: [card], chats }));
+    stub.board = { ...stub.board, chats: [] };
+    const kept = await run([b.file]);
+    assert.deepEqual([kept.code, kept.stderr], [0, `push-board: note: card width's pr 42 is ${otherRepo}#42, as the server holds it; give the card a repo for another\n`], JSON.stringify(chats));
+    assert.deepEqual([stub.board.needs[0].repo, b.read().needs[0].repo], [otherRepo, otherRepo], JSON.stringify(chats));
+  }
+  // The held card given another chat is never moved to another repo's PR of that number: a new chat whose repo is not
+  // the held one is refused, one in the held repo goes through, and so does a row that names its repo.
+  const rows = [{ name: "side-plan", repo: otherRepo }, { name: "side-glow", repo: otherRepo }, { name: "web" }, { name: "main-chat", repo: mainRepo }];
+  const rechat = async (/** @type {Record<string, unknown>} */ fields) => {
+    fs.writeFileSync(b.file, JSON.stringify({ ...b.read(), needs: [{ ...card, ...fields }], chats: rows }));
+    const sent = seen.length;
+    const r = await run([b.file]);
+    return [r.code, r.stderr, boardCalls(sent).filter((c) => c.method === "PUT").length, stub.board.needs[0].chat, stub.board.needs[0].repo];
+  };
+  assert.deepEqual(await rechat({ chat: "web" }), [1, `push-board: card width: pr 42 is held as ${otherRepo}#42 for chat side-plan, and chat web names no repo: give the card a repo; nothing was pushed\n`, 0, "side-plan", otherRepo]);
+  assert.deepEqual(await rechat({ chat: "main-chat" }), [1, `push-board: card width: pr 42 is held as ${otherRepo}#42 for chat side-plan, and chat main-chat is in ${mainRepo}: give the card a repo; nothing was pushed\n`, 0, "side-plan", otherRepo]);
+  assert.deepEqual(await rechat({ chat: undefined }), [1, `push-board: card width: pr 42 is held as ${otherRepo}#42 for chat side-plan, and the card names no chat now: give the card a repo; nothing was pushed\n`, 0, "side-plan", otherRepo]);
+  assert.deepEqual(await rechat({ chat: "side-glow" }), [0, `push-board: note: card width's pr 42 is ${otherRepo}#42, chat side-glow's repo; give the card a repo for another\n`, 1, "side-glow", otherRepo]);
+  assert.deepEqual(await rechat({ chat: "web", repo: mainRepo }), [0, "", 1, "web", mainRepo]);
+  // The other way: one held as the main repo's is not moved to the other repo's PR by one of its chats.
+  for (const heldRepo of [mainRepo, undefined]) {
+    stub.board = { ...stub.board, needs: [{ ...card, chat: "web", ...(heldRepo ? { repo: heldRepo } : {}), rev: "b2" }] };
+    assert.deepEqual(await rechat({ chat: "side-plan" }), [1, `push-board: card width: pr 42 is held as ${mainRepo}#42 for chat web, and chat side-plan is in ${otherRepo}: give the card a repo; nothing was pushed\n`, 0, "web", heldRepo]);
+    assert.deepEqual(await rechat({ chat: "main-chat" }), [0, "", 1, "main-chat", undefined]);
+    assert.deepEqual(await rechat({ chat: "side-plan", repo: otherRepo }), [0, "", 1, "side-plan", otherRepo]);
+  }
+  b.done();
+
+  // A card the server already holds as the main repo's PR of that number stays that.
+  const m = boardFile({ needs: [card], chats: [{ name: "side-plan", repo: otherRepo }] });
+  serve(6, { needs: [{ ...card, rev: "b2" }], coming: [], chats: [] });
+  const held = await run([m.file]);
+  assert.deepEqual([held.code, held.stderr], [0, ""]);
+  assert.deepEqual([repos(stub.board), repos(m.read())], [[undefined], [undefined]]);
+  // The same card id moved to another PR is a new card to read.
+  fs.writeFileSync(m.file, JSON.stringify({ ...m.read(), needs: [{ ...card, pr: 46 }] }));
+  assert.equal((await run([m.file])).code, 0);
+  assert.deepEqual([stub.board.needs[0].pr, stub.board.needs[0].repo], [46, otherRepo]);
+  m.done();
+
+  // A chat that may be in more than one repo is refused until the card names its repo.
+  const t = boardFile({ needs: [{ ...card, chat: "twin" }], chats: [{ name: "twin", repo: otherRepo }, { name: "twin" }] });
+  serve(6, { needs: [], coming: [], chats: [] });
+  const from = seen.length;
+  const among = await run([t.file]);
+  assert.equal(among.code, 1);
+  assert.match(among.stderr, new RegExp(`card width: pr 42 has no repo and chat twin may be in more than one repo: give the card a repo, one of ${otherRepo}, ${mainRepo}; nothing was pushed`));
+  assert.equal(boardCalls(from).filter((c) => c.method === "PUT").length, 0);
+  fs.writeFileSync(t.file, JSON.stringify({ ...t.read(), needs: [{ ...card, chat: "twin", repo: mainRepo }] }));
+  const named = await run([t.file]);
+  assert.deepEqual([named.code, named.stderr, stub.board.needs[0].repo], [0, "", mainRepo]);
+  t.done();
+
+  // --if-match and --replace push the file as it is.
+  for (const flags of [["--replace"], ["--if-match", "6"]]) {
+    const r = boardFile({ needs: [card], chats: [{ name: "side-plan", repo: otherRepo }] });
+    serve(6, { needs: [], coming: [], chats: [] });
+    const as = await run([r.file, ...flags]);
+    assert.deepEqual([as.code, as.stderr], [0, ""], flags.join(" "));
+    assert.deepEqual([repos(stub.board), repos(r.read())], [[undefined], [undefined]], flags.join(" "));
+    r.done();
+  }
+});

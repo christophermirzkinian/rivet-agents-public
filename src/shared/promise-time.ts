@@ -22,8 +22,11 @@ const UNITS = new Set(["m", "min", "mins", "minute", "minutes", "h", "hr", "hrs"
 const AFTER_BARE = new Set([",", ".", ";", ":", "!", "?", ")", "o", "sharp", "latest", "with"]);
 /** Between a promise word and a bare hour: "by around 9". */
 const NEAR = new Set(["~", "about", "around", "approx"]);
-/** A time said of the past is no promise ("red until 5pm yesterday", "fixed 2 hours ago"). */
-const PAST = new Set(["yesterday", "ago", "earlier", "last"]);
+/**
+ * A time said of the past is no promise ("red until 5pm yesterday", "fixed 2 hours ago", "was due 9:42"): read as a
+ * promise, a passed step time rolls on to tomorrow's or next week's and moves an ask's due later.
+ */
+const PAST = new Set(["yesterday", "ago", "earlier", "last", "was", "were"]);
 /** Where a clause ends: a past word before it speaks of another clause ("red yesterday; card by 8:30"). */
 const STOPS = new Set([",", ".", ";", "!", "?"]);
 /**
@@ -43,6 +46,14 @@ export interface Promised {
   dueAt: string;
   /** The line of the text that holds it, trimmed. */
   line: string;
+  /** True when the text names its day ("tomorrow 9", "Wed 3am"); false for a bare clock time. */
+  dayNamed: boolean;
+  /**
+   * True when the words read as a time gone by at least as well: a clock time with no day whose latest passed reading
+   * is nearer than `dueAt` ("due 9:42" at 23:50 is 21:42's, two hours ago, before tomorrow's 09:42), or yesterday's
+   * weekday ("due Sun 23:30" said on Monday). A step's report, not a slip, so it moves no due.
+   */
+  mayBePast: boolean;
 }
 
 type Day = { kind: "today" | "tonight" | "tomorrow" } | { kind: "weekday"; weekday: number };
@@ -73,7 +84,8 @@ function daysFor(day: Day | null, now: Date): string[] {
   if (day.kind !== "weekday") return [addDays(today, 1)];
   const todayIndex = new Date(`${today}T00:00:00.000Z`).getUTCDay();
   const ahead = (day.weekday - todayIndex + 7) % 7;
-  return ahead === 0 ? [today, addDays(today, 7)] : [addDays(today, ahead)];
+  // Today's weekday is today alone: "due Mon 21:42" said late on Monday is the time gone by, not next Monday's.
+  return [addDays(today, ahead)];
 }
 
 /**
@@ -172,7 +184,18 @@ export function promisedTimes(text: string, now: Date): Promised[] {
         .flatMap((one) => minutes.map((minute) => at(one, minute)))
         .filter((ms): ms is number => ms !== null && ms > now.getTime() && ms - now.getTime() <= MAX_AHEAD_MS)
         .sort((a, b) => a - b);
-      if (times.length) found.push({ dueAt: new Date(times[0]!).toISOString(), line });
+      if (!times.length) continue;
+      const today = zoneClock(now).day;
+      const passed =
+        day === null
+          ? [addDays(today, -1), today]
+              .flatMap((one) => minutes.map((minute) => at(one, minute)))
+              .filter((ms): ms is number => ms !== null && ms <= now.getTime())
+              .map((ms) => now.getTime() - ms)
+          : [];
+      const yesterday = day?.kind === "weekday" && (day.weekday - new Date(`${today}T00:00:00.000Z`).getUTCDay() + 7) % 7 === 6;
+      const mayBePast = yesterday || passed.some((gone) => gone <= times[0]! - now.getTime());
+      found.push({ dueAt: new Date(times[0]!).toISOString(), line, dayNamed: day !== null, mayBePast });
     }
   }
   return found;

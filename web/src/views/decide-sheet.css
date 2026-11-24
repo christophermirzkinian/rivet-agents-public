@@ -907,6 +907,43 @@ html.desktop .decide-sheet > .sheet-handle {
   font-size: var(--fs-xl);
 }
 
+/* "+ N minimised · Show ›" under the head while cards are open: quiet, one line, no box. */
+.decide-min {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+  padding: 0 16px;
+  color: var(--muted);
+  font-size: var(--fs-body);
+  font-weight: 700;
+}
+
+.decide-min[hidden] {
+  display: none;
+}
+
+.decide-min-show {
+  min-height: var(--tap);
+  padding: 0 10px;
+  border: 0;
+  background: none;
+  color: var(--apricot);
+  -webkit-text-fill-color: var(--apricot);
+  font: inherit;
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.decide-min-show:focus-visible {
+  outline: 3px solid var(--apricot);
+  outline-offset: 2px;
+}
+
 /* An answer's Undo toast sits over the sheet, which stays open on the next card: under it, Undo could not be tapped. */
 body:has(.decide-sheet) .toasts {
   z-index: 41;

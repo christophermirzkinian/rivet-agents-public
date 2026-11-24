@@ -1,6 +1,6 @@
-import os from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { chatDir } from "./config.mjs";
 
 // The chat runner (scripts/rivet-chat.mjs), the one way the bridge reaches a chat: every list, read, send, Pause and new
 // chat shells out to its CLI, so a hung tmux never holds the bridge's loop. A chat is named by its name.
@@ -74,12 +74,11 @@ export function submitState(screen, line) {
 /**
  * The runner, through its CLI.
  * @param {{ exec: import("./config.mjs").Exec, nodeBin?: string, cli?: string, cwd?: string, env?: Record<string, string>,
- *   sleep?: (ms: number) => Promise<void> }} deps cwd: where a new chat runs, the home folder unless given
+ *   sleep?: (ms: number) => Promise<void> }} deps cwd: where a new chat runs, chatDir() unless given
  */
 export function createChatRunner(deps) {
   const node = deps.nodeBin ?? process.execPath;
   const cli = deps.cli ?? CHAT_CLI;
-  const cwd = deps.cwd ?? os.homedir();
   const sleep = deps.sleep ?? ((/** @type {number} */ ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   const run = (/** @type {string[]} */ args, /** @type {number} */ timeout, /** @type {string | undefined} */ input) =>
     deps.exec(node, [cli, ...args], { timeout, maxBuffer: 16 * 1024 * 1024, ...(deps.env ? { env: deps.env } : {}), ...(input === undefined ? {} : { input }) });
@@ -112,7 +111,8 @@ export function createChatRunner(deps) {
      * @param {string} name @param {string} prompt
      */
     async start(name, prompt) {
-      await run(["new", name, "--cwd", cwd, "--prompt-file", "-"], START_TIMEOUT_MS, prompt);
+      // Read at each start: the folder can turn into a link while the bridge runs.
+      await run(["new", name, "--cwd", deps.cwd ?? chatDir(), "--prompt-file", "-"], START_TIMEOUT_MS, prompt);
     },
     /**
      * Types one line and presses Enter: taken input counts as delivered and is never typed again. Only a screen that

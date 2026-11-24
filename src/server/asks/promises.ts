@@ -18,6 +18,9 @@ export function askOfSoonId(id: string): string | null {
   return match?.[1] ?? null;
 }
 
+/** The furthest ahead a clock time with no day named may move an ask's due. */
+const BARE_MOVE_MAX_MS = 12 * 3_600_000;
+
 const ROW = ALL_BEHAVIOURS.find((behaviour) => behaviour.id === PROMISE_KEEPER_ID);
 
 /** The Promise keeper's row as the owner set it; its default where the store has none. */
@@ -69,8 +72,16 @@ export function promiseChange(asks: readonly Ask[], message: { from: string; to:
   const promised = promisedTime(message.text, now);
   if (!promised) return null;
   const due = Date.parse(promised.dueAt);
-  if (ask.dueAt !== undefined && Math.abs(due - Date.parse(ask.dueAt)) <= DUE_SLACK_MS) return null;
-  const later = ask.dueAt !== undefined && due > Date.parse(ask.dueAt) + DUE_SLACK_MS;
+  // A time at or before the ask's own is a step's ("merge ~21:45" on a job due 03:00), never the whole job's: it moves
+  // nothing. Only a later time moves it, as a slip with its why.
+  if (ask.dueAt !== undefined && due <= Date.parse(ask.dueAt) + DUE_SLACK_MS) return null;
+  const later = ask.dueAt !== undefined;
+  // Nor a bare clock time read as tomorrow's: "was due 21:42" at 23:50 parses as the next 21:42, 22 hours on. A slip
+  // that far names its day ("tomorrow 9pm"); without one, a time over 12 hours ahead moves nothing.
+  if (later && !promised.dayNamed && due - now.getTime() > BARE_MOVE_MAX_MS) return null;
+  // Nor a time the words also give as gone by: "a1 merged (due 9:42)" at 23:50 is 21:42's report, not a slip to 09:42,
+  // and "due Sun 23:30" said on Monday is last night's, not next Sunday's.
+  if (later && promised.mayBePast) return null;
   return { ask, change: { due: promised.dueAt, by: message.from, ...(later ? { why: clipWhy(promised.line) } : {}) } };
 }
 

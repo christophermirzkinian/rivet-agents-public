@@ -1,6 +1,7 @@
 import "./feed.css";
 
 import { chatName } from "../../../src/shared/names.js";
+import { ASKED_LABEL, DONE_CARD, DONE_LABEL, doneCardParts, YOU_ASKED_LABEL } from "../../../src/shared/asks.js";
 import { MAX_SHORT, type Decision, type Reply, type ServedNeed } from "../../../src/shared/board.js";
 import { chatImages, imageFields } from "../../../src/shared/command.js";
 import { canApprove, isGotIt, isPlan, isTodo, isUpdate, MERGE_READY, optionNeedsText, stepsOf, threadKey, wantsText } from "../../../src/shared/answers.js";
@@ -219,7 +220,7 @@ function topCard(need: ServedNeed, minimisable = false, sheet = false): HTMLElem
   // its media is a stage, and its answers are the card's last thing over the say-line.
   const phone = sheet;
   const points = phone && !todo && ask ? askPoints(ask) : null;
-  const askText = points ?? (ask ? h("p", { class: todo ? "card-ask todo-ask" : "card-ask" }, ...linkify(ask)) : null);
+  const askText = (!todo && ask && isGotIt(need) && DONE_CARD.test(need.id) ? doneAsk(ask) : null) ?? points ?? (ask ? h("p", { class: todo ? "card-ask todo-ask" : "card-ask" }, ...linkify(ask)) : null);
   const metaLine = meta || since ? h("p", { class: "card-meta" }, meta, meta && since ? " · " : null, since ? h("span", { attrs: { "data-age": need.since! } }, since) : null) : null;
   const kindChip = isPlan(need) ? h("span", { class: "card-kind plan" }, need.chat ? `Plan · ${chatName(need.chat).replace(/-/g, " ")}` : "Plan") : null;
   const riskChip = need.risk ? h("span", { class: "chip risk" }, `${need.risk} change`) : null;
@@ -398,7 +399,23 @@ export function cardMenu(need: ServedNeed): HTMLElement[] {
   ].filter((one) => one !== null);
 }
 
-const MINUS = '<svg viewBox="0 0 24 24"><path d="M6 12h12" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>';
+/** A done card's text as two labelled parts: what the owner asked, then what is done (one line, or up to three points). */
+function doneAsk(ask: string): HTMLElement | null {
+  const parts = doneCardParts(ask);
+  if (!parts) return null;
+  const label = (text: string) => h("span", { class: "done-label" }, text.replace(/:$/, ""));
+  const [only, ...more] = parts.done;
+  return h(
+    "div",
+    { class: "card-ask done-ask" },
+    h("p", { class: "done-part" }, label(parts.own ? YOU_ASKED_LABEL : ASKED_LABEL), h("span", {}, ...linkify(parts.asked))),
+    only === undefined
+      ? null
+      : h("div", { class: "done-part" }, label(DONE_LABEL), more.length ? h("ul", { class: "done-points" }, ...parts.done.map((item) => h("li", {}, ...linkify(item)))) : h("span", {}, ...linkify(only))),
+  );
+}
+
+const MINUS ='<svg viewBox="0 0 24 24"><path d="M6 12h12" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>';
 
 /** A phone card's ask written as "- " lines is its points, one to a line. */
 const POINT = /^\s*[-•*]\s+/;

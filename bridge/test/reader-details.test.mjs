@@ -19,6 +19,7 @@ test("a reader's red passes into the pick-up line, and nothing beside it", () =>
     "reader wrong: reading time ahead of now",
     "reader wrong: a negative count",
     "reader wrong: an app listed twice",
+    "reader wrong: flyctl failed for every app (auth?)",
     "reader wrong: a repo listed twice",
     "reader wrong: no account has a reading",
   ];

@@ -330,6 +330,47 @@ test("a press on an entity Home Assistant reports unavailable is refused as offl
   }
 });
 
+test("two presses run one after the other in the order they came, and a press that throws does not stop the next", async () => {
+  // The bridge hands presses over as they arrive, so the family keeps the order: two presses never race.
+  const file = settings();
+  const { buttons } = await readHomeSettings(file);
+  const family = createHomeFamily({ haUrl: HA, file });
+  /** @type {string[]} */
+  const order = [];
+  /** @type {(() => void)[]} */
+  const release = [];
+  let inFlight = 0;
+  const held = (name) => async () => {
+    order.push(`start ${name}`);
+    assert.equal(++inFlight, 1, "one press at a time");
+    await new Promise((resolve) => release.push(() => resolve(undefined)));
+    inFlight--;
+    order.push(`end ${name}`);
+    return json([]);
+  };
+  const fetch = fakeFetch({ ...ROUTES, "POST /api/services/light/turn_on": held("lamp"), "POST /api/services/switch/turn_off": held("fan") });
+  const first = family.handle("home-control", { id: ID, button: buttons[0].id, until: until() }, context(fetch).ctx);
+  const second = family.handle("home-control", { id: ID, button: buttons[1].id, until: until() }, context(fetch).ctx);
+  const waitFor = async (/** @type {() => boolean} */ ready) => {
+    for (let i = 0; i < 2_000 && !ready(); i++) await new Promise((resolve) => setImmediate(resolve));
+    assert.ok(ready(), order.join(", "));
+  };
+  await waitFor(() => release.length === 1);
+  for (let i = 0; i < 50; i++) await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(order, ["start lamp"], "the second press waits for the first");
+  release[0]();
+  await waitFor(() => release.length === 2);
+  release[1]();
+  assert.deepEqual([await first, await second], ["delivered", "delivered"]);
+  assert.deepEqual(order, ["start lamp", "end lamp", "start fan", "end fan"]);
+
+  // A press whose deps throw rejects for its caller to log; the one behind it still runs.
+  const broken = family.handle("home-control", { id: ID, button: buttons[0].id, until: until() }, /** @type {any} */ ({ deps: null }));
+  const after = family.handle("home-control", { id: ID, button: buttons[0].id, until: until(500) }, context(fakeFetch(ROUTES)).ctx);
+  await assert.rejects(broken);
+  assert.equal(await after, "dropped");
+});
+
 test("a press the server has nearly stopped waiting for is not run, and a bad event id is dropped unanswered", async () => {
   const file = settings();
   const { buttons } = await readHomeSettings(file);

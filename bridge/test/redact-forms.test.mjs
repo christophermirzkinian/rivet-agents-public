@@ -327,3 +327,91 @@ test("a prose word's line is read no further than any line, in time linear to it
   for (const word of ["mysql ", "redis-cli ", "zip "]) redactLines([`has to pass: x ${word.repeat(40000)}`], { inKey: false }, HOME, { rest: true });
   assert.ok(performance.now() - started < 3000);
 });
+
+// Fabricated keys, each built from parts so no scanner reads this file as holding one.
+test("a named credential behind a joining `_` goes, an all-capitals key too", () => {
+  const aws = "AK" + "IA" + "QWERTYUIOPASDFGH";
+  const github = "gh" + "p_" + "abcdefghijklmnopqrstuvwx";
+  const anthropic = "sk-" + "ant-" + "abcdefghijklmnop";
+  for (const secret of [aws, "AS" + "IA" + "QWERTYUIOPASDFGH", github, anthropic]) {
+    for (const line of [`x_${secret}`, `MY_${secret}`, `see x_${secret} here`, `https://h.example/a/x_${secret}/b`, `__${secret}`]) {
+      assert.deepEqual(leaks([redactKeepingLines(line)], [secret]), [], line);
+      assert.deepEqual(leaks([redactLine(line, HOME)], [secret]), [], line);
+      assert.deepEqual(leaks(read([line]), [secret]), [], line);
+    }
+  }
+  // An all-capitals key with a `_` after it too: the word boundary read none there either.
+  assert.deepEqual(leaks([redactKeepingLines(`${aws}_backup`), redactKeepingLines(`x_${aws}_backup`)], [aws]), []);
+  assert.equal(redactKeepingLines(`x_${aws}`), "x_[redacted aws key]");
+  // A constant, a longer capitals run and a key's letters glued inside a word are still names.
+  for (const text of ["THIS_IS_A_LONG_CONSTANT_NAME_HERE", "ASIA_PACIFIC_REGION_SETTING", `${aws}JKL`, `M${aws}`, ["task", "0a1b2c3d", "0a1b", "4a1b", "8a1b", "0a1b2c3d4e5f"].join("-"), "the risk_score and task_sk-1 fields"]) {
+    assert.equal(redactKeepingLines(text), text);
+  }
+});
+
+test("a named credential split at a `%` or `~` goes whole", () => {
+  const head = "AK" + "IAQWERTYU";
+  const github = "gh" + "p_" + "abcdefghij";
+  const signed = ["ey" + "J" + "abcdefghij".repeat(4), "ey" + "J" + "klmnopqrstuv".repeat(18), "wxyzabcdefgh".repeat(4)].join(".").replace(/(.{12})/g, "$1~");
+  for (const [line, pieces] of /** @type {[string, string[]][]} */ ([
+    [`${head}%34OPASDFGH`, [head, "OPASDFGH"]],
+    [`${head}%2534OPASDFGH`, [head, "OPASDFGH"]],
+    [`${head}~OPASDFGHJ`, [head, "OPASDFGHJ"]],
+    [`${head}%OPASDFGHJ`, [head, "OPASDFGHJ"]],
+    [`see x_${head}%34OPASDFGH here`, [head, "OPASDFGH"]],
+    [`https://h.example/a/${head}%34OPASDFGH/b`, [head, "OPASDFGH"]],
+    [`https://youtube.com/shorts/${head}%34OPASDFGH`, [head, "OPASDFGH"]],
+    [`${github}%6Blmnopqrstuvwx`, [github, "lmnopqrstuvwx"]],
+    [`${github}~klmnopqrstuvwx`, [github, "klmnopqrstuvwx"]],
+    // A word joined on by another `%` or `~`, before the key or after it, does not hide it.
+    [`x~${head}~OPASDFGHJ`, [head, "OPASDFGHJ"]],
+    [`${head}~OPASDFGHJ~v2`, [head, "OPASDFGHJ"]],
+    [`x%7E${head}%7EOPASDFGHJ`, [head, "OPASDFGHJ"]],
+    [`100%${head}%OPASDFGHJ`, [head, "OPASDFGHJ"]],
+    [`https://h.example/x~${head}~OPASDFGHJ`, [head, "OPASDFGHJ"]],
+    [`see~${github}~klmnopqrstuvwx`, [github, "klmnopqrstuvwx"]],
+    // A stray `%` before two of the key's own characters that read as the escape of a letter (`%4F`), alone and
+    // behind a link's own escape.
+    [`${head}%4FPASDFGH`, [head, "PASDFGH"]],
+    [`x%2F${head}%4FPASDFGH`, [head, "PASDFGH"]],
+    [`x%7E${head}%4FPASDFGH`, [head, "PASDFGH"]],
+    [`https://h.example/login?next=%2Fvault%2F${head}%254FPASDFGH`, [head, "PASDFGH"]],
+    // A signed token longer than a short window, split every few characters, alone and behind a joined word.
+    [signed, ["ey" + "J", "klmnopqrstuv"]],
+    [`x~${signed}`, ["ey" + "J", "klmnopqrstuv"]],
+  ])) {
+    assert.deepEqual(leaks([redactKeepingLines(line)], pieces), [], line);
+    assert.deepEqual(leaks([redactLine(line, HOME)], pieces), [], line);
+    assert.deepEqual(leaks(read([line]), pieces), [], line);
+  }
+  // A path under the home folder, a link's escaped spaces and a version range hold no named credential, and stay.
+  for (const text of [
+    ["~", "Documents", "GitHub", "some-repository", "rivet", "src"].join("/"),
+    "https://h.example/Asia%20Pacific%20Region%20Report",
+    "https://h.example/ASIA%20PACIFIC%20REGION",
+    "lodash@~4.17.21 and react@~18.2.0-canary",
+    "progress~75%~of~the~way~there",
+    "file~1.txt and LONGFILENAME~1.TXT",
+    "desk~lamp-and-other-long-words-here",
+    // A link's `%20` is a space: its digits never fill out a shape.
+    "https://h.example/ASIA%20PACIFIC%20GROUP",
+    "https://h.example/ASIA%20EUROPE%20AFRICA%20REPORT",
+    "https://www.google.com/search?q=sk-learn%20pipeline%20tutorial",
+    "xoxo-hugs%20and%20kisses",
+  ]) {
+    assert.equal(redactKeepingLines(text), text);
+  }
+});
+
+test("a long run of `%` and `~` pieces is read in linear time", () => {
+  const started = performance.now();
+  for (const piece of ["AK" + "IA%34", "AK" + "IA~", "ey" + "J~", "%25", "sk-%2D", "github_pat_~", "a.~"]) redactLines([piece.repeat(20000)], { inKey: false }, HOME, { rest: true });
+  // An escape written many times over (`%2525…34`) is decoded in one pass, not one pass per layer.
+  for (const layers of [2040, 8190, 100000]) redactKeepingLines(`%${"25".repeat(layers)}34`);
+  // The sizes each entry reads uncut: a 4095-character line, and 16384 characters of text.
+  for (const piece of ["ey" + "J~", "ey" + "Jaaaaaa-~", "AK" + "IA~", "%25"]) {
+    redactKeepingLines(piece.repeat(4095).slice(0, 4095));
+    redactText(piece.repeat(16384).slice(0, 16384), Infinity);
+  }
+  assert.ok(performance.now() - started < 3000);
+});

@@ -7,7 +7,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { makeExec, resolveBin } from "../lib/config.mjs";
-import { folderRepo, prRepo, remoteRepo } from "../lib/folder-repo.mjs";
+import { chatPrRepo, folderRepo, prRepo, remoteRepo } from "../lib/folder-repo.mjs";
 
 // A card's --pr with no --repo names the working folder's repo's PR, never silently the default repo's.
 
@@ -79,4 +79,28 @@ test("say.mjs refuses a card's --pr with no --repo in an unknown repo's checkout
   });
   assert.equal(r.status, 2, r.stderr);
   assert.match(r.stderr, /--pr 7 has no --repo and this folder is someone\/else, which Rivet does not know/);
+});
+
+test("--pr with no --repo: the card's chat's repo when the board's chat names one Rivet knows", () => {
+  const BB = "example-org/Other-Repo";
+  const MAIN = "example-org/example-repo";
+  const chats = [{ name: "gamma", repo: BB }, { name: "main" }, { name: "odd", repo: "someone/else" }, { name: "twin", repo: BB, prs: [5] }, { name: "twin", prs: [6] }];
+  assert.deepEqual(chatPrRepo(chats, "gamma", 46), { repo: BB });
+  assert.deepEqual(chatPrRepo(chats, "main", 46), {});
+  assert.deepEqual(chatPrRepo(chats, "odd", 46), {});
+  assert.deepEqual(chatPrRepo(chats, "none", 46), {});
+  assert.deepEqual(chatPrRepo(chats, undefined, 46), {});
+  assert.deepEqual(chatPrRepo(undefined, "gamma", 46), {});
+  // A name two repos share: the row holding the PR, else both to pick from.
+  assert.deepEqual(chatPrRepo(chats, "twin", 5), { repo: BB });
+  assert.deepEqual(chatPrRepo(chats, "twin", 6), {});
+  assert.deepEqual(chatPrRepo(chats, "twin", 7), { among: [BB, MAIN] });
+  // A row that names the main repo says so: the folder does not decide.
+  assert.deepEqual(chatPrRepo([{ name: "tools", repo: MAIN }], "tools", 46), { repo: MAIN });
+  // A numbered name with no chat of its own is its base chat's, as the server reads it: its repo when that chat holds
+  // the PR, else that repo or the main one. A chat of the numbered name itself comes first.
+  const numbered = [{ name: "held", repo: BB, prs: [46] }, { name: "gamma-2" }];
+  assert.deepEqual(chatPrRepo(numbered, "held-73", 46), { repo: BB });
+  assert.deepEqual(chatPrRepo(numbered, "held-73", 9), { among: [BB, MAIN] });
+  assert.deepEqual(chatPrRepo([...chats, ...numbered], "gamma-2", 46), {});
 });

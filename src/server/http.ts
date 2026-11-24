@@ -511,7 +511,7 @@ export function createApp(
   function writeBoard(
     ifMatch: number | null,
     change: BoardChange,
-    { sizeCap = true, progress = false, guard, check = false, sentAs }: { sizeCap?: boolean; progress?: boolean; guard?: BoardGuard; check?: boolean; sentAs?: { id: string } & Partial<Need> } = {},
+    { sizeCap = true, progress = false, guard, check = false, sentAs, unpushed }: { sizeCap?: boolean; progress?: boolean; guard?: BoardGuard; check?: boolean; sentAs?: { id: string } & Partial<Need>; unpushed?: string } = {},
   ): { status: number; body: unknown; headers?: Record<string, string> } {
     const stored = store.getBoard();
     if (ifMatch !== null && ifMatch !== (stored?.version ?? 0)) return { status: 409, body: { error: "board version is stale", version: stored?.version ?? 0 } };
@@ -589,7 +589,7 @@ export function createApp(
       // An app-down card (push "fyi") is told by its own app-down push, so the board does not push it a second time.
       const isOpsCard = (need: Need) => need.id.startsWith(OPS_CARD_PREFIX);
       const keyOf = (need: Need) => (aboutSchedule(need) ? schedulePushKey(need) : isOpsCard(need) ? opsCardPushKey(need.id) : morningPushKey(need));
-      const alerts = added.filter((need) => !(aboutSchedule(need) && schedules.owned(need.schedule as string)) && !(isOpsCard(need) && need.push === "fyi"));
+      const alerts = added.filter((need) => need.id !== unpushed && !(aboutSchedule(need) && schedules.owned(need.schedule as string)) && !(isOpsCard(need) && need.push === "fyi"));
       void push.notifyNewNeeds(alerts, keyOf).catch((error: unknown) => {
         logger.error(`[push] new-card push failed: ${error instanceof Error ? error.message : "error"}`);
       });
@@ -603,11 +603,11 @@ export function createApp(
    * A question or decision card keeps its kind. `progress`: a card shown in the conversation its text names, which may
    * be one you began, is news all the same (say.mjs with no --reply-to).
    * `check`: a card a chat posts (say.mjs) goes through the card checker; the server's own producers' do not. `sent`: its
-   * fields as the chat sent them, before the route redacted them, for the checker's links rule.
+   * fields as the chat sent them, before the route redacted them, for the checker's links rule. `silent`: no push.
    */
   function addUpdate(
     card: { id: string } & Record<string, unknown>,
-    { progress = false, check = false, sent }: { progress?: boolean; check?: boolean; sent?: { id: string } & Partial<Need> } = {},
+    { progress = false, check = false, sent, silent = false }: { progress?: boolean; check?: boolean; sent?: { id: string } & Partial<Need>; silent?: boolean } = {},
   ): { status: number; error?: string; warnings?: string[] } {
     try {
       const { status, body } = writeBoard(
@@ -617,7 +617,7 @@ export function createApp(
           const need = { since: now().toISOString(), ...card, kind: card.kind === QUESTION || card.kind === DECISION ? card.kind : UPDATE };
           return { board: stamped(board, "needs", [...board.needs, need]), item: (stored) => stored.needs.find((one) => one.id === card.id) ?? null };
         },
-        { progress, check, sentAs: sent },
+        { progress, check, sentAs: sent, ...(silent ? { unpushed: card.id } : {}) },
       );
       if (status !== 200) return { status, error: String((body as { error?: unknown }).error) };
       // A full board of question cards makes room by dropping updates, this one included: then it was not added.

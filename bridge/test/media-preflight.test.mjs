@@ -208,6 +208,20 @@ test("--viewport takes exact multiples at DPR 1 to 4", async () => {
   assert.equal((await check([{ role: "still", file: file("off.png") }], fake)).ok, true, "no --viewport, no multiple check");
 });
 
+test("maxStill refuses a still longer than it on either side, and only a still", async () => {
+  const fake = fakeExec({ "wide.png": { width: 2000, height: 900 }, "tall.jpg": { width: 900, height: 1601 }, "edge.png": { width: 1600, height: 1600 }, "s.png": { width: 390, height: 844 }, "a.mp4": { width: 1920, height: 1080 }, "p.png": { width: 1920, height: 1080 } });
+  const stills = ["wide.png", "tall.jpg", "edge.png", "s.png"].map((name) => /** @type {const} */ ({ role: "still", file: file(name) }));
+  const r = await check(stills, fake, { maxStill: 1600 });
+  assert.equal(r.ok, false);
+  assert.deepEqual(r.problems, [
+    "wide.png: 2000x900, over 1600 px on its longest side; scale it down (sips -Z 1600 wide.png)",
+    "tall.jpg: 900x1601, over 1600 px on its longest side; scale it down (sips -Z 1600 tall.jpg)",
+  ]);
+  // With no maxStill a still is any size, and a clip and its poster are never held to it.
+  assert.deepEqual(await check(stills, fake), { ok: true, problems: [], warnings: [] });
+  assert.deepEqual(await check([{ role: "after", file: file("a.mp4") }, { role: "poster", file: file("p.png") }], fake, { maxStill: 1600 }), { ok: true, problems: [], warnings: [] });
+});
+
 test("fails closed without ffprobe or ffmpeg", async () => {
   const fake = fakeExec({ "a.mp4": {} });
   const missing = await preflight([{ role: "video", file: file("a.mp4") }], { exec: fake.exec, ffmpeg: "/fake/ffmpeg", tmpdir: TMP });

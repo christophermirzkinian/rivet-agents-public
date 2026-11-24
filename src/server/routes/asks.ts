@@ -20,21 +20,23 @@ import {
   type AskStage,
 } from "../../shared/asks.js";
 import type { AuditEntry } from "../../shared/command.js";
+import { doneCardPoster } from "../asks/done-card.js";
 import { decodeSegment, hasBearer, HttpError, json, readJson, requireBearer } from "../httputil.js";
-import { parseRedacted } from "../redact.js";
+import { ASK_DONE_MEDIA, parseRedacted } from "../redact.js";
 import type { Store } from "../store.js";
 import type { Router } from "./router.js";
 import { APP_NAME } from "../../shared/names.js";
 
 // Your asks: Rivet writes them with the board token, your phone reads them. Nothing here pushes; the board
-// card an ask is carded as does that. A close posts no card: it records the stage, and Done today reads it from there
-//.
+// card an ask is carded as does that. A close to done posts one silent Got it card in the ask's conversation, once per
+// ask and best effort; Done today still reads the stage.
 
 const ASK_BODY_MAX = 64 * 1024;
 const PREFIX = "/api/asks/";
 
 export function register(router: Router): void {
-  const { config, store, requireSession, now, refreshWaits, titles } = router.deps;
+  const { config, store, requireSession, now, refreshWaits, titles, addUpdate, logger } = router.deps;
+  const askDone = doneCardPoster({ store, addUpdate, titles, logger, now });
 
   // The app's list: everything still moving, plus what shipped or was parked in the last few days. `all=1` pages
   // through every ask instead, for the CLI's list.
@@ -97,7 +99,7 @@ export function register(router: Router): void {
     requireBearer(request, config.boardTokenDigest);
     const id = askId(url.pathname.slice(PREFIX.length));
     const ifMatch = parseIfMatch(request.headers["if-match"]);
-    const parsed = parseRedacted(askPatchSchema, await readJson(request, ASK_BODY_MAX));
+    const parsed = parseRedacted(askPatchSchema, await readJson(request, ASK_BODY_MAX), ASK_DONE_MEDIA);
     if (!parsed.success) {
       json(response, 400, { error: "invalid change", issues: parsed.error.issues.slice(0, 20) });
       return;
@@ -109,12 +111,15 @@ export function register(router: Router): void {
       json(response, 409, { error: "ask version is stale", version: current.version });
       return;
     }
+    // The card is posted once, on the move: details sent after it would be dropped unseen, so say so.
+    if (current.stage === "done" && (parsed.data.done !== undefined || parsed.data.doneMedia !== undefined)) throw new HttpError(400, "the ask is already done and its Done card has gone out: done and doneMedia go with the move to done");
     const next = patched(current, parsed.data, now());
     if (!store.replaceAsk(next, current.version)) {
       json(response, 409, { error: "ask version is stale", version: store.getAsk(id)?.version ?? 0 });
       return;
     }
     refreshWaits();
+    askDone(current, next, { note: parsed.data.note, done: parsed.data.done, media: parsed.data.doneMedia });
     json(response, 200, next, etag(next.version));
   });
 }
@@ -207,7 +212,7 @@ export function patched(ask: Ask, change: AskPatch, now: Date): Ask {
     const due = checkedDue(change.due, now);
     if (ask.dueAt !== undefined && Date.parse(due) > Date.parse(ask.dueAt) + DUE_SLACK_MS) {
       if (!change.why) throw new HttpError(400, "a later time is a move: it needs a why");
-      next.dueHistory = [...ask.dueHistory, { at, dueAt: due, was: ask.dueAt, why: change.why }].slice(-MAX_DUE_HISTORY);
+      next.dueHistory = [...ask.dueHistory, { at, dueAt: due, was: ask.dueAt, why: change.why, ...(change.by ? { by: change.by } : {}) }].slice(-MAX_DUE_HISTORY);
     }
     next.dueAt = due;
     delete next.askedForTimeAt;

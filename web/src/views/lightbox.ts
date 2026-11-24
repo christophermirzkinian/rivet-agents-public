@@ -1,7 +1,7 @@
 import "./lightbox.css";
 
 import { h, inertBehind, svg } from "../dom.js";
-import { trackOverlayHistory } from "../overlay-history.js";
+import { entryId, pushOverlayEntry } from "../overlay-history.js";
 import { within } from "../within.js";
 import { downloadButton, shareButton } from "./share.js";
 import { clampView, doubleTapView, fitSize, panBy, pinchView, wheelFactor, zoomAt, type Point, type Size, type View } from "./zoom.js";
@@ -53,6 +53,8 @@ const CLOSE = '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" fill="non
 let current: { close(fromHistory?: boolean, replacing?: boolean): void } | null = null;
 /** A lightbox history entry is on top, so the back button closes the viewer instead of leaving the app's screen. */
 let historyEntry = false;
+/** The open viewer's entry, told from one an earlier load or opening left: Back onto that one still closes the viewer. */
+let viewerEntry = "";
 let closeHistory: ((fromHistory: boolean) => void) | undefined;
 
 const now = () => performance.now();
@@ -353,7 +355,9 @@ function open(options: {
       pan(0, (event.key === "PageUp" || (event.key === " " && event.shiftKey) ? 1 : -1) * size.h * 0.9);
     } else return;
   };
-  const onPop = () => {
+  const onPop = (event: PopStateEvent) => {
+    // A sheet opened over the viewer going back to the viewer's own entry.
+    if (historyEntry && (event.state as { viewer?: string } | null)?.viewer === viewerEntry) return;
     historyEntry = false;
     close(true);
   };
@@ -393,15 +397,10 @@ function open(options: {
   // Capture: the feed's own keys (left and right answer a card) never see a key meant for the viewer.
   document.addEventListener("keydown", onKey, true);
   if (!historyEntry) {
-    closeHistory = trackOverlayHistory();
-    try {
-      history.pushState({ lightbox: true }, "");
-      historyEntry = true;
-    } catch (error) {
-      closeHistory(true);
-      closeHistory = undefined;
-      throw error;
-    }
+    // It takes over the entry a sheet closed in the same tap leaves (overlay-history.ts).
+    viewerEntry = entryId();
+    closeHistory = pushOverlayEntry({ lightbox: true, viewer: viewerEntry });
+    historyEntry = true;
   }
   window.addEventListener("popstate", onPop);
   resize.observe(stage);

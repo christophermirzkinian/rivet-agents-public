@@ -1,9 +1,9 @@
 // gh's login, read once for a whole scheduled process. Each `gh` call reads the login from the macOS keychain and gives
 // that read a few seconds. At background priority on a loaded Mac the read sometimes runs out of time: gh then sends the
 // call with no login, GitHub answers 404 for a private repository and gh exits 1, which is no transient GitHub error, so
-// the run fails (about 1 run in 5 of a job that makes 10-30 calls, 23 Nov 2026). Here the login is read once, with
+// the run fails (about 1 run in 5 of a job that makes 10-30 calls). Here the login is read once, with
 // retries, and handed to each gh call in the child's environment, so later calls never touch the keychain. Under heavy
-// load the read can fail for a minute or more (four tries in a row, 24 Nov 2026): then no call goes out at all, and
+// load the read can fail for a minute or more (four tries in a row): then no call goes out at all, and
 // the run ends as a skip the next run retries, rather than going out logged out halfway through a pass.
 //
 // The login lives only in this closure and in the gh child's environment: never in arguments, a log line, a file or an

@@ -617,4 +617,12 @@ describe("a thing's lines in Chat", () => {
     open.click();
     expect(app.tab).toBe("cards");
   });
+
+  it("an ask's Done card reads Outcome in its bubble; another Got it card still reads Decision", async () => {
+    server.messages.push(rivet("p5", "k1", 46, { text: "Done: Boss reel", posted: { id: "ask-a-1000-done", kind: "decision", title: "Done: Boss reel" } }));
+    server.messages.push(rivet("p6", "g1", 46, { text: "Good morning", posted: { id: "morning-2026-11-24", kind: "decision", title: "Good morning" } }));
+    await onChat();
+    expect(root.querySelector('.chat-msg[data-id="p5"] .chat-posted-kind')!.textContent).toBe("Outcome");
+    expect(root.querySelector('.chat-msg[data-id="p6"] .chat-posted-kind')!.textContent).toBe("Decision");
+  });
 });

@@ -52,9 +52,11 @@ export const FEATURES = "image,chat-window,long-chat,images,files,reply-images,c
 const OVERTAKABLE = new Set(["reply"]);
 /**
  * Events handled as they arrive, outside the delivery queue: a sheet's live log only starts or stops a background read
- * (actions/logs.mjs) and never types into a chat. Queued, a held reply would keep it past its lease.
+ * (actions/logs.mjs) and never types into a chat. Queued, a held reply would keep it past its lease. A Home button
+ * never types into a chat either, and the page waits only seconds for it: queued behind a held reply it would be
+ * dropped late with Home Assistant reachable. The home family keeps its own presses in order (actions/home.mjs).
  */
-const UNQUEUED = new Set(["logs.subscribe", "logs.unsubscribe"]);
+const UNQUEUED = new Set(["logs.subscribe", "logs.unsubscribe", "home-control"]);
 /** The events this file handles itself; the rest go to an action family (actions/index.mjs). */
 const BUILT_IN_EVENTS = new Set(["reply", "reopen", "late-ask", "ops-pickup"]);
 /** Chat lines in a row that may pass the same waiting card answer. */
@@ -144,7 +146,7 @@ const READER_DETAILS = [
   "reader stale: never ran",
   `reader stale: no good reading for ${SPAN} \\(wanted within ${SPAN}\\)`,
   `reader empty: (?:ran but wrote nothing(?: for ${SPAN})?|no runs and no PRs|no apps|no repos|no accounts|no packs|nothing read)`,
-  "reader wrong: (?:reading time ahead of now|a negative count|an app listed twice|a repo listed twice|no account has a reading)",
+  "reader wrong: (?:reading time ahead of now|a negative count|an app listed twice|flyctl failed for every app \\(auth\\?\\)|a repo listed twice|no account has a reading)",
 ];
 const OPS_DETAIL_FAULTS = ["[Mm]emory pressure critical", `${N}% free`, "Bridge offline", ...READER_DETAILS].join("|");
 const OPS_DETAIL_RE = new RegExp(`^(?:${OPS_DETAIL_FAULTS})(?:[,;] (?:${OPS_DETAIL_FAULTS}))*$`);

@@ -27,7 +27,8 @@ export const UPDATE = "update";
 export const PLAN = "plan";
 /**
  * The kind of card that puts a choice to you. Something of your asks you must confirm (a video waiting on your OK) is one,
- * with OUTCOME_OPTIONS, never an update card. Finished work takes no card at all.
+ * with OUTCOME_OPTIONS, never an update card. Finished work takes no card of a chat's own; a close to done posts one Got
+ * it card itself.
  */
 export const DECISION = "decision";
 /** The answers of a card asking you to confirm a result: Yes, keep it, or Change it with what to change. */

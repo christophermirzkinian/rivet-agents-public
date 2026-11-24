@@ -25,6 +25,7 @@ import {
   type SplitResponse,
 } from "../../shared/conversations.js";
 import { bareGotIt, DECISION, isGotIt, UPDATE } from "../../shared/answers.js";
+import { DONE_CARD, doneCardParts } from "../../shared/asks.js";
 import { ID_PATTERN, type Need, type Reply } from "../../shared/board.js";
 import { NO_REPO } from "../../shared/board.js";
 import { type CommandStore } from "../commandstore.js";
@@ -387,7 +388,9 @@ export function registerConversations(
     if (!place || (before && place.thread === before.thread)) return before ? relink(need) : undefined;
     const card = { id: need.id, ...(need.repo ? { repo: need.repo } : {}), ...(need.pr !== undefined ? { pr: need.pr } : {}), ...(need.chat ? { chat: need.chat } : {}) };
     if (!commands.fileCard({ card: need.id, thread: place.thread, via: place.via, ...keyOf(card), at, ...(before ? { again: true } : {}) })) return;
-    const ask = need.ask?.split("\n").find((line) => line.trim() !== "")?.trim();
+    // A Done card's line here is what is done (its title already names the ask); with nothing said, what was asked.
+    const parts = DONE_CARD.test(need.id) && need.ask ? doneCardParts(need.ask) : null;
+    const ask = parts ? parts.done.join(" · ") || parts.asked : need.ask?.split("\n").find((line) => line.trim() !== "")?.trim();
     const posted: PostedCard = { id: need.id, kind: need.kind, title: need.title, ...(ask ? { ask: ask.slice(0, POSTED_ASK_MAX) } : {}) };
     const answers = answersLine(need, place);
     const message = commands.addChatMessage({ id, from: "rivet", text: need.title, at, thread: place.thread, posted, ...(answers ? { replyTo: answers } : {}) });

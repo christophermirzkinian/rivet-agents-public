@@ -35,6 +35,7 @@ import { askOfSoonId, asksAboutToSlip, askSoonId } from "../asks/promises.js";
 import type { PromiseKeeper } from "../../shared/behaviours.js";
 import { pickupAsk, settlePickupAsks } from "../asks/made.js";
 import { stageReadings, syncAskStages, syncIssueCloses } from "../asks/stages.js";
+import type { AskDone } from "../asks/done-card.js";
 import type { HealthCheck } from "../config.js";
 import type { BridgeChannel } from "../events.js";
 import { openBoard, withoutHandled } from "../http.js";
@@ -81,6 +82,8 @@ export interface OpsDeps {
   refreshWaits?: () => void;
   /** Settings › Behaviours' Promise keeper, read each sweep; without it no ask is warned before its time. */
   promiseKeeper?: () => PromiseKeeper;
+  /** Posts the done card of an ask an issue close or a fixed pick-up moved into done (asks/done-card.ts). */
+  askDone?: AskDone;
 }
 
 export type Ops = ReturnType<typeof createOps>;
@@ -310,7 +313,7 @@ export function createOps(deps: OpsDeps) {
     if (isStale(fresh.at, BACKLOG_STALE_MS, at) || sentMs > at.getTime() + BACKLOG_AHEAD_MS) return;
     if (mark !== undefined && sentMs <= Date.parse(mark)) return;
     opsStore.put("backlogClosesAt", new Date(sentMs).toISOString(), at);
-    syncIssueCloses(deps.store, fresh.repos, at);
+    syncIssueCloses(deps.store, fresh.repos, at, deps.askDone);
   }
 
   function putMac(snapshot: MacSnapshot): void {
@@ -752,7 +755,7 @@ export function createOps(deps: OpsDeps) {
 
   /** No red goes unowned (ops/pickup.ts): sends the monitor each red item nobody is on, or marks it Late when a cap is hit. */
   function pickupTick(): void {
-    settlePickupAsks(deps.store, deps.store.listOpsStatuses(), now());
+    settlePickupAsks(deps.store, deps.store.listOpsStatuses(), now(), deps.askDone);
     const pickup = deps.pickup;
     if (!pickup) return;
     const at = now();

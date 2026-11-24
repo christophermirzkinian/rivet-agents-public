@@ -1,10 +1,14 @@
 import { h, inertBehind } from "../dom.js";
-import { trackOverlayHistory } from "../overlay-history.js";
+import { afterOverlayBack, backOffEntry, entryId, pushOverlayEntry } from "../overlay-history.js";
 import { enterScreen, leaveScreen, useTap } from "../usage.js";
 import type { View } from "./view.js";
 
-/** `under` is the entry the pop-up opened on: it takes no entry of its own, so Back over it leaves that one. */
-let open: { close(): void; under: unknown } | null = null;
+/**
+ * The ordinary sheet up, if any. Over a tall sheet it takes no entry of its own (`under` is the entry it opened on, so
+ * Back over it leaves that one, the tall sheet's); anywhere else it takes one, `ownEntry`, so the phone's Back closes it.
+ * `close(soon)`: a close that is not Back takes its entry off a task later (`backOffEntry`), or at once.
+ */
+let open: { close(soon?: boolean): void; under: unknown; tookEntry: boolean; ownEntry(): boolean } | null = null;
 
 /** How long a sheet takes to slide up, and to slide off the screen as it closes (styles.css `sheet-up`, `sheet-down`). */
 const RISE_MS = 260;
@@ -181,9 +185,31 @@ export function openSheet(
   body.mount(content);
   const screen = look.use ?? "unknown";
   enterScreen(screen);
-  open = {
-    under: history.state,
-    close() {
+  const under = history.state;
+  // Over a tall sheet, that sheet's Back closes this one first (its popstate listener).
+  const state = { sheet: entryId() };
+  let untrack: ((fromHistory: boolean) => void) | null = null;
+  if (!tall) {
+    try {
+      untrack = pushOverlayEntry(state);
+    } catch {
+      // Without its entry Back leaves the screen under it; Close, Escape and the backdrop still close it.
+    }
+  }
+  const mine = (at: unknown) => (at as { sheet?: string } | null)?.sheet === state.sheet;
+  const onPop = (event: PopStateEvent) => {
+    // A viewer over the sheet, or a page inside it, going back to the sheet's own entry.
+    if (mine(event.state)) return;
+    untrack?.(true);
+    untrack = null;
+    if (open === handle) closeSheet();
+  };
+  if (untrack) window.addEventListener("popstate", onPop);
+  const handle = {
+    under,
+    tookEntry: untrack !== null,
+    ownEntry: () => untrack !== null && mine(history.state),
+    close(soon = true) {
       leaveScreen(screen);
       const still = keepStill(content);
       body.unmount();
@@ -192,14 +218,41 @@ export function openSheet(
       unfit();
       leaveSheet(backdrop);
       document.removeEventListener("keydown", onKey);
+      window.removeEventListener("popstate", onPop);
+      if (untrack) backOffEntry(state, under, untrack, soon);
+      untrack = null;
     },
   };
+  open = handle;
   close.focus();
 }
 
 export function closeSheet(): void {
-  open?.close();
+  const was = open;
   open = null;
+  was?.close();
+}
+
+/**
+ * Closes the ordinary sheet, then runs `next` once its Back has landed, so Back cannot undo where `next` goes, nor stop a
+ * page `next` loads. One closed a moment ago, its Back still in flight, is waited for too.
+ */
+export function leavePlainSheet(next: () => void): void {
+  const was = open;
+  if (!was?.ownEntry()) {
+    closeSheet();
+    return afterOverlayBack(next);
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const run = () => {
+    window.removeEventListener("popstate", run);
+    clearTimeout(timer);
+    next();
+  };
+  window.addEventListener("popstate", run);
+  timer = setTimeout(run, 400);
+  open = null;
+  was.close(false);
 }
 
 /**
@@ -245,7 +298,6 @@ function scrollerAt(target: EventTarget | null, panel: HTMLElement): HTMLElement
 type SheetDrag = { follow(offset: number): void; settle(shut: boolean): void; height(): number };
 
 let tall: { close(fromHistory?: boolean): void; hasHistory(): boolean; drag: SheetDrag } | null = null;
-let tallEntries = 0;
 
 /**
  * A tall bottom sheet (the Decide sheet over the map): `body` mounts its own head and close. It closes by Escape, a tap
@@ -260,8 +312,8 @@ export function openTallSheet(
   look: { className?: string; onClose?: () => void; historyDepth?: () => number; use?: string } = {},
 ): void {
   closeTallSheet();
-  const entry = ++tallEntries;
-  const ours = (state: unknown) => (state as { tallSheet?: number } | null)?.tallSheet === entry;
+  const entry = entryId();
+  const ours = (state: unknown) => (state as { tallSheet?: string } | null)?.tallSheet === entry;
   const content = h("div", { class: "sheet-body" });
   const handle = h("div", { class: "sheet-handle", attrs: { "aria-hidden": "true" } }, h("span"));
   const panel = h(
@@ -387,8 +439,9 @@ export function openTallSheet(
   };
   const onPop = (event: PopStateEvent) => {
     // Back over the reject popup (or Share) closes the popup alone, on an entry of the sheet's own too (one a chat page
-    // inside it pushed); off the sheet's entries, the sheet takes its entry back.
-    if (open) {
+    // inside it pushed); off the sheet's entries, the sheet takes its entry back. One with an entry of its own is under
+    // this sheet, not over it, and closes on its own Back.
+    if (open && !open.tookEntry) {
       const { under } = open;
       closeSheet();
       if (ours(event.state)) {
@@ -450,11 +503,10 @@ export function openTallSheet(
   holdFloor();
   const restore = inertBehind(backdrop);
   try {
-    closeHistory = trackOverlayHistory();
-    history.pushState({ tallSheet: entry }, "");
+    // A drawer row's page takes over the entry the drawer, closed in the same tap, leaves.
+    closeHistory = pushOverlayEntry({ tallSheet: entry });
     historyEntry = true;
   } catch {
-    closeHistory?.(true);
     closeHistory = undefined;
   }
   window.addEventListener("popstate", onPop);

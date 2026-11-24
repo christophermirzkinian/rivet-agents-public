@@ -623,6 +623,42 @@ test("a sheet's logs.subscribe and logs.unsubscribe are handled as they arrive, 
   assert.equal(handled.length, 2);
 });
 
+test("a Home button is handled as it arrives, never queued behind a delivery", async (t) => {
+  mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+  t.after(() => mock.timers.reset());
+  // Behind a reply held for minutes the press would outlive the server's wait and be dropped late.
+  /** @type {{ id: string, at: number }[]} */
+  const handled = [];
+  const homeFamily = {
+    family: "home",
+    events: Object.freeze(["home-control"]),
+    handle: async (/** @type {string} */ _event, /** @type {any} */ raw) => {
+      handled.push({ id: raw.id, at: Date.now() });
+      return "delivered";
+    },
+  };
+  const live = liveStream();
+  const h = harness({ sendMs: 7_000, idleMs: 600_000, events: live.events, actions: [createCommandFamily(), homeFamily] });
+  const done = h.bridge.connectOnce();
+  await settle();
+  const card = (/** @type {string} */ id) => `event: reply\nid: ${id}\ndata: ${JSON.stringify(reply({ id }, { pr: undefined }))}\n\n`;
+  const press = (/** @type {string} */ id) => `event: home-control\nid: ${id}\ndata: ${JSON.stringify({ id, button: "b_1", until: 13_000 })}\n\n`;
+  live.write(card("r_1") + card("r_2"));
+  await settle();
+  live.write(press("h_1"));
+  await settle();
+  await advance(1_000);
+  live.write(press("h_2"));
+  await settle();
+  // Both handled while r_1 is still being typed, not 7s or 14s later, past the press's deadline.
+  assert.deepEqual(handled, [{ id: "h_1", at: 0 }, { id: "h_2", at: 1_000 }]);
+  await advance(30_000);
+  live.end();
+  assert.deepEqual(await done, { status: "ended", connected: true });
+  assert.deepEqual(h.acks.map((a) => a.id), ["r_1", "r_2"]);
+  assert.equal(handled.length, 2);
+});
+
 test("a logs handler that throws is logged and leaves the delivery queue running", async (t) => {
   mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
   t.after(() => mock.timers.reset());

@@ -521,7 +521,8 @@ describe("wait cards on the server", () => {
     for (const [h, why] of [[1, undefined], [2, "tests were red"], [3, "deploy queue"], [4, "review found a gap"]] as const) expect((await send("PATCH", "/api/asks/a-1", { due: inHours(h), ...(why ? { why } : {}) })).status).toBe(200);
     expect(await waits()).toEqual([]);
     expect((await send("PATCH", "/api/asks/a-1", { stage: "done" })).status).toBe(200);
-    expect((await read()).needs).toEqual([]);
+    // The close's Done card is on the board, unpushed.
+    expect((await read()).needs.map((need: { id: string }) => need.id)).toEqual(["ask-a-1-done"]);
     expect(ids()).toEqual([]);
   });
 

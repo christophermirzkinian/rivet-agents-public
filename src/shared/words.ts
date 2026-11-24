@@ -20,6 +20,14 @@ export function showMinimised(count: number): string {
   return count === 1 ? "Show it ›" : "Show them ›";
 }
 
+/** Under an open card, the cards minimised beside it, still out of every count: `+ 1 minimised`, `+ 3 minimised`. */
+export function alsoMinimised(count: number): string {
+  return `+ ${count} minimised`;
+}
+
+/** The tap on that line to the first of them. */
+export const SHOW_MINIMISED_OPEN = "Show ›";
+
 /** The chip on a row that waits on you. Replaces Your OK, Waiting on your OK, waiting for you, Asking you. */
 export const NEEDS_YOU = "Needs you";
 

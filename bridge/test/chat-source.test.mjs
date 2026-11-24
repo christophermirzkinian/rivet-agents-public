@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { test } from "node:test";
 import { CHAT_CLI, createChatRunner, runnerTerminal, submitState } from "../lib/chat-source.mjs";
 
@@ -85,6 +88,42 @@ test("list, read, interrupt and start run the runner's CLI; a prompt and a line 
     { args: ["interrupt", "site-fix"] },
     { args: ["new", "chat-r01", "--cwd", "/tmp/home", "--prompt-file", "-"], input: "the first line" },
   ]);
+});
+
+test("a new chat with no folder given opens in RIVET_CHAT_DIR when it is a real folder, else home", async (t) => {
+  // The temp folder itself sits under a link on macOS (/var is /private/var).
+  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "chat-dir-")));
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const was = process.env.RIVET_CHAT_DIR;
+  t.after(() => (was === undefined ? delete process.env.RIVET_CHAT_DIR : (process.env.RIVET_CHAT_DIR = was)));
+  const chat = path.join(base, "chat");
+  fs.mkdirSync(chat);
+  fs.symlinkSync(chat, path.join(base, "link"));
+  const started = async (/** @type {string | undefined} */ dir) => {
+    if (dir === undefined) delete process.env.RIVET_CHAT_DIR;
+    else process.env.RIVET_CHAT_DIR = dir;
+    /** @type {string[][]} */
+    const calls = [];
+    const exec = async (/** @type {string} */ _file, /** @type {string[]} */ args) => (calls.push(args.slice(1)), { stdout: "", stderr: "" });
+    await createChatRunner({ exec, nodeBin: "/node", cli: "/cli" }).start("chat-r02", "hi");
+    return calls[0]?.[calls[0].indexOf("--cwd") + 1];
+  };
+  assert.equal(await started(chat), chat);
+  assert.equal(await started(undefined), os.homedir());
+  assert.equal(await started("chat"), os.homedir(), "a relative path");
+  assert.equal(await started(path.join(base, "missing")), os.homedir());
+  assert.equal(await started(path.join(base, "link")), os.homedir(), "a link");
+  // One runner, as the bridge keeps: the folder is read again at each start.
+  /** @type {string[][]} */
+  const calls = [];
+  const exec = async (/** @type {string} */ _file, /** @type {string[]} */ args) => (calls.push(args.slice(1)), { stdout: "", stderr: "" });
+  const runner = createChatRunner({ exec, nodeBin: "/node", cli: "/cli" });
+  process.env.RIVET_CHAT_DIR = chat;
+  await runner.start("chat-r03", "hi");
+  fs.rmSync(chat, { recursive: true });
+  fs.symlinkSync(os.homedir(), chat);
+  await runner.start("chat-r04", "hi");
+  assert.deepEqual(calls.map((args) => args[args.indexOf("--cwd") + 1]), [chat, os.homedir()]);
 });
 
 test("a line is confirmed only when the screen moved and the box is empty", async () => {

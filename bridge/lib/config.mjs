@@ -49,6 +49,24 @@ export function claudeCwd(home = os.homedir()) {
 }
 
 /**
+ * The folder a new chat opens in when none is named: RIVET_CHAT_DIR when it is an absolute path to a folder with no
+ * link anywhere in it, else the home folder. A hosted machine names its ~/chat there, as Claude Code trusts no chat in
+ * home.
+ * @param {NodeJS.ProcessEnv} [env] @param {string} [home]
+ */
+export function chatDir(env = process.env, home = os.homedir()) {
+  const dir = env.RIVET_CHAT_DIR;
+  if (!dir || !path.isAbsolute(dir)) return home;
+  try {
+    // native: the JS realpath folds a ".." as text before it reads the link the kernel would follow.
+    const real = fs.realpathSync.native(dir);
+    return real === path.resolve(dir) && fs.statSync(real).isDirectory() ? real : home;
+  } catch {
+    return home;
+  }
+}
+
+/**
  * A copy of `env` without any Rivet credential: every RIVET_*TOKEN* variable, today's and any added later.
  * @param {NodeJS.ProcessEnv} env
  */

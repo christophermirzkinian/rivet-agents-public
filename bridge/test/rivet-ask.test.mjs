@@ -1,4 +1,8 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { test } from "node:test";
 import { nextAskId, parseArgs, parseDueTime, run, when } from "../../scripts/rivet.mjs";
 
@@ -13,7 +17,7 @@ const NOW = "2026-10-01T02:00:00.000Z";
  * @param {any[]} [seed] @param {Record<string, string>} [messages] your messages by id, for POST from
  */
 function stubServer(seed = [], messages = {}) {
-  const state = { asks: /** @type {any[]} */ ([...seed]), held: /** @type {string[] | undefined} */ (undefined), workers: /** @type {any[] | undefined} */ (undefined), calls: /** @type {{ method: string, path: string, body?: any, ifMatch?: string }[]} */ ([]) };
+  const state = { asks: /** @type {any[]} */ ([...seed]), held: /** @type {string[] | undefined} */ (undefined), workers: /** @type {any[] | undefined} */ (undefined), chats: /** @type {any[] | undefined} */ ([]), calls: /** @type {{ method: string, path: string, body?: any, ifMatch?: string }[]} */ ([]) };
   /** @param {number} status @param {unknown} doc */
   const reply = (status, doc) => new Response(JSON.stringify(doc), { status, headers: { "content-type": "application/json" } });
   /** @param {string | URL | Request} url @param {RequestInit} [init] */
@@ -26,6 +30,7 @@ function stubServer(seed = [], messages = {}) {
     if (headers.authorization !== `Bearer ${TOKEN}`) return reply(401, { error: "unauthorized" });
     // With no chats given the read fails, as with no server: the ask is written unchecked.
     if (u.pathname === "/api/workers" && method === "GET" && state.workers) return reply(200, { workers: state.workers });
+    if (u.pathname === "/api/board" && method === "GET" && state.chats) return reply(200, { version: 6, board: { needs: [], coming: [], chats: state.chats } });
     if (u.pathname === "/api/asks" && method === "GET") {
       const stage = u.searchParams.get("stage");
       const rows = [...state.asks].reverse().filter((a) => !stage || a.stage === stage);
@@ -145,6 +150,138 @@ test("parses the ask commands and refuses bad usage", () => {
   assert.throws(() => parseArgs(["ask", "set", "a-1", "--why", "two\nlines"]), usage("--why is one line"));
   assert.throws(() => parseArgs(["ask", "set", "a-1", "--why", "y".repeat(201)]), usage("--why is one line of 1 to 200"));
   assert.throws(() => parseArgs(["ask", "set", "a-1", "--stage", "finished"]), usage("--stage is one of"));
+});
+
+test("parses the done card's --done and --media, and refuses them off a move to done", () => {
+  const set = parseArgs(["ask", "set", "a-1", "--stage", "done", "--done", "A", "--done", "B", "--media", "shot.png"]);
+  assert.deepEqual([set.fields, set.doneItems, set.doneMedia, set.media.stills], [{ stage: "done" }, ["A", "B"], "shot.png", ["shot.png"]]);
+  const close = parseArgs(["ask", "close", "a-1", "done", "--done", "A", "--media", "clip.MP4", "--poster", "first.jpg", "--skip-corner-check"]);
+  assert.deepEqual([close.doneItems, close.media.after, close.media.poster, close.media.skipCorner, close.media.stills], [["A"], "clip.MP4", "first.jpg", true, []]);
+  assert.deepEqual(parseArgs(["ask", "status", "a-1", "done", "--done", "A"]).doneItems, ["A"]);
+  assert.equal(parseArgs(["ask", "close", "a-1", "done", "--media", "shot.jpeg"]).doneMedia, "shot.jpeg");
+  const three = ["--done", "1", "--done", "2", "--done", "3"];
+  assert.equal(parseArgs(["ask", "set", "a-1", "--stage", "done", ...three]).doneItems?.length, 3);
+  assert.equal(parseArgs(["ask", "set", "a-1", "--stage", "done", "--done", "x".repeat(160)]).doneItems?.[0].length, 160);
+
+  const off = usage("go with a move to done");
+  assert.throws(() => parseArgs(["ask", "set", "a-1", "--done", "A"]), off);
+  assert.throws(() => parseArgs(["ask", "set", "a-1", "--stage", "building", "--done", "A"]), off);
+  assert.throws(() => parseArgs(["ask", "set", "a-1", "--note", "n", "--media", "shot.png"]), off);
+  assert.throws(() => parseArgs(["ask", "status", "a-1", "shipped", "--done", "A"]), off);
+  assert.throws(() => parseArgs(["ask", "close", "a-1", "shipped", "--media", "shot.png"]), off);
+  assert.throws(() => parseArgs(["ask", "close", "a-1", "parked", "--issue", "3", "--done", "A"]), off);
+  assert.throws(() => parseArgs(["ask", "set", "a-1", "--stage", "done", ...three, "--done", "4"]), usage("at most 3 --done items"));
+  assert.throws(() => parseArgs(["ask", "set", "a-1", "--stage", "done", "--done", "two\nlines"]), usage("--done is one line of 1 to 160"));
+  assert.throws(() => parseArgs(["ask", "set", "a-1", "--stage", "done", "--done", "x".repeat(161)]), usage("--done is one line of 1 to 160"));
+  assert.throws(() => parseArgs(["ask", "set", "a-1", "--stage", "done", "--done", "  "]), usage("--done is one line of 1 to 160"));
+  assert.throws(() => parseArgs(["ask", "set", "a-1", "--stage", "done", "--media", "notes.pdf"]), usage("--media is a png or jpg still, or an mp4 clip"));
+  assert.throws(() => parseArgs(["ask", "set", "a-1", "--stage", "done", "--media", "clip.webm"]), usage("--media is a png or jpg still, or an mp4 clip"));
+  assert.throws(() => parseArgs(["ask", "set", "a-1", "--stage", "done", "--media", "a.png", "--media", "b.png"]), usage("--media is one still or one clip"));
+  assert.throws(() => parseArgs(["ask", "set", "a-1", "--stage", "done", "--media", "a.png", "--poster", "p.png"]), usage("--poster and --skip-corner-check go with an mp4 --media"));
+  assert.throws(() => parseArgs(["ask", "close", "a-1", "done", "--skip-corner-check"]), usage("--poster and --skip-corner-check go with an mp4 --media"));
+  // The other ask commands take none of them.
+  assert.throws(() => parseArgs(["ask", "open", "x", "--done", "A"]), usage("unknown option --done"));
+  assert.throws(() => parseArgs(["ask", "list", "--media", "a.png"]), usage("unknown option --media"));
+});
+
+/**
+ * stubServer with the media store's PUT beside it, and every request in order.
+ * @param {any[]} seed
+ * @param {number} [putStatus] what the media PUT answers
+ */
+function mediaServer(seed, putStatus = 201) {
+  const server = stubServer(seed);
+  const media = /** @type {{ sha256: string, type: string }[]} */ ([]);
+  const order = /** @type {string[]} */ ([]);
+  /** @param {string | URL | Request} url @param {RequestInit} [init] */
+  const fetchFn = async (url, init = {}) => {
+    const u = new URL(String(url));
+    order.push(`${init.method ?? "GET"} ${u.pathname}`);
+    if (!u.pathname.startsWith("/api/bridge/media/")) return server.fetch(url, init);
+    if (putStatus !== 201) return new Response(JSON.stringify({ error: "the media store is full" }), { status: putStatus, headers: { "content-type": "application/json" } });
+    media.push({ sha256: u.pathname.slice("/api/bridge/media/".length), type: /** @type {Record<string, string>} */ (init.headers)["content-type"] });
+    return new Response("{}", { status: 201, headers: { "content-type": "application/json" } });
+  };
+  return { ...server, media, order, fetch: /** @type {typeof fetch} */ (/** @type {unknown} */ (fetchFn)) };
+}
+
+/** ffprobe saying a png of this size, and ffmpeg decoding a frame with something in it. @param {number} width @param {number} height */
+function stillExec(width, height) {
+  /** @type {import("../lib/config.mjs").Exec} */
+  return async (bin, args) => {
+    if (bin === "/fake/ffprobe") return { stdout: JSON.stringify({ streams: [{ codec_name: "png", width, height }], format: { format_name: "png_pipe" } }), stderr: "" };
+    fs.writeFileSync(/** @type {string} */ (args.at(-1)), Buffer.from(Array.from({ length: 64 * 64 * 4 }, (_, i) => (i % 4 === 3 ? 255 : (i * 37) % 256))));
+    return { stdout: "", stderr: "" };
+  };
+}
+
+test("--done items ride on the move to done", async () => {
+  const server = mediaServer([mk({ id: "a-1" }), mk({ id: "a-2" }), mk({ id: "a-3" }), mk({ id: "a-4" })]);
+  const patches = () => server.state.calls.filter((call) => call.method === "PATCH");
+  const set = await cli(["ask", "set", "a-1", "--stage", "done", "--done", "A", "--done", "B"], { fetch: server.fetch });
+  assert.equal(set.code, 0, set.stderr);
+  assert.deepEqual(patches().at(-1), { method: "PATCH", path: "/api/asks/a-1", body: { stage: "done", done: ["A", "B"] }, ifMatch: undefined });
+  const close = await cli(["ask", "close", "a-2", "done", "--note", "shipped", "--done", "The banner chart shows a week"], { fetch: server.fetch });
+  assert.equal(close.code, 0, close.stderr);
+  assert.deepEqual(patches().at(-1)?.body, { stage: "done", note: "shipped", done: ["The banner chart shows a week"] });
+  const status = await cli(["ask", "status", "a-3", "done", "--done", "1", "--done", "2", "--done", "3"], { fetch: server.fetch });
+  assert.equal(status.code, 0, status.stderr);
+  assert.deepEqual(patches().at(-1)?.body, { stage: "done", done: ["1", "2", "3"] });
+  // A move with no --done sends none.
+  assert.equal((await cli(["ask", "close", "a-4", "done"], { fetch: server.fetch })).code, 0);
+  assert.deepEqual(patches().at(-1)?.body, { stage: "done" });
+  assert.deepEqual(server.media, []);
+});
+
+test("--media is checked, uploaded, then named on the move to done; a still over 1600 px exits 5 with nothing sent", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rivet-done-"));
+  const png = path.join(dir, "shot.png");
+  const bytes = Buffer.from("89504e470d0a1a0a0000", "hex");
+  fs.writeFileSync(png, bytes);
+  const sha256 = crypto.createHash("sha256").update(bytes).digest("hex");
+  const deps = { bin: (/** @type {string} */ name) => `/fake/${name}`, tmpdir: dir };
+
+  const server = mediaServer([mk({ id: "a-1" }), mk({ id: "a-2" })]);
+  const sent = await cli(["ask", "close", "a-1", "done", "--done", "The banner is on the Lab", "--media", png], { ...deps, fetch: server.fetch, exec: stillExec(720, 1558) });
+  assert.equal(sent.code, 0, sent.stderr);
+  assert.deepEqual(server.media, [{ sha256, type: "image/png" }]);
+  assert.deepEqual(server.order, [`PUT /api/bridge/media/${sha256}`, "PATCH /api/asks/a-1"], "uploaded before the ask names it");
+  assert.deepEqual(server.state.calls.at(-1)?.body, { stage: "done", done: ["The banner is on the Lab"], doneMedia: { kind: "stills", stills: [{ sha256, type: "image/png" }] } });
+  // 1600 px on the longest side is the most a still may be.
+  const edge = await cli(["ask", "set", "a-2", "--stage", "done", "--media", png], { ...deps, fetch: server.fetch, exec: stillExec(1600, 900) });
+  assert.equal(edge.code, 0, edge.stderr);
+  assert.deepEqual(server.state.calls.at(-1)?.body, { stage: "done", doneMedia: { kind: "stills", stills: [{ sha256, type: "image/png" }] } });
+
+  const big = mediaServer([mk({ id: "a-1" })]);
+  const refused = await cli(["ask", "close", "a-1", "done", "--done", "Shipped", "--media", png], { ...deps, fetch: big.fetch, exec: stillExec(2000, 900) });
+  assert.equal(refused.code, 5);
+  assert.match(refused.stderr, /rivet: shot\.png: 2000x900, over 1600 px on its longest side; scale it down \(sips -Z 1600 shot\.png\)/);
+  assert.deepEqual(big.order, [], "nothing uploaded or patched");
+  assert.deepEqual(big.media, []);
+  assert.equal(big.state.asks[0].stage, "queued");
+});
+
+test("past the pre-flight, a picture the server will not take costs the picture, not the close", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rivet-done-"));
+  const png = path.join(dir, "shot.png");
+  const bytes = Buffer.from("89504e470d0a1a0a0000", "hex");
+  fs.writeFileSync(png, bytes);
+  const sha256 = crypto.createHash("sha256").update(bytes).digest("hex");
+  const deps = { bin: (/** @type {string} */ name) => `/fake/${name}`, tmpdir: dir };
+
+  const full = mediaServer([mk({ id: "a-1" })], 507);
+  const closed = await cli(["ask", "close", "a-1", "done", "--done", "The banner is on the Lab", "--media", png], { ...deps, fetch: full.fetch, exec: stillExec(720, 1558) });
+  assert.equal(closed.code, 0, closed.stderr);
+  assert.match(closed.stderr, /rivet: the picture did not go up \(.*the media store is full.*\); closing the ask without it\n/);
+  assert.deepEqual(full.order, [`PUT /api/bridge/media/${sha256}`, "PATCH /api/asks/a-1"]);
+  assert.deepEqual(full.state.calls.at(-1)?.body, { stage: "done", done: ["The banner is on the Lab"] });
+  assert.equal(full.state.asks[0].stage, "done");
+  assert.deepEqual(full.media, []);
+  // A pre-flight problem is still exit 5 with nothing sent.
+  const big = mediaServer([mk({ id: "a-1" })], 507);
+  const refused = await cli(["ask", "close", "a-1", "done", "--done", "Shipped", "--media", png], { ...deps, fetch: big.fetch, exec: stillExec(2000, 900) });
+  assert.equal(refused.code, 5);
+  assert.deepEqual(big.order, []);
 });
 
 test("needs-you may name its card, and the list shows each ask's stage, due time and moves", async () => {

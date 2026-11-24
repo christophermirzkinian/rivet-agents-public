@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { CARD_REFUSAL_MAX, mediaFlag, mediaOf, readMedia, replyRecord, serverError, uploadClips } from "../bridge/lib/board-client.mjs";
 import { sanitizeLine } from "../bridge/lib/templates.mjs";
 import { fingerprint, makeExec, readToken, serverOrigin } from "../bridge/lib/config.mjs";
+import { chatPrRepo } from "../bridge/lib/folder-repo.mjs";
 import { chatRepoOf, comingChatRepo, isId, progressFieldProblems } from "../bridge/lib/validate.mjs";
 import { defaultRepo } from "../src/shared/repos.ts";
 
@@ -17,6 +18,12 @@ const USAGE = `Publish Rivet's board, and read or settle replies, on the Rivet s
       the last push, and the shipped rows the server moved there from Coming (named on
       stderr and written into board.json); the keys of
       each push go in <board.json>.pushed. A stale version retries up to 3 times.
+      A card with a pr, a chat and no repo is a PR of its chat's repo when the
+      board's chat names one (repo, also written into board.json); a card the
+      server already holds with that pr and chat keeps the repo it is held as.
+      One held with that pr under another chat whose repo is not the held one,
+      and a chat that may be in more than one repo, are refused until the card
+      has a repo. --if-match and --replace push such a card as it is.
       --if-match sends that version with no merge; --replace overwrites with no
       merge and no version check.
   node push-board.mjs --replies                             unhandled replies as JSON
@@ -439,6 +446,40 @@ function cardText(need) {
   return JSON.stringify(sorted(card));
 }
 
+/**
+ * Gives each card in `body` with a pr, a chat and no repo its chat's repo (chatPrRepo, read with the chats the push
+ * leaves): left with none it is the main repo's PR of that number.
+ * A card `server` (the board the server holds) has with that pr and chat keeps the repo it is
+ * held as, whatever the chats say now, and one it has with that pr under another chat is refused unless the new chat's
+ * repo is the held one, so no card on the board moves to another PR. With no server board (null) what it holds is not
+ * known and every card goes as written. The body to write and the repos given (`held` for one the server's card
+ * gave), or why nothing may be pushed.
+ * @param {string} body @param {any} server
+ * @returns {{ error: string } | { body: string, repos: Map<string, { repo: string, pr: number, chat: string, held?: boolean }> }}
+ */
+function chatRepoCards(body, server) {
+  /** @type {Map<string, { repo: string, pr: number, chat: string, held?: boolean }>} */
+  const repos = new Map();
+  if (server === null) return { body, repos };
+  const doc = JSON.parse(body);
+  const held = new Map((Array.isArray(server?.needs) ? server.needs : []).map((/** @type {any} */ need) => [need?.id, need]));
+  for (const need of doc.needs) {
+    if (typeof need?.pr !== "number" || need.repo !== undefined) continue;
+    const there = held.get(need.id);
+    if (there?.pr === need.pr && there.chat === need.chat) {
+      if (typeof there.repo === "string" && there.repo !== DEFAULT_REPO) repos.set(need.id, { repo: (need.repo = there.repo), pr: need.pr, chat: need.chat, held: true });
+      continue;
+    }
+    const { repo, among } = chatPrRepo(doc.chats, need.chat, need.pr);
+    if (among)
+      return { error: `card ${need.id}: pr ${need.pr} has no repo and chat ${need.chat} may be in more than one repo: give the card a repo, one of ${among.join(", ")}; nothing was pushed` };
+    if (there?.pr === need.pr && (repo ?? DEFAULT_REPO) !== (there.repo ?? DEFAULT_REPO))
+      return { error: `card ${need.id}: pr ${need.pr} is held as ${there.repo ?? DEFAULT_REPO}#${need.pr}${there.chat ? ` for chat ${there.chat}` : ""}, and ${need.chat ? `chat ${need.chat} ${repo ? `is in ${repo}` : "names no repo"}` : "the card names no chat now"}: give the card a repo; nothing was pushed` };
+    if (repo && repo !== DEFAULT_REPO) repos.set(need.id, { repo: (need.repo = repo), pr: need.pr, chat: need.chat });
+  }
+  return { body: repos.size ? JSON.stringify(doc) : body, repos };
+}
+
 async function main() {
   let o;
   try {
@@ -516,6 +557,8 @@ async function main() {
       /** @type {string[]} */
       const left = [];
       if (o.ifMatch !== undefined) headers["if-match"] = o.ifMatch;
+      /** @type {any} */
+      let snapshot = null;
       if (merge) {
         const got = await fetch(`${origin}/api/board`, { ...common(), headers: auth });
         if (!got.ok) return fail(`reading the server board: ${await serverError(got)}`);
@@ -526,7 +569,11 @@ async function main() {
         // Compact: the server caps the body at the 1 MB the file may hold, and indenting can cross it.
         if (added.length || drops) body = JSON.stringify(withoutRows(withRows(JSON.parse(text), added, day, placeholders), dropped, left));
         headers["if-match"] = String(current.version);
+        snapshot = current.board ?? {};
       }
+      const ofChats = chatRepoCards(body, snapshot);
+      if ("error" in ofChats) return fail(ofChats.error);
+      body = ofChats.body;
       const res = await fetch(`${origin}/api/board`, { ...common(), method: "PUT", headers, body });
       if (res.status === 409 && merge) {
         await res.body?.cancel().catch(() => {});
@@ -544,10 +591,18 @@ async function main() {
         process.stderr.write(`push-board: kept ${kept.length} item(s) other chats added: ${kept.join(", ")}\n`);
       }
       if (left.length) process.stderr.write(`push-board: left out ${left.length} item(s) the server removed: ${left.join(", ")}\n`);
-      if (added.length || left.length) {
-        // The monitor may have changed the file while the push was in flight: add the kept rows to it as it is now.
+      for (const [id, { repo, pr, chat, held: asHeld }] of ofChats.repos)
+        process.stderr.write(`push-board: note: card ${id}'s pr ${pr} is ${repo}#${pr}, ${asHeld ? "as the server holds it" : `chat ${chat}'s repo`}; give the card a repo for another\n`);
+      if (added.length || ofChats.repos.size || left.length) {
+        // The monitor may have changed the file while the push was in flight: add the kept rows and the chats' repos to
+        // it as it is now, so the next push holds the cards as the server does.
         try {
           const latest = JSON.parse(fs.readFileSync(file, "utf8"));
+          for (const need of Array.isArray(latest?.needs) ? latest.needs : []) {
+            const ofChat = ofChats.repos.get(need?.id);
+            // Only onto the card that was read: one given another PR or chat meanwhile is read again next push.
+            if (ofChat && need.pr === ofChat.pr && need.chat === ofChat.chat && need.repo === undefined) need.repo = ofChat.repo;
+          }
           fs.writeFileSync(file, boardText(dropped ? withoutRows(withRows(latest, added, day, placeholders), dropped) : withRows(latest, added, day, placeholders)));
         } catch {
           learnt = false;

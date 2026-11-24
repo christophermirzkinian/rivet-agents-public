@@ -1061,6 +1061,54 @@ a {
   overflow-wrap: anywhere;
 }
 
+/* A done card: what was asked, then what is done, each under a small label. */
+.done-ask {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  white-space: normal;
+}
+
+.done-part {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+}
+
+.done-label {
+  color: var(--muted);
+  font-size: var(--fs-s);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.done-points {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.done-points > li {
+  position: relative;
+  padding-left: 16px;
+}
+
+.done-points > li::before {
+  position: absolute;
+  top: 0.55em;
+  left: 2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--apricot);
+  content: "";
+}
+
 .card-body:not(.with-media) > .card-ask + .card-meta {
   margin: -6px 0 12px;
 }

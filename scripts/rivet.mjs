@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as runner from "./chat-runner.mjs";
 import { CARD_REFUSAL_MAX, emailButtonLink, hasMedia, mediaFlag, mediaOf, readMedia, replyRecord, serverError, uploadClips } from "../bridge/lib/board-client.mjs";
-import { makeExec, readToken, resolveBin, serverOrigin } from "../bridge/lib/config.mjs";
+import { chatDir, makeExec, readToken, resolveBin, serverOrigin } from "../bridge/lib/config.mjs";
 import { cardHoldPrs, definitiveRefusal, dropCardHold, holdForCard, isVideoCard } from "../bridge/lib/card-holds.mjs";
 import { HOLDS_FILE, readHolds, updateHolds } from "../bridge/lib/holds-file.mjs";
 import { isMergeHoldLabel, readMergeHolds } from "../bridge/lib/merge-holds.mjs";
@@ -42,6 +42,11 @@ const MAX_ASK_WORDS = 4000;
 const MAX_ASK_NOTE = 2000;
 const MAX_ASK_CHAT = 300;
 const MAX_ASK_WHY = 200;
+/** src/shared/asks.ts MAX_DONE_ITEMS and MAX_DONE_ITEM: what a done card says is done. */
+const MAX_DONE_ITEMS = 3;
+const MAX_DONE_ITEM = 160;
+/** The longest side a done card's still may have, in pixels. */
+const MAX_DONE_STILL = 1600;
 /** src/shared/asks.ts MAX_DUE_AHEAD_MS. */
 const MAX_DUE_AHEAD_MS = 7 * 86_400_000;
 /** The opening of a `rivet hold` comment; bridge/lib/pr-holds.mjs reads it. */
@@ -69,7 +74,7 @@ export const USAGE = `Rivet's board, asks, replies and chats from the command li
                                              record one of your asks; prints its id (default a-<next number>). --from
                                              makes it from your message (the server takes your words from it when none are given)
   rivet ask set <id> [--stage s] [--due <when>] [--why "<one line>"] [--progress 0-1] [--note t] [--chat c] [--pr N]...
-                 [--card <id>] [--force]
+                 [--card <id>] [--force] [--done "<short item>"]... [--media <png|jpg|mp4> [--poster <png|jpg>]]
                                              change an ask; prints its stage and due time. --due is minutes ("90"), a
                                              clock time (3pm, 15:30, tonight) in RIVET_TIME_ZONE or the system zone, or ISO,
                                              at most 7 days out; a time later than the promised one by over 10 minutes is a
@@ -78,8 +83,14 @@ export const USAGE = `Rivet's board, asks, replies and chats from the command li
                                              a --chat that is a live chat's name with a short tail added is refused here,
                                              on status set and on card add and edit, naming the chat it may be; --force
                                              writes it as given
-  rivet ask close <id> shipped|done|parked [--issue N] [--note text]
-                                             parked needs --issue; a close records the ask and posts no card
+  rivet ask close <id> shipped|done|parked [--issue N] [--note text] [--done "<short item>"]... [--media <png|jpg|mp4>]
+                                             parked needs --issue; a close records the ask, and done posts one Done card.
+                                             The Done card (from close done, set --stage done or status <id> done) says
+                                             what you asked, then what is done: up to 3 --done items, each one short
+                                             line in plain English with no PR numbers, and --media, one still (png or
+                                             jpg, at most 1600 px a side) or one mp4 clip (--poster for its first frame),
+                                             checked and uploaded as card add's are. With no --done it says the --note,
+                                             else the ask's last --why
   rivet ask list [--stage s] [--all] [--json]
                                              what the app shows (unfinished asks, and shipped, parked or done in the last 3 days);
                                              --all for every ask; each with its due time and how often it moved
@@ -207,7 +218,7 @@ export function swallowedFlag(flag, value) {
  *   options: Option[], links: Link[], steps: string[], media: MediaFlags, json?: string, jsonOut?: boolean, replace?: boolean, force?: boolean,
  *   ifMatch?: string, repo?: string, askFile?: string, out?: string, all?: boolean, prs: number[], into?: string,
  *   unacted?: boolean, evidence: Record<string, unknown>, viewport?: import("../bridge/lib/media-preflight.mjs").Viewport, allowWebm?: boolean,
- *   skipPreflight?: boolean, threadSteps: ThreadStepFlags[], clearSteps?: boolean, open?: boolean, text?: string, textFile?: string }} Parsed
+ *   skipPreflight?: boolean, doneItems?: string[], doneMedia?: string, threadSteps: ThreadStepFlags[], clearSteps?: boolean, open?: boolean, text?: string, textFile?: string }} Parsed
  * @typedef {{ kind?: string, label: string, url?: string, at?: string }} ThreadStepFlags
  * @typedef {{ id: string, words: string, stage: string, chat?: string, issue?: number, dueAt?: string, dueHistory?: unknown[],
  *   createdAt: string, version: number }} Ask
@@ -332,6 +343,8 @@ export function parseArgs(argv) {
   const writes = o.cmd === "card" || (o.cmd === "ask" && (o.sub === "set" || o.sub === "status" || o.sub === "close")) || (o.cmd === "status" && (o.sub === "set" || o.sub === "clear"));
   /** @type {Record<string, string>} */
   const askFlags = o.cmd === "ask" ? ASK_FLAGS[/** @type {keyof typeof ASK_FLAGS} */ (o.sub)] : {};
+  // The writes that can move an ask into done, so they take the done card's text and its still or clip.
+  const closesAsk = o.cmd === "ask" && (o.sub === "set" || o.sub === "status" || o.sub === "close");
   for (; i < argv.length; i++) {
     const a = argv[i];
     const take = () => {
@@ -458,6 +471,12 @@ export function parseArgs(argv) {
     } else if (o.cmd === "claim" && o.sub === "add" && a === "--force") o.fields.force = true;
     else if (o.cmd === "cost" && o.sub === "set" && Object.hasOwn(COST_FLAGS, a)) o.fields[COST_FLAGS[/** @type {keyof typeof COST_FLAGS} */ (a)]] = take();
     else if (o.cmd === "ask" && (o.sub === "open" || o.sub === "set" || o.sub === "status") && a === "--pr") o.prs.push(positive(a, take()));
+    else if (closesAsk && a === "--done") (o.doneItems ??= []).push(take());
+    else if (closesAsk && a === "--media") {
+      if (o.doneMedia !== undefined) throw new UsageError("--media is one still or one clip");
+      o.doneMedia = take();
+    } else if (closesAsk && a === "--poster") o.media.poster = take();
+    else if (closesAsk && a === "--skip-corner-check") o.media.skipCorner = true;
     else if (o.cmd === "thread" && o.sub === "set" && (a === "--status" || a === "--title" || a === "--tag")) o.fields[a.slice(2)] = take();
     else if (o.cmd === "thread" && o.sub === "set" && a === "--step") o.threadSteps.push({ label: take() });
     else if (o.cmd === "thread" && o.sub === "set" && (a === "--kind" || a === "--url" || a === "--at")) {
@@ -669,7 +688,7 @@ function checkAsk(o, count) {
   } else if (o.sub === "set") {
     count(1, 1, "an ask id");
     if (!ASK_ID_RE.test(o.args[0])) throw new UsageError("an ask id must match [a-z0-9-]{1,40}");
-    if (!Object.keys(f).length && !o.prs.length) throw new UsageError("ask set needs something to set");
+    if (!Object.keys(f).length && !o.prs.length && !o.doneItems && o.doneMedia === undefined) throw new UsageError("ask set needs something to set");
   } else if (o.sub === "status" || o.sub === "close") {
     count(2, 2, o.sub === "status" ? "an ask id and a stage" : "an ask id and shipped, done or parked");
     if (!ASK_ID_RE.test(o.args[0])) throw new UsageError("an ask id must match [a-z0-9-]{1,40}");
@@ -684,6 +703,19 @@ function checkAsk(o, count) {
     throw new UsageError(`--stage is one of ${ASK_STAGES.join(", ")}`);
   if (f.cardId !== undefined && !isId(f.cardId)) throw new UsageError("--card must match [A-Za-z0-9._-]{1,100}");
   if (f.repo !== undefined && !REPO_RE.test(/** @type {string} */ (f.repo))) throw new UsageError("--repo is owner/name");
+  // The done card's own text and picture: they go with the move to done, and nowhere else.
+  if (o.doneItems || o.doneMedia !== undefined || o.media.poster !== undefined || o.media.skipCorner) {
+    if (f.stage !== "done") throw new UsageError("--done, --media, --poster and --skip-corner-check go with a move to done (--stage done, or close <id> done)");
+    if (o.doneItems && o.doneItems.length > MAX_DONE_ITEMS) throw new UsageError(`at most ${MAX_DONE_ITEMS} --done items: the card is a heading and up to ${MAX_DONE_ITEMS} short items`);
+    for (const item of o.doneItems ?? [])
+      if (!(oneLine(item) && item.length <= MAX_DONE_ITEM)) throw new UsageError(`--done is one line of 1 to ${MAX_DONE_ITEM} characters`);
+    if (o.doneMedia !== undefined && !/\.(png|jpe?g|mp4)$/i.test(o.doneMedia)) throw new UsageError("--media is a png or jpg still, or an mp4 clip");
+    const clip = o.doneMedia !== undefined && /\.mp4$/i.test(o.doneMedia);
+    if ((o.media.poster !== undefined || o.media.skipCorner) && !clip) throw new UsageError("--poster and --skip-corner-check go with an mp4 --media");
+    // From here the card's own media path reads it (card add's --still and --after).
+    if (clip) o.media.after = o.doneMedia;
+    else if (o.doneMedia !== undefined) o.media.stills.push(o.doneMedia);
+  }
   const chat = /** @type {string | undefined} */ (f.chat);
   if (chat !== undefined && (!chat.trim() || chat.length > MAX_ASK_CHAT || /[\x00-\x1f\x7f]/.test(chat)))
     throw new UsageError(`--chat is one line of 1 to ${MAX_ASK_CHAT} characters`);
@@ -1449,8 +1481,9 @@ async function checkStanding(o, c, id, body) {
 /**
  * Runs the media pre-flight; prints each problem, and false when there is any.
  * @param {Parsed} o @param {Deps} d @param {import("../bridge/lib/media-preflight.mjs").MediaFile[]} files
+ * @param {number} [maxStill] the longest side a still may have, in pixels
  */
-async function mediaPassed(o, d, files) {
+async function mediaPassed(o, d, files, maxStill) {
   const bin = (/** @type {string} */ name) => {
     try {
       return d.bin(name);
@@ -1466,6 +1499,7 @@ async function mediaPassed(o, d, files) {
     allowWebm: o.allowWebm,
     skipCorner: o.media.skipCorner,
     tmpdir: d.tmpdir,
+    maxStill,
   });
   for (const problem of problems) d.stderr(`rivet: ${problem}\n`);
   for (const warning of warnings) d.stderr(`rivet: warning: ${warning}\n`);
@@ -1718,7 +1752,26 @@ async function ask(o, d) {
   }
   if (o.sub === "set" || o.sub === "status" || o.sub === "close") {
     const id = o.args[0];
+    /** @type {Record<string, unknown>} */
     const body = { ...pick(f, ["stage", "why", "progress", "note", "chat", "cardId", "repo", "issue"]), ...dueBody(o, d), ...(o.prs.length ? { prs: o.prs } : {}) };
+    if (o.doneItems) body.done = o.doneItems;
+    if (hasMedia(o.media)) {
+      // The card's own path: the pre-flight, then the media store, then the reference the card carries.
+      /** @type {import("../bridge/lib/media-preflight.mjs").MediaFile[]} */
+      const files = [];
+      if (o.media.after !== undefined) files.push({ role: "after", file: o.media.after });
+      if (o.media.poster !== undefined) files.push({ role: "poster", file: o.media.poster });
+      for (const file of o.media.stills) files.push({ role: "still", file });
+      if (!(await mediaPassed(o, d, files, MAX_DONE_STILL))) return 5;
+      // Past the pre-flight a picture that will not go up costs the picture, never the close.
+      try {
+        const clips = await readMedia({ ...o.media, skipCorner: true }, (msg) => d.stderr(`rivet: ${msg}\n`));
+        await uploadClips(clips, { origin: c.origin, token: c.token, fetch: d.fetch, log: (msg) => d.stderr(`${msg}\n`) });
+        body.doneMedia = mediaOf(clips);
+      } catch (error) {
+        d.stderr(`rivet: the picture did not go up (${error instanceof Error ? error.message : "error"}); closing the ask without it\n`);
+      }
+    }
     const doc = await c.write("PATCH", `/api/asks/${encodeURIComponent(id)}`, body, o.ifMatch);
     done(o, d, `${id} ${askLine(doc, d.now(), timeZone(d.env))}, version ${doc.version}`, doc);
     return 0;
@@ -2107,7 +2160,7 @@ async function fix(o, d) {
   const clone = path.join(home, ".rivet-agents", "work", repo.split("/").pop() ?? "");
   try {
     d.runner.create(ctx, {
-      name: chat, cwd: repo && fs.existsSync(clone) ? clone : home, prompt: brief, ...(repo ? { repo } : {}),
+      name: chat, cwd: repo && fs.existsSync(clone) ? clone : chatDir(d.env, home), prompt: brief, ...(repo ? { repo } : {}),
       forceProject: fields.force ?? null, forceLogged: Boolean(misplaced && fields.force !== undefined),
     });
   } catch (err) {

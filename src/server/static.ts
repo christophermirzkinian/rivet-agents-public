@@ -1,7 +1,8 @@
-import { createReadStream } from "node:fs";
-import { readFile, stat } from "node:fs/promises";
+import { constants, type Stats } from "node:fs";
+import { lstat, open, readlink, realpath, stat, type FileHandle } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { dirname, extname, join, resolve, sep } from "node:path";
+import { pipeline } from "node:stream";
 
 import { APP_NAME, appName } from "../shared/names.js";
 import { onHostedMachine } from "./hosted-name.js";
@@ -19,10 +20,8 @@ const escapeHtml = (text: string): string => text.replace(/[&<>"']/g, (c) => `&#
  * case-blind file system folds more than toLowerCase does (/manifeſt.webmanifest finds manifest.webmanifest). Null for
  * any other file.
  */
-async function rootName(root: string, file: string): Promise<string | null> {
+async function rootName(root: string, file: string, own: Stats): Promise<string | null> {
   if (dirname(file) !== root) return null;
-  const own = await stat(file).catch(() => null);
-  if (!own) return null;
   for (const name of NAMED) {
     const named = await stat(join(root, name)).catch(() => null);
     if (named && named.dev === own.dev && named.ino === own.ino) return name;
@@ -84,34 +83,74 @@ const TYPES: Record<string, string> = {
   ".ttf": "font/ttf",
 };
 
-async function fileAt(root: string, relative: string): Promise<string | null> {
-  const target = resolve(root, `.${relative}`);
-  if (target !== root && !target.startsWith(root + sep)) return null;
-  try {
-    return (await stat(target)).isFile() ? target : null;
-  } catch {
-    return null;
-  }
+type Opened = { file: string; handle: FileHandle; own: Stats };
+const STALLED_MS = 60_000;
+
+/** The build ships no dotfile or dot-folder (web/public, vite.config.ts), so none is served: .env, .git, a "..". */
+const dotted = (path: string, separator: string): boolean => path.split(separator).some((part) => part.startsWith("."));
+
+const inside = (root: string, file: string): boolean => file.startsWith(root + sep) && !dotted(file.slice(root.length), sep);
+
+/**
+ * Where the open file is now, when that is inside the root. O_NOFOLLOW guards only the last part of the path: a folder
+ * above it swapped for a link between the realpath and the open leads the open out of the root.
+ */
+async function openedAt(root: string, file: string, handle: FileHandle, own: Stats): Promise<string | null> {
+  const named = await readlink(`/proc/self/fd/${handle.fd}`).catch(() => null);
+  if (named !== null) return inside(root, named) ? named : null;
+  // Best effort with no /proc (macOS): the path, resolved again, has to lead inside the root to this same file. lstat,
+  // not stat: a last part swapped for a link to the opened file after the realpath is a link, never that file.
+  const again = await realpath(file).catch(() => null);
+  if (!again || !inside(root, again)) return null;
+  const found = await lstat(again).catch(() => null);
+  return found && found.dev === own.dev && found.ino === own.ino ? again : null;
 }
 
-async function send(request: IncomingMessage, response: ServerResponse, root: string, file: string, cacheControl: string): Promise<void> {
-  const name = await rootName(root, file);
-  const renamed = appName() !== APP_NAME && name !== null && NAMED.includes(name);
-  const page = onHostedMachine() && name === "index.html";
-  const manifest = onHostedMachine() && name === "manifest.webmanifest";
-  const read = renamed || page || manifest ? await readFile(file, "utf8") : null;
-  const named = read !== null && renamed ? read.replaceAll(APP_NAME, escapeHtml(appName())) : read;
-  const text = named === null ? null : page ? withMark(hostedDescriptions(named)) : manifest ? hostedManifest(named) : named;
+/**
+ * The file a request names, opened: by its real path, which has to be inside the real root, so a link inside the root
+ * that leads out of it, or to a dotfile, is refused. The open file is the one served, never the path read again.
+ */
+async function fileAt(root: string, relative: string): Promise<Opened | "refused" | null> {
+  const real = await realpath(resolve(root, `.${relative}`)).catch(() => null);
+  if (!real) return null;
+  if (!inside(root, real)) return "refused";
+  // O_NONBLOCK: a FIFO swapped in would otherwise hold the open until something writes to it.
+  const handle = await open(real, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK).catch(() => null);
+  if (!handle) return null;
+  const own = await handle.stat().catch(() => null);
+  const file = own?.isFile() ? await openedAt(root, real, handle, own) : undefined;
+  if (own && file) return { file, handle, own };
+  await handle.close();
+  return file === null ? "refused" : null;
+}
+
+async function send(request: IncomingMessage, response: ServerResponse, root: string, opened: Opened, cacheControl: string): Promise<void> {
+  const { file, handle, own } = opened;
+  let text: string | null;
+  try {
+    const name = await rootName(root, file, own);
+    const renamed = appName() !== APP_NAME && name !== null && NAMED.includes(name);
+    const page = onHostedMachine() && name === "index.html";
+    const manifest = onHostedMachine() && name === "manifest.webmanifest";
+    const read = renamed || page || manifest ? await handle.readFile("utf8") : null;
+    const named = read !== null && renamed ? read.replaceAll(APP_NAME, escapeHtml(appName())) : read;
+    text = named === null ? null : page ? withMark(hostedDescriptions(named)) : manifest ? hostedManifest(named) : named;
+  } catch (err) {
+    await handle.close();
+    throw err;
+  }
+  const head = request.method === "HEAD";
+  if (head || text !== null) await handle.close();
+  // The server's own timeouts end at the request: a client that stops reading would hold the file open for good.
+  response.setTimeout(STALLED_MS, () => response.destroy());
   response.writeHead(200, {
     "content-type": TYPES[extname(file)] ?? "application/octet-stream",
     "cache-control": cacheControl,
   });
-  if (request.method === "HEAD") {
-    response.end();
-    return;
-  }
-  if (text !== null) response.end(text);
-  else createReadStream(file).pipe(response);
+  if (head) response.end();
+  else if (text !== null) response.end(text);
+  // pipeline, not pipe: a reader that goes away closes the file too.
+  else pipeline(handle.createReadStream(), response, () => {});
 }
 
 /** Serves the built web app; returns false when nothing matched. */
@@ -122,19 +161,21 @@ export async function serveStatic(
   rawPath: string,
 ): Promise<boolean> {
   if (request.method !== "GET" && request.method !== "HEAD") return false;
-  const root = resolve(webRoot);
   let path: string;
   try {
     path = decodeURIComponent(rawPath);
   } catch {
     return false;
   }
-  if (path.includes("\0") || path.includes("\\")) return false;
+  if (path.includes("\0") || path.includes("\\") || dotted(path, "/")) return false;
+  const root = await realpath(resolve(webRoot)).catch(() => null);
+  if (!root) return false;
 
   if (path !== "/" && !path.endsWith("/")) {
     const file = await fileAt(root, path);
+    if (file === "refused") return false;
     if (file) {
-      const hashed = path.startsWith("/assets/");
+      const hashed = file.file.startsWith(join(root, "assets") + sep);
       await send(request, response, root, file, hashed ? "public, max-age=31536000, immutable" : "no-cache");
       return true;
     }
@@ -142,8 +183,8 @@ export async function serveStatic(
 
   const acceptsHtml = (request.headers.accept ?? "").includes("text/html");
   if (path !== "/" && !acceptsHtml) return false;
-  const index = join(root, "index.html");
-  if (!(await fileAt(root, "/index.html"))) return false;
+  const index = await fileAt(root, "/index.html");
+  if (!index || index === "refused") return false;
   await send(request, response, root, index, "no-cache");
   return true;
 }

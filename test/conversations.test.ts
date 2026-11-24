@@ -936,6 +936,26 @@ describe("conversation routes", () => {
     expect((await list("?older=1")).conversations.find((row) => row.id === old)).toMatchObject({ closed: true });
   });
 
+  it("a Done card's posted line is what is done, joined with a dot, else what was asked; the same words on another card keep their first line", async () => {
+    await list();
+    const ask = await owner("Make the cards bigger", { conversation: null });
+    clock.advance(BATCH_QUIET_MS);
+    // The Done card comes only from the ask's move to done: the board refuses a bare Got it card on the owner's ask.
+    const close = async (id: string, who: string, done?: string[]) => {
+      expect((await send("POST", "/api/asks", { id, words: "Make the cards bigger", who, replyId: ask, stage: "queued" })).status, id).toBe(201);
+      expect((await send("PATCH", `/api/asks/${id}`, { stage: "done", ...(done ? { done } : {}) })).status, id).toBe(200);
+    };
+    const line = async (id: string) => (await open(ask)).messages.find((message) => message.posted?.id === id)?.posted?.ask;
+    await close("a-1", "owner", ["The cards are bigger", "The chips match"]);
+    await close("a-2", "rivet", ["The cards are bigger"]);
+    await close("a-3", "owner");
+    expect((await send("PUT", "/api/board/needs/cards-bigger-look", { kind: "decision", title: "Cards", ask: "You asked: Make the cards bigger\nDone: The cards are bigger", options: [{ label: "Keep" }, { label: "Undo" }], replyTo: ask })).status).toBe(200);
+    expect(await line("ask-a-1-done")).toBe("The cards are bigger · The chips match");
+    expect(await line("ask-a-2-done")).toBe("The cards are bigger");
+    expect(await line("ask-a-3-done")).toBe("Make the cards bigger");
+    expect(await line("cards-bigger-look")).toBe("You asked: Make the cards bigger");
+  });
+
   it("one conversation per thing: a card carries its ask's conversation, a follow-up card joins by stem or PR, and a merge moves the rest", async () => {
     await list();
     const ask = await owner("Lobby packages, the Apple way", { conversation: null });

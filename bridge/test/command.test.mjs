@@ -14,6 +14,7 @@ import { redactHead } from "../lib/redact-cut.mjs";
 import { FILE_NAME_RE } from "../lib/validate.mjs";
 import { StateStore } from "../lib/state.mjs";
 import { sanitizeLine } from "../lib/templates.mjs";
+import { assertLinear } from "./linear-time.mjs";
 import { paddings, showsToken, TOKEN } from "./padded-token.mjs";
 import { GH_TOKEN, HOME, KEY_BEGIN, KEY_END, REDACT } from "./redaction-corpus.mjs";
 
@@ -507,17 +508,11 @@ test("a line with an escape and a run of non-blanks too long to inspect goes, an
 });
 
 test("redactLines finds a secret's name in linear time on a long token, and reads a long line whole", () => {
-  const fastest = (/** @type {() => void} */ run) =>
-    Math.min(
-      ...[0, 1, 2].map(() => {
-        const started = cpuMs();
-        run();
-        return cpuMs() - started;
-      }),
-    );
-  for (const line of ["a".repeat(131_072), `--password ${"a".repeat(131_072)}`, "password".repeat(16_384), "_".repeat(131_072), `"**password${" *".repeat(32_768)}x`, `x${" **".repeat(32_768)}:`]) {
+  /** @type {((k: number) => string)[]} */
+  const shapes = [(k) => "a".repeat(65_536 * k), (k) => `--password ${"a".repeat(65_536 * k)}`, (k) => "password".repeat(8_192 * k), (k) => "_".repeat(65_536 * k), (k) => `"**password${" *".repeat(16_384 * k)}x`, (k) => `x${" **".repeat(16_384 * k)}:`];
+  for (const line of shapes) {
     for (const rest of [false, true]) {
-      assert.ok(fastest(() => redactLines([line], { inKey: false }, HOME, { rest })) < 150, `${line.slice(0, 20)}… took too long`);
+      assertLinear((text) => redactLines([text], { inKey: false }, HOME, { rest }), line, `${line(1).slice(0, 20)}…`);
     }
   }
   // A header, an open quote or an open array far into a line is followed as on a short one.

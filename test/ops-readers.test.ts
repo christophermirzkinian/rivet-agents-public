@@ -144,7 +144,13 @@ describe("a bridge reader", () => {
     expect(redOf("fly", flyReading(fly(-3 * HOUR), NOW))).toBe("reader stale: no good reading for 3 h (wanted within 1 h)");
     expect(redOf("fly", flyReading(fly(-MIN, []), NOW))).toBe("reader empty: no apps");
     expect(redOf("fly", flyReading(fly(-MIN, ["rivet", "rivet"]), NOW))).toBe("reader wrong: an app listed twice");
-    expect(redOf("fly", flyReading({ ...fly(-MIN), source: { failed: ["rivet"], at: iso(-3 * HOUR) } }, NOW))).toBe("reader stale: no good reading for 3 h (wanted within 1 h)");
+    expect(redOf("fly", flyReading({ ...fly(-MIN, ["rivet", "web-api"]), source: { failed: ["rivet"], at: iso(-3 * HOUR) } }, NOW))).toBe("reader stale: no good reading for 3 h (wanted within 1 h)");
+  });
+
+  it("Fly: every fetch failing with no app kept is auth, never no apps; kept data waits out its window", () => {
+    expect(redOf("fly", flyReading({ ...fly(-MIN, []), source: { failed: ["rivet", "web-api"], at: null } }, NOW))).toBe("reader wrong: flyctl failed for every app (auth?)");
+    expect(redOf("fly", flyReading({ ...fly(-MIN, ["rivet"]), source: { failed: ["rivet"], at: iso(-MIN) } }, NOW))).toBeNull();
+    expect(redOf("fly", flyReading({ ...fly(-MIN, ["rivet"]), source: { failed: ["rivet"], at: iso(-3 * HOUR) } }, NOW))).toBe("reader stale: no good reading for 3 h (wanted within 1 h)");
   });
 
   it("Backlog: quiet when fresh, else stale, empty or wrong; a repo whose fetch failed keeps its own older time", () => {
