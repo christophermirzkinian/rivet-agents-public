@@ -105,6 +105,8 @@ export function registerJobs(router: Router, commands: CommandStore, deps: JobRo
     requireSession(request);
     const parsed = overnightChangeSchema.safeParse(await readJson(request, JOB_BODY_MAX));
     if (!parsed.success) throw new HttpError(400, "invalid overnight settings");
+    // Off only holds runs, as a pause does; on lets every job run overnight again.
+    if (parsed.data.on) router.deps.requirePasskeySession(request, "let jobs run overnight");
     json(response, 200, jobs.setOvernight(parsed.data, now()));
   });
 
@@ -146,7 +148,7 @@ export function registerJobs(router: Router, commands: CommandStore, deps: JobRo
   });
 
   router.on("POST", "/api/jobs", async ({ request, response }) => {
-    requireWriter(request);
+    if (requireWriter(request) === "session") router.deps.requirePasskeySession(request, "set a job");
     const body = parse(jobCreateSchema, await readJson(request, JOB_BODY_MAX), "job");
     if (body.job.check && isUpCheck(body.job.check) && !upApps.has(body.job.check.app))
       throw new HttpError(400, `invalid job: ${body.job.check.app} is not a registered app with a public health check`);
@@ -181,6 +183,9 @@ export function registerJobs(router: Router, commands: CommandStore, deps: JobRo
     const writer = requireWriter(request);
     const id = jobIdOf(url.pathname, PREFIX);
     const body = parse(jobChangeSchema, await readJson(request, JOB_BODY_MAX), "job change");
+    // A pause only stops a job and a run is one run of a job that is on (a paused one is refused below), so a session a
+    // device code alone made may still send either; a resume switches the schedule back on.
+    if (writer === "session" && body.op === "resume") router.deps.requirePasskeySession(request, "resume a job");
     const existing = replay(body.clientId, (job) => job?.id === id && (job.op === body.op || (body.op === "resume" && job.op === "create")));
     if (existing) {
       json(response, 200, existing);

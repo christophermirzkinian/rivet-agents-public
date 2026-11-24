@@ -8,6 +8,7 @@ import { ApiError, getSignin, sendSigninCode, startSignin } from "../api.js";
 import { logoOf } from "../connector-logos.js";
 import { h, svg } from "../dom.js";
 import { loadConnectors, opsData, watchOps } from "../ops-data.js";
+import { signedInByCode } from "../session.js";
 import { enterScreen, leaveScreen } from "../usage.js";
 
 // Connectors: every service the agents sign in to, grouped by whether it
@@ -323,12 +324,15 @@ function paintSignin(): void {
   if (!askCode) codeInput = null;
 }
 
+/** The sign-ins the server offers, none of them in a window a device code signed in: the server refuses that session each. */
+const offerOf = (service: ConnectorService): ConnectorService["signIn"] => (signedInByCode() === true ? undefined : service.signIn);
+
 /**
  * Whether an account takes Reconnect: Drive's one always does, since its token can lapse while it still reads as fine;
  * a Mac service's only when it is signed out or not being read, and only with an id the server's Reconnect names it by.
  */
 function reconnects(service: ConnectorService, account: ConnectorAccount): boolean {
-  if (!service.signIn?.reconnect) return false;
+  if (!offerOf(service)?.reconnect) return false;
   if (service.id === "gdrive") return true;
   if (account.state !== "signed-out" && account.state !== "stale") return false;
   if (service.id === "claude") return /^account-\d{1,2}$/.test(account.id);
@@ -346,7 +350,7 @@ function paintDetail(service: ConnectorService): HTMLElement[] {
   const connected = service.accounts.filter((one) => one.state === "ok" || one.state === "stale").length;
   const count = service.accounts.length ? `${connected} of ${service.accounts.length} account${service.accounts.length === 1 ? "" : "s"} connected` : "No accounts connected";
   const company = COMPANY[service.id] ?? service.name;
-  const offer = service.signIn;
+  const offer = offerOf(service);
   const rows = service.accounts.map((one) =>
     h(
       "div",
@@ -363,7 +367,9 @@ function paintDetail(service: ConnectorService): HTMLElement[] {
   const how = actions.length || service.accounts.some((one) => reconnects(service, one)) ? undefined : service.how;
   const note = offer
     ? `Signing in happens on ${company}'s own page. This app sees only each account's status: never a key, password or email.`
-    : "This page shows only each account's status: never a key, password or email.";
+    : service.signIn
+      ? "Connect or add an account from a phone or computer signed in with a passkey. This page shows only each account's status: never a key, password or email."
+      : "This page shows only each account's status: never a key, password or email.";
   return [
     h("button", { class: "cn-back", attrs: { type: "button", "data-use": "connectors.back" }, on: { click: () => show(null) } }, h("span", { class: "cn-back-mark", attrs: { "aria-hidden": "true" } }, "‹"), "All services"),
     h("div", { class: "cn-head" }, logo(service, true), h("div", { class: "cn-text" }, h("h3", { class: "cn-name" }, service.name), stateLine(serviceTone(service), count))),

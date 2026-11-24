@@ -336,6 +336,29 @@ a {
   box-shadow: 0 6px 20px rgba(255, 197, 61, 0.2);
 }
 
+.gate-code {
+  min-height: 56px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-5xl);
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.gate-code::placeholder {
+  color: var(--muted);
+  font-size: var(--fs-l);
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
 .gate-status {
   min-height: 1.4em;
   color: var(--muted);
@@ -2342,7 +2365,8 @@ a {
 }
 
 .panel-actions,
-.device {
+.device,
+.device-desktop {
   display: flex;
   flex-direction: column;
   gap: 10px;

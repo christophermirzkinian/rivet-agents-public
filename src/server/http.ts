@@ -175,7 +175,7 @@ export function createApp(
   };
   const workers = () => deriveWorkers(store.getWorkers(), openBoard(store, schedules, store.getBoard()?.board ?? null, now()), config.monitorChat, Date.now(), store.listAsks({ limit: ASK_PAGE_MAX, doneSince: new Date(Date.now() - ASK_LINK_DAYS * 86_400_000).toISOString() }));
   const titles = new ShortTitles(config.dataDir, now());
-  const router = createRouter({ config, store, bridge, requireSession, push, quiet, schedules, logger, now, addUpdate, refreshWaits, prs, ownerLines, cardThreadTitles, jobRunsFrom, workers, titles, ops });
+  const router = createRouter({ config, store, bridge, requireSession, requirePasskeySession, push, quiet, schedules, logger, now, addUpdate, refreshWaits, prs, ownerLines, cardThreadTitles, jobRunsFrom, workers, titles, ops });
   router.onClose(() => ops.close());
   router.onClose(() => titles.close());
   const behaviours = new BehavioursStore(config.dataDir);
@@ -218,6 +218,15 @@ export function createApp(
 
   function requireSession(request: IncomingMessage): void {
     if (!auth.hasSession(request)) throw new HttpError(401, "sign in first");
+  }
+
+  /**
+   * For what would outlive "Sign out desktop apps" or change what this install is connected to: a session a device code
+   * alone made (auth.hasPasskeySession) is refused, `to` saying what it asked for.
+   */
+  function requirePasskeySession(request: IncomingMessage, to: string): void {
+    requireSession(request);
+    if (!auth.hasPasskeySession(request)) throw new HttpError(403, `sign in with a passkey to ${to}`);
   }
 
   async function handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -403,7 +412,7 @@ export function createApp(
 
     if (path === "/api/push/subscribe" && method === "POST") {
       requireSameOrigin(request, config.origin);
-      requireSession(request);
+      requirePasskeySession(request, "turn on notifications");
       if (!push.configured) throw new HttpError(503, "push is not configured");
       const parsed = subscriptionSchema.safeParse(await readJson(request, SMALL_BODY_MAX));
       if (!parsed.success) throw new HttpError(400, "invalid subscription");
@@ -414,7 +423,7 @@ export function createApp(
 
     if (path === "/api/push/unsubscribe" && method === "POST") {
       requireSameOrigin(request, config.origin);
-      requireSession(request);
+      requirePasskeySession(request, "turn off notifications");
       const parsed = unsubscribeSchema.safeParse(await readJson(request, SMALL_BODY_MAX));
       if (!parsed.success) throw new HttpError(400, "invalid subscription");
       json(response, 200, { removed: push.unsubscribe(parsed.data.endpoint) });

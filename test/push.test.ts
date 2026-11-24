@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -350,6 +351,32 @@ describe("push routes", () => {
       "[push] POST /api/push/unsubscribe refused 403: cross-origin request refused",
     ]);
     expect(logs.join()).not.toContain(sub.endpoint);
+  });
+
+  it("takes no subscription from a session a device code alone made, and gives up none to it", async () => {
+    const value = "c".repeat(43);
+    server.app.store.addSession(createHash("sha256").update(value).digest("hex"), 60_000, "device-code");
+    const byCode = browser(`__Host-rivet=${value}`);
+    const phone = subscription(1);
+    expect((await post("/api/push/subscribe", phone)).status).toBe(200);
+
+    const on = await post("/api/push/subscribe", subscription(2), byCode);
+    expect(on.status).toBe(403);
+    expect(await on.json()).toMatchObject({ error: "sign in with a passkey to turn on notifications" });
+    // At the cap a new phone evicts the oldest: a refused one must not.
+    for (let n = 2; n < 2 + MAX_PUSH_SUBSCRIPTIONS; n++) expect((await post("/api/push/subscribe", subscription(n), byCode)).status).toBe(403);
+    const off = await post("/api/push/unsubscribe", { endpoint: phone.endpoint }, byCode);
+    expect(off.status).toBe(403);
+    expect(await off.json()).toMatchObject({ error: "sign in with a passkey to turn off notifications" });
+    expect(server.app.store.listPushSubscriptions()).toEqual([phone]);
+    expect(await (await fetch(`${server.base}/api/push/config`, { headers: { cookie: byCode.cookie! } })).json()).toMatchObject({ subscriptions: 1, lastRemoval: null });
+
+    // "Sign out desktop apps" finds nothing of that session's to leave behind, and the passkey's phone stays.
+    expect((await post("/api/auth/device-sessions/revoke", {})).status).toBe(200);
+    expect((await post("/api/push/subscribe", subscription(2), byCode)).status).toBe(401);
+    expect(server.app.store.listPushSubscriptions()).toEqual([phone]);
+    expect((await post("/api/push/subscribe", subscription(2))).status).toBe(200);
+    expect(await (await post("/api/push/unsubscribe", { endpoint: phone.endpoint })).json()).toEqual({ removed: true });
   });
 
   it("sends a test push", async () => {

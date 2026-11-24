@@ -940,14 +940,16 @@ export function register(router: Router): void {
 
   // The Schedules tab's switch. The server checks the bridge's latest read first; the Mac reads the job again
   // before it changes anything.
-  router.on("POST", "/api/actions/schedule", (ctx) =>
-    startAction(ctx, "schedule", parseWith(scheduleCreateSchema, (body) => ({ schedule: body.schedule, on: body.on }), "schedule switch"), (request) => {
+  router.on("POST", "/api/actions/schedule", (ctx) => {
+    requireSameOrigin(ctx.request, config.origin);
+    router.deps.requirePasskeySession(ctx.request, "switch a schedule");
+    return startAction(ctx, "schedule", parseWith(scheduleCreateSchema, (body) => ({ schedule: body.schedule, on: body.on }), "schedule switch"), (request) => {
       const item = schedules.find(request.schedule!);
       if (!item) return { status: 404, reason: "that schedule is not in the Mac's latest list" };
       if (!item.toggle.can) return { status: 409, reason: item.toggle.why };
       return null;
-    }),
-  );
+    });
+  });
 
   // Settings › Who does what. The whole set of picks goes each time; the Mac checks it again, writes it only over the save
   // the screen last saw, and reads it back.

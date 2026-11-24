@@ -16,9 +16,23 @@ export function onSessionReset(reset: () => void): void {
   resets.push(reset);
 }
 
+/**
+ * Whether a device code alone made this session (api.me's `via`); null until the server has said. Such a session sets
+ * up nothing that outlives "Sign out desktop apps": the server refuses it a device code, a push subscription and a
+ * connector sign-in, so the app offers it none.
+ */
+let byCode: boolean | null = null;
+
+export const signedInByCode = (): boolean | null => byCode;
+
+export function setSignedInByCode(value: boolean): void {
+  byCode = value;
+}
+
 /** Ends the current session: every request still out answers StaleSession, and every registered reset runs. */
 export function endSession(): void {
   session++;
+  byCode = null;
   for (const reset of resets) reset();
 }
 

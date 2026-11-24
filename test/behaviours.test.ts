@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import os from "node:os";
@@ -10,7 +11,8 @@ import { ALL_BEHAVIOURS, BehavioursStore, OWNER } from "../src/server/behaviours
 import { followHostedName } from "../src/server/hosted-name.js";
 import { ALL_READERS } from "../src/server/ops/readers.js";
 import { readerBehaviourId, READERS_FIX_ID } from "../src/shared/readers.js";
-import { BEHAVIOUR_GROUPS, BEHAVIOURS, behaviour, type BehavioursResponse } from "../src/shared/behaviours.js";
+import { BEHAVIOUR_GROUPS, BEHAVIOURS, behaviour, CHAT_SEND_DELAY_PATH, type BehavioursResponse } from "../src/shared/behaviours.js";
+import { DEFAULT_CHAT_SEND_DELAY } from "../src/shared/command.js";
 import { bearer, BOARD_TOKEN, BRIDGE_TOKEN, browser, ORIGIN, startServer, type TestServer } from "./helpers.js";
 
 // Settings › Behaviours: the list, its store and its routes.
@@ -218,6 +220,51 @@ describe("the behaviours routes", () => {
       expect(row?.value, id).toEqual(value);
       expect(row?.updatedAt, id).not.toBeNull();
     }
+  });
+
+  describe("for a session a device code alone made (a-1010)", () => {
+    const REFUSED = [403, { error: "sign in with a passkey to change what your agent does by itself" }];
+    let byCode: Record<string, string>;
+    const put = (id: string, body: unknown, headers = byCode) => fetch(`${server.base}/api/behaviours/${id}`, { method: "PUT", headers, body: JSON.stringify(body) });
+
+    beforeEach(() => {
+      const value = "c".repeat(43);
+      server.app.store.addSession(createHash("sha256").update(value).digest("hex"), 60_000, "device-code");
+      byCode = browser(`__Host-rivet=${value}`);
+    });
+
+    it("marks only the three chat rows a preference, so any other row, and a new one, is closed to it", async () => {
+      expect(ALL_BEHAVIOURS.filter((entry) => entry.preference).map((entry) => entry.id)).toEqual(["chat.send-delay", "chat.reply-style", "chat.text-size"]);
+      const before = await list();
+      const closed = before.behaviours.filter((row) => !row.preference);
+      expect(closed.length).toBeGreaterThan(10);
+      for (const row of closed) {
+        const refused = await put(row.id, { on: false });
+        expect([refused.status, await refused.json()], row.id).toEqual(REFUSED);
+      }
+      expect(await list()).toEqual(before);
+      expect(await (await bridgeRead()).json()).toEqual({ values: Object.fromEntries(LIVE.map((entry) => [entry.id, entry.default])) });
+    });
+
+    it("is refused before the body is read, where a passkey session still saves", async () => {
+      const refused = await fetch(`${server.base}/api/behaviours/reader.github`, { method: "PUT", headers: byCode, body: "not json" });
+      expect([refused.status, await refused.json()]).toEqual(REFUSED);
+      const saved = await put("reader.github", { on: true, fresh: 30 }, browser(server.cookie()));
+      expect(saved.status).toBe(200);
+      expect(await saved.json()).toMatchObject({ value: { on: true, fresh: 30 } });
+    });
+
+    it("still saves reply style, text size and the send delay", async () => {
+      for (const [id, value] of [["chat.reply-style", { style: "short" }], ["chat.text-size", { size: "l" }]] as const) {
+        const saved = await put(id, value);
+        expect(saved.status, id).toBe(200);
+        expect(await saved.json(), id).toMatchObject({ value });
+      }
+      const delay = { ...DEFAULT_CHAT_SEND_DELAY, on: !DEFAULT_CHAT_SEND_DELAY.on };
+      const sent = await fetch(`${server.base}${CHAT_SEND_DELAY_PATH}`, { method: "PUT", headers: byCode, body: JSON.stringify(delay) });
+      expect(sent.status).toBe(200);
+      expect(await (await fetch(`${server.base}${CHAT_SEND_DELAY_PATH}`, { headers: byCode })).json()).toMatchObject(delay);
+    });
   });
 
   describe("on a hosted machine", () => {

@@ -5,6 +5,7 @@ import { jobScheduleKey, type Job, type JobsResponse } from "../src/shared/jobs.
 import { opsStatusKey } from "../src/shared/ops-status-key.js";
 import type { OpsResponse } from "../src/shared/ops.js";
 import { opsData, resetOps } from "../web/src/ops-data.js";
+import { setSignedInByCode } from "../web/src/session.js";
 import { app, subscribe } from "../web/src/state.js";
 import * as ops from "../web/src/views/ops.js";
 import { jobsApi, loadJobs, openRedJobs, redJobsEl, resetScheduled } from "../web/src/views/scheduled.js";
@@ -272,5 +273,32 @@ describe("the red jobs sheet", () => {
     mountJobs();
     expect(root.textContent).toContain("No job is red now.");
     expect(statusParts().some((part) => part.key === "jobs")).toBe(false);
+  });
+});
+
+describe("the red jobs sheet in a window signed in with a code alone (a-1010)", () => {
+  const LINE = "Resume or set a job from a phone or computer signed in with a passkey.";
+  const labels = (row: Element) => [...row.querySelectorAll("button")].map((b) => b.textContent).filter((label) => label !== "Dismiss");
+  afterEach(() => setSignedInByCode(false));
+
+  it("offers every button the sheet has, Run now among them, and says where a job is resumed or set", () => {
+    setSignedInByCode(true);
+    resetScheduled(view([job({ redStreak: 1, lastRun: redRun })]));
+    mountJobs();
+    expect(labels(rows()[0]!)).toEqual(["Pause", "Run now", "Delete"]);
+    expect(buttonIn(rows()[0]!, "Run now").disabled).toBe(false);
+    expect(root.querySelector(".jobs-limits")?.textContent).toBe(LINE);
+    setSignedInByCode(false);
+    redraw();
+    expect(labels(rows()[0]!)).toEqual(["Pause", "Run now", "Delete"]);
+    expect(root.textContent).not.toContain(LINE);
+  });
+
+  it("sends its Run now as any window does", async () => {
+    setSignedInByCode(true);
+    resetScheduled(view([job({ redStreak: 1, lastRun: redRun })]));
+    mountJobs();
+    buttonIn(rows()[0]!, "Run now").click();
+    await vi.waitFor(() => expect(calls.filter((call) => call.method === "PATCH").map((call) => [call.url, (call.body as { op: string }).op])).toEqual([["/api/jobs/j-aaaaaaaa", "run"]]));
   });
 });

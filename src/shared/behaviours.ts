@@ -67,6 +67,11 @@ export interface Behaviour {
   switchKey?: string;
   /** A `live` row whose value under `key` is one pick of a few, shown as a select. */
   choices?: BehaviourChoices;
+  /**
+   * How the app shows or sends a chat, and nothing the agent does by itself. A row without it is one a session a
+   * device code alone made cannot set (routes/behaviours.ts), so a new row is closed to it until this says otherwise.
+   */
+  preference?: true;
 }
 
 export interface BehaviourChoices {
@@ -154,6 +159,7 @@ export const BEHAVIOURS: readonly Behaviour[] = [
     line: "Seconds to cancel or edit before it sends",
     scope: "all",
     control: "endpoint",
+    preference: true,
     endpoint: CHAT_SEND_DELAY_PATH,
     knobs: chatSendDelaySchema,
     default: DEFAULT_CHAT_SEND_DELAY,
@@ -168,6 +174,7 @@ export const BEHAVIOURS: readonly Behaviour[] = [
     line: "How long replies are: short, normal or detailed",
     scope: "all",
     control: "live",
+    preference: true,
     knobs: z.object({ style: z.enum(["short", "normal", "detailed"]) }).strict(),
     default: { style: "normal" },
     choices: { key: "style", options: [{ value: "short", label: "Short" }, { value: "normal", label: "Normal" }, { value: "detailed", label: "Detailed" }] },
@@ -179,6 +186,7 @@ export const BEHAVIOURS: readonly Behaviour[] = [
     line: "How big the words are: small, medium or large",
     scope: "all",
     control: "live",
+    preference: true,
     knobs: z.object({ size: z.enum(["s", "m", "l"]) }).strict(),
     default: { size: "m" },
     choices: { key: "size", options: [{ value: "s", label: "Small" }, { value: "m", label: "Medium" }, { value: "l", label: "Large" }] },

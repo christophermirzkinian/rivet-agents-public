@@ -38,7 +38,8 @@ CREATE TABLE IF NOT EXISTS credentials (
 CREATE TABLE IF NOT EXISTS sessions (
   hash       TEXT PRIMARY KEY,
   created_at INTEGER NOT NULL,
-  expires_at INTEGER NOT NULL
+  expires_at INTEGER NOT NULL,
+  via        TEXT
 );
 CREATE TABLE IF NOT EXISTS spent_enroll_tokens (
   hash     TEXT PRIMARY KEY,
@@ -48,7 +49,8 @@ CREATE TABLE IF NOT EXISTS device_codes (
   hash       TEXT PRIMARY KEY,
   created_at INTEGER NOT NULL,
   expires_at INTEGER NOT NULL,
-  used       INTEGER NOT NULL DEFAULT 0
+  used       INTEGER NOT NULL DEFAULT 0,
+  misses     INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS board (
   id         INTEGER PRIMARY KEY CHECK (id = 1),
@@ -214,6 +216,8 @@ export const MAX_MINIMISED = 200;
 export const MAX_PUSH_SUBSCRIPTIONS = 20;
 /** Removal records kept, newest first. */
 export const MAX_PUSH_REMOVALS = 200;
+/** Wrong guesses a live device code survives; at this many it is void, as if spent. */
+export const DEVICE_CODE_MAX_MISSES = 5;
 
 export interface StoredCredential {
   id: string;
@@ -379,6 +383,10 @@ export class Store {
         UPDATE replies SET acted_at = handled_at WHERE handled = 1 AND delivered_at IS NULL;
         COMMIT;`);
     }
+    // How a session was made: 'device-code' for one a device code alone made; none for a passkey's, and for every session from before.
+    if (!columns("sessions").has("via")) this.db.exec("ALTER TABLE sessions ADD COLUMN via TEXT");
+    // Wrong guesses made while the code was live (missDeviceCodes): at DEVICE_CODE_MAX_MISSES it is void.
+    if (!columns("device_codes").has("misses")) this.db.exec("ALTER TABLE device_codes ADD COLUMN misses INTEGER NOT NULL DEFAULT 0");
     // Workers went by a name from a pool; they go by their chat name now.
     this.db.exec("DROP TABLE IF EXISTS worker_names");
     this.backfillAnswered();
@@ -487,10 +495,11 @@ export class Store {
 
   // Sessions (hashes only)
 
-  addSession(hash: string, ttlMs: number): void {
+  /** `via` is how the session was made when not by a passkey: 'device-code' (POST /api/auth/device-session). */
+  addSession(hash: string, ttlMs: number, via: "device-code" | null = null): void {
     const now = Date.now();
     this.db.prepare("DELETE FROM sessions WHERE expires_at <= ?").run(now);
-    this.db.prepare("INSERT INTO sessions (hash, created_at, expires_at) VALUES (?, ?, ?)").run(hash, now, now + ttlMs);
+    this.db.prepare("INSERT INTO sessions (hash, created_at, expires_at, via) VALUES (?, ?, ?, ?)").run(hash, now, now + ttlMs, via);
   }
 
   hasSession(hash: string): boolean {
@@ -499,6 +508,37 @@ export class Store {
 
   deleteSession(hash: string): void {
     this.db.prepare("DELETE FROM sessions WHERE hash = ?").run(hash);
+  }
+
+  /**
+   * What made this live session, or null when there is none. Whether it is live and what made it come from one read at
+   * one instant: asked apart, a code-made session that ran out between the two would pass for a passkey's.
+   */
+  sessionKind(hash: string): "passkey" | "device-code" | null {
+    const row = this.db.prepare("SELECT via FROM sessions WHERE hash = ? AND expires_at > ?").get(hash, Date.now()) as { via: string | null } | undefined;
+    return row === undefined ? null : row.via === null ? "passkey" : "device-code";
+  }
+
+  countDeviceCodeSessions(): number {
+    return Number((this.db.prepare("SELECT COUNT(*) AS n FROM sessions WHERE via = 'device-code' AND expires_at > ?").get(Date.now()) as { n: number }).n);
+  }
+
+  /**
+   * Ends every session a device code alone made, and voids every device code not yet used, so one made before this
+   * cannot bring a session back; returns how many sessions were still live.
+   */
+  revokeDeviceCodeSessions(): number {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const live = this.countDeviceCodeSessions();
+      this.db.prepare("DELETE FROM sessions WHERE via = 'device-code'").run();
+      this.db.prepare("UPDATE device_codes SET used = 1 WHERE used = 0").run();
+      this.db.exec("COMMIT");
+      return live;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   // Enrolment
@@ -527,17 +567,23 @@ export class Store {
   isDeviceCodeValid(hash: string): boolean {
     return (
       this.db
-        .prepare("SELECT 1 FROM device_codes WHERE hash = ? AND used = 0 AND expires_at > ?")
-        .get(hash, Date.now()) !== undefined
+        .prepare("SELECT 1 FROM device_codes WHERE hash = ? AND used = 0 AND misses < ? AND expires_at > ?")
+        .get(hash, DEVICE_CODE_MAX_MISSES, Date.now()) !== undefined
     );
   }
 
-  /** Returns false when the code is unknown, expired or already used. */
+  /** Returns false when the code is unknown, expired, already used, or void after too many wrong guesses. */
   useDeviceCode(hash: string): boolean {
+    // Single use is this one UPDATE; no test can show it, as node:sqlite is synchronous and two posts never interleave.
     const result = this.db
-      .prepare("UPDATE device_codes SET used = 1 WHERE hash = ? AND used = 0 AND expires_at > ?")
-      .run(hash, Date.now());
+      .prepare("UPDATE device_codes SET used = 1 WHERE hash = ? AND used = 0 AND misses < ? AND expires_at > ?")
+      .run(hash, DEVICE_CODE_MAX_MISSES, Date.now());
     return Number(result.changes) === 1;
+  }
+
+  /** A wrong guess names no code, so it counts against every code it could have been: each one live and unused. */
+  missDeviceCodes(): void {
+    this.db.prepare("UPDATE device_codes SET misses = misses + 1 WHERE used = 0 AND expires_at > ?").run(Date.now());
   }
 
   // Board

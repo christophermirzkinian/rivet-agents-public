@@ -11,7 +11,7 @@ import * as cmd from "../command-api.js";
 import { button, describe, h, keepFocus } from "../dom.js";
 import { changed, sameSession, signedOut, subscribe } from "../state.js";
 import { watchOps } from "../ops-data.js";
-import { onSessionReset } from "../session.js";
+import { onSessionReset, signedInByCode } from "../session.js";
 import { bringBack, dismissable, dismissed, dismissItem, owned, parked, type FailedItem } from "./ops-status.js";
 import { openSheet } from "./sheet.js";
 
@@ -38,6 +38,9 @@ onSessionReset(() => {
   loadError = null;
   pending.clear();
 });
+
+/** In a window signed in with a code alone, which may pause, run or delete a job and no more: a job it pauses leaves this list, and the server refuses its resume. */
+export const JOBS_NEED_PASSKEY = "Resume or set a job from a phone or computer signed in with a passkey.";
 
 export const RUN_WORDS: Record<JobRun["result"], string> = { running: "Running", green: "Passed", red: "Red", skipped: "Skipped", missed: "Missed" };
 const RUN_TONE: Record<JobRun["result"], "ok" | "bad" | "idle"> = { running: "idle", green: "ok", red: "bad", skipped: "idle", missed: "bad" };
@@ -207,6 +210,7 @@ export function redJobsEl(): HTMLElement {
     "section",
     { class: "ops-list", attrs: { "data-section": "jobs" } },
     red.length ? h("ul", { class: "jobs" }, ...red.map((job) => jobEl(job, now))) : h("p", { class: "empty" }, "No job is red now."),
+    red.length && signedInByCode() === true ? h("p", { class: "jobs-limits" }, JOBS_NEED_PASSKEY) : null,
     loadError ? h("p", { class: "jobs-limits" }, "Couldn't read the jobs again.") : null,
   );
 }

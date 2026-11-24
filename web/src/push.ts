@@ -3,6 +3,7 @@
 
 import * as api from "./api.js";
 import { FULL_SCREEN_EVENTS, fullScreenElement, modalOpen } from "./dom.js";
+import { signedInByCode } from "./session.js";
 import { within } from "./within.js";
 
 export interface Environment {
@@ -332,6 +333,8 @@ export async function workerRefresh(
 export async function resyncPush(): Promise<void> {
   const env = environment();
   if (!env.canPush || needsInstall(env) || Notification.permission !== "granted") return;
+  // The server takes no subscription from a session a device code alone made.
+  if (signedInByCode() === true) return;
   const started = snapshot();
   const current = () => started() && !turnedOff() && Notification.permission === "granted";
   if (!current()) return;

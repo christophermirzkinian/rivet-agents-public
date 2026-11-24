@@ -11,7 +11,7 @@ import { loadPushHealth, pushChanged } from "./push-health.js";
 import { registerWorker, resyncPush, watchViewing, workerRefresh } from "./push.js";
 import { watchInput } from "./rivet-sleep.js";
 import { showRivetWords } from "./rivet-words.js";
-import { endSession } from "./session.js";
+import { endSession, setSignedInByCode } from "./session.js";
 import { takeShare } from "./share-target.js";
 import { openedVia, startUsage, usageHidden, usageShown } from "./usage.js";
 import { app, changed, go, navStamp, networkChanged, refresh, resetSession, settleOpening, whenSignedOut } from "./state.js";
@@ -92,11 +92,35 @@ function gate(lede: string, ...children: (Node | null)[]): void {
   );
 }
 
-function renderSignIn(message: string | null = null): void {
+/** Sign-in by a device code alone: the server offers it (api.me) and this window cannot make a passkey of its own. */
+let codeSignIn = false;
+
+/** The session about to start was made by a device code alone: startApp hands it to the session (signedInByCode). */
+let codeMade = false;
+
+/** How long the window's answer about its passkey maker is waited for before the passkey screen shows anyway. */
+const PASSKEY_CHECK_MS = 1500;
+
+/** False where the window has no passkey maker of its own, as the desktop app's has none. */
+async function passkeysWork(): Promise<boolean> {
+  if (typeof PublicKeyCredential === "undefined") return false;
+  return Promise.race([
+    PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable().catch(() => true),
+    new Promise<boolean>((resolve) => window.setTimeout(() => resolve(true), PASSKEY_CHECK_MS)),
+  ]);
+}
+
+const DEVICE_CODE = /^[A-Za-z0-9]{8}$/;
+
+const gateLede = (): string => (hostedPage() ? "Your agent's command centre." : "Your coding agents, on your phone.");
+
+/** `passkey` asks for the passkey screen where the code one would open first. */
+function renderSignIn(message: string | null = null, passkey = false): void {
+  if (codeSignIn && !passkey) return renderCodeSignIn(message);
   stopPolling();
   const status = h("p", { class: "gate-status", attrs: { role: "status" } }, message ?? "");
   gate(
-    hostedPage() ? "Your agent's command centre." : "Your coding agents, on your phone.",
+    gateLede(),
     gateSteps({ title: "Use your passkey", sub: "No password to remember." }),
     button(
       "Sign in with passkey",
@@ -109,6 +133,56 @@ function renderSignIn(message: string | null = null): void {
       "gate.signin",
     ),
     status,
+    codeSignIn ? button("Use a code instead", () => renderSignIn(), "ghost big", false, "gate.signin-code") : null,
+  );
+}
+
+/** `linked` is the code a set-up link brought: it waits in the field for one tap, and the link's passkey set-up stays a tap away. */
+function renderCodeSignIn(message: string | null, linked: string | null = null): void {
+  stopPolling();
+  const status = h("p", { class: "gate-status", attrs: { role: "status" } }, message ?? "");
+  let sending = false;
+  const send = (): void => {
+    const code = field.value.trim();
+    if (sending || !code) return;
+    sending = true;
+    status.textContent = "Checking the code…";
+    api.deviceSession(code).then(startAppByCode, (error: unknown) => {
+      sending = false;
+      status.textContent =
+        error instanceof api.ApiError && error.status === 403 ? "That code is not valid or has expired. Get a new one and try again." : describe(error);
+    });
+  };
+  const field = h("input", {
+    class: "gate-code",
+    attrs: {
+      type: "text",
+      autocomplete: "off",
+      autocapitalize: "characters",
+      spellcheck: "false",
+      maxlength: "8",
+      enterkeyhint: "go",
+      placeholder: "8-character code",
+      "aria-label": "Code from a signed-in device",
+    },
+    on: {
+      keydown: (event) => {
+        if ((event as KeyboardEvent).key === "Enter") send();
+      },
+    },
+  });
+  if (linked) field.value = linked.toUpperCase();
+  gate(
+    gateLede(),
+    linked
+      ? gateSteps({ title: "Set-up link opened", sub: "Its code came with it.", done: true }, { title: "Sign in with the code", sub: "It works once." })
+      : gateSteps({ title: "Use a code from a signed-in device", sub: `On a phone signed in to ${appName()}, open Settings › Add a device.` }),
+    field,
+    button("Sign in with code", send, "primary big", false, "gate.code"),
+    status,
+    linked
+      ? button("Create a passkey instead", () => renderEnrol(linked), "ghost big", false, "gate.code-enrol")
+      : button("Use a passkey instead", () => renderSignIn(null, true), "ghost big", false, "gate.code-passkey"),
   );
 }
 
@@ -149,6 +223,8 @@ async function startApp(): Promise<void> {
   resetFeed();
   const front = app.front;
   resetSession();
+  setSignedInByCode(codeMade);
+  codeMade = false;
   app.front = front;
   void loadChatPrefs();
   startUsage(() => ({ tab: app.tab, desk: window.matchMedia?.(DESK_QUERY).matches ?? false, morePage: app.morePage, cards: cardsSegment() }));
@@ -281,15 +357,32 @@ function takeParams(): { code: string | null; card: string | null } {
   return { code: code ? decodeURIComponent(code) : null, card };
 }
 
+function startAppByCode(): Promise<void> {
+  codeMade = true;
+  return startApp();
+}
+
 async function start(): Promise<void> {
   // The worker is there before sign-in too, so a share made from a signed-out install is kept for it.
   void registerWorker();
   const { code, card } = takeParams();
-  if (code) return renderEnrol(code);
+  if (code) {
+    // A link's code is only put in the field: opening the link, by a slip or a preloader, spends nothing.
+    const linked = DEVICE_CODE.test(code.trim()) ? code.trim() : null;
+    // The server is asked only where the window cannot make a passkey: one that can sets up at once, as it always did.
+    if (linked && !(await passkeysWork())) codeSignIn = await api.me().then((me) => me.deviceSession === true, () => false);
+    return linked && codeSignIn ? renderCodeSignIn(null, linked) : renderEnrol(code);
+  }
   if (card) app.front = startCard = card;
   try {
-    const { signedIn: yes } = await api.me();
-    if (yes) return void (await startApp());
+    const { signedIn: yes, deviceSession, via } = await api.me();
+    if (yes) {
+      codeMade = via === "device-code";
+      // Only the signed-out gate needs the answer, so the app never waits on it; a later sign-out finds it there.
+      if (deviceSession === true) void passkeysWork().then((works) => (codeSignIn = !works));
+      return void (await startApp());
+    }
+    codeSignIn = deviceSession === true && !(await passkeysWork());
     renderSignIn();
   } catch (error) {
     renderSignIn(describe(error));

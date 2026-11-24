@@ -30,6 +30,70 @@ describe("store migration", () => {
     expect(columns).toContain("rev");
   });
 
+  it("adds sessions.via, and a session from before it still signs in", () => {
+    const dir = mkdtempSync(join(tmpdir(), "rivet-migrate-"));
+    const old = new DatabaseSync(join(dir, "rivet.sqlite"));
+    old.exec("CREATE TABLE sessions (hash TEXT PRIMARY KEY, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL)");
+    old.prepare("INSERT INTO sessions (hash, created_at, expires_at) VALUES (?, ?, ?)").run("old", Date.now(), Date.now() + 60_000);
+    old.close();
+    const store = new Store(dir);
+    expect(store.hasSession("old")).toBe(true);
+    store.addSession("passkey", 60_000);
+    store.addSession("code", 60_000, "device-code");
+    store.close();
+    // A second open migrates nothing again.
+    new Store(dir).close();
+    const db = new DatabaseSync(join(dir, "rivet.sqlite"));
+    const rows = db.prepare("SELECT hash, via FROM sessions ORDER BY hash").all() as { hash: string; via: string | null }[];
+    db.close();
+    expect(rows.map((row) => [row.hash, row.via])).toEqual([["code", "device-code"], ["old", null], ["passkey", null]]);
+  });
+
+  it("adds device_codes.misses, and a code from before it still works, then is void at 5 misses", () => {
+    const dir = mkdtempSync(join(tmpdir(), "rivet-migrate-"));
+    const old = new DatabaseSync(join(dir, "rivet.sqlite"));
+    old.exec("CREATE TABLE device_codes (hash TEXT PRIMARY KEY, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, used INTEGER NOT NULL DEFAULT 0)");
+    for (const hash of ["old", "spare"]) old.prepare("INSERT INTO device_codes (hash, created_at, expires_at) VALUES (?, ?, ?)").run(hash, Date.now(), Date.now() + 60_000);
+    old.close();
+    new Store(dir).close();
+    const store = new Store(dir);
+    expect(store.isDeviceCodeValid("old")).toBe(true);
+    for (let i = 0; i < 4; i += 1) store.missDeviceCodes();
+    expect(store.useDeviceCode("old")).toBe(true);
+    store.missDeviceCodes();
+    expect(store.isDeviceCodeValid("spare")).toBe(false);
+    expect(store.useDeviceCode("spare")).toBe(false);
+    store.addDeviceCode("new", 60_000);
+    expect(store.useDeviceCode("new")).toBe(true);
+    store.close();
+  });
+
+  it("says what made a live session, and nothing of one that ran out or never was", () => {
+    const store = new Store(mkdtempSync(join(tmpdir(), "rivet-kind-")));
+    store.addSession("passkey", 60_000);
+    store.addSession("code", 60_000, "device-code");
+    store.addSession("spent", -1, "device-code");
+    store.addSession("old", -1);
+    expect(["passkey", "code", "spent", "old", "none"].map((hash) => store.sessionKind(hash))).toEqual(["passkey", "device-code", null, null, null]);
+    store.close();
+  });
+
+  it("revoking the sessions a code made ends them, leaves a passkey's, and voids every code not yet used", () => {
+    const store = new Store(mkdtempSync(join(tmpdir(), "rivet-revoke-")));
+    store.addSession("passkey", 60_000);
+    store.addSession("code", 60_000, "device-code");
+    store.addSession("other", 60_000, "device-code");
+    store.addDeviceCode("waiting", 60_000);
+    expect(store.revokeDeviceCodeSessions()).toBe(2);
+    expect([store.hasSession("passkey"), store.hasSession("code"), store.hasSession("other")]).toEqual([true, false, false]);
+    expect(store.isDeviceCodeValid("waiting")).toBe(false);
+    expect(store.useDeviceCode("waiting")).toBe(false);
+    expect(store.revokeDeviceCodeSessions()).toBe(0);
+    store.addDeviceCode("later", 60_000);
+    expect(store.useDeviceCode("later")).toBe(true);
+    store.close();
+  });
+
   it("adds replies.images, and a reply stored with one image or file before it reads as it did", () => {
     const dir = mkdtempSync(join(tmpdir(), "rivet-migrate-"));
     const old = new DatabaseSync(join(dir, "rivet.sqlite"));

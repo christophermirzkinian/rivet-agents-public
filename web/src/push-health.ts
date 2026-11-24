@@ -8,7 +8,7 @@ import { clock, shortDate } from "../../src/shared/when.js";
 import * as api from "./api.js";
 import { button, describe, h, ICONS, svg } from "./dom.js";
 import { enablePush, environment, needsInstall, type PushState } from "./push.js";
-import { onSessionReset } from "./session.js";
+import { onSessionReset, signedInByCode } from "./session.js";
 import { changed } from "./state.js";
 import { flash } from "./views/toast.js";
 
@@ -103,6 +103,9 @@ async function turnOn(): Promise<void> {
   changed();
 }
 
+/** In place of Turn on in a window a device code signed in: the server takes no subscription from that session. */
+export const PUSH_NEEDS_PASSKEY = "Turn on notifications from a phone or computer signed in with a passkey.";
+
 /** The banner, or null while notifications reach a phone (or the server has no push at all). */
 export function pushBanner(): HTMLElement | null {
   const env = environment();
@@ -115,17 +118,20 @@ export function pushBanner(): HTMLElement | null {
     ? `They're blocked for ${APP_NAME} on this phone, so it can't ping you here until they're allowed again.`
     : (removalLine(health?.lastRemoval ?? null) ?? `${APP_NAME} can't ping you anywhere.`);
   const install = needsInstall(env);
+  const byCode = signedInByCode() === true;
   const action = install
     ? h("p", { class: "push-off-note" }, `Add ${APP_NAME} to your Home Screen first: tap Share, then Add to Home Screen.`)
     : !env.canPush
       ? h("p", { class: "push-off-note" }, "This browser can't show notifications. Open it on your phone.")
-      : button(busy ? "Turning on…" : "Turn on", () => void turnOn(), "primary big", busy, "cards.push-banner.on");
+      : byCode
+        ? h("p", { class: "push-off-note" }, PUSH_NEEDS_PASSKEY)
+        : button(busy ? "Turning on…" : "Turn on", () => void turnOn(), "primary big", busy, "cards.push-banner.on");
   return h(
     "section",
     { class: "push-off box", attrs: { role: "alert", "aria-label": title } },
     h("div", { class: "push-off-head" }, svg(ICONS.bell, "push-off-icon"), h("strong", {}, title)),
     h("p", { class: "push-off-why" }, why),
-    blocked && !install ? h("ol", { class: "push-off-steps" }, ...unblockSteps(env).map((step) => h("li", {}, step))) : null,
+    blocked && !install && !byCode ? h("ol", { class: "push-off-steps" }, ...unblockSteps(env).map((step) => h("li", {}, step))) : null,
     action,
   );
 }

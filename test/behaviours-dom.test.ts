@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { type BehaviourRow, cardCheckerBehaviour } from "../src/shared/behaviours.js";
 import { CARD_CHECKER_ID, DEFAULT_CARD_CHECKER } from "../src/shared/card-check.js";
+import { setSignedInByCode, signedInByCode } from "../web/src/session.js";
 import { changed, resetSession } from "../web/src/state.js";
 import { behavioursPanel, LATE_READ_MS, loadBehaviours, REREAD_MS } from "../web/src/views/behaviours.js";
 import { loadChatPrefs } from "../web/src/views/chat-prefs.js";
@@ -226,6 +227,64 @@ describe("Settings › Behaviours", () => {
     const panel = await shown(open);
     row(panel, "alerts.quiet-hours")!.querySelector<HTMLButtonElement>("button")!.click();
     expect(open).toHaveBeenCalledWith("quiet");
+  });
+});
+
+describe("Settings › Behaviours in a window signed in with a code alone (a-1010)", () => {
+  const LINE = "Change this from a phone or computer signed in with a passkey.";
+  const TEXT_SIZE: BehaviourRow = {
+    ...base,
+    id: "chat.text-size",
+    group: "Chat",
+    name: "Text size",
+    line: "How big the words are",
+    control: "live",
+    preference: true,
+    value: { size: "m" },
+    choices: { key: "size", options: [{ value: "s", label: "Small" }, { value: "m", label: "Medium" }] },
+  };
+  const controls = (el: HTMLElement) => [...el.querySelectorAll<HTMLInputElement | HTMLSelectElement>("input, select")];
+  const lines = (el: HTMLElement) => [...el.querySelectorAll(".bhv-state")].map((line) => line.textContent);
+
+  beforeEach(() => {
+    listed = [...ROWS, ...SWITCHES.slice(0, 1), TEXT_SIZE];
+  });
+
+  it("shows each row that makes the agent act by itself disabled under that line, and leaves a preference open", async () => {
+    setSignedInByCode(true);
+    const panel = await shown();
+    for (const id of ["work.live", CARD_CHECKER_ID, "reader.github", "work.free"]) {
+      expect(controls(row(panel, id)!).map((control) => control.disabled), id).not.toContain(false);
+      expect(controls(row(panel, id)!).length, id).toBeGreaterThan(0);
+      expect(lines(row(panel, id)!), id).toEqual([LINE]);
+    }
+    for (const id of ["chat.text-size", "chat.send-delay"]) {
+      expect(controls(row(panel, id)!).map((control) => control.disabled), id).not.toContain(true);
+      expect(lines(row(panel, id)!), id).toEqual([]);
+    }
+    const size = row(panel, "chat.text-size")!.querySelector<HTMLSelectElement>("select")!;
+    size.value = "s";
+    size.dispatchEvent(new Event("change"));
+    await vi.waitFor(() => expect(puts).toEqual([{ url: "/api/behaviours/chat.text-size", body: { size: "s" } }]));
+  });
+
+  it("shows no such line and disables nothing in a passkey's window", async () => {
+    const panel = await shown();
+    expect(panel.textContent).not.toContain(LINE);
+    expect(controls(row(panel, "work.live")!).map((control) => control.disabled)).toEqual([false]);
+  });
+
+  it("shows that line for a save the server refuses for the passkey, never the server's words", async () => {
+    putAnswer = () => json({ error: "sign in with a passkey to change what your agent does by itself" }, 403);
+    const panel = await shown();
+    const toggle = row(panel, "work.live")!.querySelector<HTMLInputElement>(".bhv-switch")!;
+    toggle.checked = false;
+    toggle.dispatchEvent(new Event("change"));
+    await vi.waitFor(() => expect(lines(row(behavioursPanel(() => {}), "work.live")!)).toEqual([LINE]));
+    const after = row(behavioursPanel(() => {}), "work.live")!.querySelector<HTMLInputElement>(".bhv-switch")!;
+    expect([after.checked, after.disabled]).toEqual([true, true]);
+    expect(signedInByCode()).toBe(true);
+    expect(flash).not.toHaveBeenCalled();
   });
 });
 

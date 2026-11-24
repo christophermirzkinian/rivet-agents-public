@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { serviceOf, type ConnectorAccount, type ConnectorsResponse, type SigninStatus } from "../src/shared/connectors.js";
 import { opsData, resetOps } from "../web/src/ops-data.js";
+import { endSession, setSignedInByCode } from "../web/src/session.js";
 import * as connectorsPage from "../web/src/views/connectors.js";
 
 // The Connectors sheet's sign-in panel: which accounts take Reconnect, what the panel says it is for, the code field's
@@ -73,6 +74,33 @@ const words = () => panel()?.querySelector(".cn-signin-words")?.textContent;
 const reconnectRows = () =>
   [...page.querySelectorAll<HTMLElement>(".cn-account")].filter((row) => row.querySelector('[data-use="connectors.reconnect"]')).map((row) => row.querySelector(".cn-name")?.textContent);
 const last = () => asks[asks.length - 1]!;
+
+describe("the Connectors sheet in a window a device code alone signed in", () => {
+  afterEach(() => endSession());
+
+  it("offers no Connect, Reconnect or Add account, and says where an account is connected", async () => {
+    const offered = () => page.querySelectorAll('[data-use="connectors.connect"], [data-use="connectors.reconnect"], [data-use="connectors.add"]').length;
+    openService("claude");
+    expect(offered()).toBe(2);
+    click('[data-use="connectors.back"]');
+
+    setSignedInByCode(true);
+    for (const id of ["claude", "gdrive", "chatgpt"]) {
+      openService(id);
+      expect(offered()).toBe(0);
+      expect(page.querySelector(".cn-signin-btn")).toBeNull();
+      expect(page.querySelector(".cn-note:not(.cn-how)")?.textContent).toBe(
+        "Connect or add an account from a phone or computer signed in with a passkey. This page shows only each account's status: never a key, password or email.",
+      );
+      click('[data-use="connectors.back"]');
+    }
+    // A service that never had a sign-in here keeps its own words.
+    openService("github");
+    expect(page.querySelector(".cn-note:not(.cn-how)")?.textContent).toBe("This page shows only each account's status: never a key, password or email.");
+    await settle();
+    expect(asks).toEqual([]);
+  });
+});
 
 describe("the Connectors sign-in panel", () => {
   it("offers Reconnect on Drive's account while it reads as fine, and names the account it signs in to", async () => {

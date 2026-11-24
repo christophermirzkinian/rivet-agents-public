@@ -27,6 +27,9 @@ export interface Config {
   monitorChat: string;
   /** RIVET_OVERNIGHT_NOTICE_SEEN=1: only marks the retired overnight-jobs notice seen; the app shows nothing for it. */
   overnightNoticeSeen?: boolean;
+  /** RIVET_DEVICE_SESSION=on, exactly: POST /api/auth/device-session signs a device in with a device code alone, for
+   * the desktop app, whose window cannot make a passkey. Anything else leaves the route 404 and the page not offering it. */
+  deviceSession: boolean;
   /** RIVET_MERGE=on: a merge-ready card's yes merges its PR. Off, the yes is a plain approve. */
   merge: boolean;
   /** RIVET_HEALTH_URLS: the apps Ops checks, in the order given. Empty with nothing set. */
@@ -96,6 +99,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     webRoot: resolve(PACKAGE_ROOT, "dist/web"),
     monitorChat,
     overnightNoticeSeen: env.RIVET_OVERNIGHT_NOTICE_SEEN === "1",
+    deviceSession: env.RIVET_DEVICE_SESSION === "on",
     merge: env.RIVET_MERGE === "on",
     healthChecks: healthChecksOf(env.RIVET_HEALTH_URLS),
   };

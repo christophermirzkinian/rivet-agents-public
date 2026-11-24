@@ -188,13 +188,22 @@ async function answer<T>(response: Response): Promise<T> {
   return data as T;
 }
 
-export const me = () => call<{ signedIn: boolean }>("GET", "/api/me");
+/**
+ * `deviceSession` only from a server that signs a device in with a device code alone (RIVET_DEVICE_SESSION=on);
+ * `deviceSessions` is how many such sessions are live, told only to a signed-in caller; `via` only when the caller's
+ * own session is one of them, which can add no device.
+ */
+export const me = () => call<{ signedIn: boolean; deviceSession?: true; deviceSessions?: number; via?: "device-code" }>("GET", "/api/me");
 export const getBoard = () => call<BoardResponse>("GET", "/api/board");
 export const getStatus = () => call<StatusResponse>("GET", "/api/status");
 export const getReplies = () => call<{ replies: Reply[] }>("GET", "/api/replies?limit=200");
 export const getReply = (id: string) => call<Reply>("GET", `/api/replies/${encodeURIComponent(id)}`);
 export const logout = () => call<{ ok: true }>("POST", "/api/auth/logout", {});
 export const deviceCode = () => call<{ code: string; expiresAt: string }>("POST", "/api/auth/device-code", {});
+/** Signs this device in with a code from Settings › Add a device, where it cannot make a passkey. */
+export const deviceSession = (code: string) => call<{ ok: true }>("POST", "/api/auth/device-session", { code });
+/** Ends every session a device code alone made; `signedOut` when this device's was one of them. */
+export const revokeDeviceSessions = () => call<{ ended: number; signedOut?: true }>("POST", "/api/auth/device-sessions/revoke", {});
 
 export interface ReplyInput {
   clientId: string;

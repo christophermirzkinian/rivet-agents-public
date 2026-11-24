@@ -4,8 +4,9 @@ import "./sheets.css";
 import { clock } from "../../../src/shared/when.js";
 import * as api from "../api.js";
 import { button, describe, h, keepFocus } from "../dom.js";
-import { loadPushHealth, onPushChanged, pushBanner, pushChanged } from "../push-health.js";
+import { loadPushHealth, onPushChanged, PUSH_NEEDS_PASSKEY, pushBanner, pushChanged } from "../push-health.js";
 import { disablePush, enablePush, pushState, type PushState } from "../push.js";
+import { onSessionReset, setSignedInByCode, signedInByCode } from "../session.js";
 import { app, changed, sameSession, signedOut, subscribe } from "../state.js";
 import type { BehaviourSection } from "../../../src/shared/behaviours.js";
 import { behavioursPanel, loadBehaviours } from "./behaviours.js";
@@ -26,6 +27,51 @@ let tab: SettingsTab = "general";
 
 /** Bumped by each read and each Turn on or off, so only the latest answer lands. */
 let pushReads = 0;
+/** Whether "Sign out desktop apps" shows: the server signs a device in by a code alone, or such a session is still live. */
+let desktopApps = false;
+let desktopAsk = false;
+let desktopBusy = false;
+/** This window signed in with a code alone: such a session can add no device and turn on no notifications (the server refuses it). */
+const byCode = (): boolean => signedInByCode() === true;
+onSessionReset(() => {
+  desktopApps = desktopAsk = desktopBusy = false;
+});
+
+function readDesktopApps(): void {
+  const current = sameSession();
+  void api.me().then(
+    (me) => {
+      if (!current()) return;
+      desktopApps = me.deviceSession === true || (me.deviceSessions ?? 0) > 0;
+      setSignedInByCode(me.via === "device-code");
+      changed();
+    },
+    () => {},
+  );
+}
+
+function signOutDesktopApps(): void {
+  const current = sameSession();
+  desktopBusy = true;
+  changed();
+  void api.revokeDeviceSessions().then(
+    ({ ended, signedOut: own }) => {
+      if (!current()) return;
+      if (own) return signedOut("Signed out.");
+      desktopAsk = desktopBusy = false;
+      flash(ended === 0 ? "No desktop app was signed in." : ended === 1 ? "1 desktop app signed out." : `${ended} desktop apps signed out.`, "ok");
+      readDesktopApps();
+      changed();
+    },
+    (error: unknown) => {
+      if (!current()) return;
+      if (error instanceof api.ApiError && error.status === 401) return signedOut("Signed out.");
+      desktopBusy = false;
+      flash(`Not signed out: ${describe(error)}`, "error");
+      changed();
+    },
+  );
+}
 
 function readPushState(): void {
   const mine = ++pushReads;
@@ -54,6 +100,8 @@ export function mount(el: HTMLElement): void {
   void loadPushHealth();
   // Read on every open: a resync or the phone's own settings may have changed it since.
   readPushState();
+  desktopAsk = false;
+  readDesktopApps();
 }
 
 export function unmount(): void {
@@ -98,6 +146,7 @@ const PUSH_TEXT: Record<PushState, string> = {
 };
 
 function notifications(): HTMLElement {
+  if (byCode()) return h("section", { class: "panel box notify" }, h("h3", { class: "panel-title" }, "Notifications on this phone"), h("p", { class: "panel-text" }, PUSH_NEEDS_PASSKEY));
   const state = push;
   return h(
     "section",
@@ -152,25 +201,66 @@ function device(): HTMLElement {
             "settings.device.done",
           ),
         )
-      : button(
-          "Add a device",
-          () => {
-            const current = sameSession();
-            void api.deviceCode().then(
-              (value) => {
-                if (!current()) return;
-                app.device = value;
-                changed();
-              },
-              (error: unknown) => {
-                if (current()) flash(describe(error), "error");
-              },
-            );
-          },
-          "big",
-          false,
-          "settings.device.add",
-        ),
+      : byCode()
+        ? h("p", { class: "panel-text" }, "Add a device from a phone or computer signed in with a passkey.")
+        : button(
+            "Add a device",
+            () => {
+              const current = sameSession();
+              void api.deviceCode().then(
+                (value) => {
+                  if (!current()) return;
+                  app.device = value;
+                  changed();
+                },
+                (error: unknown) => {
+                  if (!current()) return;
+                  // The server's word that a code alone made this session, where the window had not heard yet: the line above.
+                  if (error instanceof api.ApiError && error.status === 403) {
+                    setSignedInByCode(true);
+                    return changed();
+                  }
+                  flash(describe(error), "error");
+                },
+              );
+            },
+            "big",
+            false,
+            "settings.device.add",
+          ),
+    !desktopApps
+      ? null
+      : desktopAsk
+        ? h(
+            "div",
+            { class: "device-desktop" },
+            h("p", { class: "panel-text" }, "Sign out every desktop app that signed in with a code? Each needs a new code to come back."),
+            h(
+              "div",
+              { class: "panel-actions" },
+              button("Sign them out", signOutDesktopApps, "big", desktopBusy, "settings.device.desktop-yes"),
+              button(
+                "Cancel",
+                () => {
+                  desktopAsk = false;
+                  changed();
+                },
+                "ghost big",
+                desktopBusy,
+                "settings.device.desktop-no",
+              ),
+            ),
+          )
+        : button(
+            "Sign out desktop apps",
+            () => {
+              desktopAsk = true;
+              changed();
+            },
+            "ghost big",
+            false,
+            "settings.device.desktop",
+          ),
     // Signed out only once the server says so (or the session had already ended): a sign-out that never reached it
     // leaves the session live, so saying "Signed out." then would be wrong.
     button(

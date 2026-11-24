@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { BoardResponse, Reply } from "../src/shared/board.js";
@@ -537,5 +539,101 @@ describe("the overnight-jobs switch", () => {
     server = await startServer({ RIVET_OVERNIGHT_NOTICE_SEEN: "1" }, { now: clock.now });
     cookie = server.cookie();
     expect(await (await overnight()).json()).toEqual({ on: true, noticeSeen: true });
+  });
+});
+
+describe("a session a device code alone made (a-1010)", () => {
+  const NIGHTLY = "github:acme/app/nightly.yml";
+  let byCode: string;
+  const audit = async () => ((await (await fetch(`${server.base}/api/audit`, { headers: { cookie } })).json()) as { entries: AuditEntry[] }).entries;
+  const change = (id: string, op: string, as: string) => send("PATCH", `/api/jobs/${id}`, { clientId: clientId(), op }, browser(as));
+  const stateOf = async (id: string) => (await list()).jobs.find((job) => job.id === id)?.state;
+  const refusal = async (response: Response) => [response.status, ((await response.json()) as { error: string }).error];
+
+  beforeEach(() => {
+    const value = "c".repeat(43);
+    server.app.store.addSession(createHash("sha256").update(value).digest("hex"), HOUR, "device-code");
+    byCode = `__Host-rivet=${value}`;
+  });
+
+  it("sets no job, not even a dry run, where a passkey session does", async () => {
+    const mac = await connectBridge();
+    for (const body of [{}, { dryRun: true }]) expect(await refusal(await create(body, browser(byCode)))).toEqual([403, "sign in with a passkey to set a job"]);
+    expect((await list()).jobs).toEqual([]);
+    expect(mac.events()).toEqual([]);
+    expect(await audit()).toEqual([]);
+    expect((await create({}, browser(cookie))).status).toBe(202);
+    expect((await list()).jobs).toHaveLength(1);
+    mac.abort();
+  });
+
+  /** What one run must leave as it found it: how many jobs there are, and each one's state, schedule and next run. */
+  const standing = async () => (await list()).jobs.map(({ id, state, whenText, nextRun }) => ({ id, state, whenText, nextRun }));
+  const jobEvents = (mac: Awaited<ReturnType<typeof connectBridge>>) => mac.events().filter((one) => one.event === "job").map((one) => one.data.job);
+
+  it("runs a job that is on once and changes no schedule by it, resumes none, and may still pause or delete one", async () => {
+    const id = await madeJob();
+    const mac = await connectBridge();
+    const on = await standing();
+    expect(on).toMatchObject([{ id, state: "active" }]);
+    expect((await change(id, "run", byCode)).status).toBe(202);
+    expect(await standing()).toEqual(on);
+    expect((await change(id, "pause", byCode)).status).toBe(202);
+    const paused = await standing();
+    expect(paused).toMatchObject([{ id, state: "paused" }]);
+    const sent = (await audit()).length;
+    expect(await refusal(await change(id, "run", byCode))).toEqual([409, "it is paused: resume it first"]);
+    expect(await refusal(await change(id, "resume", byCode))).toEqual([403, "sign in with a passkey to resume a job"]);
+    expect(await standing()).toEqual(paused);
+    expect(await audit()).toHaveLength(sent);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(jobEvents(mac)).toEqual([{ op: "run", id }, { op: "pause", id }]);
+    expect((await change(id, "resume", cookie)).status).toBe(202);
+    expect(await stateOf(id)).toBe("active");
+    expect((await send("DELETE", `/api/jobs/${id}`, { clientId: clientId() }, browser(byCode))).status).toBe(202);
+    expect(await stateOf(id)).toBe("removing");
+    mac.abort();
+  });
+
+  it("starts one run from a limit card's answer and changes no schedule by it, and leaves a paused job paused", async () => {
+    const TASK = { name: "Issues", words: "look over the open site issues", kind: "task", when: { every: "day", at: "07:00" }, cards: "red" };
+    const [on, held] = [await madeJob(TASK), await madeJob({ ...TASK, name: "PRs", words: "look over the open PRs" })];
+    const mac = await connectBridge();
+    const limited = async (id: string, run: string) => {
+      await report(id, { run, state: "start", usage: 10 });
+      await send("PUT", `/api/bridge/jobs/${id}/report`, { run, state: "red", line: "Claude is at its limit. Use ChatGPT for this job?", limit: { plan: "claude" } }, bearer(BRIDGE_TOKEN));
+      return (await board()).needs.find((need) => need.schedule === `job-${id}`)!;
+    };
+    const answer = (card: { id: string; rev: string }) => send("POST", "/api/replies", { clientId: clientId(), itemId: card.id, decision: "choice", choice: "Use ChatGPT", rev: card.rev }, browser(byCode));
+    const [card, heldCard] = [await limited(on, "run-00000001"), await limited(held, "run-00000002")];
+    expect((await change(held, "pause", byCode)).status).toBe(202);
+    const before = await standing();
+    expect(before).toMatchObject([on, held].sort().map((id) => ({ id, state: id === on ? "active" : "paused" })));
+
+    expect((await answer(card)).status).toBe(201);
+    expect(await refusal(await answer(heldCard))).toEqual([409, "It couldn't start on ChatGPT: it is paused."]);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(jobEvents(mac)).toEqual([{ op: "pause", id: held }, { op: "run", id: on, plan: "chatgpt" }]);
+    expect(await standing()).toEqual(before);
+    mac.abort();
+  });
+
+  it("lets jobs run overnight again by no word of its own, and may still hold them", async () => {
+    const overnight = (body: unknown, as: string) => send("PUT", "/api/settings/overnight", body, browser(as));
+    expect(await (await overnight({ on: false }, byCode)).json()).toMatchObject({ on: false });
+    expect(await refusal(await overnight({ on: true }, byCode))).toEqual([403, "sign in with a passkey to let jobs run overnight"]);
+    expect(await (await overnight({ noticeSeen: true }, byCode)).json()).toMatchObject({ on: false, noticeSeen: true });
+    expect(await (await overnight({ on: true }, cookie)).json()).toMatchObject({ on: true });
+  });
+
+  it("switches no schedule, on or off", async () => {
+    const mac = await connectBridge();
+    for (const on of [true, false])
+      expect(await refusal(await send("POST", "/api/actions/schedule", { clientId: clientId(), schedule: NIGHTLY, on }, browser(byCode)))).toEqual([403, "sign in with a passkey to switch a schedule"]);
+    expect(await audit()).toEqual([]);
+    expect(mac.events()).toEqual([]);
+    // A passkey session passes the gate: here the Mac has listed no schedule (schedules.test.ts sends a switch through).
+    expect((await send("POST", "/api/actions/schedule", { clientId: clientId(), schedule: NIGHTLY, on: true }, browser(cookie))).status).toBe(404);
+    mac.abort();
   });
 });

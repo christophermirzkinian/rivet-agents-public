@@ -1,8 +1,11 @@
 import { createHash } from "node:crypto";
+import { createRequire } from "node:module";
+import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { clearedSessionCookie, sessionCookie } from "../src/server/auth.js";
+import { loadConfig, sha256 } from "../src/server/config.js";
 import type { Board, Reply } from "../src/shared/board.js";
 import {
   bearer,
@@ -20,6 +23,8 @@ import {
   startServer,
   type TestServer,
 } from "./helpers.js";
+
+const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as typeof import("node:sqlite");
 
 let server: TestServer;
 let cookie: string;
@@ -753,6 +758,405 @@ describe("passkey boundary", () => {
     for (let i = 0; i < 30; i += 1) expect((await hit("203.0.113.9")).status).toBe(200);
     expect((await hit("203.0.113.9")).status).toBe(429);
     expect((await hit("203.0.113.10")).status).toBe(200);
+  });
+});
+
+describe("device session", () => {
+  const post = (to: TestServer, code: unknown, headers = browser("")) =>
+    fetch(`${to.base}/api/auth/device-session`, { method: "POST", headers, body: JSON.stringify(code === undefined ? {} : { code }) });
+  const newCode = async (to: TestServer) =>
+    ((await (await fetch(`${to.base}/api/auth/device-code`, { method: "POST", headers: browser(to.cookie()), body: "{}" })).json()) as { code: string }).code;
+  const madeByCode = (to: TestServer): number => {
+    const db = new DatabaseSync(join(to.dataDir, "rivet.sqlite"));
+    const row = db.prepare("SELECT COUNT(*) AS n FROM sessions WHERE via = 'device-code'").get() as { n: number };
+    db.close();
+    return row.n;
+  };
+  let on: TestServer;
+
+  beforeEach(async () => {
+    on = await startServer({ RIVET_DEVICE_SESSION: "on" });
+  });
+
+  afterEach(async () => {
+    await on.close();
+  });
+
+  it("is on only for the value on, exactly", () => {
+    for (const value of [undefined, "", "1", "true", "ON", " on", "on "]) expect(loadConfig({ RIVET_DEVICE_SESSION: value }).deviceSession).toBe(false);
+    expect(loadConfig({ RIVET_DEVICE_SESSION: "on" }).deviceSession).toBe(true);
+  });
+
+  it("off: the route is an unknown auth route, a good code is not spent, and /api/me offers nothing", async () => {
+    const code = await newCode(server);
+    const off = await post(server, code);
+    const unknown = await fetch(`${server.base}/api/auth/nope`, { method: "POST", headers: browser(""), body: JSON.stringify({ code }) });
+    expect(off.status).toBe(404);
+    expect(off.headers.get("set-cookie")).toBeNull();
+    expect(await off.json()).toEqual(await unknown.json());
+    expect((await fetch(`${server.base}/api/auth/device-session`, { headers: browser("") })).status).toBe(405);
+    expect((await post(server, code, { ...browser(""), origin: "https://evil.example" })).status).toBe(403);
+    expect(await (await fetch(`${server.base}/api/me`)).json()).toEqual({ signedIn: false });
+    expect(await (await fetch(`${server.base}/api/me`, { headers: { cookie } })).json()).toEqual({ signedIn: true });
+    expect(server.app.store.isDeviceCodeValid(sha256(code).toString("hex"))).toBe(true);
+  });
+
+  it("on: /api/me offers it, and a good code gives a working session and is spent", async () => {
+    expect(await (await fetch(`${on.base}/api/me`)).json()).toEqual({ signedIn: false, deviceSession: true });
+    const code = await newCode(on);
+    const response = await post(on, ` ${code.toLowerCase()} `);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+    const setCookie = response.headers.get("set-cookie")!;
+    expect(setCookie).toMatch(/^__Host-rivet=[A-Za-z0-9_-]{43}; Path=\/; Max-Age=2592000; HttpOnly; Secure; SameSite=Strict$/);
+    const made = setCookie.split(";")[0]!;
+    expect(await (await fetch(`${on.base}/api/me`, { headers: { cookie: made } })).json()).toEqual({ signedIn: true, deviceSession: true, deviceSessions: 1, via: "device-code" });
+    expect(await (await fetch(`${on.base}/api/me`, { headers: { cookie: on.cookie() } })).json()).toEqual({ signedIn: true, deviceSession: true, deviceSessions: 1 });
+    expect(await (await fetch(`${on.base}/api/me`)).json()).toEqual({ signedIn: false, deviceSession: true });
+    expect((await fetch(`${on.base}/api/board`, { headers: { cookie: made } })).status).not.toBe(401);
+    expect(madeByCode(on)).toBe(1);
+
+    const again = await post(on, code);
+    expect(again.status).toBe(403);
+    expect(again.headers.get("set-cookie")).toBeNull();
+    expect(await again.json()).toMatchObject({ error: "that code is not valid or has expired" });
+    const enrol = await fetch(`${on.base}/api/auth/register/options`, { method: "POST", headers: browser(""), body: JSON.stringify({ code }) });
+    expect(enrol.status).toBe(403);
+    expect(madeByCode(on)).toBe(1);
+  });
+
+  it("refuses an expired code, a wrong code and no code", async () => {
+    on.app.store.addDeviceCode(sha256("ABCDEFGH").toString("hex"), -1000);
+    for (const code of ["ABCDEFGH", "ZZZZ2222", "ABCDEFG", "ABCDEFGHJ", "ABCD EFG", "x".repeat(200)]) {
+      const response = await post(on, code);
+      expect(response.status).toBe(403);
+      expect(response.headers.get("set-cookie")).toBeNull();
+      expect(await response.json()).toMatchObject({ error: "that code is not valid or has expired" });
+    }
+    for (const code of [undefined, "", 12345678, "x".repeat(201)]) expect((await post(on, code)).status).toBe(400);
+    expect(madeByCode(on)).toBe(0);
+  });
+
+  it("refuses the enrolment token, which stays unspent, even one shaped like a device code", async () => {
+    const response = await post(on, ENROLL_TOKEN);
+    expect(response.status).toBe(403);
+    expect(response.headers.get("set-cookie")).toBeNull();
+    const enrol = await fetch(`${on.base}/api/auth/register/options`, { method: "POST", headers: browser(""), body: JSON.stringify({ code: ENROLL_TOKEN }) });
+    expect(enrol.status).toBe(200);
+
+    const short = await startServer({ RIVET_DEVICE_SESSION: "on", RIVET_ENROLL_TOKEN: "ABCD2345" });
+    try {
+      expect((await post(short, "ABCD2345")).status).toBe(403);
+      expect((await post(short, "abcd2345")).status).toBe(403);
+      expect(madeByCode(short)).toBe(0);
+    } finally {
+      await short.close();
+    }
+  });
+
+  it("refuses a cross-origin post, and the code is not spent", async () => {
+    const code = await newCode(on);
+    const noOrigin = { "x-rivet": "1", "content-type": "application/json" };
+    const noMark = { origin: ORIGIN, "content-type": "application/json" };
+    for (const headers of [{ ...browser(""), origin: "https://evil.example" }, noOrigin, noMark]) {
+      const response = await post(on, code, headers);
+      expect(response.status).toBe(403);
+      expect(response.headers.get("set-cookie")).toBeNull();
+      expect(await response.json()).toMatchObject({ error: "cross-origin request refused" });
+    }
+    expect((await post(on, code)).status).toBe(200);
+  });
+
+  it("counts toward the auth rate limit per client IP", async () => {
+    const code = await newCode(on);
+    const hit = (ip: string, value: string) => post(on, value, { ...browser(""), "fly-client-ip": ip });
+    for (let i = 0; i < 30; i += 1) expect((await hit("203.0.113.9", "not-a-code")).status).toBe(403);
+    expect((await hit("203.0.113.9", code)).status).toBe(429);
+    expect(on.app.store.isDeviceCodeValid(sha256(code).toString("hex"))).toBe(true);
+    expect((await hit("203.0.113.10", code)).status).toBe(200);
+  });
+
+  const enrolWith = (to: TestServer, code: string) =>
+    fetch(`${to.base}/api/auth/register/options`, { method: "POST", headers: browser(""), body: JSON.stringify({ code }) });
+  const misses = (to: TestServer): number[] => {
+    const db = new DatabaseSync(join(to.dataDir, "rivet.sqlite"));
+    const rows = db.prepare("SELECT misses FROM device_codes ORDER BY created_at").all() as { misses: number }[];
+    db.close();
+    return rows.map((row) => row.misses);
+  };
+
+  it("voids every live code after 5 wrong guesses, for a code alone and for a passkey's set-up", async () => {
+    const first = await newCode(on);
+    const second = await newCode(on);
+    for (let i = 0; i < 4; i += 1) expect((await post(on, "ZZZZ2222")).status).toBe(403);
+    expect((await enrolWith(on, first)).status).toBe(200);
+    expect((await post(on, "zzzz3333")).status).toBe(403);
+    expect(misses(on)).toEqual([5, 5]);
+    expect((await enrolWith(on, first)).status).toBe(403);
+    expect((await enrolWith(on, second)).status).toBe(403);
+    const refused = await post(on, first);
+    expect(refused.status).toBe(403);
+    expect(refused.headers.get("set-cookie")).toBeNull();
+    expect((await post(on, second)).status).toBe(403);
+    expect(madeByCode(on)).toBe(0);
+    // A code made after the guesses starts clean.
+    expect((await post(on, await newCode(on))).status).toBe(200);
+  });
+
+  it("takes the right code after 4 wrong guesses, and a guess of the wrong shape costs nothing", async () => {
+    const code = await newCode(on);
+    for (const guess of ["ZZZZ222", "ZZZZ22223", "ZZZZ-222", "", "   ", 12345678]) expect([400, 403]).toContain((await post(on, guess)).status);
+    // 8 letters and digits, but with one no code is made from (I L O U 0 1): never right, so no miss.
+    for (const guess of ["ZZZZ0000", "ABCD1O23", "illouuuu", "ZZZZ222I", "zzzz222l", "OZZZ2222", "ZZZU2222", "ZZZZ2220", "1ZZZ2222"]) expect((await post(on, guess)).status).toBe(403);
+    for (let i = 0; i < 30; i += 1) await post(on, "nope", { ...browser(""), "fly-client-ip": `198.51.100.${i}` });
+    expect(misses(on)).toEqual([0]);
+    for (let i = 0; i < 4; i += 1) expect((await post(on, "ZZZZ2222")).status).toBe(403);
+    expect(misses(on)).toEqual([4]);
+    expect((await post(on, code)).status).toBe(200);
+  });
+
+  it("counts a wrong guess at a passkey's set-up too, so that route is no free place to test a code; not while the switch is off", async () => {
+    const code = await newCode(on);
+    for (const guess of ["ZZZZ222", "not-a-code"]) expect([403, 503]).toContain((await enrolWith(on, guess)).status);
+    for (const guess of ["ZZZZ0000", "abcd1o23", "ZZZZ222I", "zzzz222l", "OZZZ2222", "ZZZU2222"]) expect((await enrolWith(on, guess)).status).toBe(403);
+    expect(misses(on)).toEqual([0]);
+    for (let i = 0; i < 3; i += 1) expect((await enrolWith(on, "ZZZZ2222")).status).toBe(403);
+    expect((await enrolWith(on, code)).status).toBe(200);
+    expect(misses(on)).toEqual([3]);
+    for (let i = 0; i < 2; i += 1) expect((await post(on, "ZZZZ2222")).status).toBe(403);
+    expect((await post(on, code)).status).toBe(403);
+    expect(madeByCode(on)).toBe(0);
+    await newCode(server);
+    for (let i = 0; i < 6; i += 1) expect((await enrolWith(server, "ZZZZ2222")).status).toBe(403);
+    expect(misses(server)).toEqual([0]);
+  });
+
+  it("adds up wrong guesses from different addresses", async () => {
+    const code = await newCode(on);
+    for (let i = 0; i < 5; i += 1) expect((await post(on, "ZZZZ2222", { ...browser(""), "fly-client-ip": `203.0.113.${i + 1}` })).status).toBe(403);
+    expect((await post(on, code, { ...browser(""), "fly-client-ip": "203.0.113.99" })).status).toBe(403);
+    expect(madeByCode(on)).toBe(0);
+  });
+
+  it("counts a used code and an expired one against the codes still live, and nothing while the switch is off", async () => {
+    const spent = await newCode(on);
+    const live = await newCode(on);
+    expect((await post(on, spent)).status).toBe(200);
+    expect((await post(on, spent)).status).toBe(403);
+    on.app.store.addDeviceCode(sha256("EXPD2345").toString("hex"), -1);
+    expect((await post(on, "EXPD2345")).status).toBe(403);
+    expect(misses(on).sort()).toEqual([0, 0, 2]);
+    expect(on.app.store.isDeviceCodeValid(sha256(live).toString("hex"))).toBe(true);
+
+    const code = await newCode(server);
+    for (let i = 0; i < 6; i += 1) expect((await post(server, "ZZZZ2222")).status).toBe(404);
+    for (let i = 0; i < 6; i += 1) expect((await enrolWith(server, "ZZZZ2222")).status).toBe(403);
+    expect(misses(server)).toEqual([0]);
+    expect((await enrolWith(server, code)).status).toBe(200);
+  });
+
+  it("still gives one session to two posts at once after wrong guesses, and none once the code is void", async () => {
+    const code = await newCode(on);
+    for (let i = 0; i < 4; i += 1) await post(on, "ZZZZ2222");
+    const responses = await Promise.all([post(on, code), post(on, code)]);
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 403]);
+    expect(responses.filter((response) => response.headers.get("set-cookie") !== null)).toHaveLength(1);
+    expect(madeByCode(on)).toBe(1);
+
+    const next = await newCode(on);
+    for (let i = 0; i < 5; i += 1) await post(on, "ZZZZ2222");
+    const late = await Promise.all([post(on, next), post(on, next)]);
+    expect(late.map((response) => response.status)).toEqual([403, 403]);
+    expect(madeByCode(on)).toBe(1);
+  });
+
+  describe("signing the desktop apps out", () => {
+    const revoke = (to: TestServer, headers: Record<string, string>) => fetch(`${to.base}/api/auth/device-sessions/revoke`, { method: "POST", headers, body: "{}" });
+    const byCode = async (to: TestServer) => (await post(to, await newCode(to))).headers.get("set-cookie")!.split(";")[0]!;
+    const signedIn = async (to: TestServer, value: string) => ((await (await fetch(`${to.base}/api/me`, { headers: { cookie: value } })).json()) as { signedIn: boolean }).signedIn;
+
+    it("ends every session a code made at once and leaves a passkey's, for a caller signed in by passkey", async () => {
+      const passkey = on.cookie();
+      const laptop = await byCode(on);
+      const other = await byCode(on);
+      expect(await (await fetch(`${on.base}/api/me`, { headers: { cookie: passkey } })).json()).toEqual({ signedIn: true, deviceSession: true, deviceSessions: 2 });
+
+      expect((await revoke(on, browser(""))).status).toBe(401);
+      expect((await revoke(on, { ...browser(passkey), origin: "https://evil.example" })).status).toBe(403);
+      expect((await revoke(on, { cookie: passkey, origin: ORIGIN, "content-type": "application/json" })).status).toBe(403);
+      expect((await fetch(`${on.base}/api/auth/device-sessions/revoke`, { headers: browser(passkey) })).status).toBe(405);
+      expect(madeByCode(on)).toBe(2);
+
+      const response = await revoke(on, browser(passkey));
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ ended: 2 });
+      expect(response.headers.get("set-cookie")).toBeNull();
+      for (const gone of [laptop, other]) {
+        expect(await signedIn(on, gone)).toBe(false);
+        expect((await fetch(`${on.base}/api/board`, { headers: { cookie: gone } })).status).toBe(401);
+        expect((await fetch(`${on.base}/api/chat/stream`, { headers: { cookie: gone } })).status).toBe(401);
+        expect((await revoke(on, browser(gone))).status).toBe(401);
+      }
+      expect(await (await fetch(`${on.base}/api/me`, { headers: { cookie: passkey } })).json()).toEqual({ signedIn: true, deviceSession: true });
+      expect((await fetch(`${on.base}/api/board`, { headers: { cookie: passkey } })).status).not.toBe(401);
+      expect(await (await revoke(on, browser(passkey))).json()).toEqual({ ended: 0 });
+    });
+
+    it("signs the caller out too when a code made its own session", async () => {
+      const passkey = on.cookie();
+      const laptop = await byCode(on);
+      const response = await revoke(on, browser(laptop));
+      expect(await response.json()).toEqual({ ended: 1, signedOut: true });
+      expect(response.headers.get("set-cookie")).toBe(clearedSessionCookie());
+      expect(await signedIn(on, laptop)).toBe(false);
+      expect(await signedIn(on, passkey)).toBe(true);
+    });
+
+    it("ends a chat stream such a session left open at the stream's next write, before anything more is sent", async () => {
+      const laptop = await byCode(on);
+      const controller = new AbortController();
+      const stream = await fetch(`${on.base}/api/chat/stream`, { headers: { cookie: laptop }, signal: controller.signal });
+      expect(stream.status).toBe(200);
+      const reader = stream.body!.getReader();
+      const decoder = new TextDecoder();
+      let text = "";
+      const ended = (async () => {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) return true;
+          text += decoder.decode(value, { stream: true });
+        }
+      })();
+      const say = (words: string) => fetch(`${on.base}/api/bridge/say`, { method: "POST", headers: bearer(BOARD_TOKEN), body: JSON.stringify({ text: words, new: true }) });
+      expect((await say("before")).status).toBe(201);
+      for (let i = 0; i < 100 && !text.includes("before"); i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(text).toContain("before");
+      expect(await (await revoke(on, browser(on.cookie()))).json()).toEqual({ ended: 1 });
+      expect((await say("after the sign-out")).status).toBe(201);
+      await expect(Promise.race([ended, new Promise((resolve) => setTimeout(() => resolve("still open"), 2_000))])).resolves.toBe(true);
+      expect(text).not.toContain("after the sign-out");
+      controller.abort();
+    });
+
+    it("works with the switch off, and tells a signed-in caller there are such sessions to end", async () => {
+      const value = "c".repeat(43);
+      server.app.store.addSession(sha256(value).toString("hex"), 60_000, "device-code");
+      const laptop = `__Host-rivet=${value}`;
+      expect(await (await fetch(`${server.base}/api/me`, { headers: { cookie: laptop } })).json()).toEqual({ signedIn: true, deviceSessions: 1, via: "device-code" });
+      expect(await (await fetch(`${server.base}/api/me`)).json()).toEqual({ signedIn: false });
+      expect(await (await fetch(`${server.base}/api/me`, { headers: { cookie } })).json()).toEqual({ signedIn: true, deviceSessions: 1 });
+      expect(await (await revoke(server, browser(cookie))).json()).toEqual({ ended: 1 });
+      expect(await signedIn(server, laptop)).toBe(false);
+      expect(await (await fetch(`${server.base}/api/me`, { headers: { cookie } })).json()).toEqual({ signedIn: true });
+    });
+
+    it("voids a code made before it, so the code brings no session back and sets up no passkey", async () => {
+      const passkey = on.cookie();
+      const laptop = await byCode(on);
+      const kept = await newCode(on);
+      const spare = await newCode(on);
+      expect(await (await revoke(on, browser(passkey))).json()).toEqual({ ended: 1 });
+      expect(await signedIn(on, laptop)).toBe(false);
+      const back = await post(on, kept);
+      expect(back.status).toBe(403);
+      expect(back.headers.get("set-cookie")).toBeNull();
+      expect((await enrolWith(on, spare)).status).toBe(403);
+      expect((await enrolWith(on, kept)).status).toBe(403);
+      expect(madeByCode(on)).toBe(0);
+      // A code made after it works as any other.
+      expect((await post(on, await newCode(on))).status).toBe(200);
+    });
+  });
+
+  describe("a session a code made is the weaker one", () => {
+    const byCode = async (to: TestServer) => (await post(to, await newCode(to))).headers.get("set-cookie")!.split(";")[0]!;
+    const mint = (to: TestServer, value: string) => fetch(`${to.base}/api/auth/device-code`, { method: "POST", headers: browser(value), body: "{}" });
+    const options = (to: TestServer, value: string, body: unknown = {}) =>
+      fetch(`${to.base}/api/auth/register/options`, { method: "POST", headers: browser(value), body: JSON.stringify(body) });
+    const rows = (to: TestServer, sql: string): Record<string, unknown>[] => {
+      const db = new DatabaseSync(join(to.dataDir, "rivet.sqlite"));
+      const found = db.prepare(sql).all() as Record<string, unknown>[];
+      db.close();
+      return found;
+    };
+
+    it("makes no device code, where a passkey's session still does", async () => {
+      const laptop = await byCode(on);
+      const before = rows(on, "SELECT hash FROM device_codes").length;
+      const refused = await mint(on, laptop);
+      expect(refused.status).toBe(403);
+      expect(await refused.json()).toMatchObject({ error: "sign in with a passkey to add a device" });
+      expect(rows(on, "SELECT hash FROM device_codes")).toHaveLength(before);
+      expect((await mint(on, on.cookie())).status).toBe(200);
+      // Switch off, with such a session left over: the same.
+      const value = "c".repeat(43);
+      server.app.store.addSession(sha256(value).toString("hex"), 60_000, "device-code");
+      expect((await mint(server, `__Host-rivet=${value}`)).status).toBe(403);
+      expect(rows(server, "SELECT hash FROM device_codes")).toHaveLength(0);
+    });
+
+    it("is never taken for a passkey's by running out part-way through the check, and a session that ran out is no one's", () => {
+      const { auth, store } = server.app;
+      const asks = (value: string) => ({ headers: { cookie: `__Host-rivet=${value}` } }) as Parameters<typeof auth.hasPasskeySession>[0];
+      const [code, passkey] = ["c".repeat(43), "p".repeat(43)];
+      const real = Date.now;
+      let clock: number[] = [];
+      // The last time given stays: a check that reads the clock twice sees the session's last instant, then its end.
+      Date.now = () => (clock.length > 1 ? clock.shift()! : clock[0]!);
+      try {
+        clock = [1_000];
+        store.addSession(sha256(code).toString("hex"), 60_000, "device-code");
+        store.addSession(sha256(passkey).toString("hex"), 60_000);
+        clock = [60_999];
+        expect([auth.hasPasskeySession(asks(code)), auth.hasPasskeySession(asks(passkey))]).toEqual([false, true]);
+        clock = [60_999, 61_000];
+        expect(auth.hasPasskeySession(asks(code))).toBe(false);
+        clock = [61_000];
+        expect([auth.hasPasskeySession(asks(passkey)), auth.hasSession(asks(passkey)), auth.hasSession(asks(code))]).toEqual([false, false, false]);
+      } finally {
+        Date.now = real;
+      }
+    });
+
+    it("sets up no passkey on its own word, where a passkey's session still does", async () => {
+      const laptop = await byCode(on);
+      const refused = await options(on, laptop);
+      expect(refused.status).toBe(401);
+      expect(await refused.json()).not.toHaveProperty("flowId");
+      expect((await options(on, laptop, { code: "ZZZZ2222" })).status).toBe(403);
+      expect(on.app.store.listCredentials()).toHaveLength(0);
+      expect((await options(on, on.cookie())).status).toBe(200);
+      // As a signed-out window would, it needs a code from a device signed in with a passkey.
+      expect((await options(on, laptop, { code: await newCode(on) })).status).toBe(200);
+    });
+
+    it("cannot renew itself: on day 29 it gets no code to sign in again with, and its 30 days end when they did", async () => {
+      const laptop = await byCode(on);
+      const made = rows(on, "SELECT hash, expires_at FROM sessions WHERE via = 'device-code'");
+      expect(made).toHaveLength(1);
+      const db = new DatabaseSync(join(on.dataDir, "rivet.sqlite"));
+      db.prepare("UPDATE sessions SET expires_at = ? WHERE via = 'device-code'").run(Date.now() + 24 * 60 * 60 * 1000);
+      db.close();
+      const day29 = rows(on, "SELECT hash, expires_at FROM sessions WHERE via = 'device-code'");
+      expect((await mint(on, laptop)).status).toBe(403);
+      expect((await options(on, laptop)).status).toBe(401);
+      expect(rows(on, "SELECT hash FROM device_codes WHERE used = 0")).toHaveLength(0);
+      expect(rows(on, "SELECT hash, expires_at FROM sessions WHERE via = 'device-code'")).toEqual(day29);
+      expect((await fetch(`${on.base}/api/board`, { headers: { cookie: laptop } })).status).not.toBe(401);
+      const late = new DatabaseSync(join(on.dataDir, "rivet.sqlite"));
+      late.prepare("UPDATE sessions SET expires_at = ? WHERE via = 'device-code'").run(Date.now() - 1);
+      late.close();
+      expect((await fetch(`${on.base}/api/board`, { headers: { cookie: laptop } })).status).toBe(401);
+      expect((await mint(on, laptop)).status).toBe(401);
+    });
+  });
+
+  it("gives one session when one code is posted twice at once", async () => {
+    const code = await newCode(on);
+    const responses = await Promise.all([post(on, code), post(on, code)]);
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 403]);
+    expect(responses.filter((response) => response.headers.get("set-cookie") !== null)).toHaveLength(1);
+    expect(madeByCode(on)).toBe(1);
   });
 });
 

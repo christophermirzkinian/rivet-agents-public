@@ -90,6 +90,8 @@ export function register(router: Router): void {
     const id = url.pathname.slice(PREFIX.length);
     const behaviour = visible().find((entry) => entry.id === id);
     if (!behaviour) throw new HttpError(404, "no such behaviour");
+    // Closed unless the row says it is a preference: what the agent does by itself goes on after "Sign out desktop apps".
+    if (!behaviour.preference) router.deps.requirePasskeySession(request, "change what your agent does by itself");
     const value = await readJson(request, SMALL_BODY_MAX);
     if (behaviour.control === "switch" && switches) {
       const { state, done } = await switches.put(behaviour.id, value);

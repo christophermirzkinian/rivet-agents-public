@@ -14,7 +14,7 @@ import {
 import { CHAT_SEND_DELAY_SECONDS, chatSendDelaySchema, type ChatSendDelay } from "../../../src/shared/command.js";
 import * as api from "../api.js";
 import { button, describe, h } from "../dom.js";
-import { onSessionReset, StaleSession } from "../session.js";
+import { onSessionReset, setSignedInByCode, signedInByCode, StaleSession } from "../session.js";
 import { changed, sameSession, signedOut } from "../state.js";
 import { cacheChatPref, syncChatPrefs } from "./chat-prefs.js";
 import { flash } from "./toast.js";
@@ -122,6 +122,10 @@ function lostSafety(before: BehaviourRow[] | null, after: BehaviourRow[] | null)
   return (after ?? []).some((row) => (row.switch?.state === "stopped" || row.switch?.state === "offline") && was.get(row.id) !== row.switch.state);
 }
 
+/** What a row the server keeps from a window a device code alone signed in reads under its line (a-1010). */
+export const BEHAVIOUR_NEEDS_PASSKEY = "Change this from a phone or computer signed in with a passkey.";
+const locked = (row: BehaviourRow) => signedInByCode() === true && row.preference !== true && (row.control === "live" || row.control === "switch");
+
 function refused(error: unknown): void {
   if (error instanceof StaleSession) return;
   if (error instanceof api.ApiError && error.status === 401) return signedOut("Your session ended. Sign in again.");
@@ -159,7 +163,8 @@ function saveRow(row: BehaviourRow, value: BehaviourValue): void {
         }, LATE_READ_MS);
         return;
       }
-      refused(error);
+      if (error instanceof api.ApiError && error.status === 403) setSignedInByCode(true);
+      else refused(error);
       // A failed save may still have landed (a cut-off), and a refused switch's file may have moved: read what the
       // server holds now.
       void loadBehaviours();
@@ -290,7 +295,7 @@ function choiceChip(row: BehaviourRow, choices: BehaviourChoices, disabled: bool
 
 /** The row's chip and control, or null for a row that stays hidden. */
 function side(row: BehaviourRow, open: (section: BehaviourSection) => void): HTMLElement[] | null {
-  const busy = saving.has(row.id);
+  const busy = saving.has(row.id) || locked(row);
   switch (row.control) {
     case "endpoint": {
       if (row.id !== "chat.send-delay") return null;
@@ -325,7 +330,7 @@ function side(row: BehaviourRow, open: (section: BehaviourSection) => void): HTM
 /** A live row's knobs under it: each label with its select, or with a note where it has one choice. */
 function knobs(row: BehaviourRow): HTMLElement | null {
   if (row.control !== "live" || !row.selects?.length) return null;
-  const disabled = saving.has(row.id) || (!row.switchKey && row.value?.on !== true);
+  const disabled = saving.has(row.id) || locked(row) || (!row.switchKey && row.value?.on !== true);
   return h(
     "div",
     { class: "bhv-knobs" },
@@ -367,6 +372,7 @@ function rowView(row: BehaviourRow, open: (section: BehaviourSection) => void): 
       h("p", { class: "bhv-line" }, row.line),
       note ? h("p", { class: "bhv-state" }, note) : null,
       row.report?.detail ? h("p", { class: "bhv-state" }, row.report.detail) : null,
+      locked(row) ? h("p", { class: "bhv-state" }, BEHAVIOUR_NEEDS_PASSKEY) : null,
     ),
     h("div", { class: "bhv-side" }, ...right),
     under,

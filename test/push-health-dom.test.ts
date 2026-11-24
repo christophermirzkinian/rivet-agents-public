@@ -153,6 +153,23 @@ describe("the banner", () => {
     await health.loadPushHealth();
     expect(health.pushBanner()).toBeNull();
   });
+
+  it("has no Turn on in a window a device code alone signed in, and says where they are turned on", async () => {
+    stubBrowser(GONE);
+    (await import("../web/src/session.js")).setSignedInByCode(true);
+    const health = await import("../web/src/push-health.js");
+    await health.loadPushHealth();
+    const banner = health.pushBanner()!;
+    expect(banner.textContent).toContain("Notifications are off on every phone");
+    expect(banner.textContent).toContain("Turn on notifications from a phone or computer signed in with a passkey.");
+    expect(banner.querySelector("button")).toBeNull();
+    expect(posted).toEqual([]);
+    // Blocked too: no steps that end in a Turn on this window does not have.
+    permission = "denied";
+    const blocked = health.pushBanner()!;
+    expect(blocked.textContent).toContain("Turn on notifications from a phone or computer signed in with a passkey.");
+    expect(blocked.querySelector("li, button")).toBeNull();
+  });
 });
 
 describe("resync", () => {
@@ -172,6 +189,20 @@ describe("resync", () => {
     const { resyncPush } = await import("../web/src/push.js");
     await resyncPush();
     expect(subscribe).not.toHaveBeenCalled();
+    expect(posted).toEqual(["/api/push/subscribe"]);
+  });
+
+  it("asks nothing of the browser or the server in a window a device code alone signed in, and does again once a passkey signs in", async () => {
+    stubBrowser(GONE);
+    const session = await import("../web/src/session.js");
+    const { resyncPush } = await import("../web/src/push.js");
+    session.setSignedInByCode(true);
+    await resyncPush();
+    expect(subscribe).not.toHaveBeenCalled();
+    expect(posted).toEqual([]);
+    session.endSession();
+    session.setSignedInByCode(false);
+    await resyncPush();
     expect(posted).toEqual(["/api/push/subscribe"]);
   });
 

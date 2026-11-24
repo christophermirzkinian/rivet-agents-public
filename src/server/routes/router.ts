@@ -30,6 +30,8 @@ export interface RouteDeps {
   bridge: BridgeChannel;
   /** Throws 401 unless the request carries the owner's session. */
   requireSession(request: IncomingMessage): void;
+  /** Throws 401 without a session, and 403 ("sign in with a passkey to `to`") for one a device code alone made. */
+  requirePasskeySession(request: IncomingMessage, to: string): void;
   /** The one push sender; quiet hours apply to every push it sends. */
   push: PushService;
   quiet: QuietStore;
