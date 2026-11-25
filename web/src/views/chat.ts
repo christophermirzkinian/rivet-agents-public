@@ -75,7 +75,7 @@ import {
   photosHold,
   photosPayload,
 } from "./attach.js";
-import { showCard } from "./feed.js";
+import { answerOption, answerTapsLocked, showCard, shutAnswers, shutOption } from "./feed.js";
 import { holdFoot } from "./hold-foot.js";
 import { closeLightbox } from "./lightbox.js";
 import { createDraftLineage } from "../draft-lineage.js";
@@ -506,10 +506,41 @@ const POSTED_KINDS: Record<string, string> = {
  * A posted card's kind, as its bubble names it. An ask's Done card is a Got it decision on the board (its answer, push
  * and filters stay those of one) but reads "Outcome", known by its id as feed.ts knows it.
  */
-function postedKind(posted: { id: string; kind: string }): string {
+function postedKind(posted: { id: string; kind: string; label?: string }): string {
+  if (posted.label) return posted.label;
   if (DONE_CARD.test(posted.id)) return "Outcome";
   const { kind } = posted;
   return POSTED_KINDS[kind] ?? kind.charAt(0).toUpperCase() + kind.slice(1);
+}
+
+/**
+ * A card answered in its chat (inChatSchema): drawn from the card on the board, never from the line it was posted as, so
+ * the words are the ones its answer's revision pins. The answer is the Feed's own, with its Undo.
+ */
+function inChatCard(card: ServedNeed): HTMLElement {
+  return h(
+    "div",
+    // Its revision is part of each button's name to keepFocus: the keyboard never lands on a changed card's answer.
+    { class: "chat-posted chat-in-card", attrs: { "data-rev": card.rev } },
+    h("span", { class: "chat-posted-kind", attrs: { [TYPED]: "" } }, card.inChat!.label),
+    h("strong", { class: "chat-posted-title", attrs: { [TYPED]: "" } }, card.title),
+    card.ask ? h("p", { class: "chat-posted-ask", attrs: { [TYPED]: "" } }, card.ask) : null,
+    h(
+      "div",
+      { class: "chat-in-answers" },
+      ...(card.options ?? []).flatMap((option, index, options): HTMLElement | HTMLElement[] =>
+        shutOption(card, options, index) ?? h(
+          "button",
+          {
+            class: index === 0 ? "btn primary" : "btn",
+            attrs: { type: "button", "data-use": "cards.answer.choice", "data-use-value": String(index + 1), "data-key": option.label, [TYPED]: "" },
+            on: { click: () => void (answerTapsLocked() || answerOption(card, option.label)) },
+          },
+          option.label,
+        ),
+      ),
+    ),
+  );
 }
 
 /** Rivet's ack as its status line: "building it, ~9:45" reads "building it · ~9:45". */
@@ -1676,7 +1707,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
       labelOf([message]),
       message.id === lit,
       appOnly(message),
-      card ? [card.id, card.rev, isUpdate(card)] : null,
+      card ? [card.id, card.rev, isUpdate(card), shutAnswers(card)] : null,
       message.card ? answeredTitle(message) : null,
       timeOf(message.at),
       chatImages(message).map(mediaSrc),
@@ -2080,14 +2111,16 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
             }))),
           )
         : null,
-      posted
+      posted && card?.inChat
+        ? inChatCard(card)
+        : posted
         ? h(
             "div",
             { class: "chat-posted" },
-            h("span", { class: "chat-posted-kind" }, postedKind(posted)),
-            h("strong", { class: "chat-posted-title" }, posted.title),
+            h("span", { class: "chat-posted-kind", attrs: posted.label ? { [TYPED]: "" } : {} }, postedKind(posted)),
+            h("strong", { class: "chat-posted-title", attrs: posted.label ? { [TYPED]: "" } : {} }, posted.title),
             posted.ask
-              ? h("p", { class: "chat-posted-ask" }, posted.ask)
+              ? h("p", { class: posted.label ? "chat-posted-ask ask-exact" : "chat-posted-ask", attrs: posted.label ? { [TYPED]: "" } : {} }, posted.ask)
               : null,
             card
               ? h(
@@ -2271,7 +2304,9 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     // A new message keeps the keyboard on the control it was on; dropped to the page, Enter would answer the card.
     const refocus = keepFocus(thread);
     // A first-read Try again goes however the chat loads (its own tap, a refresh, the stream): its keyboard moves on.
-    const retryHeld = !!thread.querySelector(".chat-retry")?.contains(document.activeElement);
+    // Nor is a card's answer, changed or gone under the keyboard (inChatCard).
+    const held = document.activeElement?.closest(".chat-retry, .chat-in-card");
+    const controlHeld = !!held && thread.contains(held);
     // A card moving to the end, or lines landing above, would shift what he is reading: iOS has no overflow-anchor.
     const anchor = !stick && !atBottom && !back ? readingAt() : null;
     // A reply to a line in its own topic card needs no quote; one to a line outside it shows it.
@@ -2319,7 +2354,7 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
     );
     placeChildren(thread, bubbles.length ? bubbles : [empty]);
     refocus();
-    if (retryHeld && !thread.contains(document.activeElement)) handFocus();
+    if (controlHeld && !thread.contains(document.activeElement)) handFocus();
     // Under search the scroller is hidden and measures 0 everywhere: the hold stays as the reader left it.
     if (back && !atBottom) scroller.scrollTop = back.top;
     holdReading(anchor);
@@ -3210,7 +3245,8 @@ export function mount(el: HTMLElement, later?: (then: () => void) => void): void
   // a thing's step, media and Share read the board's cards: the page redraws when that changes.
   const openable = () =>
     allCards()
-      .map((need) => `${need.id}:${need.rev}`)
+      // An inChat card's buttons go as its answer is held for Undo, while the board still holds the card.
+      .map((need) => `${need.id}:${need.rev}${need.inChat ? `${app.held.has(need.id) ? ":held" : ""}:${shutAnswers(need)}` : ""}`)
       .join("\n");
   let cards = openable();
   const unboard = subscribe(() => {

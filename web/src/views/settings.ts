@@ -5,6 +5,7 @@ import { clock } from "../../../src/shared/when.js";
 import * as api from "../api.js";
 import { button, describe, h, keepFocus } from "../dom.js";
 import { loadPushHealth, onPushChanged, PUSH_NEEDS_PASSKEY, pushBanner, pushChanged } from "../push-health.js";
+import { gateWords } from "../gate-words.js";
 import { disablePush, enablePush, pushState, type PushState } from "../push.js";
 import { onSessionReset, setSignedInByCode, signedInByCode } from "../session.js";
 import { app, changed, sameSession, signedOut, subscribe } from "../state.js";
@@ -67,7 +68,7 @@ function signOutDesktopApps(): void {
       if (!current()) return;
       if (error instanceof api.ApiError && error.status === 401) return signedOut("Signed out.");
       desktopBusy = false;
-      flash(`Not signed out: ${describe(error)}`, "error");
+      flash(`Not signed out: ${gateWords(error, "devices")}`, "error");
       changed();
     },
   );
@@ -216,11 +217,11 @@ function device(): HTMLElement {
                 (error: unknown) => {
                   if (!current()) return;
                   // The server's word that a code alone made this session, where the window had not heard yet: the line above.
-                  if (error instanceof api.ApiError && error.status === 403) {
+                  if (api.needsPasskey(error)) {
                     setSignedInByCode(true);
                     return changed();
                   }
-                  flash(describe(error), "error");
+                  flash(gateWords(error, "devices"), "error");
                 },
               );
             },
@@ -268,7 +269,7 @@ function device(): HTMLElement {
       () =>
         void api.logout().then(
           () => signedOut("Signed out."),
-          (error: unknown) => (error instanceof api.ApiError && error.status === 401 ? signedOut("Signed out.") : flash(`Not signed out: ${describe(error)}`, "error")),
+          (error: unknown) => (error instanceof api.ApiError && error.status === 401 ? signedOut("Signed out.") : flash(`Not signed out: ${gateWords(error, "devices")}`, "error")),
         ),
       "ghost big",
       false,

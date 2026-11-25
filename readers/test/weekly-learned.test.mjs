@@ -102,6 +102,17 @@ test("the first Yes or Not now to a card's newest revision is its answer; a comm
   assert.equal(state.proposed[0].answer, "no");
 });
 
+test("a Yes from a code sign-in is recorded as one, and the same answer with a passkey takes its mark off", () => {
+  const state = { fixes: [], proposed: [proposed("k", 1)] };
+  const yes = { itemId: "weekly-learned-x", decision: "choice", choice: "Yes", rev: "r1", at: ago(0.3), via: "device-code" };
+  assert.equal(syncAnswers(state, [yes]).length, 1);
+  assert.deepEqual([state.proposed[0].answer, state.proposed[0].via], ["yes", "device-code"]);
+  assert.equal(syncAnswers(state, [yes]).length, 0);
+  const { via: _none, ...again } = { ...yes, rev: "r2", at: ago(0.2), passkey: true };
+  assert.equal(syncAnswers(state, [again, yes]).length, 1);
+  assert.deepEqual([state.proposed[0].answer, "via" in state.proposed[0]], ["yes", false]);
+});
+
 test("Answer again: the newest revision's answer replaces the old one, in either direction", () => {
   const state = { fixes: [], proposed: [proposed("k", 1)] };
   const no = { itemId: "weekly-learned-x", decision: "choice", choice: "Not now", rev: "r1", at: ago(0.3) };

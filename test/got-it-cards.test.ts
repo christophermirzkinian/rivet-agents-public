@@ -7,7 +7,7 @@ import { bearer, BOARD_TOKEN, browser, putBoard, revOf, startServer, type TestSe
 // Whatever a writer sends as an
 // update (or as a kind-less card), the board stores a decision card with one option, "Got it", and that tap drops it.
 const BASE = { updatedAt: "2026-11-01T00:00:00.000Z", coming: [], chats: [], shipped: [] };
-const question = { id: "q1", kind: "decision", title: "Ship it?" };
+const question = { id: "q1", kind: "decision", title: "Ship it?", ask: "Ready to go out." };
 
 describe("a card written as an update", () => {
   let server: TestServer;
@@ -107,7 +107,7 @@ describe("a card written as an update", () => {
     expect(stored("u1")).toBeUndefined();
     expect((await post()).status).toBeLessThan(300);
     // Again once its id has gone to another card.
-    expect((await putNeed("u1", { kind: "decision", title: "Ship it?", options: [{ label: "Yes" }, { label: "No" }] })).status).toBe(200);
+    expect((await putNeed("u1", { kind: "decision", title: "Ship it?", ask: "Ready to go out.", options: [{ label: "Yes" }, { label: "No" }] })).status).toBe(200);
     expect((await post()).status).toBeLessThan(300);
     const listed = async (query: string) => JSON.stringify(await (await fetch(`${server.base}/api/conversations${query}`, { headers: browser(cookie) })).json());
     expect(await listed("")).not.toContain("Got it");

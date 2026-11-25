@@ -1084,6 +1084,13 @@ a {
   overflow-wrap: anywhere;
 }
 
+/* A held message: its own words, set apart from the card's. */
+.card-body > .wa-held {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
 /* A done card: what was asked, then what is done, each under a small label. */
 .done-ask {
   display: flex;

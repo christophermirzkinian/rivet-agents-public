@@ -661,6 +661,10 @@
   gap: 8px;
 }
 
+.desktop .desk-picks > .merge-passkey {
+  align-self: center;
+}
+
 .desktop .desk-actions .btn.pick {
   display: inline-flex;
   align-items: center;

@@ -5,6 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileHolds } from "../lib/holds-file.mjs";
+import { CODE_ANSWER, NO_MARK } from "../lib/templates.mjs";
 import { NOTE_AFTER_YES, RECORD_LADDER, RECORD_YES } from "./decision-records.mjs";
 
 const OWNER = ["example-owner"];
@@ -325,6 +326,31 @@ test("a long comment parses in linear time", () => {
   for (const text of [(k) => "Unhold" + " ".repeat(7_500 * k) + "x", (k) => "Hold:" + " ".repeat(7_500 * k) + "x", (k) => ": " + " ".repeat(7_500 * k) + "x", (k) => "hold" + "_".repeat(7_500 * k), (k) => "1.".repeat(3_750 * k) + "x", (k) => "- ".repeat(3_750 * k) + "x", (k) => "Owner holds: none," + " ".repeat(7_500 * k) + "x", (k) => "Hold" + " ".repeat(7_500 * k) + "x", (k) => "## Owner holds\nNone" + " ".repeat(7_500 * k) + "x", (k) => "## Holds\nNone.\n\n".repeat(500 * k)]) assertLinear(parse, text);
 });
 
+test("a decision record a device code's session made reads as the same record without its line", () => {
+  const body = (fields, after = "") => `**Owner decision (via Rivet): CHOSE: Ship**\nItem: \`ship-1\` — Ship it?\n${fields}\nCard revision: \`abc\`\n\n${after}Verify: node x --verify 1-2\n\n<!-- rivet-reply:1-2 decision=choice -->`;
+  const coded = (text) => text.replace(/^(.*\r?\nItem: .*)(\r?\n)/, `$1$2${CODE_ANSWER}$2`);
+  const read = (text) => [holdLine(text), holdLines([text]), prHold({ body: text, comments: [] }, OWNER), prHold({ body: "", comments: [owner("Owner hold: the video"), owner(text)] }, OWNER), isRelease(text)];
+  for (const [text, line] of [
+    [RECORD_YES, null],
+    [RECORD_LADDER, null],
+    [RECORD_YES.replace(/\n/g, "\r\n"), null],
+    [body("Asked: Hold the PR until the owner signs off? Do not merge before then."), null],
+    [body("Asked: Ship it?\nChoice: Hold until the video"), "Choice: Hold until the video"],
+    [body("Asked: Ship it?\nChoice detail: do not merge before the owner signs off"), "Choice detail: do not merge before the owner signs off"],
+    [body("Asked: Ship it?", "> Hold until the owner signs off\n\n"), "> Hold until the owner signs off"],
+    [body("Asked: Ship it?", "Owner hold: the video\n\n"), "Owner hold: the video"],
+    [body("Asked: Ship it?", "> Hold released\n\n"), null],
+  ]) {
+    const marked = coded(text);
+    assert.ok(marked.includes(`${CODE_ANSWER}\n`) || marked.includes(`${CODE_ANSWER}\r\n`), text);
+    assert.deepEqual(read(marked), read(text), text);
+    assert.equal(holdLine(marked), line, text);
+    assert.equal(isRelease(marked), false, text);
+  }
+  // Nor does a held line beside it hide behind it.
+  assert.equal(holdLine(body(`Asked: Ship it?\n${CODE_ANSWER}; hold until the video`)), `${CODE_ANSWER}; hold until the video`);
+});
+
 test("text that only names a hold is not one: a decision record's question, a quoted hold a release lifts, a file name", () => {
   const record = (fields, after = "") => `**Owner decision (via Rivet): CHOSE: Ship**\nItem: \`ship-1\` — Ship it?\n${fields}\nCard revision: \`abc\`\n\n${after}Verify: node ~/.rivet-agents/app/scripts/push-board.mjs --verify 1-2\n\n<!-- rivet-reply:1-2 decision=choice -->`;
   const free = [
@@ -333,6 +359,7 @@ test("text that only names a hold is not one: a decision record's question, a qu
     NOTE_AFTER_YES,
     RECORD_YES.replace(/\n/g, "\r\n"),
     record("Asked: Hold the PR until the owner signs off? Do not merge before then."),
+    record(`${NO_MARK}\nAsked: Hold the PR until the owner signs off? Do not merge before then.`),
     // The headline as written after the app became Rivet; comments already on GitHub keep "via Rivet".
     record("Asked: Hold the PR until the owner signs off? Do not merge before then.").replace("(via Rivet)", "(via Rivet)"),
     RECORD_YES.replace("(via Rivet)", "(via Rivet)"),

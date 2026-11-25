@@ -306,7 +306,7 @@ async function cli(argv, deps) {
 
 test("card add with refused media exits 5 and calls no server", async () => {
   const fake = fakeExec({ "hevc.mp4": { codec: "hevc" } });
-  const r = await cli(["card", "add", "cam-pick", "--title", "Camera", "--after", file("hevc.mp4")], { exec: fake.exec });
+  const r = await cli(["card", "add", "cam-pick", "--title", "Camera", "--ask", "Which?", "--after", file("hevc.mp4")], { exec: fake.exec });
   assert.equal(r.code, 5);
   assert.equal(r.fetches, 0);
   assert.match(r.stderr, /rivet: hevc\.mp4: video codec hevc, not H\.264/);
@@ -325,7 +325,7 @@ test("card add with refused media exits 5 and calls no server", async () => {
 
 test("--skip-preflight warns and goes on to the server", async () => {
   const fake = fakeExec({});
-  const r = await cli(["card", "add", "cam-pick", "--still", file("s.png"), "--after", file("junk.mp4"), "--skip-preflight"], { exec: fake.exec });
+  const r = await cli(["card", "add", "cam-pick", "--ask", "Which?", "--still", file("s.png"), "--after", file("junk.mp4"), "--skip-preflight"], { exec: fake.exec });
   assert.match(r.stderr, /WARNING --skip-preflight: this media is NOT checked/);
   assert.doesNotMatch(r.stderr, /corner check|grey padding/, "the legacy corner check is skipped too");
   assert.ok(r.fetches > 0);

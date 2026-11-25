@@ -428,7 +428,7 @@ describe("sending an image", () => {
     const connection = () =>
       ({ writeHead: () => {}, write: (chunk: string) => written.push(chunk), on: () => {}, end: () => {} }) as unknown as ServerResponse;
     const channel = new BridgeChannel();
-    const reply = (image?: string) => ({ id: `r-${image ?? "text"}`, itemId: "x", itemTitle: "X", decision: "comment", rev: "1", at: "", handled: false, item: {}, ...(image ? { image } : {}) }) as unknown as Reply;
+    const reply = (image?: string) => ({ id: `r-${image ?? "text"}`, itemId: "x", itemTitle: "X", decision: "comment", rev: "1", at: "", handled: false, item: { passkey: true }, ...(image ? { image } : {}) }) as unknown as Reply;
     const image = "b".repeat(64);
     channel.attach(connection(), []);
     written.length = 0;
@@ -709,7 +709,7 @@ describe("several photos with a card answer", () => {
     const channel = new BridgeChannel();
     const written: string[] = [];
     const response = { writeHead: () => {}, write: (chunk: string) => written.push(chunk), on: () => {}, end: () => {} } as unknown as ServerResponse;
-    const reply = { id: "r-many", images: ["a".repeat(64), "b".repeat(64)], item: { id: "x", title: "x", kind: "decision" } } as unknown as Reply;
+    const reply = { id: "r-many", images: ["a".repeat(64), "b".repeat(64)], item: { id: "x", title: "x", kind: "decision", passkey: true } } as unknown as Reply;
     channel.attach(response, [reply], new Set(["image", "images", "files"]));
     expect(written.some((chunk) => chunk.includes("r-many"))).toBe(false);
     channel.attach(response, [reply], new Set(["image", "images", "files", "reply-images"]));

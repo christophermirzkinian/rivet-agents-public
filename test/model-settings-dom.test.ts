@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AuditEntry } from "../src/shared/command.js";
 import { defaultPicks, MODEL_JOBS, picksFromFile, type ModelPicks, type ModelSettingsResponse } from "../src/shared/models.js";
 import { ApiError } from "../web/src/api.js";
+import { setSignedInByCode, signedInByCode } from "../web/src/session.js";
 import { resetSession } from "../web/src/state.js";
 import { closeModels, CONFIRM_MS, ELSEWHERE, loadModels, modelSettings, readLands, refused, SAVED, UNCONFIRMED, UNREAD_EVERY_MS } from "../web/src/views/model-settings.js";
 import { flash } from "../web/src/views/toast.js";
@@ -108,6 +109,74 @@ describe("the guards", () => {
     expect(refused(new ApiError(400, "bad picks"))).toBe(true);
     for (const status of [0, 408, 429, 500, 502, 503]) expect(refused(new ApiError(status, "lost")), String(status)).toBe(false);
     expect(refused(new TypeError("Failed to fetch"))).toBe(false);
+  });
+});
+
+describe("Who does what in a window signed in with a code alone", () => {
+  const LINE = "Change who does each job from a phone or computer signed in with a passkey.";
+  const PICK = "Pick who does each job. A change applies to each chat's next start, never mid-task.";
+  const intro = () => modelSettings().querySelector(".panel-text")?.textContent;
+
+  it("shows the Mac's picks, every one shut, under that line, and sends nothing", async () => {
+    served = reported(fable, "a1");
+    setSignedInByCode(true);
+    await loadModels();
+    expect(selects()).toHaveLength(MODEL_JOBS.length * 2);
+    expect(selects().map((select) => select.disabled)).not.toContain(false);
+    expect(monitorSelect().value).toBe("claude-fable-5-2");
+    expect(intro()).toBe(LINE);
+    expect(modelSettings().textContent).not.toContain(PICK);
+    await vi.advanceTimersByTimeAsync(UNREAD_EVERY_MS * 2);
+    expect(posts).toEqual([]);
+  });
+
+  it("shows no such line and leaves the rows open in a passkey's window", async () => {
+    served = reported(fable, "a1");
+    setSignedInByCode(false);
+    await loadModels();
+    expect(intro()).toBe(PICK);
+    expect(modelSettings().textContent).not.toContain(LINE);
+    expect(editable()).toBe(true);
+  });
+
+  it("shows that line for a save the server refuses for the passkey, never the server's words, and goes back to the picks before it", async () => {
+    served = reported(defaultPicks(), "a0");
+    await loadModels();
+    expect(editable()).toBe(true);
+    onPost = () => json({ error: "sign in with a passkey to change the models" }, 403);
+    pickMonitor("claude-fable-5-2");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(posts).toHaveLength(1);
+    expect(signedInByCode()).toBe(true);
+    expect(intro()).toBe(LINE);
+    expect(selects().map((select) => select.disabled)).not.toContain(false);
+    expect(monitorSelect().value).toBe("claude-opus-5-5");
+    expect(flash).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(UNREAD_EVERY_MS * 2);
+    expect(posts).toHaveLength(1);
+  });
+
+  it("shows that line when a lost answer's second send is refused for the passkey, never the server's words", async () => {
+    served = reported(defaultPicks(), "a0");
+    await loadModels();
+    onPost = () => {
+      onPost = () => json({ error: "sign in with a passkey to change the models" }, 403);
+      return json({ error: "bad gateway" }, 502);
+    };
+    pickMonitor("claude-fable-5-2");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(signedInByCode()).toBeNull();
+    vi.mocked(flash).mockClear();
+    await vi.advanceTimersByTimeAsync(UNREAD_EVERY_MS);
+    expect(posts).toHaveLength(2);
+    expect(posts[1]).toEqual(posts[0]);
+    expect(signedInByCode()).toBe(true);
+    expect(intro()).toBe(LINE);
+    expect(selects().map((select) => select.disabled)).not.toContain(false);
+    expect(monitorSelect().value).toBe("claude-opus-5-5");
+    expect(flash).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(UNREAD_EVERY_MS * 2);
+    expect(posts).toHaveLength(2);
   });
 });
 

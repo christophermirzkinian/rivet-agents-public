@@ -4,7 +4,7 @@ import { chatName } from "../../../src/shared/names.js";
 import { ASKED_LABEL, DONE_CARD, DONE_LABEL, doneCardParts, YOU_ASKED_LABEL } from "../../../src/shared/asks.js";
 import { MAX_SHORT, type Decision, type Reply, type ServedNeed } from "../../../src/shared/board.js";
 import { chatImages, imageFields } from "../../../src/shared/command.js";
-import { canApprove, isGotIt, isPlan, isTodo, isUpdate, MERGE_READY, optionNeedsText, stepsOf, threadKey, wantsText } from "../../../src/shared/answers.js";
+import { armsMerge, canApprove, isGotIt, isPlan, isTodo, isUpdate, MERGE_READY, optionNeedsText, stepsOf, threadKey, wantsText } from "../../../src/shared/answers.js";
 import { isToday, maybeWhen, when } from "../../../src/shared/when.js";
 import { NOTHING_NEEDS_YOU } from "../../../src/shared/words.js";
 import * as api from "../api.js";
@@ -26,7 +26,7 @@ import {
 } from "../feed-logic.js";
 import { freshPrs, opsData } from "../ops-data.js";
 import * as outbox from "../outbox.js";
-import { StaleSession } from "../session.js";
+import { setSignedInByCode, signedInByCode, StaleSession } from "../session.js";
 import {
   app,
   cardState,
@@ -49,7 +49,7 @@ import {
   type CardState,
 } from "../state.js";
 import { dropPhotos, photosControl, photosHold, photosPayload, restorePhotos } from "./attach.js";
-import { reopenBand } from "./answered.js";
+import { mergedReopen, reopenBand } from "./answered.js";
 import { cardAnswered, useTap } from "../usage.js";
 import { sending } from "./mac-wait.js";
 import { planLocks } from "./plan-lock.js";
@@ -60,6 +60,7 @@ import { rivet } from "../rivet/rivet.js";
 import { decideUp } from "./decide-sheet.js";
 import { closeLightbox } from "./lightbox.js";
 import { leaveOverlays } from "./navigation.js";
+import { TYPED } from "../rivet-words.js";
 import { clearWords } from "./progress-mark.js";
 import { closeSheet, openSheet } from "./sheet.js";
 import { clearUndo, flash, showUndo } from "./toast.js";
@@ -203,6 +204,7 @@ function topCard(need: ServedNeed, minimisable = false, sheet = false): HTMLElem
     card.confirm = null;
     card.error = "This card changed; look again.";
   }
+  if (card.confirm && shutLine(need, card.confirm.decision, card.confirm.choice)) card.confirm = null;
   const todo = isTodo(need);
   const place = todoPlace(need);
   const links = (need.links ?? []).filter((link) => isHttps(link.url) && link !== place);
@@ -220,9 +222,11 @@ function topCard(need: ServedNeed, minimisable = false, sheet = false): HTMLElem
   // its media is a stage, and its answers are the card's last thing over the say-line.
   const phone = sheet;
   const points = phone && !todo && ask ? askPoints(ask) : null;
-  const askText = (!todo && ask && isGotIt(need) && DONE_CARD.test(need.id) ? doneAsk(ask) : null) ?? points ?? (ask ? h("p", { class: todo ? "card-ask todo-ask" : "card-ask" }, ...linkify(ask)) : null);
+  // A card answered in its chat shows its words as they are (inChatSchema).
+  const exact: Record<string, string> = need.inChat ? { [TYPED]: "" } : {};
+  const askText = need.inChat ? (ask ? h("p", { class: "card-ask ask-exact", attrs: exact }, ask) : null) : (!todo && ask && isGotIt(need) && DONE_CARD.test(need.id) ? doneAsk(ask) : null) ?? points ?? (ask ? h("p", { class: todo ? "card-ask todo-ask" : "card-ask" }, ...linkify(ask)) : null);
   const metaLine = meta || since ? h("p", { class: "card-meta" }, meta, meta && since ? " · " : null, since ? h("span", { attrs: { "data-age": need.since! } }, since) : null) : null;
-  const kindChip = isPlan(need) ? h("span", { class: "card-kind plan" }, need.chat ? `Plan · ${chatName(need.chat).replace(/-/g, " ")}` : "Plan") : null;
+  const kindChip = isPlan(need) ? h("span", { class: "card-kind plan" }, need.chat ? `Plan · ${chatName(need.chat).replace(/-/g, " ")}` : "Plan") : need.inChat ? h("span", { class: "card-kind in-chat", attrs: exact }, need.inChat.label) : null;
   const riskChip = need.risk ? h("span", { class: "chip risk" }, `${need.risk} change`) : null;
   const others = options.filter((option) => !yellowAnswer(need, option));
   // Short answers with no detail line sit two to a row under the yellow one; any longer one stacks them all, as does a
@@ -267,7 +271,7 @@ function topCard(need: ServedNeed, minimisable = false, sheet = false): HTMLElem
       reopenBand(need),
       phone && (kindChip || riskChip) ? h("p", { class: "card-tags" }, kindChip, riskChip) : null,
       // The owner reads what a card is about, and what it asks, before who sent it or its photos or clip.
-      h("h2", { class: "card-title" }, need.title),
+      h("h2", { class: "card-title", attrs: exact }, need.title),
       askText,
       ...planPoints(need),
       metaLine,
@@ -298,17 +302,17 @@ function topCard(need: ServedNeed, minimisable = false, sheet = false): HTMLElem
             { class: paired ? "choices paired" : "choices" },
             ...options.flatMap((option, index) => [
               // The answer names the button, so a redraw keeps the keyboard on this answer (dom.ts keepFocus).
-              keyed(
+              ...(shutOption(need, options, index) ?? [keyed(
                 sending(button(
                 phone
                   ? [
-                      h("span", { class: "choice-text" }, h("span", { class: "choice-label" }, rec(option) ? option.label.replace(SAID_RECOMMENDED, "") : option.label), option.detail ? h("span", { class: "choice-detail" }, option.detail) : null),
+                      h("span", { class: "choice-text" }, h("span", { class: "choice-label", attrs: exact }, rec(option) ? option.label.replace(SAID_RECOMMENDED, "") : option.label), option.detail ? h("span", { class: "choice-detail" }, option.detail) : null),
                       rec(option) ? h("span", { class: "choice-rec choice-tag" }, "Recommended") : null,
                     ]
                   : [
                       isDesk() && index < 9 ? h("kbd", { class: "key choice-key" }, String(index + 1)) : null,
                       rec(option) ? h("span", { class: "choice-top" }, h("span", { class: "choice-rec" }, "Recommended")) : null,
-                      h("span", { class: "choice-label" }, option.label),
+                      h("span", { class: "choice-label", attrs: exact }, option.label),
                       option.detail ? h("span", { class: "choice-detail" }, option.detail) : null,
                     ],
                 () => decide(need, "choice", option.label),
@@ -318,7 +322,7 @@ function topCard(need: ServedNeed, minimisable = false, sheet = false): HTMLElem
                 index + 1,
                 )),
                 option.label,
-              ),
+              )]),
               choiceLinks(option.detail),
             ]),
           )
@@ -747,6 +751,37 @@ function yesLabel(need: ServedNeed): string {
   return need.kind === MERGE_READY ? "Merge" : "Approve";
 }
 
+/** What a window a device code alone signed in reads where a merge-ready card's yes would be: the server refuses it that answer. */
+const MERGE_NEEDS_PASSKEY = "Merge this from a phone or computer signed in with a passkey.";
+
+/** The same where any other answer it is refused would be (ServedNeed passkeyAnswers). */
+const YES_NEEDS_PASSKEY = "Approve this from a phone or computer signed in with a passkey.";
+
+const passkeyLine = (text: string) => h("p", { class: "merge-passkey" }, text);
+
+/** What this window reads in place of that answer, or null for one it can give: a device code alone arms no merge and releases none. */
+function shutLine(need: ServedNeed, decision: Decision, choice?: string): string | null {
+  if (signedInByCode() !== true) return null;
+  if (!need.passkeyAnswers?.includes(choice ?? decision)) return null;
+  return armsMerge(need, decision, choice) && !mergedReopen(need) ? MERGE_NEEDS_PASSKEY : YES_NEEDS_PASSKEY;
+}
+
+/** The card's answers this window can't give, for a drawing kept until one of its inputs changes. */
+export const shutAnswers = (need: ServedNeed): string => (signedInByCode() === true && need.passkeyAnswers?.join("\n")) || "";
+
+/** What stands in place of an option this window can't pick, one line a card; null for one it can. */
+export function shutOption(need: ServedNeed, options: readonly { label: string }[], index: number): HTMLElement[] | null {
+  const lines = options.map((option) => shutLine(need, "choice", option.label));
+  const own = lines[index] ?? null;
+  if (own === null) return null;
+  return lines.findIndex((line) => line !== null) === index ? [passkeyLine(lines.includes(MERGE_NEEDS_PASSKEY) ? MERGE_NEEDS_PASSKEY : own)] : [];
+}
+
+function shutApprove(need: ServedNeed): HTMLElement | null {
+  const line = shutLine(need, "approve");
+  return line === null ? null : passkeyLine(line);
+}
+
 /** Dictation stops, keeping its words, before the answer goes. */
 function afterVoice(then: () => void): void {
   stopDictation();
@@ -831,12 +866,12 @@ function actionBar(need: ServedNeed): HTMLElement {
       h(
         "div",
         { class: "plan-row" },
-        sending(button([h("span", { class: "plan-b" }, "Yes, go"), h("span", { class: "plan-s" }, "starts the build")], () => afterVoice(() => act(need, "approve")), "pick yes plan-go", false, "cards.plan.yes")),
+        shutApprove(need) ?? sending(button([h("span", { class: "plan-b" }, "Yes, go"), h("span", { class: "plan-s" }, "starts the build")], () => afterVoice(() => act(need, "approve")), "pick yes plan-go", false, "cards.plan.yes")),
         button([h("span", { class: "plan-b" }, "No"), h("span", { class: "plan-s" }, "change it")], () => afterVoice(() => act(need, "reject")), "mini no plan-che", false, "cards.plan.no"),
       ),
     );
   }
-  const primary = options.length ? null : (answer ?? sending(button([svg(ICONS.yes, "btn-icon"), yesLabel(need)], () => afterVoice(() => act(need, "approve")), "pick yes", false, "cards.approve")));
+  const primary = options.length ? null : (answer ?? shutApprove(need) ?? sending(button([svg(ICONS.yes, "btn-icon"), yesLabel(need)], () => afterVoice(() => act(need, "approve")), "pick yes", false, "cards.approve")));
   return h(
     "div",
     { class: "actions", attrs: { "data-need": need.id, "data-rev": need.rev } },
@@ -931,6 +966,12 @@ function decide(need: ServedNeed, decision: Decision, choice?: string, confirmed
     return;
   }
   const { images, files } = seen ? { images: [], files: [] } : photosPayload(card.attach.photos);
+  // Where a pick passes on only what the card shows, one with a note is the note alone (inChatSchema's `noted`).
+  const noted = decision === "choice" && (text || images.length || files.length) ? need.inChat?.noted : undefined;
+  if (noted) [decision, choice] = ["comment", undefined];
+  // A key press reaches here with no button on the card.
+  const shut = shutLine(need, decision, choice);
+  if (shut) return flash(shut, "warn");
   if (decision === "comment" && !text && !images.length && !files.length) return focusSay(need.id);
   // The words show on the say-line above the option, so what is there is what he means.
   if (decision === "choice" && optionNeedsText(need, choice) && confirmedRev === undefined && !text) {
@@ -965,7 +1006,7 @@ function decide(need: ServedNeed, decision: Decision, choice?: string, confirmed
     need,
     answer,
     confirm: confirmedRev !== undefined,
-    verb: decision === "choice" ? `${VERBS.choice}: ${choice ?? ""}` : VERBS[decision],
+    verb: noted ?? (decision === "choice" ? (need.inChat?.doing?.[choice ?? ""] ?? `${VERBS.choice}: ${choice ?? ""}`) : VERBS[decision]),
     tone: decision === "approve" || decision === "choice" || decision === "done" || decision === "seen" ? "yes" : decision === "reject" ? "no" : decision === "dismiss" ? "later" : "note",
   });
 }
@@ -1064,6 +1105,13 @@ async function send(need: ServedNeed, answer: Answer, confirm: boolean): Promise
       card.error = "This card changed; look again.";
       flash(`That card changed. Look again${where}.`, "error");
       await refreshBoard();
+      return;
+    }
+    // The card back on top says where to give it from; one read before the server marked its answers says the refusal.
+    if (api.needsPasskey(error)) {
+      setSignedInByCode(true);
+      if (!shutLine(need, answer.decision, answer.choice)) card.error = describe(error);
+      changed();
       return;
     }
     card.error = failure === "retry" ? `Not sent: ${describe(error)} Answer again to retry.` : describe(error);
@@ -1189,7 +1237,7 @@ function deskActions(need: ServedNeed): HTMLElement {
     attrs: {
       rows: "2",
       maxlength: "4000",
-      placeholder: text ? "Type your answer…" : "Comment, or a note that goes with your answer…",
+      placeholder: text ? "Type your answer…" : need.inChat?.noted ? "Comment…" : "Comment, or a note that goes with your answer…",
       "aria-label": text ? "Your answer" : "Comment",
     },
     on: {
@@ -1221,15 +1269,18 @@ function deskActions(need: ServedNeed): HTMLElement {
     : options.length && !barHoldsAll(options)
     ? [toAnswers(need)]
     : options.length
-    ? options.slice(0, 4).map((option, index) => {
+    ? options.slice(0, 4).flatMap((option, index) => {
+        const shut = shutOption(need, options, index);
+        if (shut) return shut;
         const element = keyed(
-          sending(button([kbd(String(index + 1)), h("span", { class: "pick-text" }, h("span", { class: "pick-label" }, option.label, option.recommended ? recommendedTag() : null), option.detail ? h("span", { class: "pick-detail" }, option.detail) : null)], () => decide(need, "choice", option.label), yellowAnswer(need, option) ? "pick rec" : "pick", false, "cards.answer.choice", index + 1), option.detail ? `${option.label}, ${option.detail}` : option.label),
+          sending(button([kbd(String(index + 1)), h("span", { class: "pick-text" }, h("span", { class: "pick-label", attrs: need.inChat ? { [TYPED]: "" } : {} }, option.label, option.recommended ? recommendedTag() : null), option.detail ? h("span", { class: "pick-detail" }, option.detail) : null)], () => decide(need, "choice", option.label), yellowAnswer(need, option) ? "pick rec" : "pick", false, "cards.answer.choice", index + 1), need.inChat ? undefined : option.detail ? `${option.label}, ${option.detail}` : option.label),
           option.label,
         );
-        element.title = option.label;
+        // An inChat card's answer is its label as written, read out too: the page rewords names in these attributes (rivet-words.ts).
+        if (!need.inChat) element.title = option.label;
         return element;
       })
-    : [answer ?? sending(button([svg(ICONS.yes, "btn-icon"), yesLabel(need), kbd("A")], () => act(need, "approve"), "pick yes", false, "cards.desk.approve"))];
+    : [answer ?? shutApprove(need) ?? sending(button([svg(ICONS.yes, "btn-icon"), yesLabel(need), kbd("A")], () => act(need, "approve"), "pick yes", false, "cards.desk.approve"))];
   return h(
     "div",
     { class: "desk-actions", attrs: { "data-need": need.id, "data-rev": need.rev } },

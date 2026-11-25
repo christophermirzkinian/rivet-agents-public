@@ -1,4 +1,5 @@
 import type { Ask } from "../shared/asks.js";
+import { CODE_ANSWER } from "../shared/board.js";
 import type { Reply } from "../shared/board.js";
 import type { MergedPr } from "./stamps.js";
 import { NO_REPO } from "../shared/board.js";
@@ -418,7 +419,7 @@ export function threadSteps(input: {
     if (pr === undefined || !prs.has(prKey(reply.item.repo ?? NO_REPO, pr))) continue;
     if (reply.decision !== "approve" && reply.decision !== "choice" && reply.decision !== "done") continue;
     const said = reply.decision === "choice" && reply.choice ? `: ${oneLine(reply.choice)}` : "";
-    steps.push({ kind: "ok", label: `Your OK on PR #${pr}${said}`, ...(reply.item.repo ? { url: `https://github.com/${reply.item.repo}/pull/${pr}` } : {}), at: reply.at, auto: true });
+    steps.push({ kind: "ok", label: `Your OK on PR #${pr}${said}${reply.item.via ? `, ${CODE_ANSWER}` : ""}`, ...(reply.item.repo ? { url: `https://github.com/${reply.item.repo}/pull/${pr}` } : {}), at: reply.at, auto: true });
   }
   // The same step from two sources (an ask's PR and Rivet's) shows once, the first kept.
   const seen = new Set<string>();

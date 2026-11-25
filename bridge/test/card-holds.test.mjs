@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { UNMARKED_ANSWERS_UNTIL } from "../lib/answer-acts.mjs";
 import { cardHoldPrs, definitiveRefusal, dropCardHold, holdForCard, isVideoCard, isYes, rekeyCardHold, releaseForYes } from "../lib/card-holds.mjs";
 import { readHolds } from "../lib/holds-file.mjs";
 
@@ -173,20 +174,20 @@ test("his yes releases only the answered card's holds; another card's on the sam
   assert.deepEqual(releaseForYes({ itemId: "out-new", at, decision: "choice", choice: "Keep it held" }, { file }), { released: [], kept: [] });
   assert.deepEqual(releaseForYes({ itemId: "out-none", at, decision: "approve" }, { file }), { released: [], kept: [] });
   assert.equal(fs.readFileSync(file, "utf8"), before, "nothing changed, nothing written");
-  assert.deepEqual(releaseForYes({ itemId: "out-new", at, decision: "choice", choice: "Yes, keep it", item: { pr: 41 } }, { file }), {
+  assert.deepEqual(releaseForYes({ itemId: "out-new", at, decision: "choice", choice: "Yes, keep it", item: { pr: 41, passkey: true } }, { file }), {
     released: [41],
     kept: [{ pr: 41, card: "out-old" }, { pr: 41, card: "out-later" }],
   });
   assert.deepEqual(readHolds(file).holds, [older, newer, elsewhere, monitor, owner]);
   // A replay finds nothing left.
-  assert.deepEqual(releaseForYes({ itemId: "out-new", at, decision: "approve", item: { pr: 41 } }, { file }), { released: [], kept: [] });
+  assert.deepEqual(releaseForYes({ itemId: "out-new", at, decision: "approve", item: { pr: 41, passkey: true } }, { file }), { released: [], kept: [] });
 });
 
 test("a yes given before the card's newest video, or with no time, keeps its hold", (t) => {
   const restamped = { pr: 41, reason: "video card vc-1 waits", card: "vc-1", since: "2026-11-14T05:00:00.000Z" };
   const file = holdsFile(t, [restamped]);
   const before = fs.readFileSync(file, "utf8");
-  const item = { pr: 41 };
+  const item = { pr: 41, passkey: true };
   const earlier = { released: [], kept: [{ pr: 41, card: "vc-1", why: "earlier" }] };
   assert.deepEqual(releaseForYes({ itemId: "vc-1", at: "2026-11-14T04:59:59.999Z", decision: "approve", item }, { file }), earlier);
   assert.deepEqual(releaseForYes({ itemId: "vc-1", decision: "approve", item }, { file }), earlier);
@@ -194,6 +195,34 @@ test("a yes given before the card's newest video, or with no time, keeps its hol
   assert.equal(fs.readFileSync(file, "utf8"), before);
   assert.deepEqual(releaseForYes({ itemId: "vc-1", at: restamped.since, decision: "approve", item }, { file }), { released: [41], kept: [] });
   assert.deepEqual(readHolds(file).holds, []);
+});
+
+test("only a yes the server marked as a passkey's releases its hold; a no releases nothing either way", (t) => {
+  const held = { pr: 41, reason: "video card vc-1 waits", card: "vc-1", since: "2026-11-14T05:00:00.000Z" };
+  const at = "2026-11-14T06:00:00.000Z";
+  assert.ok(Date.parse(UNMARKED_ANSWERS_UNTIL) < Date.parse(held.since));
+  const marked = { pr: 41, passkey: true };
+  for (const yes of [{ decision: "approve" }, { decision: "choice", choice: "Yes, keep it" }, { decision: "choice", choice: "SHIP IT!" }]) {
+    const file = holdsFile(t, [held]);
+    const before = fs.readFileSync(file, "utf8");
+    const refused = { released: [], kept: [{ pr: 41, card: "vc-1", why: "passkey" }] };
+    assert.deepEqual(releaseForYes({ itemId: "vc-1", at, ...yes, item: { pr: 41 } }, { file }), refused);
+    assert.deepEqual(releaseForYes({ itemId: "vc-1", ...yes, item: { pr: 41 } }, { file }), refused, "no time is no earlier time");
+    assert.deepEqual(releaseForYes({ itemId: "vc-1", at, ...yes, item: { pr: 41, merge: true } }, { file }), refused);
+    assert.deepEqual(releaseForYes({ itemId: "vc-1", at, ...yes, item: { pr: 41, via: "device-code" } }, { file }), refused);
+    assert.deepEqual(releaseForYes({ itemId: "vc-1", at, ...yes, item: { ...marked, via: "device-code" } }, { file }), refused);
+    assert.equal(fs.readFileSync(file, "utf8"), before);
+    assert.deepEqual(releaseForYes({ itemId: "vc-1", at, ...yes, item: marked }, { file }), { released: [41], kept: [] });
+    assert.deepEqual(readHolds(file).holds, []);
+  }
+
+  const file = holdsFile(t, [held]);
+  for (const item of [marked, { pr: 41 }, { pr: 41, via: "device-code" }]) {
+    for (const no of [{ decision: "reject" }, { decision: "comment" }, { decision: "choice", choice: "Change it" }]) {
+      assert.deepEqual(releaseForYes({ itemId: "vc-1", at, ...no, item }, { file }), { released: [], kept: [] });
+    }
+  }
+  assert.deepEqual(readHolds(file).holds, [held]);
 });
 
 test("his yes releases only the holds the revision he answered covers: the PRs it names and the video it showed", (t) => {
@@ -205,15 +234,15 @@ test("his yes releases only the holds the revision he answered covers: the PRs i
   const file = holdsFile(t, [onB, unbound]);
   const at = "2026-11-14T02:00:00.000Z";
   // A yes to the old video A, whenever it is processed, keeps B's hold; an entry with no video goes by the PRs only.
-  assert.deepEqual(releaseForYes({ itemId: "vid", at, decision: "approve", item: { pr: 41, title: "and #42", video: A } }, { file }), {
+  assert.deepEqual(releaseForYes({ itemId: "vid", at, decision: "approve", item: { pr: 41, title: "and #42", video: A, passkey: true } }, { file }), {
     released: [42],
     kept: [{ pr: 41, card: "vid", why: "video" }],
   });
   // A revision with no after video, or one that does not name the PR, keeps it too.
-  assert.deepEqual(releaseForYes({ itemId: "vid", at, decision: "approve", item: { pr: 41 } }, { file }).kept, [{ pr: 41, card: "vid", why: "video" }]);
-  assert.deepEqual(releaseForYes({ itemId: "vid", at, decision: "approve", item: { pr: 50, video: B } }, { file }).kept, [{ pr: 41, card: "vid", why: "unnamed" }]);
+  assert.deepEqual(releaseForYes({ itemId: "vid", at, decision: "approve", item: { pr: 41, passkey: true } }, { file }).kept, [{ pr: 41, card: "vid", why: "video" }]);
+  assert.deepEqual(releaseForYes({ itemId: "vid", at, decision: "approve", item: { pr: 50, video: B, passkey: true } }, { file }).kept, [{ pr: 41, card: "vid", why: "unnamed" }]);
   assert.deepEqual(readHolds(file).holds, [onB]);
-  assert.deepEqual(releaseForYes({ itemId: "vid", at, decision: "approve", item: { pr: 41, video: B } }, { file }), { released: [41], kept: [] });
+  assert.deepEqual(releaseForYes({ itemId: "vid", at, decision: "approve", item: { pr: 41, video: B, passkey: true } }, { file }), { released: [41], kept: [] });
   assert.deepEqual(readHolds(file).holds, []);
 });
 
@@ -225,7 +254,7 @@ test("a reused card id: a yes to the revision about the new PR and video release
   const now = new Date("2026-11-14T02:00:00.000Z");
   holdForCard({ id: "vid", pr: 50, media: { kind: "video", after: B } }, { file, now, restamp: true });
   assert.deepEqual(readHolds(file).holds.map((h) => [h.pr, h.video]), [[41, B.sha256], [50, B.sha256]]);
-  const yes = releaseForYes({ itemId: "vid", at: "2026-11-14T03:00:00.000Z", decision: "approve", item: { pr: 50, video: B } }, { file });
+  const yes = releaseForYes({ itemId: "vid", at: "2026-11-14T03:00:00.000Z", decision: "approve", item: { pr: 50, video: B, passkey: true } }, { file });
   assert.deepEqual(yes, { released: [50], kept: [{ pr: 41, card: "vid", why: "unnamed" }] });
   assert.deepEqual(readHolds(file).holds.map((h) => h.pr), [41]);
 });
@@ -237,7 +266,7 @@ test("a hold is bound to the whole comparison, so a yes to the old before beside
   const card = (before) => ({ id: "vc-9", pr: 41, media: { kind: "video", before: { sha256: before, type: "video/mp4" }, after: { sha256: B, type: "video/mp4" } } });
   holdForCard(card(C), { file, now: new Date("2026-11-14T05:00:00.000Z") });
   assert.equal(readHolds(file).holds[1].video, `${B}+${C}`);
-  const yes = (videoSha) => ({ itemId: "vc-9", at, decision: "approve", item: { pr: 41, video: { sha256: B, type: "video/mp4" }, ...(videoSha ? { videoSha } : {}) } });
+  const yes = (videoSha) => ({ itemId: "vc-9", at, decision: "approve", item: { pr: 41, passkey: true, video: { sha256: B, type: "video/mp4" }, ...(videoSha ? { videoSha } : {}) } });
   // His yes on the old comparison (before A, after B), however late, keeps the hold on the new one (before C).
   assert.deepEqual(releaseForYes(yes(`${B}+${A}`), { file }), { released: [], kept: [{ pr: 41, card: "vc-9", why: "video" }] });
   // An older server sends only the after video: it matches no comparison, so the hold stays (fails safe).
@@ -252,7 +281,7 @@ test("a before video beside an after image binds both, so a yes to the old after
   const card = (after) => ({ id: "vc-10", pr: 41, media: { kind: "video", before: { sha256: A, type: "video/mp4" }, after: { sha256: after, type: "image/png" } } });
   holdForCard(card(C), { file, now: new Date("2026-11-14T05:00:00.000Z") });
   assert.equal(readHolds(file).holds[1].video, `${C}+${A}`);
-  const yes = (videoSha) => ({ itemId: "vc-10", at: "2026-11-14T06:00:00.000Z", decision: "approve", item: { pr: 41, videoSha } });
+  const yes = (videoSha) => ({ itemId: "vc-10", at: "2026-11-14T06:00:00.000Z", decision: "approve", item: { pr: 41, passkey: true, videoSha } });
   assert.deepEqual(releaseForYes(yes(`${B}+${A}`), { file }).released, []);
   assert.deepEqual(releaseForYes(yes(A), { file }).released, [], "an older server's before-only key matches nothing");
   assert.deepEqual(releaseForYes(yes(`${C}+${A}`), { file }).released, [41]);

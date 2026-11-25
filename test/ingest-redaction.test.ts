@@ -205,7 +205,7 @@ describe("what the board token writes is stored and pushed redacted", () => {
     // Comments go under an update card stored before the server took new ones as Got it cards (2026-11-01).
     const before = server.app.store.getBoard()!;
     expect(server.app.store.putBoard({ ...before.board, needs: [...before.board.needs, { id: "old-update", kind: "update", title: "Merged", thread: "main" }] }, before.version)).toBeTruthy();
-    expect((await fetch(`${server.base}/api/board/needs/leaky-item`, { method: "PUT", headers: bearer(BOARD_TOKEN), body: JSON.stringify({ kind: "decision", title: `item ${GH}` }) })).status).toBe(200);
+    expect((await fetch(`${server.base}/api/board/needs/leaky-item`, { method: "PUT", headers: bearer(BOARD_TOKEN), body: JSON.stringify({ kind: "decision", title: `item ${GH}`, ask: "Keep it?" }) })).status).toBe(200);
     expect((await post("/api/bridge/say", { text: `the deploy said: password: ${PASSWORD}` })).status).toBe(201);
     expect((await post("/api/board/needs/old-update/comments", { text: `the key was ${GH}` })).status).toBe(201);
 
@@ -224,7 +224,7 @@ describe("what the board token writes is stored and pushed redacted", () => {
   });
 
   it("refuses a card whose options redaction would make read the same", async () => {
-    const card = { id: "session-policy", kind: "decision", title: "Choose session expiry", options: [{ label: "Session: expire after one hour" }, { label: "Session: expire after six hours" }] };
+    const card = { id: "session-policy", kind: "decision", title: "Choose session expiry", ask: "How long should a sign-in last?", options: [{ label: "Session: expire after one hour" }, { label: "Session: expire after six hours" }] };
     const response = await putBoard(server.base, { ...EXAMPLE_BOARD, needs: [...EXAMPLE_BOARD.needs, card] });
     expect(response.status).toBe(400);
     expect(await response.text()).toContain("two options read the same");

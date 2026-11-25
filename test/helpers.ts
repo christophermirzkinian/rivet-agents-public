@@ -35,6 +35,7 @@ export const EXAMPLE_BOARD = {
       id: "billing-retry",
       kind: "decision",
       title: "Billing retry queue",
+      ask: "Retries a failed billing write.",
       risk: "money",
       options: [{ label: "Ship it" }],
     },

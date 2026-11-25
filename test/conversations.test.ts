@@ -59,6 +59,7 @@ describe("resolveConversation", () => {
     expect(answerText({ decision: "comment", text: "why?", itemTitle: "t" })).toBe("Comment: why?");
     expect(answerText({ decision: "done", itemTitle: "t" })).toBe("Done");
     expect(answerText({ decision: "dismiss", itemTitle: "t" })).toBe("Dismissed");
+    expect(answerText({ decision: "choice", choice: "Ship it", text: "looks good", itemTitle: "t", via: "device-code" })).toBe("Chose: Ship it\nlooks good\nanswered from a code sign-in, not a passkey");
   });
 });
 
@@ -337,6 +338,31 @@ describe("conversation routes", () => {
     expect((await list("?older=1")).conversations.find((row) => row.id === UPDATES_ID)).toMatchObject({ unread: 0 });
     const board = (await (await send("GET", "/api/board")).json()) as { board: { needs: { title: string }[] } | null };
     expect(board.board?.needs.map((need) => need.title) ?? []).not.toContain("Late card");
+  });
+
+  it("a card answered in its chat keeps its whole ask on its line; any other keeps the first line", async () => {
+    const id = await owner("The download button is broken", { conversation: null });
+    clock.advance(BATCH_QUIET_MS);
+    const ask = `First line.\n\n${"Second. ".repeat(60).trim()}`;
+    const card = { kind: "decision", title: "Download", ask, replyTo: id, options: [{ label: "Send" }, { label: "Not now" }] };
+    expect((await send("PUT", "/api/board/needs/plain-line", card)).status).toBe(200);
+    expect((await send("PUT", "/api/board/needs/whole-words", { ...card, inChat: { label: "To the team" } })).status).toBe(200);
+    const posted = (await open(id)).messages.flatMap((message) => message.posted ?? []);
+    expect(posted.find((one) => one.id === "plain-line")).toMatchObject({ ask: "First line." });
+    expect(posted.find((one) => one.id === "whole-words")).toMatchObject({ ask, label: "To the team" });
+    // Its words changed, so its line does: the bubble shows what is answered. A plain card's line stays as posted.
+    for (const name of ["plain-line", "whole-words"]) {
+      const changed = { ...card, title: "Upload", ask: "Other words", ...(name === "whole-words" ? { inChat: { label: "To the crew" } } : {}) };
+      expect((await send("PUT", `/api/board/needs/${name}`, changed)).status).toBe(200);
+    }
+    const after = (await open(id)).messages.flatMap((message) => message.posted ?? []);
+    expect(after.find((one) => one.id === "plain-line")).toMatchObject({ title: "Download", ask: "First line." });
+    expect(after.find((one) => one.id === "whole-words")).toEqual({ id: "whole-words", kind: "decision", title: "Upload", ask: "Other words", label: "To the crew" });
+    // Sent again naming no message, it is the same line's words that change.
+    const { replyTo: _replyTo, ...unlinked } = card;
+    expect((await send("PUT", "/api/board/needs/whole-words", { ...unlinked, title: "Again", ask: "Last words", inChat: { label: "To the crew" } })).status).toBe(200);
+    const last = (await open(id)).messages.flatMap((message) => message.posted ?? []);
+    expect(last.find((one) => one.id === "whole-words")).toEqual({ id: "whole-words", kind: "decision", title: "Again", ask: "Last words", label: "To the crew" });
   });
 
   it("Chat lists a thing's every reply: Rivet's follow-up after its first card and Rivet's reply to a card answer", async () => {
@@ -1089,7 +1115,7 @@ describe("conversation routes", () => {
 
   it("a card's filing holds against near misses: another repo's PR, a stem on another PR, an ask naming it elsewhere; posted cards are never unread", async () => {
     await list();
-    const card = (id: string, extra: Record<string, unknown> = {}) => send("PUT", `/api/board/needs/${id}`, { kind: "decision", title: `Card ${id}`, ...extra });
+    const card = (id: string, extra: Record<string, unknown> = {}) => send("PUT", `/api/board/needs/${id}`, { kind: "decision", title: `Card ${id}`, ask: "Pick one", ...extra });
     const filed = async (id: string) => ((await (await send("GET", `/api/card-conversations/${id}`)).json()) as { conversation: { id: string } | null }).conversation?.id ?? null;
     const a = await owner("Lobby deploys", { conversation: null });
     clock.advance(BATCH_QUIET_MS);
@@ -1162,7 +1188,7 @@ describe("conversation routes", () => {
 
   it("chats match in their repo; Updates takes no card; a card follows its parent of the same write", async () => {
     await list();
-    const card = (id: string, extra: Record<string, unknown> = {}) => send("PUT", `/api/board/needs/${id}`, { kind: "decision", title: `Card ${id}`, ...extra });
+    const card = (id: string, extra: Record<string, unknown> = {}) => send("PUT", `/api/board/needs/${id}`, { kind: "decision", title: `Card ${id}`, ask: "Pick one", ...extra });
     const filed = async (id: string) => ((await (await send("GET", `/api/card-conversations/${id}`)).json()) as { conversation: { id: string } | null }).conversation?.id ?? null;
     const lobby = await owner("Lobby copy", { conversation: null });
     clock.advance(BATCH_QUIET_MS);
@@ -1185,7 +1211,7 @@ describe("conversation routes", () => {
 
     // One write, the follow-up before its parent: it still follows the parent in.
     const board = (await (await send("GET", "/api/board")).json()) as { board: { needs: Record<string, unknown>[] } };
-    const needs = [...board.board.needs, { id: "copy-walkthrough", kind: "update", title: "Walkthrough", replyTo: "copy-plan" }, { id: "copy-plan", kind: "decision", title: "Plan", replyTo: lobby }];
+    const needs = [...board.board.needs, { id: "copy-walkthrough", kind: "update", title: "Walkthrough", replyTo: "copy-plan" }, { id: "copy-plan", kind: "decision", title: "Plan", ask: "Pick one", replyTo: lobby }];
     expect((await send("PUT", "/api/board", { ...REPLY_BOARD, needs })).status).toBe(200);
     expect([await filed("copy-plan"), await filed("copy-walkthrough")]).toEqual([lobby, lobby]);
   });

@@ -111,7 +111,7 @@ describe("board needs", () => {
   });
 
   it("creates on an empty board, replaces, and create=only refuses an existing card", async () => {
-    const card = { kind: "decision", title: "Pick a camera", options: [{ label: "Chase" }] };
+    const card = { kind: "decision", title: "Pick a camera", ask: "Which camera?", options: [{ label: "Chase" }] };
     const created = await send("PUT", "/api/board/needs/cam-pick?create=only", card);
     expect(created.status).toBe(200);
     expect(created.headers.get("etag")).toBe('"1"');
@@ -198,11 +198,11 @@ describe("board needs", () => {
       headers: browser(cookie),
       body: JSON.stringify({ endpoint: "https://fcm.googleapis.com/fcm/send/device-1", keys: { p256dh: "BKey1", auth: "auth1" } }),
     });
-    expect((await send("PUT", "/api/board/needs/fresh-card", { kind: "decision", title: "Fresh" })).status).toBe(200);
+    expect((await send("PUT", "/api/board/needs/fresh-card", { kind: "decision", title: "Fresh", ask: "Ship it?" })).status).toBe(200);
     await settle();
     expect(sender.tags).toEqual(["need-fresh-card"]);
     expect((await send("PATCH", "/api/board/needs/fresh-card", { title: "Fresh, edited" })).status).toBe(200);
-    expect((await send("PUT", "/api/board/needs/fresh-card", { kind: "decision", title: "Fresh, replaced" })).status).toBe(200);
+    expect((await send("PUT", "/api/board/needs/fresh-card", { kind: "decision", title: "Fresh, replaced", ask: "Ship it?" })).status).toBe(200);
     await settle();
     expect(sender.tags).toEqual(["need-fresh-card"]);
   });
@@ -497,11 +497,11 @@ describe("board chats, coming and sections", () => {
   });
 
   it("refuses an item write that would take the board over 1 MB", async () => {
-    expect((await putBoard(server.base, { ...EXAMPLE_BOARD, padding: filler(900_000) })).status).toBe(200);
-    const big = await send("PUT", "/api/board/needs/notes", { kind: "decision", title: "Notes", notes: filler(200_000) });
+    expect((await putBoard(server.base, { ...EXAMPLE_BOARD, padding: filler(996_500) })).status).toBe(200);
+    const big = await send("PUT", "/api/board/needs/notes", { kind: "decision", title: "Notes", ask: filler(3900) });
     expect(big.status).toBe(413);
     expect((await board()).version).toBe(1);
-    expect((await send("PUT", "/api/board/needs/notes", { kind: "decision", title: "Notes", notes: filler(1000) })).status).toBe(200);
+    expect((await send("PUT", "/api/board/needs/notes", { kind: "decision", title: "Notes", ask: filler(100) })).status).toBe(200);
   });
 
   it("keeps the whole-board PUT's request-size limit when schema defaults grow the body", async () => {

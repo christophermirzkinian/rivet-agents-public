@@ -13,6 +13,8 @@ import { NO_REPO } from "../src/shared/board.js";
 const HOME = "example-org/example-repo";
 const nodeRequire = createRequire(import.meta.url);
 const { DatabaseSync } = nodeRequire("node:sqlite") as typeof import("node:sqlite");
+const actsPath = "../bridge/lib/answer-acts.mjs";
+const { UNMARKED_ANSWERS_UNTIL } = (await import(actsPath)) as { UNMARKED_ANSWERS_UNTIL: string };
 
 describe("store migration", () => {
   it("adds replies.rev to a database written by the first deploy", () => {
@@ -322,9 +324,9 @@ describe("wait yeses", () => {
     new CommandStore(dir).close();
     const store = new Store(dir);
     let n = 0;
-    const answer = (itemId: string, kind: string, decision: "approve" | "choice" | "reject", choice?: string, pr = 2483) => {
-      vi.setSystemTime(new Date(Date.parse("2026-10-29T00:00:00.000Z") + ++n * 60_000));
-      const item = { id: itemId, title: "Daily build v2", kind, pr, repo: HOME };
+    const answer = (itemId: string, kind: string, decision: "approve" | "choice" | "reject", choice?: string, pr = 2483, stamp: object = { passkey: true }, from = "2026-10-29T00:00:00.000Z") => {
+      vi.setSystemTime(new Date(Date.parse(from) + ++n * 60_000));
+      const item = { id: itemId, title: "Daily build v2", kind, pr, repo: HOME, ...stamp };
       return store.addReply({ clientId: `client-${n}`, itemId, itemTitle: item.title, decision, ...(choice ? { choice } : {}), rev: "0123456789abcdef", item: item as never });
     };
     const close = () => store.close();
@@ -342,6 +344,27 @@ describe("wait yeses", () => {
     expect([...store.waitYeses()]).toEqual([[OK_KEY, ok.at]]);
     answer("wait-ok-0123456789ab-d", "decision", "choice", "Change it");
     expect(store.waitYeses().size).toBe(0);
+    close();
+  });
+
+  it("a yes a code sign-in gave, or one with a mark that is not a passkey's, is no yes, nor a no to an earlier one", () => {
+    const { store, answer, close } = setup();
+    for (const stamp of [{ via: "device-code" }, { passkey: false }, { via: "device-code", passkey: true }]) {
+      answer("wait-ok-0123456789ab-a", "decision", "choice", "Yes", 2483, stamp);
+      expect(store.waitYeses().size).toBe(0);
+    }
+    const ok = answer("wait-ok-0123456789ab-b", "decision", "choice", "Yes", 2483, { passkey: true });
+    answer("wait-ok-0123456789ab-c", "decision", "choice", "Yes", 2483, { via: "device-code" });
+    expect([...store.waitYeses()]).toEqual([[OK_KEY, ok.at]]);
+    close();
+  });
+
+  it("a yes with no mark is one only when it came before the cut-off", () => {
+    const { store, answer, close } = setup();
+    const early = answer("wait-ok-0123456789ab-a", "decision", "choice", "Yes", 2483, {}, new Date(Date.parse(UNMARKED_ANSWERS_UNTIL) - 3_600_000).toISOString());
+    expect([...store.waitYeses()]).toEqual([[OK_KEY, early.at]]);
+    answer("wait-ok-0123456789ac-a", "decision", "choice", "Yes", 2484, {}, UNMARKED_ANSWERS_UNTIL);
+    expect([...store.waitYeses()]).toEqual([[OK_KEY, early.at]]);
     close();
   });
 });

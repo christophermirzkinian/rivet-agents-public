@@ -5,7 +5,8 @@ import * as api from "./api.js";
 import { dismissBoot } from "./boot.js";
 import { hostedPage, leaveCloud, ownMachineAfterEnrol, readCloud, readServedApp } from "./cloud-agent.js";
 import { DESK_QUERY, isDesk } from "./desk.js";
-import { button, describe, h } from "./dom.js";
+import { button, h } from "./dom.js";
+import { gateWords } from "./gate-words.js";
 import { watchNewBuild } from "./new-build.js";
 import { loadPushHealth, pushChanged } from "./push-health.js";
 import { registerWorker, resyncPush, watchViewing, workerRefresh } from "./push.js";
@@ -126,7 +127,7 @@ function renderSignIn(message: string | null = null, passkey = false): void {
       "Sign in with passkey",
       () => {
         status.textContent = "Waiting for your passkey…";
-        api.signIn().then(startApp, (error: unknown) => (status.textContent = describe(error)));
+        api.signIn().then(startApp, (error: unknown) => (status.textContent = gateWords(error, codeSignIn ? "passkey-or-code" : "passkey")));
       },
       "primary big",
       false,
@@ -149,8 +150,7 @@ function renderCodeSignIn(message: string | null, linked: string | null = null):
     status.textContent = "Checking the code…";
     api.deviceSession(code).then(startAppByCode, (error: unknown) => {
       sending = false;
-      status.textContent =
-        error instanceof api.ApiError && error.status === 403 ? "That code is not valid or has expired. Get a new one and try again." : describe(error);
+      status.textContent = gateWords(error, "code");
     });
   };
   const field = h("input", {
@@ -200,7 +200,7 @@ function renderEnrol(code: string): void {
             status.textContent = "Passkey made. Finishing setup…";
             return ownMachineAfterEnrol().then((own) => (own ? startApp() : location.replace("/")));
           },
-          (error: unknown) => (status.textContent = describe(error)),
+          (error: unknown) => (status.textContent = gateWords(error, "set-up")),
         );
       },
       "primary big",
@@ -385,7 +385,7 @@ async function start(): Promise<void> {
     codeSignIn = deviceSession === true && !(await passkeysWork());
     renderSignIn();
   } catch (error) {
-    renderSignIn(describe(error));
+    renderSignIn(gateWords(error, "start"));
   }
 }
 

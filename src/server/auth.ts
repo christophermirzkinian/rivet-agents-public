@@ -57,6 +57,8 @@ export interface Auth {
   hasSession(request: IncomingMessage): boolean;
   /** A live session that a passkey made: false for one a device code alone made (hasPasskeySession below). */
   hasPasskeySession(request: IncomingMessage): boolean;
+  /** What made the caller's live session, or null without one. */
+  sessionKind(request: IncomingMessage): "passkey" | "device-code" | null;
   /** Issues a session directly; tests use it to skip the authenticator. */
   createSession(): string;
 }
@@ -336,5 +338,5 @@ export function createAuth(config: Config, store: Store): Auth {
     }
   }
 
-  return { handle, hasSession, hasPasskeySession, createSession };
+  return { handle, hasSession, hasPasskeySession, sessionKind, createSession };
 }

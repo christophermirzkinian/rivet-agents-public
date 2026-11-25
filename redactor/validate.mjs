@@ -57,7 +57,7 @@ export const FILE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9 ._()-]{0,95}\.(?:pdf|txt|log
  * @typedef {{ id: string, title: string, kind: string, ask?: string, choiceDetail?: string, steps?: string[], chat?: string, pr?: number,
  *   issue?: number, repo: string | null, risk?: string, merge?: true, headSha?: string,
  *   video?: { sha256: string, type: string }, videoSha?: string, links?: { label: string, url: string }[],
- *   changes?: { replyId: string, decision: string, choice?: string } }} ReplyItem
+ *   changes?: { replyId: string, decision: string, choice?: string, via?: "device-code" }, passkey?: boolean, via?: "device-code" }} ReplyItem
  * @typedef {{ sha256: string, name: string }} FileRef
  * @typedef {{ id: string, itemId: string, decision: "approve"|"reject"|"choice"|"comment"|"done"|"seen"|"dismiss",
  *   choice?: string, text?: string, image?: string, images?: string[], files?: FileRef[], at?: string, rev?: string,
@@ -253,14 +253,18 @@ export function validateReply(raw) {
   if (issue !== undefined) outItem.issue = issue;
   if (risk !== undefined) outItem.risk = risk;
   if (item.merge === true) outItem.merge = true;
+  // The session that answered, as the server read it: a stamp this bridge does not know stays a refused one (answer-acts.mjs).
+  if (item.passkey !== undefined) outItem.passkey = item.passkey === true;
+  if (item.via !== undefined) outItem.via = "device-code";
   if (typeof item.headSha === "string") outItem.headSha = item.headSha;
   // After Answer again, the earlier answer this one changes; context only, so a malformed one is left out.
-  const changes = /** @type {{ replyId?: unknown, decision?: unknown, choice?: unknown } | null | undefined} */ (item.changes);
+  const changes = /** @type {{ replyId?: unknown, decision?: unknown, choice?: unknown, via?: unknown } | null | undefined} */ (item.changes);
   if (changes && typeof changes === "object" && isId(changes.replyId) && typeof changes.decision === "string" && DECISIONS.includes(changes.decision))
     outItem.changes = {
       replyId: /** @type {string} */ (changes.replyId),
       decision: changes.decision,
       ...(typeof changes.choice === "string" && changes.choice.length <= 200 ? { choice: changes.choice } : {}),
+      ...(changes.via !== undefined ? { via: "device-code" } : {}),
     };
   // The answered revision's after video, its video's sha (after, else before) and links, which a video card's merge hold is bound to (card-holds.mjs);
   // context only, so a malformed one is left out and the hold stays.

@@ -6,10 +6,12 @@ import type { OpsStatus } from "../src/shared/ops-status.js";
 import { OPS_STATUS_KEY_PATTERN } from "../src/shared/ops-status.js";
 import type { Worker } from "../src/shared/workers.js";
 import { noteDismissal, opsData, refreshOps } from "../web/src/ops-data.js";
+import { setSignedInByCode, signedInByCode } from "../web/src/session.js";
 import { app, changed } from "../web/src/state.js";
 import { mount, unmount, wrongRows } from "../web/src/views/ops.js";
 import { bringBack, ciItem, diskItem, dismissable, dismissed, dismissItem, appItem, macItem, markOf, openStatus, prItem, runnerItem } from "../web/src/views/ops-status.js";
 import { closeSheet } from "../web/src/views/sheet.js";
+import * as toast from "../web/src/views/toast.js";
 import * as asks from "../web/src/views/your-asks.js";
 
 const NOW = Date.parse("2026-10-01T04:00:00.000Z");
@@ -319,6 +321,70 @@ describe("Dismiss and being fixed", () => {
     const el = page("plan");
     expect(rows(el)).toEqual(expect.arrayContaining(["app/paper-trail +Dismiss", "app/field-notes"]));
     expect(rows(el)).not.toContain("app/field-notes +Dismiss");
+  });
+
+  describe("in a window signed in with a code alone", () => {
+    const LINE = "Dismiss this from a phone or computer signed in with a passkey.";
+    const trailLi = (el: HTMLElement) => [...el.querySelectorAll("li")].find((li) => li.querySelector('[data-plan="app/paper-trail"],[data-ask="app/paper-trail"]'))!;
+    const trailRow = (el: HTMLElement) => el.querySelector<HTMLButtonElement>('[data-plan="app/paper-trail"],[data-ask="app/paper-trail"]')!;
+    const sheet = () => document.querySelector<HTMLElement>(".sheet .ops-status-detail")!;
+    const refuse = (error: string) =>
+      vi.stubGlobal("fetch", (url: string, init?: RequestInit) => {
+        if (!String(url).startsWith("/api/ops/dismissals/") || init?.method !== "PUT") return new Promise(() => {});
+        puts.push(String(url));
+        return Promise.resolve(new Response(JSON.stringify({ error }), { status: 403, headers: { "content-type": "application/json" } }));
+      });
+    let flashed: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+      setSignedInByCode(false);
+      flashed = vi.spyOn(toast, "flash");
+    });
+    afterEach(() => {
+      setSignedInByCode(false);
+      flashed.mockRestore();
+    });
+
+    it("offers no Dismiss on Plan, says in the break's sheet where to dismiss it from, and stores none", () => {
+      setSignedInByCode(true);
+      const el = page("plan");
+      expect(rows(el)).toContain("app/paper-trail");
+      expect(rows(el).filter((row) => row.endsWith("+Dismiss"))).toEqual([]);
+      trailRow(el).click();
+      expect(sheet().querySelector(".ops-dismiss")).toBeNull();
+      expect(sheet().textContent).toContain(LINE);
+      dismissItem(appItem(opsData.ops!.apps[0]!)!);
+      expect(puts).toEqual([]);
+      expect(opsData.dismissals).toEqual([]);
+    });
+
+    it("keeps Dismiss in the sheet, with no such line, in a passkey's window", () => {
+      trailRow(page("plan")).click();
+      expect(sheet().querySelector(".ops-dismiss")).not.toBeNull();
+      expect(sheet().textContent).not.toContain(LINE);
+    });
+
+    it("a Dismiss the server refuses for the passkey brings the break back with no Dismiss and no error", async () => {
+      refuse("sign in with a passkey to hide an alarm");
+      trailLi(page("plan")).querySelector<HTMLButtonElement>(".plan-dismiss")!.click();
+      await vi.waitFor(() => expect(signedInByCode()).toBe(true));
+      expect(puts).toEqual(["/api/ops/dismissals/app/paper-trail"]);
+      expect(opsData.dismissals).toEqual([]);
+      expect(flashed).not.toHaveBeenCalled();
+      const el = page("plan");
+      expect(rows(el)).toContain("app/paper-trail");
+      trailRow(el).click();
+      expect(sheet().textContent).toContain(LINE);
+    });
+
+    it("a Dismiss the server refuses for another reason says it could not, and the window keeps its Dismiss", async () => {
+      refuse("that one cannot be dismissed");
+      trailLi(page("plan")).querySelector<HTMLButtonElement>(".plan-dismiss")!.click();
+      await vi.waitFor(() => expect(flashed).toHaveBeenCalledWith("Couldn't dismiss it. Try again.", "error"));
+      expect(puts).toEqual(["/api/ops/dismissals/app/paper-trail"]);
+      expect(opsData.dismissals).toEqual([]);
+      expect(signedInByCode()).toBe(false);
+      expect(rows(page("plan"))).toContain("app/paper-trail +Dismiss");
+    });
   });
 
   it("a dismissed break leaves Plan's rows for its fold, and is back with its Dismiss once it breaks anew", async () => {

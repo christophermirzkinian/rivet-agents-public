@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { boardSchema } from "../src/shared/board.js";
+import { boardSchema, needSchema } from "../src/shared/board.js";
 import { HANDLED_DROP_MS, needRev, withoutHandled } from "../src/server/http.js";
 import { Store } from "../src/server/store.js";
 import { EXAMPLE_BOARD } from "./helpers.js";
@@ -62,5 +62,22 @@ describe("needRev and a card's proof", () => {
     // A changed ask is a new revision; a card naming none keeps its old one.
     expect(needRev({ ...card, askId: "a-1" } as typeof card)).not.toBe(needRev({ ...card, askId: "a-2" } as typeof card));
     expect(needRev({ ...card, askId: undefined } as typeof card)).toBe(needRev(card));
+  });
+
+  it("a card answered in its chat pins that; every other card keeps the revision it had (a-1012)", () => {
+    const card = { id: "q", kind: "decision", title: "T", ask: "A", options: [{ label: "Send", recommended: true }, { label: "Not now" }] } as Parameters<typeof needRev>[0];
+    expect(needRev(card)).toBe("a85bbaaf7da5ac21");
+    const plain = { ...card, options: [{ label: "Send" }, { label: "Not now" }] };
+    const inChat = { ...plain, inChat: { label: "To the team", doing: { Send: "Sending" }, noted: "Not sent." } } as typeof card;
+    expect(needRev(inChat)).not.toBe(needRev(plain));
+    for (const other of [{ label: "Other" }, { doing: { Send: "Going" } }, { noted: "Kept." }]) {
+      expect(needRev({ ...inChat, inChat: { ...inChat.inChat!, ...other } }), JSON.stringify(other)).not.toBe(needRev(inChat));
+    }
+    expect(needSchema.safeParse(inChat).success).toBe(true);
+    // Its bubble has no confirm step, no text box and no merge, no answer is the recommended one, and a button says all
+    // its answer is.
+    for (const bad of [{ options: card.options }, { options: [{ label: "Send", detail: "And cancel the account" }] }, { options: [{ label: "Send", short: "Go" }] }, { options: [{ label: "Send" }, { label: "Send" }] }, { options: [{ label: "Send" }, { label: " Send " }] }, { options: [{ label: "Not now" }, { label: "Not ​ now" }] }, { options: [{ label: "Send" }, { label: "‮dneS‬" }] }, { options: [{ label: "Send" }, { label: "​" }] }, { options: [{ label: "Send" }, { label: "Ｓend" }] }, { options: [{ label: "Send" }, { label: "Send⠀" }] }, { options: [{ label: "Send" }, { label: "Ѕend" }] }, { options: [{ label: "Send" }, { label: "SEND." }] }, { options: [{ label: "Send" }, { label: "S.end" }] }, { options: [{ label: "Send" }, { label: "." }] }, { inChat: { label: "⠀" } }, { inChat: { label: "To the team" } }, { kind: "todo", steps: ["Do it"] }, { kind: "update" }, { inChat: { label: "To the team", doing: { Post: "Posting" } } }, { options: undefined },{ options: [] }, { risk: "money" }, { reply: "text" }, { options: [{ label: "Send", text: true }] }, { kind: "merge-ready", pr: 1, headSha: "a".repeat(40) }, { inChat: { label: " " } }]) {
+      expect(needSchema.safeParse({ ...inChat, ...bad }).success, JSON.stringify(bad)).toBe(false);
+    }
   });
 });

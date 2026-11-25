@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { clearedSessionCookie, sessionCookie } from "../src/server/auth.js";
 import { loadConfig, sha256 } from "../src/server/config.js";
-import type { Board, Reply } from "../src/shared/board.js";
+import { boardSchema, type Board, type Reply } from "../src/shared/board.js";
 import {
   bearer,
   BOARD_TOKEN,
@@ -298,6 +298,7 @@ describe("POST /api/replies", () => {
       id: "freeze-merge",
       kind: "decision",
       title: "Merge Freeze 3D?",
+      ask: "Its tests are green.",
       options: [{ label: "Merge as is" }, { label: "Change something (type what)", text: true }],
     });
     expect((await putBoard(server.base, board)).status).toBe(200);
@@ -318,7 +319,7 @@ describe("POST /api/replies", () => {
 
   it("refuses ambiguous legacy option labels with or without a typed note", async () => {
     const board = structuredClone(EXAMPLE_BOARD) as typeof EXAMPLE_BOARD & { needs: Record<string, unknown>[] };
-    board.needs.push({ id: "dup-labels", kind: "decision", title: "Which?", options: [{ label: "Proceed", detail: "Deploy to production" }, { label: "Proceed", detail: "Deploy to staging only", text: true }] });
+    board.needs.push({ id: "dup-labels", kind: "decision", title: "Which?", ask: "Where does it go?", options: [{ label: "Proceed", detail: "Deploy to production" }, { label: "Proceed", detail: "Deploy to staging only", text: true }] });
     expect((await putBoard(server.base, board)).status).toBe(200);
     server.app.store.putBoard(board as never, null);
     for (const [index, text] of [undefined, "Staging only"].entries()) {
@@ -404,6 +405,22 @@ describe("POST /api/replies", () => {
     expect(b!.id).toBe(a!.id);
     const list = (await (await fetch(`${server.base}/api/replies`, { headers: { cookie } })).json()) as { replies: unknown[] };
     expect(list.replies).toHaveLength(1);
+  });
+
+  it("on a card answered in its chat with a note rule, a pick with a note is refused whatever app sent it, then the pick or the note alone is the one answer (a-1012)", async () => {
+    const card = { id: "in-chat-note", kind: "decision", title: "T", ask: "A", options: [{ label: "Send" }, { label: "Not now" }], inChat: { label: "To the team", noted: "Not sent." } };
+    const withCard = (id: string) => server.app.store.putBoard(boardSchema.parse({ ...REPLY_BOARD, needs: [{ ...card, id }] }), null);
+    withCard("in-chat-note");
+    expect((await postReply({ clientId: "client-noted-1", itemId: "in-chat-note", decision: "choice", choice: "Send", text: "Not like this" })).status).toBe(400);
+    expect((await postReply({ clientId: "client-noted-2", itemId: "in-chat-note", decision: "comment", text: "Not like this" })).status).toBe(201);
+    // The note came first: a Send after it, from this device or another, is refused.
+    const late = await postReply({ clientId: "client-noted-3", itemId: "in-chat-note", decision: "choice", choice: "Send" });
+    expect([late.status, ((await late.json()) as { answered: Reply }).answered.decision]).toEqual([409, "comment"]);
+    withCard("in-chat-pick");
+    expect((await postReply({ clientId: "client-noted-4", itemId: "in-chat-pick", decision: "choice", choice: "Send" })).status).toBe(201);
+    for (const [n, after] of [{ decision: "comment", text: "Wait" }, { decision: "choice", choice: "Send" }, { decision: "choice", choice: "Not now" }].entries()) {
+      expect((await postReply({ clientId: `client-noted-5${n}`, itemId: "in-chat-pick", ...after })).status).toBe(409);
+    }
   });
 
   it("takes the first answer to a card revision and refuses a later one from another client, until the card changes", async () => {

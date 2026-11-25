@@ -405,6 +405,20 @@ describe("thread status and steps", () => {
     expect(steps[0]).toMatchObject({ messageId: "c1", auto: true });
   });
 
+  it("an OK from a code sign-in says so", () => {
+    const item = { id: "card", title: "t", kind: "approval" as const, pr: 287, repo: "example-org/example-repo", via: "device-code" as const };
+    const coded: Reply = { id: "r1", itemId: "card", itemTitle: "t", decision: "approve", rev: "1", at: iso(30), handled: true, item, via: "device-code" };
+    const steps = threadSteps({
+      row: { id: "c1", rootFrom: "owner" },
+      rootAt: iso(0),
+      ask: ask({ chat: "rivet-chat-threads", repo: "example-org/example-repo", prs: [287], updatedAt: iso(10), createdAt: iso(5) }),
+      stored: [],
+      merged: [],
+      replies: () => [coded],
+    });
+    expect(steps.filter((step) => step.kind === "ok").map((step) => step.label)).toEqual(["Your OK on PR #287, answered from a code sign-in, not a passkey"]);
+  });
+
   it("asks for card answers by the thread's PRs, and orders steps by the instant they name", () => {
     const asked: { repo: string; number: number }[][] = [];
     const steps = threadSteps({

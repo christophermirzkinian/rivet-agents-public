@@ -20,7 +20,7 @@ import { mountShell } from "../web/src/views/shell.js";
 import { dock } from "../web/src/views/home.js";
 import { localItems, openTarget } from "../web/src/views/search.js";
 import { rankSearch } from "../src/shared/search.js";
-import { endSession } from "../web/src/session.js";
+import { endSession, setSignedInByCode } from "../web/src/session.js";
 import { closeSheet, closeTallSheet } from "../web/src/views/sheet.js";
 import { clearUndo, flash, mountToasts, showUndo } from "../web/src/views/toast.js";
 import { stubCanvas } from "./canvas-stub.js";
@@ -73,7 +73,7 @@ let minimiseFails = false;
 /** Minimise PUTs for these cards never answer, as a send stalled offline. */
 let minimiseStalls = new Set<string>();
 /** How the fake server answers each POST /api/replies, in order; missing entries succeed. */
-let replyPlan: ("ok" | "conflict" | "answered" | "late" | "hang" | "signin" | "lost" | "no-photos")[] = [];
+let replyPlan: ("ok" | "conflict" | "answered" | "late" | "hang" | "signin" | "passkey" | "lost" | "no-photos")[] = [];
 /** GET paths the fake server fails with a 503. */
 let failing = new Set<string>();
 let workers: Worker[] = [];
@@ -167,6 +167,7 @@ function fakeFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Re
     if (plan === "conflict") return Promise.resolve(json({ error: "This card changed" }, 409));
     if (plan === "answered") return Promise.resolve(json({ error: "This card was already answered.", answered: replies.find((r) => r.itemId === body.itemId) }, 409));
     if (plan === "signin") return Promise.resolve(json({ error: "Sign in" }, 401));
+    if (plan === "passkey") return Promise.resolve(json({ error: "sign in with a passkey to merge a pull request" }, 403));
     if (plan === "lost") return Promise.reject(new TypeError("Failed to fetch"));
     if (plan === "no-photos") return Promise.resolve(json({ error: "The Mac's bridge needs updating before it can take photos." }, 424));
     const reply = { id: `reply-${posts.length}`, itemTitle: "t", at: new Date().toISOString(), handled: false, item: {}, ...body } as unknown as Reply;
@@ -506,6 +507,46 @@ describe("cards that take a pick or a typed answer", () => {
     flushHeld();
     await settle(0);
     expect(posts.map((post) => post.body)).toMatchObject([{ itemId: "m", decision: "choice", choice: "Change something (type what)", text: "Bluer ice" }]);
+  });
+
+  describe("a card answered in its chat (inChat)", () => {
+    const NOTED = "Not sent. Your agent will read your note first.";
+    const IN_CHAT: ServedNeed = { ...need("s", "s1", "- It **stops**"), kind: "decision", options: [{ label: "Send" }, { label: "Not now" }], inChat: { label: "To the team", doing: { Send: "Sending to the team" }, noted: NOTED } };
+    const sendBox = () => root.querySelector<HTMLButtonElement>('.card.top .btn.choice[data-key="Send"]')!;
+    const undoLine = () => document.querySelector(".toast.undo strong")?.textContent;
+
+    it("says where its answer goes, and recommends none", async () => {
+      needs = [IN_CHAT];
+      await signIn();
+      expect(root.querySelector(".card.top .card-kind[data-typed]")!.textContent).toBe("To the team");
+      expect(root.querySelector(".card.top .ask-exact")!.textContent).toBe("- It **stops**");
+      expect(root.querySelector(".card.top .choice-rec, .card.top .choice.rec, .card.top [aria-label*='ecommended']")).toBeNull();
+      sendBox().click();
+      expect(undoLine()).toBe("Sending to the team");
+      flushHeld();
+      await settle(0);
+      expect(posts.map((post) => post.body)).toEqual([{ clientId: expect.any(String), itemId: "s", decision: "choice", choice: "Send", rev: "s1" }]);
+    });
+
+    // rivet-words.ts rewords a button's name and title, but not its words as written.
+    it("gives a desk answer no name but its words as written", async () => {
+      vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({ matches: true, media: query, addEventListener() {}, removeEventListener() {} }) as unknown as MediaQueryList);
+      needs = [IN_CHAT];
+      await signIn();
+      const picks = [...root.querySelectorAll<HTMLElement>(".desk-picks .btn.pick")];
+      expect(picks.map((pick) => [pick.querySelector(".pick-label[data-typed]")?.textContent, pick.getAttribute("aria-label"), pick.title])).toEqual([["Send", null, ""], ["Not now", null, ""]]);
+    });
+
+    it("a pick with a note typed is the note alone, and says so", async () => {
+      needs = [IN_CHAT];
+      await signIn();
+      say("also on my iPad");
+      sendBox().click();
+      expect(undoLine()).toBe(NOTED);
+      flushHeld();
+      await settle(0);
+      expect(posts.map((post) => post.body)).toEqual([{ clientId: expect.any(String), itemId: "s", decision: "comment", text: "also on my iPad", rev: "s1" }]);
+    });
   });
 
   it("a question with no options leads with a text box and sends a typed answer", async () => {
@@ -3990,6 +4031,218 @@ describe("X rejects, always asking why", () => {
     expect(topId()).toBe("b");
     await settle(5100);
     expect(posts.map((post) => post.body)).toMatchObject([{ itemId: "t", decision: "reject", text: "Not needed any more" }]);
+  });
+});
+
+describe("a merge-ready card in a window a device code alone signed in", () => {
+  const LINE = "Merge this from a phone or computer signed in with a passkey.";
+  const plain = (): ServedNeed => ({ ...need("m", "m1"), kind: "merge-ready", pr: 12, passkeyAnswers: ["approve"] });
+  const picks = (): ServedNeed => ({ ...plain(), options: [{ label: "Merge now", recommended: true }, { label: "Hold it" }], passkeyAnswers: ["Merge now"] });
+  const line = () => root.querySelector(".merge-passkey")?.textContent;
+  const labels = () => [...root.querySelectorAll(".card.top .btn.choice, .actions .btn.pick")].map((element) => element.textContent);
+  const wide = () =>
+    vi.spyOn(window, "matchMedia").mockImplementation(
+      (query: string) => ({ matches: query === DESK_QUERY, media: query, addEventListener() {}, removeEventListener() {} }) as unknown as MediaQueryList,
+    );
+  const deskLabels = () => [...root.querySelectorAll(".desk-picks .btn.pick")].map((element) => element.textContent);
+  const press = async (name: string) => {
+    key("keydown", name);
+    key("keyup", name);
+    await settle(6000);
+  };
+  /** main.ts hands the flag over once the session has begun. */
+  const signInAs = async (byCode: boolean) => {
+    await signIn();
+    setSignedInByCode(byCode);
+    changed();
+  };
+
+  it("says where to merge it from in place of Merge; the note box still answers it", async () => {
+    needs = [plain(), need("b", "b1")];
+    await signInAs(true);
+    expect(line()).toBe(LINE);
+    expect(labels()).toEqual([]);
+    say("Why this one?");
+    root.querySelector<HTMLButtonElement>(".actions .say-send")!.click();
+    await settle(6000);
+    expect(posts.map((post) => post.body)).toMatchObject([{ itemId: "m", decision: "comment", text: "Why this one?" }]);
+    expect(line()).toBeUndefined();
+    expect(actionButton("Approve")).toBeTruthy();
+  });
+
+  it("in place of the recommended option; the other option still answers it", async () => {
+    needs = [picks()];
+    await signInAs(true);
+    expect(line()).toBe(LINE);
+    expect(labels()).toEqual([expect.stringContaining("Hold it")]);
+    actionButton("Hold it").click();
+    await settle(6000);
+    expect(posts.map((post) => post.body)).toMatchObject([{ itemId: "m", decision: "choice", choice: "Hold it" }]);
+  });
+
+  it("no key arms it on the desktop either, and the other answer's key still works", async () => {
+    wide();
+    needs = [plain()];
+    await signInAs(true);
+    expect(root.querySelector(".desk-picks .merge-passkey")?.textContent).toBe(LINE);
+    expect(deskLabels()).toEqual([]);
+    await press("a");
+    expect(posts).toEqual([]);
+
+    needs = [picks()];
+    await poll();
+    expect(root.querySelector(".desk-picks .merge-passkey")?.textContent).toBe(LINE);
+    expect(deskLabels()).toEqual([expect.stringContaining("Hold it")]);
+    await press("1");
+    expect(posts).toEqual([]);
+    await press("2");
+    expect(posts.map((post) => post.body)).toMatchObject([{ itemId: "m", decision: "choice", choice: "Hold it" }]);
+  });
+
+  it("a card reopened after its PR merged keeps its yes, which merges nothing", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) !== "/api/answered") return fakeFetch(input, init);
+      return Promise.resolve(json({ cards: [], reopened: [{ cardId: "m", rev: "m1", at: new Date().toISOString(), merged: true, reply: reply("m", "m0", "c-m0") }] }));
+    }));
+    const { passkeyAnswers: _none, ...merged } = plain();
+    needs = [merged];
+    await signInAs(true);
+    await settle();
+    expect(line()).toBeUndefined();
+    expect(actionButton("Merge")).toBeTruthy();
+  });
+
+  it("in a passkey session the card keeps its Merge", async () => {
+    needs = [plain()];
+    await signInAs(false);
+    expect(line()).toBeUndefined();
+    actionButton("Merge").click();
+    await settle(6000);
+    expect(posts.map((post) => post.body)).toMatchObject([{ itemId: "m", decision: "approve" }]);
+  });
+
+  it("a yes refused for the passkey brings the card back with the line, and no flash", async () => {
+    replyPlan = ["passkey"];
+    needs = [plain(), need("b", "b1"), need("c", "c1")];
+    await signInAs(false);
+    actionButton("Merge").click();
+    expect(topId()).toBe("b");
+    await settle(6000);
+    expect(posts.map((post) => post.body)).toMatchObject([{ itemId: "m", decision: "approve" }]);
+    expect(topId()).toBe("m");
+    expect(line()).toBe(LINE);
+    expect(root.querySelector(".toast.flash")).toBeNull();
+    expect(root.querySelector(".card-error")).toBeNull();
+    await poll();
+    await settle(6000);
+    expect(posts).toHaveLength(1);
+  });
+
+  describe("an answer the server marks as needing a passkey", () => {
+    const APPROVE_LINE = "Approve this from a phone or computer signed in with a passkey.";
+    const video = (): ServedNeed => ({ ...need("m", "m1"), pr: 12, passkeyAnswers: ["approve"] });
+    const ship = (): ServedNeed => ({ ...need("m", "m1"), kind: "decision", pr: 12, options: [{ label: "Yes, keep it", recommended: true }, { label: "Ship it" }, { label: "Change it" }], passkeyAnswers: ["Yes, keep it", "Ship it"] });
+
+    it("has the line in its place, and the rest of the card still answers", async () => {
+      needs = [video(), need("b", "b1")];
+      await signInAs(true);
+      expect(line()).toBe(APPROVE_LINE);
+      expect(labels()).toEqual([]);
+      say("Too dark");
+      root.querySelector<HTMLButtonElement>(".actions .say-send")!.click();
+      await settle(6000);
+      expect(posts.map((post) => post.body)).toMatchObject([{ itemId: "m", decision: "comment", text: "Too dark" }]);
+    });
+
+    it("has the line in place of a plan's Yes, go, and No still answers", async () => {
+      needs = [{ ...video(), kind: "plan" }];
+      await signInAs(true);
+      expect(root.querySelectorAll(".plan-go")).toHaveLength(0);
+      expect(root.querySelector(".plan-row .merge-passkey")?.textContent).toBe(APPROVE_LINE);
+      expect([...root.querySelectorAll(".plan-row .btn")].map((b) => b.textContent)).toEqual(["Nochange it"]);
+      actionButton("No").click();
+      rejectWhy("Start smaller");
+      await settle(6000);
+      expect(posts.map((post) => post.body)).toMatchObject([{ itemId: "m", decision: "reject", text: "Start smaller" }]);
+    });
+
+    it("stands once for a card with two of them", async () => {
+      needs = [ship()];
+      await signInAs(true);
+      expect(line()).toBe(APPROVE_LINE);
+      expect(root.querySelectorAll(".merge-passkey")).toHaveLength(1);
+      expect(labels()).toEqual([expect.stringContaining("Change it")]);
+      actionButton("Change it").click();
+      await settle(6000);
+      expect(posts.map((post) => post.body)).toMatchObject([{ itemId: "m", decision: "choice", choice: "Change it" }]);
+    });
+
+    it("no key gives it on the desktop", async () => {
+      wide();
+      needs = [video()];
+      await signInAs(true);
+      expect(root.querySelector(".desk-picks .merge-passkey")?.textContent).toBe(APPROVE_LINE);
+      expect(deskLabels()).toEqual([]);
+      await press("a");
+      needs = [ship()];
+      await poll();
+      expect(root.querySelectorAll(".desk-picks .merge-passkey")).toHaveLength(1);
+      expect(deskLabels()).toEqual([expect.stringContaining("Change it")]);
+      await press("1");
+      await press("2");
+      expect(posts).toEqual([]);
+      await press("3");
+      expect(posts.map((post) => post.body)).toMatchObject([{ itemId: "m", decision: "choice", choice: "Change it" }]);
+    });
+
+    it("an open confirm for it closes once the window is known to be code-made", async () => {
+      needs = [{ ...ship(), risk: "money" }];
+      await signInAs(false);
+      actionButton("Yes, keep it").click();
+      expect(root.querySelector(".confirm-q")).toBeTruthy();
+      setSignedInByCode(true);
+      changed();
+      expect(root.querySelector(".confirm-q")).toBeNull();
+      expect(line()).toBe(APPROVE_LINE);
+      await settle(6000);
+      expect(posts).toEqual([]);
+    });
+
+    it("a merge-ready card that is also a video card reads the merge's line alone", async () => {
+      needs = [{ ...plain(), passkeyAnswers: ["approve"] }];
+      await signInAs(true);
+      expect([...root.querySelectorAll(".merge-passkey")].map((element) => element.textContent)).toEqual([LINE]);
+      needs = [{ ...picks(), passkeyAnswers: ["Merge now", "Hold it"] }];
+      await poll();
+      expect([...root.querySelectorAll(".merge-passkey")].map((element) => element.textContent)).toEqual([LINE]);
+    });
+
+    it("a passkey session keeps every answer", async () => {
+      needs = [ship()];
+      await signInAs(false);
+      expect(line()).toBeUndefined();
+      actionButton("Yes, keep it").click();
+      await settle(6000);
+      expect(posts.map((post) => post.body)).toMatchObject([{ itemId: "m", decision: "choice", choice: "Yes, keep it" }]);
+    });
+
+    it("refused, it comes back with the line; a card read before the server marked it says the refusal", async () => {
+      replyPlan = ["passkey", "passkey"];
+      needs = [video(), need("b", "b1")];
+      await signInAs(false);
+      actionButton("Approve").click();
+      await settle(6000);
+      expect([topId(), line(), root.querySelector(".card-error")]).toEqual(["m", APPROVE_LINE, null]);
+
+      const { passkeyAnswers: _none, ...older } = video();
+      needs = [{ ...older, rev: "m2" }];
+      await poll();
+      expect(line()).toBeUndefined();
+      actionButton("Approve").click();
+      await settle(6000);
+      expect(posts).toHaveLength(2);
+      expect(root.querySelector(".card-error")?.textContent).toContain("sign in with a passkey");
+    });
   });
 });
 

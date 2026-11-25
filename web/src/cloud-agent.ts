@@ -128,6 +128,24 @@ async function readOnce(path: string, signal?: AbortSignal): Promise<Read> {
 
 const bodyOf = (read: Read): unknown => ("body" in read ? read.body : null);
 
+/** The Mind page's questions and what is picked (views/mind-setup.ts); a JSON 404 is an older supervisor without them. */
+export const readMindSetup = (): Promise<Read> => readJson("/cloud/mind", STATUS_TIMEOUT_MS);
+
+/** One tap on the Mind page, ids only: the supervisor's own result word, null when none came back. */
+export async function saveMindSetup(id: string, value: string): Promise<string | null> {
+  const stop = new AbortController();
+  const timer = setTimeout(() => stop.abort(), STATUS_TIMEOUT_MS);
+  try {
+    const response = await fetch("/cloud/mind/set", { method: "POST", credentials: "same-origin", redirect: "error", headers: { accept: "application/json" }, body: new URLSearchParams({ id, value }), signal: stop.signal });
+    const { result } = (await response.json()) as { result?: unknown };
+    return typeof result === "string" ? result : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** A probe started before a sign-out changes nothing and answers null. */
 export async function probeCloud(): Promise<CloudAgent | null> {
   const at = session;

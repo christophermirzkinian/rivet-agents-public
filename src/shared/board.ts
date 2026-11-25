@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { ASK, MERGE_READY, PLAN, UPDATE } from "./answers.js";
+import { ASK, isTodo, isUpdate, MERGE_READY, PLAN, UPDATE } from "./answers.js";
 import { isRepo, NO_REPO, REPO_RE, setDefaultRepo } from "./repos.js";
 import { NEEDS_YOU } from "./words.js";
 
@@ -257,17 +257,41 @@ export { ASK, UPDATE };
 export const MAX_COMMENTS = 20;
 export const MAX_COMMENT = 1000;
 
+/** What an agent is told beside an answer a device code's session gave (redactor/templates.mjs CODE_ANSWER). */
+export const CODE_ANSWER = "answered from a code sign-in, not a passkey";
+
 /** A line under an update card: your comment, or Rivet's answer to it. (`comments`, not `notes`: older cards use that freely.) */
 export const commentSchema = z
   .object({
     from: z.enum(["owner", "rivet"]),
     text: text(MAX_COMMENT).refine((value) => value.trim() !== "", "comments must not be blank"),
     at: timestamp,
+    /** On a comment a device code's session made, as the server read it. */
+    note: z.literal(CODE_ANSWER).optional(),
   })
   .strict();
 export type CardComment = z.infer<typeof commentSchema>;
 
 const noteText = (max: number) => text(max).refine((value) => value.trim() !== "", "must not be blank");
+
+/** Words that show exactly as they are: keyboard characters, one space between words, a letter or number among them. */
+const PLAIN_WORDS = /^(?=.*[A-Za-z0-9])[!-~]+(?: [!-~]+)*$/;
+/** What tells two labels apart: their letters and numbers, not case, marks or spaces. */
+const wordsOf = (label: string) => label.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+/**
+ * A card answered where it was raised: its chat bubble holds its whole title and ask, word for word (no link, bullet or
+ * name is reworded), and its options as buttons, under `label`. For words that go on somewhere exactly as shown, so
+ * what is read is what is answered. `doing` is the Undo line of an option, by its label. With `noted`, an option picked
+ * with a note sends the note alone, as a comment, and `noted` is the line that says so.
+ */
+export const inChatSchema = z
+  .object({
+    label: text(40).regex(PLAIN_WORDS),
+    doing: z.record(text(120), noteText(60)).optional(),
+    noted: noteText(120).optional(),
+  })
+  .strict();
 
 /** A question card's proof: what you check before you say yes, so you need not open the PR. */
 export const evidenceSchema = z
@@ -338,6 +362,7 @@ export const needSchema = z
     /** A plan card's ETA as you read it ("~2:30pm", "today"). */
     eta: text(MAX_ETA).refine((value) => value.trim() !== "", "an eta must not be blank").optional(),
     evidence: evidenceSchema.optional(),
+    inChat: inChatSchema.optional(),
     /**
      * Server-owned: you tapped Answer again `n` times, the last time on the answer `after`. A new revision, so
      * your new answer is recorded on it, and relayed as a change of that one; a writer's own is never kept. `at`: when you
@@ -379,6 +404,26 @@ export const needSchema = z
     } else {
       for (const field of ["points", "size", "eta"] as const) {
         if (need[field] !== undefined) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [field], message: `only a plan card takes ${field}` });
+      }
+    }
+    // Its bubble has only its options' buttons: no confirm step, no box to type in.
+    if (need.inChat) {
+      if (need.kind === MERGE_READY || isTodo(need) || isUpdate(need) || !need.options?.length) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["inChat"], message: "a card answered in its chat needs options, and is no merge-ready, todo or update card" });
+      }
+      if (need.risk !== undefined || need.reply !== undefined) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["inChat"], message: "a card answered in its chat takes no risk and no typed answer" });
+      }
+      // A button shows its label alone, so an answer is nothing more: no detail, no typed note, and, as the card asks
+      // leave to pass words on, no recommended one.
+      if (need.options?.some((option) => Object.keys(option).some((key) => key !== "label"))) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["options"], message: "a card answered in its chat has options with a label alone" });
+      }
+      if (need.options?.some((option) => !PLAIN_WORDS.test(option.label)) || new Set(need.options?.map((option) => wordsOf(option.label))).size !== need.options?.length) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["options"], message: "a card answered in its chat needs different labels, in plain words" });
+      }
+      if (Object.keys(need.inChat.doing ?? {}).some((label) => !need.options?.some((option) => option.label === label))) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["inChat", "doing"], message: "doing names an option the card does not have" });
       }
     }
     // The answer that arms it must be one option only: a second option with that label would arm with it.
@@ -516,8 +561,12 @@ export type Need = z.infer<typeof needSchema>;
 export type ComingItem = z.infer<typeof comingSchema>;
 export type ComingStage = (typeof COMING_STAGES)[number];
 export type Progress = { what?: string; progress?: number; etaMinutes?: number; updatedAt?: string; stage?: string };
-/** A need as GET /api/board serves it: `rev` pins a reply to the card you saw; `seen`, an update card you saw at that rev. */
-export type ServedNeed = Need & { rev: string; seen?: true };
+/**
+ * A need as GET /api/board serves it: `rev` pins a reply to the card you saw; `seen`, an update card you saw at that rev;
+ * `passkeyAnswers` (the app's read only), the option labels, or "approve", that POST /api/replies refuses a session a
+ * device code alone made.
+ */
+export type ServedNeed = Need & { rev: string; seen?: true; passkeyAnswers?: string[] };
 export type ServedBoard = { [K in keyof Board as K extends "needs" ? never : K]: Board[K] } & { needs: ServedNeed[] };
 export type BoardChat = z.infer<typeof chatSchema>;
 export type Board = z.infer<typeof boardSchema>;
@@ -601,7 +650,11 @@ export interface ReplyItem {
   /** The card's links as shown, on every card that has them. */
   links?: { label: string; url: string }[];
   /** Answered after Answer again: the earlier answer this one changes. */
-  changes?: { replyId: string; decision: Decision; choice?: string };
+  changes?: { replyId: string; decision: Decision; choice?: string; via?: "device-code" };
+  /** Answered in a session a passkey made, as the server read it: code acts on no answer without it (bridge/lib/answer-acts.mjs). */
+  passkey?: true;
+  /** Answered in a session a device code alone made, as the server read it: code never acts on it. */
+  via?: "device-code";
 }
 
 export interface Reply {
@@ -629,6 +682,11 @@ export interface Reply {
   /** Rivet marked it handled (POST /api/replies/:id/handled): acted on, not only delivered. */
   actedAt?: string;
   item: ReplyItem;
+  /** The item's two stamps again, where whoever reads the served answer sees them. */
+  passkey?: true;
+  via?: "device-code";
+  /** Beside `via`, in words. */
+  note?: typeof CODE_ANSWER;
   delivery?: z.infer<typeof deliverySchema>;
   github?: z.infer<typeof githubResultSchema>;
   /** The bridge's last reported failure, if any. */

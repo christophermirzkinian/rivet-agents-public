@@ -1,10 +1,11 @@
 import { ACTION_FAMILIES, actionTable } from "./actions/index.mjs";
 import { newChatName } from "./actions/command.mjs";
+import { mayActByCode } from "./answer-acts.mjs";
 import { fetchImage } from "./images.mjs";
 import { SseParser } from "./sse.mjs";
 import { LEGACY_ERROR, StateStore } from "./state.mjs";
 import { replyStyleSentence } from "./command-templates.mjs";
-import { chatLine, field, githubCommentBody, githubTarget, replyMarker, sanitizeLine } from "./templates.mjs";
+import { chatLine, CODE_ANSWER, field, githubCommentBody, githubTarget, replyMarker, sanitizeLine } from "./templates.mjs";
 import { resolveChatTerminal } from "./terminals.mjs";
 import { isChatName, validateReply } from "./validate.mjs";
 import { ASK_ID_RE } from "./asks.mjs";
@@ -47,7 +48,7 @@ export const HOLD_POLL_MS = 5_000;
  * scripts/attachments.mjs), a merge-ready card's arming answer and a Dismiss (no GitHub comment for either), late asks,
  * the owner's Reopen, the auto pick-up and the Home page's buttons.
  */
-export const FEATURES = "image,chat-window,long-chat,images,files,reply-images,card-merge,dismiss,choice-detail,ask-late,changes,reopen,ops-pickup,home-control,ask-soon";
+export const FEATURES = "image,chat-window,long-chat,images,files,reply-images,card-merge,dismiss,choice-detail,ask-late,changes,reopen,ops-pickup,home-control,code-answer,ask-soon";
 /** Queued events an app chat line may go ahead of: the server re-sends them on reconnect. */
 const OVERTAKABLE = new Set(["reply"]);
 /**
@@ -210,7 +211,7 @@ export function reopenLine(raw, direct = false) {
       ? "The card names no chat: hold off acting on that answer yourself."
       : `For chat ${r.chat}: tell that chat to hold off acting on that answer.`;
   const repo = !r.repo || r.repo === defaultRepo() ? "" : ` Repo: ${r.repo}.`;
-  return `Rivet app — owner REOPENED card [${r.itemId}] at ${r.at}: the earlier answer (${was}, reply ${earlier.replyId}) no longer stands; the new answer follows as a change of it. ${who}${repo} Card title (board data): "${field(r.title, 300)}".`;
+  return `Rivet app — owner REOPENED card [${r.itemId}] at ${r.at}: the earlier answer (${was}, reply ${earlier.replyId}${earlier.via ? `, ${CODE_ANSWER}` : ""}) no longer stands; the new answer follows as a change of it. ${who}${repo} Card title (board data): "${field(r.title, 300)}".`;
 }
 
 /**
@@ -335,7 +336,7 @@ export function createBridge(deps) {
     const posted = await exec(
       ghBin,
       ["api", "--method", "POST", endpoint, "--input", "-", "--jq", ".html_url"],
-      { timeout: TIMEOUTS.gh, input: JSON.stringify({ body: githubCommentBody(reply) }) },
+      { timeout: TIMEOUTS.gh, input: JSON.stringify({ body: githubCommentBody(reply, mayActByCode(reply)) }) },
     );
     const url = posted.stdout.trim();
     if (!GITHUB_URL_RE.test(url)) throw new Error("gh returned no comment url");
@@ -444,11 +445,13 @@ export function createBridge(deps) {
           released +=
             card !== reply.itemId
               ? ` PR #${pr} is still held by video card ${card}.`
-              : why === "unnamed"
-                ? ` PR #${pr} is still held: the version of card ${card} he answered did not name it; the hold waits for his answer on the card as it is now.`
-                : why === "video"
-                  ? ` PR #${pr} is still held: his yes answered another video of card ${card}; the hold waits for his answer on the card as it is now.`
-                  : ` PR #${pr} is still held: his yes answered an earlier video of card ${card}; the hold waits for his answer on the new one.`;
+              : why === "passkey"
+                ? ` PR #${pr} is still held: the yes on card ${card} is not marked as given in a session a passkey made, so it releases nothing; the hold waits for his yes from a phone or computer signed in with a passkey (Answer again on the card), or by hand on his word: rivet unhold --card ${card}.`
+                : why === "unnamed"
+                  ? ` PR #${pr} is still held: the version of card ${card} he answered did not name it; the hold waits for his answer on the card as it is now.`
+                  : why === "video"
+                    ? ` PR #${pr} is still held: his yes answered another video of card ${card}; the hold waits for his answer on the card as it is now.`
+                    : ` PR #${pr} is still held: his yes answered an earlier video of card ${card}; the hold waits for his answer on the new one.`;
       } catch (err) {
         log("card-hold-release-failed", { id: reply.id, itemId: reply.itemId, error: short(err) });
         released = ` The video-card merge hold of card ${reply.itemId} was not released (${short(err)}): rivet unhold --card ${reply.itemId}.`;
@@ -470,7 +473,7 @@ export function createBridge(deps) {
     /** @type {Route} */
     const route = { target: found && !found.direct ? "rivet" : "chat", chat: handle, ...(found?.direct ? {} : { reason: chat ? "relay" : "no-chat" }) };
     // Chat's Reply style ends the line, after any hold release, so a cut note never takes it.
-    const line = chatLine(reply, github, route, attachments, `${released}${replyStyleSentence(reply.replyStyle)}`);
+    const line = chatLine(reply, github, route, attachments, `${released}${replyStyleSentence(reply.replyStyle)}`, mayActByCode(reply));
     /** @type {{ confirmed: boolean, stages: string[] }} */
     let receipt;
     try {

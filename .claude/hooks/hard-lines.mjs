@@ -37,6 +37,7 @@ let inputs = []; // parse()'s here-strings and heredoc bodies, read by mergeUnre
 let fed = []; // who reads each of `inputs`: a record, a group's range of records, or null
 let ran = false; // parse() met text that runs as code: `<(…)`, a shell's, eval's or group's script
 let bareWrapper = false; // parse() met a wrapper left with no command words (`env -S '…'`), or a heredoc opened in backticks: what it runs is not read
+let lookup = false; // parse() met a `command -v` or `-V`, which makes no record
 let grouped = false; // parse() met a `( … )` or `{ …; }` group at any depth: its input reaches every command in it
 let readsIn = false; // parse() met a redirect onto stdin other than a heredoc or here-string (`< f`, `<> f`, `<&3`, `0>&3`)
 let pipeAt = Infinity; // how many records parse() had when it met its first `|` (any depth: a nested one counts low)
@@ -136,7 +137,12 @@ function parse(src, asText = false, depth = 0) {
         assigns.push(first);
         k += 1;
       } else if (WRAPPERS.has(name)) {
-        if (name === "command" && /^-[vV]$/.test(raw[k + 1] ?? "")) return null; // a lookup, not a run
+        if (name === "command" && /^-[vV]$/.test(raw[k + 1] ?? "")) {
+          lookup = true; // a lookup, not a run, but what it prints may be written
+          // After a wrapper, an assignment or a path the words before it may run something (`env -S '…' command -v x`).
+          if (wrappers.length || assigns.length || first !== "command") bareWrapper = true;
+          return null;
+        }
         const takesValue = WRAPPERS.get(name);
         wrappers.push(name);
         k += 1;
@@ -605,11 +611,11 @@ function readable(command) {
   // whole hook's, not one per caller.
   if (lastRead?.command === command) {
     // Another line read since (scriptsChrome() on one word) left its own; this line's come back with its commands.
-    ({ inputs, fed, ran, bare: bareWrapper, writes, grouped, readsIn, pipeAt, defines, literal } = lastRead);
+    ({ inputs, fed, ran, bare: bareWrapper, lookup, writes, grouped, readsIn, pipeAt, defines, literal } = lastRead);
     return lastRead.commands;
   }
   const commands = read(command);
-  lastRead = { command, commands, inputs, fed, ran, bare: bareWrapper, writes, grouped, readsIn, pipeAt, defines, literal };
+  lastRead = { command, commands, inputs, fed, ran, bare: bareWrapper, lookup, writes, grouped, readsIn, pipeAt, defines, literal };
   return commands;
 }
 let lastRead = null;
@@ -637,6 +643,7 @@ function read(command) {
     fed = [];
     ran = false;
     bareWrapper = false;
+    lookup = false;
     grouped = false;
     readsIn = false;
     pipeAt = Infinity;

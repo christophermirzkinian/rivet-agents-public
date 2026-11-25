@@ -294,6 +294,22 @@ describe("the red jobs sheet in a window signed in with a code alone (a-1010)", 
     expect(root.textContent).not.toContain(LINE);
   });
 
+  it("says where a red job nobody is on is dismissed from, with no Dismiss; a passkey's window keeps the button", () => {
+    const DISMISS_LINE = "Dismiss this from a phone or computer signed in with a passkey.";
+    opsData.statuses = [];
+    opsData.statusesLoaded = true;
+    setSignedInByCode(true);
+    resetScheduled(view([job({ redStreak: 1, lastRun: redRun })]));
+    mountJobs();
+    expect([...rows()[0]!.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Pause", "Run now", "Delete"]);
+    expect(rows()[0]!.textContent).toContain(DISMISS_LINE);
+    setSignedInByCode(false);
+    redraw();
+    expect([...rows()[0]!.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Pause", "Run now", "Delete", "Dismiss"]);
+    expect(root.textContent).not.toContain(DISMISS_LINE);
+    expect(calls.filter((call) => call.method === "PUT")).toEqual([]);
+  });
+
   it("sends its Run now as any window does", async () => {
     setSignedInByCode(true);
     resetScheduled(view([job({ redStreak: 1, lastRun: redRun })]));

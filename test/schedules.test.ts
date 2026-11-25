@@ -369,7 +369,7 @@ describe("a schedule failing twice in a row", () => {
   it("the board token can't write a schedule- card, and an answer always finds the server's own", async () => {
     await putBoard(server.base);
     const stored = await board(bearer(BOARD_TOKEN));
-    const fake = { id: "schedule-fake", kind: "decision", title: "Fake", options: [{ label: "Ask Rivet to fix" }] };
+    const fake = { id: "schedule-fake", kind: "decision", title: "Fake", ask: "Fix it?", options: [{ label: "Ask Rivet to fix" }] };
     expect((await putBoard(server.base, { ...stored.board, needs: [...stored.board!.needs, fake] })).status).toBe(400);
     const one = await fetch(`${server.base}/api/board/needs/schedule-fake`, { method: "PUT", headers: bearer(BOARD_TOKEN), body: JSON.stringify(fake) });
     expect(one.status).toBe(400);
@@ -517,7 +517,7 @@ describe("a schedule failing twice in a row", () => {
     expect(board.board?.needs.map((need) => need.title)).toContain("Backlog: Nightly scan has stopped");
     // A decision card naming the schedule is still the owner's to answer: its held push is never withdrawn.
     clock.advance(14 * 3600_000);
-    const decision = { kind: "decision", title: "Approve the scan fix", options: [{ label: "Yes" }, { label: "No" }], schedule };
+    const decision = { kind: "decision", title: "Approve the scan fix", ask: "Put the fix in?", options: [{ label: "Yes" }, { label: "No" }], schedule };
     expect((await fetch(`${server.base}/api/board/needs/scan-ok?create=only`, { method: "PUT", headers: bearer(BOARD_TOKEN), body: JSON.stringify(decision) })).status).toBe(200);
     await expect.poll(() => server.app.quiet.heldCount()).toBe(1);
     clock.advance(10 * 3600_000);
@@ -565,7 +565,7 @@ describe("a schedule failing twice in a row", () => {
       fetch(`${server.base}/api/board/needs/${id}?create=only`, { method: "PUT", headers: bearer(BOARD_TOKEN), body: JSON.stringify({ ...card, schedule }) });
     expect((await put("scan-alert", { kind: "update", title: "Scan has stopped" })).status).toBe(200);
     // A decision card naming the schedule is still the owner's to answer: it pushes.
-    expect((await put("scan-ok", { kind: "decision", title: "Approve the scan fix", options: [{ label: "Yes" }, { label: "No" }] })).status).toBe(200);
+    expect((await put("scan-ok", { kind: "decision", title: "Approve the scan fix", ask: "Put the fix in?", options: [{ label: "Yes" }, { label: "No" }] })).status).toBe(200);
     await expect.poll(() => sent.length).toBe(1);
     expect(sent[0]?.title).toContain("Approve the scan fix");
     const board = (await (await fetch(`${server.base}/api/board`, { headers: bearer(BOARD_TOKEN) })).json()) as BoardResponse;

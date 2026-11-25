@@ -146,7 +146,7 @@ export interface ReopenEvent {
   /** Absent for the default repo. */
   repo?: string;
   at: string;
-  earlier: { replyId: string; decision: Decision; choice?: string };
+  earlier: { replyId: string; decision: Decision; choice?: string; via?: "device-code" };
 }
 
 export const reopenAckSchema = z
@@ -185,7 +185,7 @@ export function cardFromReply(reply: Pick<Reply, "itemId" | "itemTitle" | "item"
   } as Need;
 }
 
-/** Whether a card is kept once answered: an update card is kept as seen instead, and a Got it card goes at its tap. */
+/** Whether a card is kept once answered: an update card is kept as seen instead, a Got it card goes at its tap, and the server's own cards have no second answer. */
 export function keepsAnswer(need: Pick<Need, "kind" | "id" | "options">): boolean {
-  return !isUpdate(need) && !isGotIt(need) && !need.id.startsWith("schedule-");
+  return !isUpdate(need) && !isGotIt(need) && !/^(schedule|wa-hold)-/.test(need.id);
 }

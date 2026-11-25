@@ -15,7 +15,7 @@ import { freshPrs, opsData, watchOps } from "../ops-data.js";
 import { app, crewLapsed, sameSession, subscribe } from "../state.js";
 import { showCard, showSegment } from "./feed.js";
 import { fixedToday, foldRow, ownRows, type PlanRow, type PlanState } from "./ops-plan.js";
-import { dismissable, dismissItem } from "./ops-status.js";
+import { dismissable, dismissItem, offersDismiss } from "./ops-status.js";
 import { openChatSheet } from "./worker-sheet.js";
 
 // Your asks: one row per ask still open, newest first, with its stage and one time, then today's finished ones. Once
@@ -361,7 +361,8 @@ function rowEl(row: AskRow): HTMLElement {
   // A moved time or a time asked for is a sentence: it takes its own line under the title, so the title stays whole.
   const cls = `ask-row${row.tone === "moved" || row.tone === "asked" ? " is-long" : ""}${row.counted ? " is-counted" : ""}`;
   const record = row.go && "record" in row.go ? row.go.record : null;
-  const dismiss = record?.picking && dismissable(record.item) ? record.item : null;
+  // A window a device code alone signed in has no Dismiss here: the row's sheet says where to dismiss it from.
+  const dismiss = record?.picking && offersDismiss() && dismissable(record.item) ? record.item : null;
   const use = record ? (record.kind === "coming" ? "plan.coming.open" : "ops.status.detail") : row.id.startsWith("update:") ? "updates.pile.open" : "plan.ask.open";
   const el = open
     ? h("button", { class: cls, attrs: { type: "button", "data-ask": row.id, "data-use": use }, on: { click: open } }, ...parts)

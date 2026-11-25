@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { ID_PATTERN } from "./board.js";
+import { CODE_ANSWER, ID_PATTERN } from "./board.js";
 import type { ChatMessage } from "./command.js";
 import { MAX_THREAD_TITLE, type ThreadDetail } from "./threads.js";
 import { STORED_NAME } from "./names.js";
@@ -263,7 +263,12 @@ export function chatBadge(rows: readonly Pick<ConversationSummary, "unread" | "m
 }
 
 /** What a card answer says in its conversation, as your message. */
-export function answerText(reply: { decision: string; choice?: string; text?: string; itemTitle: string }): string {
+export function answerText(reply: { decision: string; choice?: string; text?: string; itemTitle: string; via?: "device-code" }): string {
+  const words = answerWords(reply);
+  return reply.via ? `${words}\n${CODE_ANSWER}` : words;
+}
+
+function answerWords(reply: Parameters<typeof answerText>[0]): string {
   const note = reply.text?.trim();
   if (reply.decision === "comment") return note ? `Comment: ${note}` : "Comment";
   const said =

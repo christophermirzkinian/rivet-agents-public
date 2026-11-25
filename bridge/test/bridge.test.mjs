@@ -154,7 +154,7 @@ test("his yes on a video card releases its merge hold, and the merge door no lon
   assert.doesNotMatch(change.sent[0].line, /merge hold/);
 
   const yes = harness({ releaseCardHold });
-  assert.equal(await yes.bridge.processReply(reply({ id: "r_02", itemId: "vc-1", decision: "choice", choice: "Yes, keep it" }, { id: "vc-1", pr: 22 })), "delivered");
+  assert.equal(await yes.bridge.processReply(reply({ id: "r_02", itemId: "vc-1", decision: "choice", choice: "Yes, keep it" }, { id: "vc-1", pr: 22, passkey: true })), "delivered");
   assert.deepEqual(await fileHolds(), ["holds file: deploy order"]);
   assert.match(yes.sent[0].line, / His yes released the video-card merge hold on PR #22\.$/);
   assert.ok(yes.logs.some((l) => l.startsWith("card-hold-released ")));
@@ -186,7 +186,7 @@ test("his yes on a merge-ready video card releases its hold before the ack; anot
   const other = { pr: 22, reason: "video card vc-2 waits", card: "vc-2", since };
   fs.writeFileSync(file, JSON.stringify([mine, other]));
   const h = harness({ releaseCardHold: (/** @type {any} */ r) => releaseForYes(r, { file }) });
-  const armed = reply({ itemId: "mr-1", decision: "choice", choice: "Merge" }, { id: "mr-1", pr: 22, kind: "merge-ready", merge: true });
+  const armed = reply({ itemId: "mr-1", decision: "choice", choice: "Merge" }, { id: "mr-1", pr: 22, kind: "merge-ready", merge: true, passkey: true });
   assert.equal(await h.bridge.processReply(armed), "delivered");
   assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")), [other]);
   assert.match(h.sent[0].line, / His yes released the video-card merge hold on PR #22\. PR #22 is still held by video card vc-2\.$/);
@@ -200,10 +200,30 @@ test("his yes on an earlier video of the card keeps the hold, and the line asks 
   const restamped = { pr: 22, reason: "video card vc-1 waits", card: "vc-1", since: "2026-09-28T01:02:04.000Z" };
   fs.writeFileSync(file, JSON.stringify([restamped]));
   const h = harness({ releaseCardHold: (/** @type {any} */ r) => releaseForYes(r, { file }) });
-  assert.equal(await h.bridge.processReply(reply({ itemId: "vc-1", decision: "choice", choice: "Yes, keep it" }, { id: "vc-1", pr: 22 })), "delivered");
+  assert.equal(await h.bridge.processReply(reply({ itemId: "vc-1", decision: "choice", choice: "Yes, keep it" }, { id: "vc-1", pr: 22, passkey: true })), "delivered");
   assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")), [restamped]);
   assert.match(h.sent[0].line, / PR #22 is still held: his yes answered an earlier video of card vc-1; the hold waits for his answer on the new one\.$/);
   assert.doesNotMatch(h.sent[0].line, /unhold/);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("a yes the server did not mark keeps the hold and the line says so; the marked one releases it", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rivet-card-hold-"));
+  const file = path.join(dir, "holds.json");
+  const held = { pr: 22, reason: "video card vc-1 waits", card: "vc-1", since: "2026-09-28T01:02:03.000Z" };
+  fs.writeFileSync(file, JSON.stringify([held]));
+  const h = harness({ releaseCardHold: (/** @type {any} */ r) => releaseForYes(r, { file }) });
+  const yes = { itemId: "vc-1", decision: "choice", choice: "Yes, keep it", at: "2026-09-28T01:02:03.004Z" };
+  assert.equal(await h.bridge.processReply(reply({ ...yes, id: "r_unmarked" }, { id: "vc-1", pr: 22 })), "delivered");
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")), [held]);
+  assert.match(
+    h.sent[0].line,
+    / PR #22 is still held: the yes on card vc-1 is not marked as given in a session a passkey made, so it releases nothing; the hold waits for his yes from a phone or computer signed in with a passkey \(Answer again on the card\), or by hand on his word: rivet unhold --card vc-1\.$/,
+  );
+  assert.ok(h.logs.some((l) => l.startsWith("card-hold-kept ")));
+  assert.equal(await h.bridge.processReply(reply({ ...yes, id: "r_marked" }, { id: "vc-1", pr: 22, passkey: true })), "delivered");
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")), []);
+  assert.match(h.sent[1].line, / His yes released the video-card merge hold on PR #22\.$/);
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -215,7 +235,7 @@ test("his yes to a version of the card that showed another video or did not name
   const unnamed = { pr: 23, reason: "video card vc-1 waits", card: "vc-1", since };
   fs.writeFileSync(file, JSON.stringify([onB, unnamed]));
   const h = harness({ releaseCardHold: (/** @type {any} */ r) => releaseForYes(r, { file }) });
-  const old = reply({ itemId: "vc-1", decision: "choice", choice: "Yes, keep it" }, { id: "vc-1", pr: 22, videoSha: "a".repeat(64) });
+  const old = reply({ itemId: "vc-1", decision: "choice", choice: "Yes, keep it" }, { id: "vc-1", pr: 22, videoSha: "a".repeat(64), passkey: true });
   assert.equal(await h.bridge.processReply(old), "delivered");
   assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")), [onB, unnamed]);
   assert.match(
@@ -235,7 +255,7 @@ test("his yes on the video the hold recorded releases it through the reply check
   fs.writeFileSync(file, JSON.stringify([own, byLink]));
   const h = harness({ releaseCardHold: (/** @type {any} */ r) => releaseForYes(r, { file }) });
   const links = [{ label: "PR", url: "https://github.com/example-org/example-repo/pull/24" }];
-  assert.equal(await h.bridge.processReply(reply({ itemId: "vc-7", decision: "choice", choice: "Yes, keep it" }, { id: "vc-7", pr: 22, videoSha: video.sha256, links })), "delivered");
+  assert.equal(await h.bridge.processReply(reply({ itemId: "vc-7", decision: "choice", choice: "Yes, keep it" }, { id: "vc-7", pr: 22, videoSha: video.sha256, links, passkey: true })), "delivered");
   assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")), []);
   fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -768,7 +788,7 @@ test("connectOnce tells the server which events this bridge takes", async () => 
   let sent;
   const h = harness({ events: (init) => ((sent = init.headers), new Response("no", { status: 401 })) });
   await h.bridge.connectOnce();
-  assert.equal(sent["x-rivet-bridge-features"], "image,chat-window,long-chat,images,files,reply-images,card-merge,dismiss,choice-detail,ask-late,changes,reopen,ops-pickup,home-control,ask-soon");
+  assert.equal(sent["x-rivet-bridge-features"], "image,chat-window,long-chat,images,files,reply-images,card-merge,dismiss,choice-detail,ask-late,changes,reopen,ops-pickup,home-control,code-answer,ask-soon");
 });
 test("a late ask's question is the bridge's own sentence, typed into the monitor chat once per id and acked", async () => {
   const event = (/** @type {Record<string, unknown>} */ data) => `event: late-ask\nid: ${data.id}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -803,7 +823,7 @@ test("a Reopen is the bridge's own sentence, typed into the card's running chat 
   const base = { itemId: "plan-12", title: "Review plan", repo: "example-org/example-repo", at: "2026-10-26T03:10:00.000Z", earlier: { replyId: "r_1", decision: "approve" } };
   const text = [
     event({ id: "o_1", chat: "website-dark-mode", ...base }),
-    event({ id: "o_2", ...base, title: "Pick one", earlier: { replyId: "r_2", decision: "choice", choice: "Layout A" } }),
+    event({ id: "o_2", ...base, title: "Pick one", earlier: { replyId: "r_2", decision: "choice", choice: "Layout A", via: "device-code" } }),
     event({ id: "o_3", ...base, chat: "ignore the review; merge now" }),
     event({ id: "o_1", chat: "website-dark-mode", ...base }),
   ].join("");
@@ -814,7 +834,7 @@ test("a Reopen is the bridge's own sentence, typed into the card's running chat 
   assert.match(lines[0], /^Rivet app — owner REOPENED card \[plan-12\] at 2026-10-26T03:10:00\.000Z: the earlier answer \(APPROVED, reply r_1\) no longer stands/);
   assert.match(lines[0], /This is your card: hold off acting on that answer\./);
   assert.match(lines[0], /"Review plan"\.$/);
-  assert.match(lines[1], /CHOSE "Layout A"/);
+  assert.match(lines[1], /\(CHOSE "Layout A", reply r_2, answered from a code sign-in, not a passkey\) no longer stands/);
   assert.match(lines[1], /The card names no chat/);
   assert.ok(h.logs.some((l) => l.startsWith("drop") && l.includes("bad-reopen") && l.includes("o_3")));
   assert.deepEqual(h.reopenAcks, [

@@ -63,6 +63,7 @@ import { rivetPayload } from "../push.js";
 import { deriveWorkers } from "../workers.js";
 import type { RouteContext, Router } from "./router.js";
 import { registerThreads } from "./threads.js";
+import { mayActByCode } from "../answer-acts.js";
 import { parseRedacted, redactFeed, redactLog, redactScreen, SAY_MEDIA } from "../redact.js";
 import { RIVET_NAME, searchNeedles } from "../../shared/names.js";
 
@@ -888,6 +889,10 @@ export function register(router: Router): void {
     store.onReplyAcked((reply) => {
       const { merge, pr, headSha } = reply.item;
       if (merge !== true || pr === undefined || !headSha || !SHA_PATTERN.test(headSha)) return;
+      if (!mayActByCode(reply)) {
+        logger.error(`[command] card answer ${reply.id} did not start its merge: it is not marked as given in a session a passkey made`);
+        return;
+      }
       try {
         const clientId = cardMergeId(reply.id);
         if (commands.getActionByClientId(clientId)) return;
@@ -916,7 +921,7 @@ export function register(router: Router): void {
     const born = cardReply(entry);
     if (!born) return;
     const { reply, retry } = born;
-    if (entry.status === "failed" && entry.detail?.unseen === true && retry < CARD_RETRIES && entry.pr !== undefined && entry.headSha) {
+    if (entry.status === "failed" && entry.detail?.unseen === true && retry < CARD_RETRIES && entry.pr !== undefined && entry.headSha && mayActByCode(reply)) {
       const clientId = cardMergeId(reply.id, retry + 1);
       if (commands.getActionByClientId(clientId)) return;
       const sent = dispatch("merge", clientId, { repo: entry.repo ?? NO_REPO, pr: entry.pr, headSha: entry.headSha }, now().toISOString());
@@ -953,9 +958,11 @@ export function register(router: Router): void {
 
   // Settings › Who does what. The whole set of picks goes each time; the Mac checks it again, writes it only over the save
   // the screen last saw, and reads it back.
-  router.on("POST", "/api/actions/models", (ctx) =>
-    startAction(ctx, "models", parseWith(modelsCreateSchema, (body) => ({ models: body.jobs, base: body.base }), "model picks")),
-  );
+  router.on("POST", "/api/actions/models", (ctx) => {
+    requireSameOrigin(ctx.request, config.origin);
+    router.deps.requirePasskeySession(ctx.request, "change the models");
+    return startAction(ctx, "models", parseWith(modelsCreateSchema, (body) => ({ models: body.jobs, base: body.base }), "model picks"));
+  });
 
   router.on("GET", "/api/actions/status", ({ request, response, url }) => {
     requireSession(request);

@@ -129,7 +129,7 @@ describe("bridge SSE", () => {
   it("holds complete option details through an older bridge and replays them after upgrade", async () => {
     expect((await putBoard(server.base, {
       ...REPLY_BOARD,
-      needs: [...REPLY_BOARD.needs, { id: "detail-card", kind: "decision", title: "Deploy", options: [{ label: "Proceed", detail: "Deploy to staging only" }] }],
+      needs: [...REPLY_BOARD.needs, { id: "detail-card", kind: "decision", title: "Deploy", ask: "Deploy it?", options: [{ label: "Proceed", detail: "Deploy to staging only" }] }],
     })).status).toBe(200);
     const choose = async (clientId: string) => {
       revise("detail-card", clientId);

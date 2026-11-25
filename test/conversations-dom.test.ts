@@ -20,7 +20,10 @@ vi.mock("../web/src/voice.js", async (original) => ({
 }));
 
 const chat = await import("../web/src/views/chat.js");
-const { app, changed } = await import("../web/src/state.js");
+const { setSignedInByCode } = await import("../web/src/session.js");
+const { app, cardState, changed } = await import("../web/src/state.js");
+const { answerTapsLocked, flushHeld, undoLast } = await import("../web/src/views/feed.js");
+const { mountToasts } = await import("../web/src/views/toast.js");
 const { closeSheet, openSheet } = await import("../web/src/views/sheet.js");
 
 const at = (minute: number) => new Date(Date.UTC(2030, 0, 1, 0, minute)).toISOString();
@@ -624,5 +627,123 @@ describe("a thing's lines in Chat", () => {
     await onChat();
     expect(root.querySelector('.chat-msg[data-id="p5"] .chat-posted-kind')!.textContent).toBe("Outcome");
     expect(root.querySelector('.chat-msg[data-id="p6"] .chat-posted-kind')!.textContent).toBe("Decision");
+  });
+
+  describe("a card answered in its chat (inChat, a-1012)", () => {
+    const CARD = {
+      id: "note-1",
+      kind: "decision",
+      title: "The **download** button",
+      ask: "- Tapped Download, Rivet said https://a.example/x\n\n  second line",
+      options: [{ label: "Send" }, { label: "Not now" }],
+      rev: "r1",
+    } as ServedNeed;
+    const NOTED = "Not sent. Your agent will read your note first.";
+    const IN_CHAT = { ...CARD, inChat: { label: "To the team", doing: { Send: "Sending to the team" }, noted: NOTED } };
+    // What the line was posted with may be old: the bubble is drawn from the card.
+    const line = () => rivet("p7", "k1", 46, { text: "x", posted: { id: "note-1", kind: "decision", title: "Posted title", ask: "Posted ask" } });
+    const bubble = () => root.querySelector<HTMLElement>('.chat-msg[data-id="p7"] .chat-posted')!;
+    const buttons = () => [...bubble().querySelectorAll("button")].map((button) => button.textContent);
+
+    it("shows the card's own words, as written, with its options as buttons and no Open card", async () => {
+      server.messages.push(line());
+      await onChat();
+      board([{ ...CARD, inChat: { label: "To the team" } }]);
+      await settle();
+      for (const [selector, words] of [[".chat-posted-kind", "To the team"], [".chat-posted-title", CARD.title], [".chat-posted-ask", CARD.ask]] as const) {
+        const el = bubble().querySelector(selector)!;
+        expect(el.textContent).toBe(words);
+        expect(el.hasAttribute("data-typed")).toBe(true);
+        expect(el.children).toHaveLength(0);
+      }
+      expect(buttons()).toEqual(["Send", "Not now"]);
+    });
+
+    it("in a window a code alone signed in, an answer only a passkey gives is the Feed's line, not a button", async () => {
+      server.messages.push(line());
+      await onChat();
+      board([{ ...CARD, passkeyAnswers: ["Send"], inChat: { label: "To the team" } }]);
+      await settle();
+      expect(buttons()).toEqual(["Send", "Not now"]);
+      setSignedInByCode(true);
+      changed();
+      await settle();
+      expect(buttons()).toEqual(["Not now"]);
+      expect(bubble().querySelector(".merge-passkey")!.textContent).toBe("Approve this from a phone or computer signed in with a passkey.");
+      setSignedInByCode(false);
+    });
+
+    it("the keyboard stays on its answer through a redraw, and never lands on a changed card's", async () => {
+      server.messages.push(line());
+      await onChat();
+      board([{ ...CARD, inChat: { label: "To the team" } }]);
+      await settle();
+      const primary = () => bubble().querySelector<HTMLButtonElement>("button.primary")!;
+      expect(primary().hasAttribute("data-typed")).toBe(true);
+      primary().focus();
+      expect(document.activeElement).toBe(primary());
+      board([{ ...CARD, ask: "Other words", rev: "r2", inChat: { label: "To the team" } }]);
+      await settle();
+      expect(bubble().querySelector(".chat-posted-ask")!.textContent).toBe("Other words");
+      expect(document.activeElement).not.toBe(primary());
+      // Nor to the page, where Enter would confirm a card waiting for it.
+      expect(document.activeElement).not.toBe(document.body);
+    });
+
+    it("a tap is the Feed's own answer, at the revision shown, takes the buttons away and keeps every word", async () => {
+      server.messages.push(rivet("p7", "k1", 46, { text: "x", posted: { id: "note-1", kind: "decision", title: CARD.title, ask: CARD.ask!, label: "To the team" } }));
+      await onChat();
+      board([{ ...CARD, inChat: { label: "To the team" } }]);
+      await settle();
+      bubble().querySelector<HTMLButtonElement>("button.primary")!.click();
+      await settle();
+      expect(app.held.has("note-1")).toBe(true);
+      expect(bubble().querySelector(".chat-in-answers")).toBeNull();
+      for (const [selector, words] of [[".chat-posted-kind", "To the team"], [".chat-posted-title", CARD.title], [".chat-posted-ask", CARD.ask]] as const) {
+        expect(bubble().querySelector(selector)!.textContent).toBe(words);
+        expect(bubble().querySelector(selector)!.hasAttribute("data-typed")).toBe(true);
+      }
+      undoLast();
+      expect(app.held.has("note-1")).toBe(false);
+      // The fake server's board is empty, and the gone card was read for: the board as it stands again.
+      board([{ ...CARD, inChat: { label: "To the team" } }]);
+      await settle();
+      expect(buttons()).toEqual(["Send", "Not now"]);
+    });
+
+    it.each([
+      ["a pick says what it is doing and posts that pick", "", "Sending to the team", { decision: "choice", choice: "Send", rev: "r1" }],
+      ["a pick with a note typed is the note alone, and says so", "also on my iPad", NOTED, { decision: "comment", text: "also on my iPad", rev: "r1" }],
+    ])("%s", async (_name, note, verb, posted) => {
+      const toasts = document.createElement("div");
+      mountToasts(toasts);
+      server.messages.push(line());
+      await onChat();
+      board([IN_CHAT]);
+      await settle();
+      cardState("note-1").text = note;
+      // The tap lock the test before left.
+      await vi.waitFor(() => expect(answerTapsLocked()).toBe(false), { timeout: 3000 });
+      bubble().querySelector<HTMLButtonElement>("button.primary")!.click();
+      await settle();
+      expect(toasts.querySelector(".toast.undo strong")!.textContent).toBe(verb);
+      flushHeld();
+      await settle();
+      const bodies = vi.mocked(fetch).mock.calls.filter(([url, init]) => url === "/api/replies" && init?.method === "POST").map(([, init]) => JSON.parse(String(init!.body)));
+      expect(bodies).toHaveLength(1);
+      expect(bodies[0]).toEqual({ clientId: expect.any(String), itemId: "note-1", ...posted });
+      app.cards.delete("note-1");
+      app.held.delete("note-1");
+    });
+
+    it("without the flag the same card's bubble is as it was: the posted words and Open card", async () => {
+      server.messages.push(line());
+      await onChat();
+      board([CARD]);
+      await settle();
+      expect(bubble().outerHTML).toBe(
+        '<div class="chat-posted"><span class="chat-posted-kind">Decision</span><strong class="chat-posted-title">Posted title</strong><p class="chat-posted-ask">Posted ask</p><button class="btn chat-card-open chat-posted-open" type="button" data-use="chat.msg.open-card">Open card</button></div>',
+      );
+    });
   });
 });

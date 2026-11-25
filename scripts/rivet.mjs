@@ -178,8 +178,9 @@ Card flags: --kind (default decision; a card is for what you must confirm or cho
                                              drop the holds.json entries for the PR but a video card's (named; unhold --card
                                              drops those) and the owner's hold on the server, edit each hold comment to
                                              "Released …", leave the draft as it is, and name any hold still left (exit 1
-                                             while one is)
-  rivet unhold --card <id> [<pr>]           drop only video card <id>'s holds.json merge holds (on <pr>), and nothing else
+                                             while one is). An answer from a code sign-in is not the owner's yes
+  rivet unhold --card <id> [<pr>]           drop only video card <id>'s holds.json merge holds (on <pr>), and nothing else.
+                                             An answer from a code sign-in is not the owner's yes
 Writes take --if-match <version> (409 when the board, or for ask set, status and close the ask, or for status set and
   clear the status, moved on; status set --if-match 0 only creates).
 Ask stages: ${ASK_STAGES.join(", ")}. Other commands print JSON with --json.

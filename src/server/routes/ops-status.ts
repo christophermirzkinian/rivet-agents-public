@@ -83,7 +83,7 @@ export function register(router: Router): void {
 
   router.onPrefix("PUT", DISMISS_PREFIX, async ({ request, response, url }) => {
     requireSameOrigin(request, config.origin);
-    requireSession(request);
+    router.deps.requirePasskeySession(request, "hide an alarm");
     const { kind, key } = itemOf(url.pathname, DISMISS_PREFIX);
     const parsed = opsDismissPutSchema.safeParse(await readJson(request, BODY_MAX));
     if (!parsed.success) {

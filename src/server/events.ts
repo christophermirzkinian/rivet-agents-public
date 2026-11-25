@@ -4,6 +4,7 @@ import type { ServerResponse } from "node:http";
 import type { ReopenEvent } from "../shared/answered.js";
 import type { Reply } from "../shared/board.js";
 import { chatWindowText, MAX_CHAT_IMAGES } from "../shared/command.js";
+import { mayActByCode } from "./answer-acts.js";
 import { BATCH_MAX_TEXT, OLD_BRIDGE_CHAT_TEXT, SHORT_CHAT_BRIDGE_TEXT, SHORT_CHAT_WINDOW_TEXT } from "./commandstore.js";
 
 const PING_MS = 15_000;
@@ -32,8 +33,9 @@ export const FEATURES_HEADER = "x-rivet-bridge-features";
  * `ops-pickup`: the bridge types the auto pick-up's rivet fix ask into the monitor chat; an older one would drop it.
  * `home-control`: the bridge runs the Home page's buttons; an older one would drop them.
  * `ask-soon`: the bridge types the Promise keeper's warning before an ask's time; an older one would type it as late.
+ * `code-answer`: the bridge reads how an answer was made; an older one would act on a code-made one, or relay it as the owner's own.
  */
-const KNOWN_FEATURES = ["image", "chat-window", "long-chat", "images", "files", "reply-images", "card-merge", "dismiss", "choice-detail", "ask-late", "changes", "reopen", "ops-pickup", "home-control", "ask-soon"] as const;
+const KNOWN_FEATURES = ["image", "chat-window", "long-chat", "images", "files", "reply-images", "card-merge", "dismiss", "choice-detail", "ask-late", "changes", "reopen", "ops-pickup", "home-control", "ask-soon", "code-answer"] as const;
 export type BridgeFeature = (typeof KNOWN_FEATURES)[number];
 
 /** A comma list of [a-z-]+ tokens; anything else is no features at all. Unknown tokens are dropped. */
@@ -106,6 +108,8 @@ export class BridgeChannel {
   /** A Reopen's notice for the monitor chat; false with no bridge that takes one, and the next connect offers it again. */
   sendReopen(event: ReopenEvent): boolean {
     if (!this.current || this.features?.has("reopen") !== true) return false;
+    // It names a code-made answer: an older bridge would leave that out.
+    if (event.earlier.via !== undefined && !this.features.has("code-answer")) return false;
     this.current.response.write(`event: reopen\nid: ${event.id}\ndata: ${JSON.stringify(event)}\n\n`);
     return true;
   }
@@ -205,6 +209,9 @@ export class BridgeChannel {
     if (reply.decision === "dismiss" && this.features?.has("dismiss") !== true) return;
     // A changed answer waits for a bridge that said changes: an older one drops what it changes and relays it as plain.
     if (reply.item.changes !== undefined && this.features?.has("changes") !== true) return;
+    // An answer code may not act on, or one that changes a code-made one, waits for a bridge that reads the marks: an older
+    // one drops them, and acts on it or relays it as the owner's own.
+    if ((!mayActByCode(reply) || reply.item.changes?.via !== undefined) && this.features?.has("code-answer") !== true) return;
     this.current?.response.write(`event: reply\nid: ${reply.id}\ndata: ${JSON.stringify(reply)}\n\n`);
   }
 

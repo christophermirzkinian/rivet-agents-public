@@ -177,7 +177,7 @@ describe("Sign out desktop apps", () => {
     named("Sign them out")!.click();
     await flush();
     expect(signedOut).toEqual([]);
-    expect(document.body.textContent).toContain("Not signed out: too many attempts, wait a minute");
+    expect(document.body.textContent).toContain("Not signed out: Too many tries. Wait a minute, then try again.");
     expect(named("Sign them out")!.disabled).toBe(false);
     unmount();
   });

@@ -473,7 +473,7 @@ describe("wait cards on the server", () => {
 
   // An agent's own card for the row's PR: once its answer is 2h old it no longer speaks for the PR.
   const agentCard = (kind: string, id = `${kind}-483`) =>
-    ({ id, kind, title: "Daily build v2: merge?", pr: 483, ...(kind === "merge-ready" ? { headSha: "b".repeat(40) } : { options: [{ label: "Yes" }, { label: "No" }] }) }) as Need;
+    ({ id, kind, title: "Daily build v2: merge?", pr: 483, ...(kind === "merge-ready" ? { headSha: "b".repeat(40) } : { ask: "Merge it?", options: [{ label: "Yes" }, { label: "No" }] }) }) as Need;
   const agentAnswer = (card: Need, decision: string, { choice }: { choice?: string } = {}) =>
     server.app.store.addReply({
       clientId: `client-${card.id}-${decision}`,

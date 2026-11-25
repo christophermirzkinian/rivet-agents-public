@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { paddedEdge, videoFrame } from "./clip-check.mjs";
 import { redactorChanges, TEXT_DOCUMENT_MAX, TEXT_DOCUMENT_TOO_BIG, textDocumentRefusal } from "./redact-check.mjs";
-import { sanitizeLine } from "./templates.mjs";
+import { CODE_ANSWER, sanitizeLine } from "./templates.mjs";
 import { MAX_CHOICE_DETAIL } from "./validate.mjs";
 
 // What scripts/push-board.mjs and scripts/rivet.mjs share: reading and checking card media, uploading it, and
@@ -321,6 +321,9 @@ export function replyRecord(doc, id) {
     rev: r.rev,
     item: { ask: item.ask, choiceDetail, steps: item.steps, pr: item.pr, issue: item.issue, repo: item.repo, chat: item.chat },
     at: r.at,
+    passkey: r.passkey ?? item.passkey,
+    via: r.via ?? item.via,
+    note: r.via ?? item.via ? CODE_ANSWER : undefined,
     delivery: r.delivery,
   };
 }

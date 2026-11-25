@@ -50,6 +50,8 @@ interface Run {
   status: SigninStatus | null;
   word: string | null;
   codeSent: boolean;
+  /** It reached a page to sign in on: a failure before that never started. */
+  offered: boolean;
   shown: string;
 }
 let run: Run | null = null;
@@ -193,6 +195,7 @@ function take(mine: Run | null, status: SigninStatus): void {
   if (!run || run !== mine || run.service !== status.service || (run.status && run.status.id !== status.id)) return;
   run.status = status;
   run.word = null;
+  if (status.state === "waiting") run.offered = true;
   if (OPEN_STATES.includes(status.state)) schedulePoll();
   else {
     codeInput = null;
@@ -205,7 +208,7 @@ async function begin(service: ConnectorService, mode: SigninMode, account?: Conn
   if (runOpen()) return;
   endRun();
   const title = mode === "add" ? `Adding a ${service.name} account` : account ? `Signing in to ${account.label}` : `Connecting ${service.name}`;
-  const mine: Run = { service: service.id, title, status: null, word: null, codeSent: false, shown: "" };
+  const mine: Run = { service: service.id, title, status: null, word: null, codeSent: false, offered: false, shown: "" };
   run = mine;
   paint();
   try {
@@ -251,7 +254,7 @@ function signinWords(service: ConnectorService, status: SigninStatus | null): st
     case "signed-in":
       return "Signed in.";
     case "failed":
-      return "The sign-in didn't finish. Nothing changed.";
+      return run?.offered ? "The sign-in didn't finish. Nothing changed." : "The sign-in couldn't start. Nothing changed.";
     case "expired":
       return "The sign-in ran out of time. Start it again.";
   }

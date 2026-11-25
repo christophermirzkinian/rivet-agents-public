@@ -3,7 +3,7 @@ import type { ScreenItem } from "./screen-view.js";
 import { z } from "zod";
 
 import { ASK_ID_PATTERN, type AskCreate } from "./asks.js";
-import { CHAT_PATTERN, fileRefsSchema, ID_PATTERN, MAX_CHAT_IMAGES, PDF_NAME_PATTERN, replyStyleSchema, type FileRef, type ReplyStyle } from "./board.js";
+import { CHAT_PATTERN, CODE_ANSWER, fileRefsSchema, ID_PATTERN, MAX_CHAT_IMAGES, PDF_NAME_PATTERN, replyStyleSchema, type FileRef, type ReplyStyle } from "./board.js";
 
 export type { ReplyStyle } from "./board.js";
 import type { JobAction } from "./jobs.js";
@@ -67,15 +67,20 @@ export interface ChatQuote {
   text: string;
 }
 
-/** The first line of a message, cut to MAX_QUOTE_TEXT; a message with no text quotes as its photo or file. */
+/**
+ * The first line of a message, cut to MAX_QUOTE_TEXT; a message with no text quotes as its photo or file. An answer a
+ * device code's session gave keeps its mark (conversations.ts answerText), which is never the part cut.
+ */
 export function quoteText(message: { text: string; image?: string; images?: readonly string[]; video?: string; files?: readonly unknown[] }): string {
   const line =
     message.text
       .split(/\r\n|[\r\n\v\f\x85\u2028\u2029]/)
       .map((part) => part.trim())
       .find(Boolean) ?? (chatImages(message).length ? "Photo" : message.video ? "Video" : message.files?.length ? "File" : "");
+  const mark = line !== CODE_ANSWER && message.text.trimEnd().endsWith(`\n${CODE_ANSWER}`) ? ` (${CODE_ANSWER})` : "";
   const chars = Array.from(line);
-  return chars.length > MAX_QUOTE_TEXT ? `${chars.slice(0, MAX_QUOTE_TEXT - 1).join("")}…` : line;
+  const room = MAX_QUOTE_TEXT - mark.length;
+  return `${chars.length > room ? `${chars.slice(0, room - 1).join("")}…` : line}${mark}`;
 }
 
 const clientId = z.string().regex(CLIENT_ID_PATTERN);
@@ -412,8 +417,10 @@ export interface PostedCard {
   id: string;
   kind: string;
   title: string;
-  /** Its ask's first line, clipped. */
+  /** Its ask's first line, clipped; the whole ask of an inChat card. */
   ask?: string;
+  /** An inChat card's label, which its bubble keeps once the card is answered. */
+  label?: string;
 }
 
 /** A saved chat line; `conversation` is its thread, so Chat can bring it up. */

@@ -1038,6 +1038,15 @@ export class CommandStore {
     return this.db.prepare("UPDATE chat_messages SET reply_to = ? WHERE id = ? AND reply_to IS NOT ?").run(replyTo, message, replyTo).changes > 0;
   }
 
+  /** Replaces the card a line shows; false when it shows just that already. */
+  setPostedCard(message: string, posted: PostedCard): boolean {
+    return (
+      this.db
+        .prepare("UPDATE chat_messages SET media = json_set(media, '$.posted', json(?1)) WHERE id = ?2 AND json_extract(media, '$.posted') IS NOT json(?1)")
+        .run(JSON.stringify(posted), message).changes > 0
+    );
+  }
+
   /** Records Rivet's message that shows the card in its conversation. */
   setCardPosted(card: string, message: string): void {
     this.db.prepare("UPDATE card_conversations SET posted = ? WHERE card = ?").run(message, card);

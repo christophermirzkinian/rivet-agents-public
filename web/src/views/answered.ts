@@ -370,9 +370,14 @@ function chatTold(reopen: AnsweredResponse["reopened"][number]): ChatTold {
   return reopen.expired ? "not-told" : "telling";
 }
 
+const reopenOf = (need: ServedNeed) => data?.reopened.find((one) => one.cardId === need.id && one.rev === need.rev);
+
+/** Whether the card was reopened after its PR merged: a yes to it is then a follow-up, and merges nothing. */
+export const mergedReopen = (need: ServedNeed): boolean => reopenOf(need)?.merged === true;
+
 /** The band on a reopened card: when the owner reopened it, his answer before, whether its chat heard, and if its PR merged. */
 export function reopenBand(need: ServedNeed): HTMLElement | null {
-  const reopen = data?.reopened.find((one) => one.cardId === need.id && one.rev === need.rev);
+  const reopen = reopenOf(need);
   if (!reopen) return null;
   const told = chatTold(reopen);
   const earlier = reopen.earlier;

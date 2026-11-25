@@ -5,6 +5,7 @@ import { jobScheduleKey, type JobSpec } from "../src/shared/jobs.js";
 import { opsStatusKey } from "../src/shared/ops-status-key.js";
 import { SchedulesStore } from "../src/server/schedules.js";
 import { writeOpsStatus } from "../src/server/routes/ops-status.js";
+import { createHash } from "node:crypto";
 import { pickupAsk } from "../src/server/asks/made.js";
 import { bearer, BOARD_TOKEN, BRIDGE_TOKEN, browser, fakeClock, startServer, type TestServer } from "./helpers.js";
 
@@ -140,6 +141,44 @@ describe("ops dismissals", () => {
     expect((await send("GET", "/api/ops/dismissals", undefined, bearer(BRIDGE_TOKEN))).status).toBe(401);
     expect((await send("GET", "/api/ops/dismissals", undefined, {})).status).toBe(401);
     expect(await list()).toEqual([]);
+  });
+
+  describe("from a session a device code alone made", () => {
+    const REFUSED = [403, { error: "sign in with a passkey to hide an alarm" }];
+    const answer = async (response: Response) => [response.status, await response.json()];
+
+    it("is refused before the item or the body is read and stores nothing, where a passkey session dismisses as before with the code sign-in off", async () => {
+      const value = "c".repeat(43);
+      server.app.store.addSession(createHash("sha256").update(value).digest("hex"), 60_000, "device-code");
+      const byCode = browser(`__Host-rivet=${value}`);
+      const open = pickupAsk(server.app.store, { kind: "pr", key: "77" }, new Date(clock.now()), 30)!;
+      expect(await answer(await dismiss("pr/77", { mark: "changed" }, byCode))).toEqual(REFUSED);
+      expect(await answer(await fetch(`${server.base}/api/ops/dismissals/pr/77`, { method: "PUT", headers: byCode, body: "not json" }))).toEqual(REFUSED);
+      expect(await answer(await dismiss("nope/x", { mark: "changed" }, byCode))).toEqual(REFUSED);
+      expect(await list()).toEqual([]);
+      expect(server.app.store.getAsk(open.id)?.stage).toBe("building");
+      // It reads them, and brings back what a passkey session dismissed.
+      expect(await list(byCode)).toEqual([]);
+      expect((await dismiss("pr/77", { mark: "changed" })).status).toBe(201);
+      expect(server.app.store.getAsk(open.id)?.stage).toBe("parked");
+      expect(await list(byCode)).toHaveLength(1);
+      expect((await send("DELETE", "/api/ops/dismissals/pr/77", undefined, byCode)).status).toBe(200);
+      expect(await list()).toEqual([]);
+    });
+
+    it("is refused with the code sign-in on too, for a session it made itself, where a passkey session still dismisses", async () => {
+      await server.close();
+      server = await startServer({ RIVET_DEVICE_SESSION: "on" }, { now: clock.now });
+      cookie = server.cookie();
+      const { code } = (await (await send("POST", "/api/auth/device-code", {})).json()) as { code: string };
+      const signedIn = await send("POST", "/api/auth/device-session", { code }, browser(""));
+      expect(signedIn.status).toBe(200);
+      const made = signedIn.headers.get("set-cookie")!.split(";")[0]!;
+      expect(await answer(await dismiss("pr/77", { mark: "changed" }, browser(made)))).toEqual(REFUSED);
+      expect(await list()).toEqual([]);
+      expect((await dismiss("pr/77", { mark: "changed" })).status).toBe(201);
+      expect(await list()).toHaveLength(1);
+    });
   });
 
   it("refuses a bad kind, key or mark with 400", async () => {

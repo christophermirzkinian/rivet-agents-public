@@ -369,11 +369,15 @@ export function registerConversations(
     return commands.threadOf(replyTo) === place.thread ? replyTo : undefined;
   }
 
-  /** A card posted before it kept its replyTo gets it now. */
+  /** An inChat card keeps its whole ask on its line: its bubble is where it is read, answered or not. */
+  const inChatPosted = (need: Need): PostedCard => ({ id: need.id, kind: need.kind, title: need.title, ...(need.ask ? { ask: need.ask } : {}), label: need.inChat!.label });
+
+  /** A card posted before it kept its replyTo gets it now; an inChat card that changed has its new words on its line. */
   function relink(need: Need): void {
     const filed = commands.cardConversation(need.id);
     const answers = filed?.posted ? answersLine(need, filed) : undefined;
     if (filed?.posted && answers) commands.linkPostedReply(filed.posted, answers);
+    if (filed?.posted && need.inChat && commands.setPostedCard(filed.posted, inChatPosted(need))) out.broadcast(commands.getChatMessage(filed.posted)!);
   }
 
   /**
@@ -391,7 +395,7 @@ export function registerConversations(
     // A Done card's line here is what is done (its title already names the ask); with nothing said, what was asked.
     const parts = DONE_CARD.test(need.id) && need.ask ? doneCardParts(need.ask) : null;
     const ask = parts ? parts.done.join(" · ") || parts.asked : need.ask?.split("\n").find((line) => line.trim() !== "")?.trim();
-    const posted: PostedCard = { id: need.id, kind: need.kind, title: need.title, ...(ask ? { ask: ask.slice(0, POSTED_ASK_MAX) } : {}) };
+    const posted: PostedCard = need.inChat ? inChatPosted(need) : { id: need.id, kind: need.kind, title: need.title, ...(ask ? { ask: ask.slice(0, POSTED_ASK_MAX) } : {}) };
     const answers = answersLine(need, place);
     const message = commands.addChatMessage({ id, from: "rivet", text: need.title, at, thread: place.thread, posted, ...(answers ? { replyTo: answers } : {}) });
     commands.setCardPosted(need.id, message.id);
@@ -429,7 +433,7 @@ export function registerConversations(
         return n;
       };
       for (const need of [...board.needs].sort((a, b) => depth(a) - depth(b))) {
-        if (known.has(need.id) && typeof need.replyTo !== "string") continue;
+        if (known.has(need.id) && typeof need.replyTo !== "string" && !need.inChat) continue;
         try {
           fileCard(need, at, !known.has(need.id));
         } catch (error) {

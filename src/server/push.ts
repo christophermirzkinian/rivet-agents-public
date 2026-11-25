@@ -215,9 +215,12 @@ function optionCalled(need: Need, labels: readonly string[]): string | undefined
  * update card has Seen alone, a Got it card Got it alone.
  */
 export function pushButtons(need: Need): Pick<PushPayload, "actions" | "answers"> {
+  // Its whole words must be read first, and a notification clips them.
+  if (need.inChat) return {};
   if (need.kind === UPDATE) return { actions: [{ action: "seen", title: "Seen" }], answers: { seen: { decision: "seen" } } };
   if (isGotIt(need)) return { actions: [{ action: "yes", title: GOT_IT }], answers: { yes: { decision: "choice", choice: GOT_IT } } };
-  if (need.risk || isTodo(need) || wantsText(need)) return {};
+  // A held message (wa-hold-…) is read whole on its card before it is answered.
+  if (need.risk || need.id.startsWith("wa-hold-") || isTodo(need) || wantsText(need)) return {};
   let yes: PushAnswer;
   let no: PushAnswer | undefined;
   if (need.options?.length) {

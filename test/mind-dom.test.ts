@@ -66,6 +66,8 @@ const answer = (graph: MindPut | null) =>
     "fetch",
     vi.fn((url: string) => {
       const u = new URL(String(url), "http://x");
+      // A supervisor older than the mind setup (mind-setup-dom.test.ts).
+      if (u.pathname === "/cloud/mind") return Promise.resolve(new Response('{"error":"not-here"}', { status: 404, headers: { "content-type": "application/json" } }));
       if (u.pathname === "/api/mind") return reply(graph ? dots(graph) : { graph: null, receivedAt: null });
       const n = graph?.nodes.find((one) => one.id === u.searchParams.get("id"));
       if (u.pathname === "/api/mind/node" && n) return reply({ id: n.id, desc: n.desc, body: n.body });

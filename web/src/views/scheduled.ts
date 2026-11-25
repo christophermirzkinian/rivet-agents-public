@@ -12,7 +12,7 @@ import { button, describe, h, keepFocus } from "../dom.js";
 import { changed, sameSession, signedOut, subscribe } from "../state.js";
 import { watchOps } from "../ops-data.js";
 import { onSessionReset, signedInByCode } from "../session.js";
-import { bringBack, dismissable, dismissed, dismissItem, owned, parked, type FailedItem } from "./ops-status.js";
+import { bringBack, dismissable, dismissed, dismissItem, DISMISS_NEEDS_PASSKEY, offersDismiss, owned, parked, type FailedItem } from "./ops-status.js";
 import { openSheet } from "./sheet.js";
 
 // Your own jobs, set by Rivet from your words once you say Yes on its confirm card. They have no page: the status line
@@ -174,6 +174,7 @@ function jobEl(job: Job, now: number): HTMLElement {
   const item = jobItem(job);
   const mine = jobMine(job);
   const gone = !mine && jobDismissed(job);
+  const loose = !mine && !gone && dismissable(item);
   const runTone = paused || removing ? "idle" : last ? RUN_TONE[last.result] : "idle";
   const tone = runTone !== "bad" || !item ? runTone : gone ? "idle" : mine ? "warn" : "bad";
   const busy = pending.get(job.id)?.tone === "wait";
@@ -196,8 +197,9 @@ function jobEl(job: Job, now: number): HTMLElement {
       button("Run now", () => send(job, "run"), "", busy || paused || removing, "scheduled.run-now"),
       button("Delete", () => ask(job, "remove"), "ghost", busy, "scheduled.delete"),
       // A red nobody is on can be dismissed; one dismissed comes back with a tap.
-      gone ? button("Bring back", () => bringBack(item!), "ghost job-bring-back", false, "scheduled.bring-back") : !mine && dismissable(item) ? button("Dismiss", () => dismissItem(item), "ghost job-dismiss", false, "scheduled.dismiss") : null,
+      gone ? button("Bring back", () => bringBack(item!), "ghost job-bring-back", false, "scheduled.bring-back") : loose && offersDismiss() ? button("Dismiss", () => dismissItem(item), "ghost job-dismiss", false, "scheduled.dismiss") : null,
     ),
+    loose && !offersDismiss() ? h("p", { class: "job-next" }, DISMISS_NEEDS_PASSKEY) : null,
   );
 }
 

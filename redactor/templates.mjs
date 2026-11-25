@@ -255,15 +255,30 @@ export function replyMarker(id) {
   return `<!-- rivet-reply:${id} decision=`;
 }
 
+/** What every agent is told beside an answer a device code's session gave: it is no owner's yes to act on. */
+export const CODE_ANSWER = "answered from a code sign-in, not a passkey";
+
+/** The same beside an answer with no stamp, past the date code still acts on one. */
+export const NO_MARK = "answered with no passkey mark";
+
+/** @param {Reply} reply @param {boolean} acts whether code may act on it (answer-acts.mjs mayActByCode) */
+function refusedMark(reply, acts) {
+  if (reply.item.via) return CODE_ANSWER;
+  return acts ? null : NO_MARK;
+}
+
 /**
  * The owner's decision of record, posted as a new comment on the PR or issue.
  * @param {Reply} reply
+ * @param {boolean} [acts] whether code may act on it (answer-acts.mjs mayActByCode)
  */
-export function githubCommentBody(reply) {
+export function githubCommentBody(reply, acts = !reply.item.via) {
   const lines = [
     `**Owner decision (via Rivet Agents): ${headline(reply)}**`,
     `Item: \`${reply.itemId}\` — ${githubInline(sanitizeLine(reply.item.title, 300))}`,
   ];
+  const mark = refusedMark(reply, acts);
+  if (mark) lines.push(mark);
   if (reply.item.ask !== undefined) lines.push(`Asked: ${githubInline(sanitizeLine(reply.item.ask, 1500))}`);
   if (reply.choice !== undefined) lines.push(`Choice: ${githubInline(sanitizeLine(reply.choice, 200))}`);
   if (reply.item.choiceDetail !== undefined) lines.push(`Choice detail: ${githubInline(sanitizeLine(reply.item.choiceDetail, 2000))}`);
@@ -322,7 +337,7 @@ function changesSentence(reply) {
   if (!earlier) return "";
   const words = { approve: "APPROVED", reject: "REJECTED", done: "DONE", dismiss: "DISMISSED", comment: "COMMENT", seen: "SEEN" };
   const was = earlier.decision === "choice" ? `CHOSE "${field(earlier.choice ?? "", 200)}"` : (words[/** @type {keyof typeof words} */ (earlier.decision)] ?? "an answer");
-  return ` This CHANGES the owner's earlier answer to this card (${was}, reply ${earlier.replyId}): act on this one instead of that one.`;
+  return ` This CHANGES the owner's earlier answer to this card (${was}, reply ${earlier.replyId}${earlier.via ? `, ${CODE_ANSWER}` : ""}): act on this one instead of that one.`;
 }
 
 /** The selected option's scope, before notes that may need truncation. @param {Reply} reply */
@@ -400,10 +415,12 @@ export function filesSentence(id, files) {
  * @param {Attachment[]} [attachments] the reply's images, in order, as the bridge saved them
  * @param {string} [tail] text the bridge ends the line with (a merge-hold release); its room is kept back before the
  *   owner's note is fitted, so a cut note keeps its recovery instruction
+ * @param {boolean} [acts] whether code may act on it (answer-acts.mjs mayActByCode)
  */
-export function chatLine(reply, github, route, attachments = [], tail = "") {
+export function chatLine(reply, github, route, attachments = [], tail = "", acts = !reply.item.via) {
   const max = MAX_LINE - Array.from(tail).length;
-  let line = `Rivet app — owner decision on card [${reply.itemId}]: ${chatDecision(reply)}.${changesSentence(reply)}${revisionSentence(reply)}${choiceDetailSentence(reply)}`;
+  const mark = refusedMark(reply, acts);
+  let line = `Rivet app — owner decision on card [${reply.itemId}]: ${chatDecision(reply)}${mark ? `, ${mark}` : ""}.${changesSentence(reply)}${revisionSentence(reply)}${choiceDetailSentence(reply)}`;
   // Routing, repo and GitHub context come before the owner's note and the card
   // text, so a line truncated at MAX_LINE only ever loses the variable text.
   if (route.reason === "no-chat") line += " Delivered here: the card names no chat.";
@@ -412,7 +429,7 @@ export function chatLine(reply, github, route, attachments = [], tail = "") {
   // The answer is the owner's message in the card's conversation, under the reply's id: the follow-up lands beside it.
   line += followUp(reply);
   line += githubSentence(reply, github);
-  line += " This is the owner's decision of record.";
+  line += mark ? " This is not the owner's decision of record." : " This is the owner's decision of record.";
   const attached = attachmentsSentence(attachments) + filesSentence(reply.id, reply.files);
   const cut = ` The owner's note was cut to fit this line; read it whole with: node ~/.rivet-agents/app/scripts/push-board.mjs --verify ${reply.id}.`;
   const wrapper = Array.from(" Owner's note: \"\".").length;

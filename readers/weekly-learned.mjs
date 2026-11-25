@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { CODE_ANSWER } from "../bridge/lib/templates.mjs";
 import { serverError } from "../bridge/lib/board-client.mjs";
 import { formatLog, makeExec, readToken, serverOrigin } from "../bridge/lib/config.mjs";
 import { NO_RUN } from "../bridge/lib/scheduled-run.mjs";
@@ -38,10 +39,10 @@ const MAX_BULLET = 140;
 
 /**
  * @typedef {{ id: string, kind: string, key: string, at: string, cause?: string, prevent?: string }} Fix
- * @typedef {{ key: string, card: string, text: string, count: number, kind: string, at: string, pending?: true, answer?: "yes" | "no", answeredAt?: string }} Proposal
+ * @typedef {{ key: string, card: string, text: string, count: number, kind: string, at: string, pending?: true, answer?: "yes" | "no", answeredAt?: string, via?: string }} Proposal
  * @typedef {{ fixes: Fix[], proposed: Proposal[] }} State
  * @typedef {{ kind: string, key: string, state: string, by?: string, since: string, updatedAt: string, cause?: string, prevent?: string }} Status
- * @typedef {{ itemId: string, decision: string, choice?: string, rev?: string, at?: string }} Reply
+ * @typedef {{ itemId: string, decision: string, choice?: string, rev?: string, at?: string, via?: string }} Reply
  * @typedef {{ key: string, text: string, count: number, kind: string, last: string }} Group
  */
 
@@ -145,8 +146,10 @@ export function syncAnswers(state, replies) {
     const first = mine.find((r) => r.rev === rev);
     if (!first) continue;
     const answer = first.decision === "approve" || first.choice === YES ? "yes" : "no";
-    if (p.answer === answer) continue;
+    if (p.answer === answer && p.via === first.via) continue;
     p.answer = answer;
+    if (first.via) p.via = first.via;
+    else delete p.via;
     p.answeredAt = first.at ?? new Date().toISOString();
     changed.push(p);
   }
@@ -254,7 +257,7 @@ export async function runWeekly(d) {
   let read = true;
   if (watching.length) {
     try {
-      for (const p of syncAnswers(state, await d.replies(watching))) d.log(p.answer === "yes" ? "accepted" : "declined", { card: p.card, proposal: p.text });
+      for (const p of syncAnswers(state, await d.replies(watching))) d.log(p.answer === "yes" ? "accepted" : "declined", { card: p.card, proposal: p.text, ...(p.via ? { note: CODE_ANSWER } : {}) });
     } catch (err) {
       // Proposing without the answers could offer again what was just turned down.
       if (d.mode === "propose") throw err;

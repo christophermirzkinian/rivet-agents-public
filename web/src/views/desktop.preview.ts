@@ -39,7 +39,9 @@ import { takeShare } from "../share-target.js";
 import { receiveShare, showLine, startDraft } from "./chat.js";
 import { drawnClip, drawnStill, drawPreviewMedia, appStill, previewMediaFile, previewMediaPage, tapPreviewThumb } from "./media.preview.js";
 import { answeredRoute } from "./answered.preview.js";
+import { probeCloud } from "../cloud-agent.js";
 import { mindPreview } from "./mind.preview.js";
+import { mindSetupPreview } from "./mind-setup.preview.js";
 import { mountShell } from "./shell.js";
 
 const now = new Date();
@@ -1239,6 +1241,8 @@ const passThrough = window.fetch.bind(window);
 window.fetch = async (input, init) => {
   const url = String(input);
   if (url.startsWith("/media/")) return (await previewMediaFile(url)) ?? passThrough(input, init);
+  const setup = mindSetupPreview(url, init?.body);
+  if (setup) return setup;
   if (!url.startsWith("/api/")) return passThrough(input, init);
   if (serverDown) return json({ error: "Unavailable" }, 503);
   const method = init?.method ?? "GET";
@@ -1428,6 +1432,8 @@ const openId = params.get("conversation");
 if (openId) showLine(openId);
 else if (params.get("new") === "1") startDraft("");
 showRivetWords();
+// &mind=setup is a hosted machine: its agent's name is read before the first draw.
+if (params.get("mind") === "setup") await probeCloud();
 mountShell(document.getElementById("app")!);
 drawPreviewMedia();
 const task = params.get("task");

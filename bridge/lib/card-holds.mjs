@@ -1,4 +1,5 @@
 import { defaultRepo } from "../../src/shared/repos.ts";
+import { mayActByCode } from "./answer-acts.mjs";
 import { HOLDS_FILE, updateHolds } from "./holds-file.mjs";
 
 // A video card about a PR holds its merge from the moment it is posted until the owner's yes on that card, so a PR can't
@@ -165,10 +166,11 @@ export function isYes(reply) {
  * no other video than it showed, and placed no later than his answer. An answer with no time keeps its holds. Another
  * card's hold on the same PR is its own card's to release; the monitor's and the owner's own holds (no `card`) are never
  * touched. Returns the PRs released, and each video card still holding one of the answered card's PRs; for the answered
- * card's own, `why`: the revision he answered did not name the PR, showed another video, or came before the hold.
+ * card's own, `why`: the answer may not act (answer-acts.mjs), or the revision he answered did not name the PR, showed
+ * another video, or came before the hold.
  * @param {{ itemId: string, at?: string, decision?: string, choice?: string, item?: any }} reply
  * @param {{ file?: string, platform?: string }} [opts]
- * @returns {{ released: number[], kept: { pr: number, card: string, why?: "unnamed" | "video" | "earlier" }[] }}
+ * @returns {{ released: number[], kept: { pr: number, card: string, why?: "passkey" | "unnamed" | "video" | "earlier" }[] }}
  */
 export function releaseForYes(reply, { file = HOLDS_FILE, platform } = {}) {
   if (!isYes(reply)) return { released: [], kept: [] };
@@ -177,8 +179,10 @@ export function releaseForYes(reply, { file = HOLDS_FILE, platform } = {}) {
   // The server's videoSha (the comparison, cardVideo's form); an older server sends only the after video, which matches
   // no hold on a card with a before as well (it fails safe).
   const shown = reply.item?.videoSha ?? reply.item?.video?.sha256;
-  /** @param {Record<string, unknown>} h @returns {"unnamed" | "video" | "earlier" | undefined} */
+  const acts = mayActByCode(reply);
+  /** @param {Record<string, unknown>} h @returns {"passkey" | "unnamed" | "video" | "earlier" | undefined} */
   const why = (h) => {
+    if (!acts) return "passkey";
     if (!named.includes(/** @type {number} */ (h.pr))) return "unnamed";
     if (h.video !== undefined && h.video !== shown) return "video";
     if (!(at >= Date.parse(String(h.since)))) return "earlier";
@@ -190,7 +194,7 @@ export function releaseForYes(reply, { file = HOLDS_FILE, platform } = {}) {
       const gone = answered.filter((h) => why(h) === undefined);
       const left = holds.filter((h) => !gone.includes(h));
       const prs = new Set(answered.map((h) => h.pr));
-      /** @type {{ pr: number, card: string, why?: "unnamed" | "video" | "earlier" }[]} */
+      /** @type {{ pr: number, card: string, why?: "passkey" | "unnamed" | "video" | "earlier" }[]} */
       const kept = [];
       for (const h of left) {
         if (typeof h.card !== "string" || !prs.has(h.pr) || kept.some((k) => k.pr === h.pr && k.card === h.card)) continue;

@@ -5,13 +5,14 @@ import { join } from "node:path";
 
 import { ANSWERED_KEEP_MS, answeredAsk, cardFromReply, DONE_ASK_STAGES, type Reopen } from "../shared/answered.js";
 import { type Ask, type AskStage } from "../shared/asks.js";
-import { FILE_TYPES, type Board, type BridgeAck, type Decision, type FileRef, type FileType, type Need, type PushRemoval, type PushRemovalReason, type Reply, type ReplyItem, type ReplyStyle } from "../shared/board.js";
+import { CODE_ANSWER, FILE_TYPES, type Board, type BridgeAck, type Decision, type FileRef, type FileType, type Need, type PushRemoval, type PushRemovalReason, type Reply, type ReplyItem, type ReplyStyle } from "../shared/board.js";
 import { IMAGE_TYPES } from "../shared/command.js";
 import { NO_REPO } from "../shared/board.js";
 import type { OpsDismissal } from "../shared/ops-dismiss.js";
 import { upgradeOpsStatus, type OpsStatus } from "../shared/ops-status.js";
 import { MAX_USAGE_EVENTS_PER_DAY, USAGE_KEEP_MS, type UsageAsk, type UsageBatch, type UsageCount, type UsageDevice, type UsageEventKind } from "../shared/usage-ids.js";
 import type { WorkerSnapshot } from "../shared/workers.js";
+import { mayActByCode } from "./answer-acts.js";
 import { stemOf, WAIT_PREFIX, yesKey } from "./asks/waits.js";
 
 // Loaded through createRequire rather than a static import: Vite 5's builtin
@@ -281,6 +282,8 @@ function toReply(row: Row): Reply {
     handled: row.handled === 1,
     item: JSON.parse(row.item as string) as ReplyItem,
   };
+  if (reply.item.passkey) reply.passkey = reply.item.passkey;
+  if (reply.item.via) [reply.via, reply.note] = [reply.item.via, CODE_ANSWER];
   if (typeof row.client_id === "string") reply.clientId = row.client_id;
   if (row.choice !== null) reply.choice = row.choice as string;
   if (row.text !== null) reply.text = row.text as string;
@@ -1135,7 +1138,7 @@ export class Store {
   waitYeses(): Map<string, string> {
     const rows = this.db
       .prepare(
-        `SELECT item_id, choice, json_extract(item, '$.repo') AS repo, json_extract(item, '$.pr') AS pr, MAX(at) AS at
+        `SELECT item_id, choice, json_extract(item, '$.repo') AS repo, json_extract(item, '$.pr') AS pr, item, MAX(at) AS at
          FROM replies WHERE item_id LIKE 'wait-%' GROUP BY item_id, repo, pr`,
       )
       .all() as Row[];
@@ -1149,6 +1152,8 @@ export class Store {
       const key = yesKey(stem, repo, pr);
       const at = row.at as string;
       const yes = row.choice === "Yes";
+      // A yes that may not act gives no OK, so you are asked again; nor is it a no to the ones you gave.
+      if (yes && !mayActByCode({ at, item: JSON.parse(row.item as string) as ReplyItem })) continue;
       const asksOk = pr !== undefined && stem.startsWith(`${WAIT_PREFIX}ok-`);
       const prKey = asksOk ? `${repo ?? NO_REPO}#${pr}` : undefined;
       if (!yes && prKey) lastNo.set(prKey, Math.max(lastNo.get(prKey) ?? -Infinity, Date.parse(at)));

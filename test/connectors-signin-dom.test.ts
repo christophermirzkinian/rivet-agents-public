@@ -184,6 +184,25 @@ describe("the Connectors sign-in panel", () => {
     expect(field?.getAttribute("type")).toBe("text");
   });
 
+  it("says a sign-in that never reached its page couldn't start, and one that did didn't finish", async () => {
+    openService("claude");
+    click('[data-use="connectors.add"]');
+    last().answer(status("a", { state: "failed" }));
+    await settle();
+    expect(words()).toBe("The sign-in couldn't start. Nothing changed.");
+    click('[data-use="connectors.back"]');
+
+    openService("claude");
+    click('[data-use="connectors.add"]');
+    last().answer(status("b", { state: "waiting", url: URL_A, needsCode: true }));
+    await settle();
+    panel()!.querySelector<HTMLInputElement>("input.cn-code-field")!.value = CODE;
+    click('[data-use="connectors.code-send"]');
+    last().answer(status("b", { state: "failed" }));
+    await settle();
+    expect(words()).toBe("The sign-in didn't finish. Nothing changed.");
+  });
+
   it("drops a late answer to the code of a sign-in the sheet has left, so it never lands on the next one", async () => {
     openService("claude");
     click('[data-use="connectors.add"]');

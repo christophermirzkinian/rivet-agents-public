@@ -113,7 +113,7 @@ describe("the sign-in screen's code offer", () => {
     field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
     await flush();
     expect(deviceSession.mock.calls).toEqual([["abcd2345"], ["WXYZ6789"]]);
-    expect(text(".gate-status")).toBe("too many attempts, wait a minute");
+    expect(text(".gate-status")).toBe("Too many tries. Wait a minute, then try again.");
   });
 
   it("shows the passkey screen when the window never answers about its passkey maker", async () => {

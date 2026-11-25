@@ -366,6 +366,26 @@
   overflow-wrap: anywhere;
 }
 
+/* A card answered in its chat: its lines as written, all of them, and its answers under them. */
+.chat-in-card .chat-posted-title,
+.chat-in-card .chat-posted-ask,
+.ask-exact {
+  white-space: pre-wrap;
+}
+
+.chat-in-answers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.chat-in-answers .btn {
+  flex: 1 1 88px;
+  min-height: 44px;
+  font-size: var(--fs-m);
+}
+
 .chat-posted .chat-posted-open {
   align-self: flex-start;
   min-height: 44px;

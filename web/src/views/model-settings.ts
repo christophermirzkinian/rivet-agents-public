@@ -15,7 +15,7 @@ import { when } from "../../../src/shared/when.js";
 import * as api from "../api.js";
 import * as cmd from "../command-api.js";
 import { button, describe, h } from "../dom.js";
-import { onSessionReset, StaleSession } from "../session.js";
+import { onSessionReset, setSignedInByCode, signedInByCode, StaleSession } from "../session.js";
 import { changed, sameSession, signedOut } from "../state.js";
 import { flash } from "./toast.js";
 
@@ -29,6 +29,8 @@ export const UNREAD_EVERY_MS = 5000;
 export const SAVED = "Saved. Applies at each chat's next start.";
 export const UNCONFIRMED = "Sent to the Mac, not confirmed yet.";
 export const ELSEWHERE = "Changed since on another screen.";
+/** What a window a device code alone signed in reads over the picks, which it sees and cannot change: the server refuses it a save. */
+export const MODELS_NEED_PASSKEY = "Change who does each job from a phone or computer signed in with a passkey.";
 const FALLBACK_FRESH_MS = 24 * 60 * 60_000;
 const SIGNED_OUT = "Your session ended. Sign in again.";
 
@@ -206,7 +208,8 @@ function resend(pending: Unsure): void {
       if (!refused(error)) return;
       unsure = null;
       if (models) picks = shown(models);
-      flash(`Not saved: ${describe(error)}`, "error");
+      if (api.needsPasskey(error)) setSignedInByCode(true);
+      else flash(`Not saved: ${describe(error)}`, "error");
       void read();
     },
   );
@@ -232,8 +235,9 @@ function save(next: ModelPicks): void {
       if (!refused(error)) return doubt(sent, null, `Not confirmed: ${describe(error)}`);
       saving = false;
       picks = previous;
+      if (api.needsPasskey(error)) setSignedInByCode(true);
+      else flash(`Not saved: ${describe(error)}`, "error");
       changed();
-      flash(`Not saved: ${describe(error)}`, "error");
     },
   );
 }
@@ -387,12 +391,13 @@ export function modelSettings(): HTMLElement {
     );
   const all = picks;
   const status = models.status;
-  const locked = saving || !editable();
+  const byCode = signedInByCode() === true;
+  const locked = byCode || saving || !editable();
   return h(
     "section",
     { class: "panel box mdl" },
     title,
-    h("p", { class: "panel-text" }, "Pick who does each job. A change applies to each chat's next start, never mid-task."),
+    h("p", { class: "panel-text" }, byCode ? MODELS_NEED_PASSKEY : "Pick who does each job. A change applies to each chat's next start, never mid-task."),
     h("div", { class: "mdl-cols" }, h("span", {}, "Model"), h("span", {}, "Effort")),
     ...models.jobs.map((job) => row(job, all, status[job.key], locked)),
     h("h4", { class: "set-sub" }, "Always on, whatever you pick"),

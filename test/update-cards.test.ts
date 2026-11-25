@@ -15,7 +15,7 @@ const filler = (n: number) => LINE.repeat(Math.floor(n / (LINE.length + 1))) + "
 
 const BASE = { updatedAt: "2026-10-05T00:00:00.000Z", coming: [], chats: [], shipped: [] };
 const update = (id: string, extra: Record<string, unknown> = {}) => ({ id, kind: "update", title: `Update ${id}`, tag: "Merged", ...extra });
-const question = { id: "q1", kind: "decision", title: "Ship it?" };
+const question = { id: "q1", kind: "decision", title: "Ship it?", ask: "Ready to go out." };
 const AT = "2026-10-05T01:00:00.000Z";
 
 describe("the update card's shape", () => {
@@ -196,7 +196,7 @@ describe("update cards on the board", () => {
     const refused = await card(update("u2", { replyTo: answer }));
     expect(refused.status).toBe(400);
     expect(((await refused.json()) as { error: string }).error).toMatch(/^card u2 answers one of your asks, so it is not an update card.*--kind decision/);
-    expect((await card({ id: "u3", kind: "decision", title: "Shipped", replyTo: answer, options: [{ label: "Yes, keep it" }, { label: "Change it", text: true }] })).status).toBe(200);
+    expect((await card({ id: "u3", kind: "decision", title: "Shipped", ask: "It is out.", replyTo: answer, options: [{ label: "Yes, keep it" }, { label: "Change it", text: true }] })).status).toBe(200);
     // An update card stored before the rule is left alone: a whole-board write that keeps it as it is passes.
     const stored = server.app.store.getBoard()!;
     expect(server.app.store.putBoard({ ...stored.board, needs: [...stored.board.needs, { ...update("u4", { replyTo: answer }), thread: "main" }] }, stored.version)).toBeTruthy();
@@ -205,7 +205,7 @@ describe("update cards on the board", () => {
     // Pointing it at his answer anew is refused.
     expect((await putBoard(server.base, { ...now, needs: now.needs.map((need) => (need.id === "u1" ? { ...need, replyTo: answer } : need)) })).status).toBe(400);
     // A full board refuses it too, before making room would drop it unseen.
-    const full = Array.from({ length: MAX_CARDS }, (_, index) => ({ id: `d${index}`, kind: "decision", title: `Decision ${index}` }));
+    const full = Array.from({ length: MAX_CARDS }, (_, index) => ({ id: `d${index}`, kind: "decision", title: `Decision ${index}`, ask: "Which one?" }));
     expect((await putBoard(server.base, { ...BASE, needs: full })).status).toBe(200);
     const atCap = await card(update("u5", { replyTo: answer }));
     expect(atCap.status).toBe(400);
@@ -265,7 +265,7 @@ describe("update cards on the board", () => {
     expect((await note("old", version - 1)).status).toBe(409);
     expect((await note("current", version)).status).toBe(201);
     const room = 1_000_000 - Buffer.byteLength(JSON.stringify(server.app.store.getBoard()!.board)) - 600;
-    expect((await putBoard(server.base, { ...BASE, needs: [question, update("u1", { thread: "main", notes: filler(room) })] })).status).toBe(200);
+    expect((await putBoard(server.base, { ...BASE, needs: [question, update("u1", { thread: "main" })], padding: filler(room) })).status).toBe(200);
     expect((await note("word ".repeat(200))).status).toBe(413);
     expect((await note("fits")).status).toBe(201);
   });
@@ -281,7 +281,7 @@ describe("update cards on the board", () => {
 
   it("takes one comment after Seen when the board is too full to show it, never a second at that revision", async () => {
     const room = 1_000_000 - Buffer.byteLength(JSON.stringify(server.app.store.getBoard()!.board)) - 600;
-    expect((await putBoard(server.base, { ...BASE, needs: [question, update("u1", { thread: "main", chat: "fixer", notes: filler(room) })] })).status).toBe(200);
+    expect((await putBoard(server.base, { ...BASE, needs: [question, update("u1", { thread: "main", chat: "fixer" })], padding: filler(room) })).status).toBe(200);
     const rev = await revOf(server.base, cookie, "u1");
     expect((await reply("seen")).status).toBe(201);
     expect((await reply("comment", { rev, text: "word ".repeat(200) })).status).toBe(201);
@@ -310,7 +310,7 @@ describe("update cards on the board", () => {
   it("answers a card written into a full board with that card, after making room", async () => {
     const fill = Array.from({ length: MAX_CARDS - 2 }, (_, i) => update(`n${i}`, { thread: "main", since: new Date(Date.UTC(2026, 9, 5, 0, i)).toISOString() }));
     expect((await putBoard(server.base, { ...BASE, needs: [question, update("u1", { thread: "main", chat: "fixer" }), ...fill] })).status).toBe(200);
-    const res = await fetch(`${server.base}/api/board/needs/q-new?create=only`, { method: "PUT", headers: bearer(BOARD_TOKEN), body: JSON.stringify({ kind: "decision", title: "Ship it?" }) });
+    const res = await fetch(`${server.base}/api/board/needs/q-new?create=only`, { method: "PUT", headers: bearer(BOARD_TOKEN), body: JSON.stringify({ kind: "decision", title: "Ship it?", ask: "Ready to go out." }) });
     expect(res.status).toBe(200);
     expect(((await res.json()) as { item: { id: string; rev: string } }).item).toMatchObject({ id: "q-new", rev: expect.any(String) });
     expect(server.app.store.getBoard()!.board.needs).toHaveLength(MAX_CARDS);

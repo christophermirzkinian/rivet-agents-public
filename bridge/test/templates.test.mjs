@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { chatLine, clipUnits, defuseMentions, githubCommentBody, MAX_LINE, sanitizeLine } from "../lib/templates.mjs";
+import { chatLine, clipUnits, CODE_ANSWER, defuseMentions, githubCommentBody, MAX_LINE, NO_MARK, sanitizeLine } from "../lib/templates.mjs";
 import { MAX_CHOICE, MAX_TEXT, MAX_TITLE, validateReply } from "../lib/validate.mjs";
 import { reply } from "./fixtures.mjs";
 
@@ -85,6 +85,35 @@ test("attachment-heavy choices retain the owner's note or its full-read notice",
   assert.ok(line.includes(chosen.text) || line.includes(`--verify ${id}.`));
   assert.ok(line.includes("Deploy to staging only\""));
   assert.ok(Array.from(line).length <= MAX_LINE);
+});
+
+test("an answer a device code's session made says so on GitHub and in the line to Rivet; any other says nothing new", () => {
+  assert.equal(CODE_ANSWER, "answered from a code sign-in, not a passkey");
+  for (const [over, item] of [[{ choice: "Approve and merge", text: "go" }, { ask: "Merge it?" }], [{ decision: "reject" }, {}], [{ decision: "choice", choice: "Option B" }, {}]]) {
+    const plain = valid(over, item);
+    const coded = valid(over, { ...item, via: "device-code" });
+    const lines = githubCommentBody(plain).split("\n");
+    assert.deepEqual(githubCommentBody(coded).split("\n"), [...lines.slice(0, 2), CODE_ANSWER, ...lines.slice(2)]);
+    const line = chatLine(plain, null, { target: "rivet", chat: "monitor", reason: "relay" });
+    const said = chatLine(coded, null, { target: "rivet", chat: "monitor", reason: "relay" });
+    assert.ok(said.includes(`, ${CODE_ANSWER}. `), said);
+    assert.ok(line.includes("This is the owner's decision of record"), line);
+    assert.equal(said.replace(`, ${CODE_ANSWER}.`, ".").replace("This is not the owner's", "This is the owner's"), line);
+    for (const text of [githubCommentBody(valid(over, { ...item, passkey: true })), githubCommentBody(plain), line]) assert.equal(text.includes("sign-in"), false);
+  }
+});
+
+test("an answer with no passkey mark, once the bridge refuses it, says that in both, and is no decision of record", () => {
+  for (const item of [{ ask: "Merge it?" }, { passkey: false }]) {
+    const plain = valid({ choice: "Approve and merge", text: "go" }, item);
+    assert.equal(githubCommentBody(plain, false).split("\n")[2], NO_MARK);
+    assert.equal(githubCommentBody(plain, true).includes(NO_MARK), false);
+    const where = { target: "rivet", chat: "monitor", reason: "relay" };
+    const said = chatLine(plain, null, where, undefined, undefined, false);
+    assert.ok(said.includes(`, ${NO_MARK}. `) && said.includes("This is not the owner's decision of record"), said);
+    assert.ok(chatLine(plain, null, where, undefined, undefined, true).includes("This is the owner's decision of record"));
+  }
+  assert.ok(githubCommentBody(valid({}, { via: "device-code" }), true).includes(CODE_ANSWER));
 });
 
 test("github body headlines for each decision, no text or choice", () => {
@@ -286,6 +315,10 @@ test("an answer after Answer again says which earlier answer it changes; a malfo
   assert.match(line, /This CHANGES the owner's earlier answer to this card \(REJECTED, reply r_00\): act on this one instead of that one\./);
   const chose = validateReply(reply({}, { changes: { replyId: "r_00", decision: "choice", choice: "Not now" } }));
   assert.match(chatLine(/** @type {any} */ (chose).reply, undefined, route), /\(CHOSE "Not now", reply r_00\)/);
+  for (const via of ["device-code", "passkey", null]) {
+    const coded = validateReply(reply({}, { changes: { replyId: "r_00", decision: "approve", via }, passkey: true }));
+    assert.match(chatLine(/** @type {any} */ (coded).reply, undefined, route), /\(APPROVED, reply r_00, answered from a code sign-in, not a passkey\)/, String(via));
+  }
   for (const changes of [{ replyId: "../x", decision: "reject" }, { replyId: "r_00", decision: "maybe" }, "r_00"]) {
     const bad = validateReply(reply({}, { changes }));
     assert.equal(bad.ok, true);

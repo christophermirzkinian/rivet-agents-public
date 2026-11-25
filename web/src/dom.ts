@@ -218,7 +218,7 @@ export function linksIn(text: string): HTMLAnchorElement[] {
 }
 
 export function describe(error: unknown): string {
-  if (error instanceof DOMException && error.name === "NotAllowedError") return "Passkey request was cancelled.";
+  if (error instanceof DOMException && error.name === "NotAllowedError") return "Your browser didn't allow that.";
   return error instanceof Error ? error.message : "Something went wrong.";
 }
 

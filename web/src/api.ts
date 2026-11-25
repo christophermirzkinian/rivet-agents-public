@@ -37,6 +37,9 @@ export class ApiError extends Error {
   }
 }
 
+/** The server's word that a device code alone made this session (http.ts requirePasskeySession): its other 403s are not. */
+export const needsPasskey = (error: unknown): boolean => error instanceof ApiError && error.status === 403 && error.message.startsWith("sign in with a passkey");
+
 /**
  * A hosted machine refused the write because no AI plan is connected (cloud-agent.ts noPlan): nothing was sent and
  * nothing is to be tried again; the message boxes are locked by the time this is thrown.

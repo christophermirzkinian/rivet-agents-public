@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { AuditEntry } from "../src/shared/command.js";
@@ -148,6 +150,53 @@ describe("saving the picks", () => {
     expect((await post({ clientId: id, jobs: defaultPicks(), base: "a1" })).status).toBe(409);
     expect((await post({ clientId: id, jobs, base: null })).status).toBe(409);
     stream.abort();
+  });
+
+  describe("from a session a device code alone made", () => {
+    const REFUSED = [403, { error: "sign in with a passkey to change the models" }];
+    const jobs = pick("monitor", "claude-fable-5-2", "high");
+    const audit = async () => ((await (await fetch(`${server.base}/api/audit`, { headers: { cookie } })).json()) as { entries: AuditEntry[] }).entries;
+    const answer = async (response: Response) => [response.status, await response.json()];
+
+    it("is refused before the body is read, sends the Mac nothing and keeps no row, where a passkey session saves as before with the switch off", async () => {
+      const value = "c".repeat(43);
+      server.app.store.addSession(createHash("sha256").update(value).digest("hex"), 60_000, "device-code");
+      const byCode = browser(`__Host-rivet=${value}`);
+      const stream = await connectBridge();
+      const id = clientId();
+      expect(await answer(await post({ clientId: id, jobs, base: null }, byCode))).toEqual(REFUSED);
+      expect(await answer(await fetch(`${server.base}/api/actions/models`, { method: "POST", headers: byCode, body: "not json" }))).toEqual(REFUSED);
+      expect(await audit()).toEqual([]);
+      // The read stays open to it.
+      expect((await fetch(`${server.base}/api/settings/models`, { headers: byCode })).status).toBe(200);
+      const saved = await post({ clientId: id, jobs, base: null });
+      expect(saved.status).toBe(202);
+      const entry = (await saved.json()) as AuditEntry;
+      await stream.waitFor(1);
+      expect(stream.payloads()).toMatchObject([{ id: entry.id, models: jobs, base: null }]);
+      expect((await audit()).map((row) => row.id)).toEqual([entry.id]);
+      stream.abort();
+    });
+
+    it("is refused with the switch on too, for a session the code sign-in itself made, where a passkey session still saves", async () => {
+      await server.close();
+      server = await startServer({ RIVET_DEVICE_SESSION: "on" });
+      cookie = server.cookie();
+      const { code } = (await (await fetch(`${server.base}/api/auth/device-code`, { method: "POST", headers: browser(cookie), body: "{}" })).json()) as { code: string };
+      const signedIn = await fetch(`${server.base}/api/auth/device-session`, { method: "POST", headers: browser(""), body: JSON.stringify({ code }) });
+      expect(signedIn.status).toBe(200);
+      const made = signedIn.headers.get("set-cookie")!.split(";")[0]!;
+      expect(await (await fetch(`${server.base}/api/me`, { headers: { cookie: made } })).json()).toMatchObject({ signedIn: true, via: "device-code" });
+      const stream = await connectBridge();
+      expect(await answer(await post({ clientId: clientId(), jobs, base: null }, browser(made)))).toEqual(REFUSED);
+      expect(await audit()).toEqual([]);
+      const saved = await post({ clientId: clientId(), jobs, base: null });
+      expect(saved.status).toBe(202);
+      const entry = (await saved.json()) as AuditEntry;
+      await stream.waitFor(1);
+      expect(stream.payloads()).toMatchObject([{ id: entry.id, models: jobs, base: null }]);
+      stream.abort();
+    });
   });
 });
 

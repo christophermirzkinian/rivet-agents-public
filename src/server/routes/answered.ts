@@ -21,7 +21,7 @@ export function reopenEvent(store: Store, reopen: Reopen): ReopenEvent | null {
     ...(reopen.chat ? { chat: reopen.chat } : {}),
     ...(reopen.repo ? { repo: reopen.repo } : {}),
     at: reopen.at,
-    earlier: { replyId: earlier.id, decision: earlier.decision, ...(earlier.choice ? { choice: earlier.choice } : {}) },
+    earlier: { replyId: earlier.id, decision: earlier.decision, ...(earlier.choice ? { choice: earlier.choice } : {}), ...(earlier.via ? { via: earlier.via } : {}) },
   };
 }
 

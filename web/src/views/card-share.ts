@@ -12,9 +12,11 @@ import { flash } from "./toast.js";
 // document to the laptop. Only what the card shows goes: never its chat, PR comment links or ids.
 
 /** The card as text to send on: its title, a blank line, then its text with its line breaks kept. */
-export function cardShareText(need: Pick<ServedNeed, "title" | "ask">): string {
+export function cardShareText(need: Pick<ServedNeed, "title" | "ask" | "inChat">): string {
   const body = need.ask?.trim();
-  return rivetWords(body ? `${need.title}\n\n${body}` : need.title);
+  const words = body ? `${need.title}\n\n${body}` : need.title;
+  // A card answered in its chat shows its words as they are, so they go so.
+  return need.inChat ? words : rivetWords(words);
 }
 
 /**

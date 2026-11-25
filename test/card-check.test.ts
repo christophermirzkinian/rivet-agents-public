@@ -301,7 +301,7 @@ describe("the card checker on the board routes", () => {
 
   it("refuses a card a blocking rule stops, with what to change", async () => {
     const still = await upload(png(400, 900), "image/png");
-    const refused = await send("PUT", "/api/board/needs/pick", { kind: "decision", title: "Pick a look", options, media: { kind: "stills", stills: [{ sha256: still, type: "image/png" }] } });
+    const refused = await send("PUT", "/api/board/needs/pick", { kind: "decision", title: "Pick a look", ask: "Which look?",options, media: { kind: "stills", stills: [{ sha256: still, type: "image/png" }] } });
     expect(refused.status).toBe(422);
     expect(await refused.json()).toEqual({ error: "card checker: card pick: 3 options but 1 still; put every option's picture on the card (one --still each)" });
     expect((await send("PATCH", "/api/board/needs/pick", { title: "Pick" })).status).toBe(404);
@@ -319,13 +319,13 @@ describe("the card checker on the board routes", () => {
     expect(row.selects).toHaveLength(6);
 
     const still = await upload(png(1700, 20), "image/png");
-    const posted = await send("PUT", "/api/board/needs/pick", { kind: "decision", title: "Pick a look", options, media: { kind: "stills", stills: [{ sha256: still, type: "image/png" }] } });
+    const posted = await send("PUT", "/api/board/needs/pick", { kind: "decision", title: "Pick a look", ask: "Which look?",options, media: { kind: "stills", stills: [{ sha256: still, type: "image/png" }] } });
     expect(posted.status).toBe(200);
     expect(((await posted.json()) as { warnings: string[] }).warnings).toEqual([
       "card pick: 3 options but 1 still; put every option's picture on the card (one --still each)",
       "card pick: still 1 is 1700×20, over 1600 px on its long side; shrink it (sips -Z 1600, or ffmpeg scale) before --still",
     ]);
-    const clean = await send("PUT", "/api/board/needs/plain", { kind: "decision", title: "Plain" });
+    const clean = await send("PUT", "/api/board/needs/plain", { kind: "decision", title: "Plain", ask: "Ship it?" });
     expect(await clean.json()).not.toHaveProperty("warnings");
   });
 
@@ -333,7 +333,7 @@ describe("the card checker on the board routes", () => {
     await setKnobs({ ...DEFAULT_CARD_CHECKER, options: "warn" });
     const still = await upload(png(400, 900), "image/png");
     const media = { kind: "stills", stills: [{ sha256: still, type: "image/png" }] };
-    expect((await send("PUT", "/api/board/needs/pick", { kind: "decision", title: "Pick a look", options, media })).status).toBe(200);
+    expect((await send("PUT", "/api/board/needs/pick", { kind: "decision", title: "Pick a look", ask: "Which look?",options, media })).status).toBe(200);
     expect((await setKnobs(DEFAULT_CARD_CHECKER)).status).toBe(200);
 
     const read = (await (await fetch(`${server.base}/api/board`, { headers: bearer(BOARD_TOKEN) })).json()) as { board: { needs: Record<string, unknown>[] } };
@@ -401,7 +401,7 @@ describe("the card checker on the board routes", () => {
     const still = await upload(png(400, 900), "image/png");
     const looks = [{ label: "Calm", recommended: true }, { label: "Bold" }];
     const media = { kind: "stills", stills: [{ sha256: still, type: "image/png" }] };
-    expect((await send("PUT", "/api/board/needs/pick", { kind: "merge-ready", title: "Merge the banner", pr: 1, headSha: "a".repeat(40), options: looks, media })).status).toBe(200);
+    expect((await send("PUT", "/api/board/needs/pick", { kind: "merge-ready", title: "Merge the banner", ask: "Merge it?", pr: 1, headSha: "a".repeat(40), options: looks, media })).status).toBe(200);
     const refused = await send("PATCH", "/api/board/needs/pick", { kind: "decision", headSha: null });
     expect(refused.status).toBe(422);
     expect(((await refused.json()) as { error: string }).error).toBe("card checker: card pick: 2 options but 1 still; put every option's picture on the card (one --still each)");
@@ -412,7 +412,7 @@ describe("the card checker on the board routes", () => {
     const still = await upload(png(1700, 20), "image/png");
     const media = { kind: "stills", stills: [{ sha256: still, type: "image/png" }] };
     const answers = [{ label: "Approve", recommended: true }, { label: "Change it" }];
-    expect((await send("PUT", "/api/board/needs/pick", { kind: "merge-ready", title: "Merge the banner", pr: 1, headSha: "a".repeat(40), options: answers, media })).status).toBe(200);
+    expect((await send("PUT", "/api/board/needs/pick", { kind: "merge-ready", title: "Merge the banner", ask: "Merge it?", pr: 1, headSha: "a".repeat(40), options: answers, media })).status).toBe(200);
     await setKnobs({ ...DEFAULT_CARD_CHECKER, stills: "block" });
     const moved = await send("PATCH", "/api/board/needs/pick", { kind: "decision", headSha: null });
     expect(moved.status).toBe(200);
@@ -421,7 +421,7 @@ describe("the card checker on the board routes", () => {
 
   it("judges a private link that redacts to the stored one, sent with new proof", async () => {
     const link = "https://h.example/p";
-    expect((await send("PUT", "/api/board/needs/pick", { kind: "decision", title: "Pick a look", links: [{ label: "Lab", url: link }], evidence: { ci: "running" } })).status).toBe(200);
+    expect((await send("PUT", "/api/board/needs/pick", { kind: "decision", title: "Pick a look", ask: "Which look?",links: [{ label: "Lab", url: link }], evidence: { ci: "running" } })).status).toBe(200);
     const refused = await send("PATCH", "/api/board/needs/pick", { links: [{ label: "Lab", url: `${link}?access_token=ghp_${"a1B2c3D4e5".repeat(4)}` }], evidence: { ci: "green" } });
     expect(refused.status).toBe(422);
     expect(((await refused.json()) as { error: string }).error).toContain("card pick: 1 private link");
@@ -430,7 +430,7 @@ describe("the card checker on the board routes", () => {
   it("checks nothing while it is off", async () => {
     await setKnobs({ ...DEFAULT_CARD_CHECKER, on: false });
     const still = await upload(png(400, 900), "image/png");
-    const posted = await send("PUT", "/api/board/needs/pick", { kind: "decision", title: "Pick a look", options, media: { kind: "stills", stills: [{ sha256: still, type: "image/png" }] } });
+    const posted = await send("PUT", "/api/board/needs/pick", { kind: "decision", title: "Pick a look", ask: "Which look?",options, media: { kind: "stills", stills: [{ sha256: still, type: "image/png" }] } });
     expect(posted.status).toBe(200);
     expect(await posted.json()).not.toHaveProperty("warnings");
   });

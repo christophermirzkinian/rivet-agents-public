@@ -14,7 +14,8 @@ import { isRed, type AppStatus, type MacSnapshot, type OpsResponse, type MacVolu
 import { button, h, isHttps } from "../dom.js";
 import * as api from "../api.js";
 import { dismissalWrite, flyCurrent, healthCurrent, noteDismissal, opsData, watchOps } from "../ops-data.js";
-import { app, crewLapsed, subscribe } from "../state.js";
+import { setSignedInByCode, signedInByCode } from "../session.js";
+import { app, changed, crewLapsed, subscribe } from "../state.js";
 import { prHref } from "./queue-cards.js";
 import { etaWords } from "./plan-time.js";
 import { maybeWhen, when } from "../../../src/shared/when.js";
@@ -291,21 +292,31 @@ function queueWrite(item: FailedItem, write: (stored: boolean) => Promise<boolea
   });
 }
 
+/** What a window a device code alone signed in reads where Dismiss would be: the server refuses it the write. */
+export const DISMISS_NEEDS_PASSKEY = "Dismiss this from a phone or computer signed in with a passkey.";
+
+/** Whether this window offers Dismiss: never one a device code alone signed in. */
+export const offersDismiss = (): boolean => signedInByCode() !== true;
+
 /** Hides the item at once and stores it on the server, with a 5 s Undo; a refused write brings it back. */
 export function dismissItem(item: FailedItem): void {
-  if (!dismissable(item)) return;
+  if (!dismissable(item) || !offersDismiss()) return;
   const mark = markOf(item);
   const latest = tap(item);
   noteDismissal(item.kind, item.key, mark);
   const undoKey = `dismiss:${item.kind}/${item.key}`;
-  const failed = () => {
+  const failed = (error: unknown) => {
     if (latest()) {
       noteDismissal(item.kind, item.key, null);
       clearUndo(undoKey);
     }
-    flash("Couldn't dismiss it. Try again.", "error");
+    // The server's other 403 here refuses the item, which is no word about the session.
+    if (api.needsPasskey(error)) {
+      setSignedInByCode(true);
+      changed();
+    } else flash("Couldn't dismiss it. Try again.", "error");
   };
-  queueWrite(item, (stored) => api.putOpsDismissal(item.kind, item.key, mark).then(() => true, () => (failed(), stored)));
+  queueWrite(item, (stored) => api.putOpsDismissal(item.kind, item.key, mark).then(() => true, (error: unknown) => (failed(error), stored)));
   const timer = window.setTimeout(() => clearUndo(undoKey), UNDO_MS);
   showUndo({
     key: undoKey,
@@ -488,17 +499,19 @@ function statusDetail(item: FailedItem, status: OpsStatus | null, sheet: { retur
     dismissed(item)
       ? button("Bring back", () => bringBack(item), "ghost big ops-bring-back", false, "ops.status.bring-back")
       : dismissable(item)
-        ? button(
-            "Dismiss",
-            () => {
-              sheet.returnFocus = false;
-              closeSheet();
-              dismissItem(item);
-            },
-            "ghost big ops-dismiss",
-            false,
-            "ops.status.dismiss",
-          )
+        ? offersDismiss()
+          ? button(
+              "Dismiss",
+              () => {
+                sheet.returnFocus = false;
+                closeSheet();
+                dismissItem(item);
+              },
+              "ghost big ops-dismiss",
+              false,
+              "ops.status.dismiss",
+            )
+          : h("p", { class: "ops-status-text" }, DISMISS_NEEDS_PASSKEY)
         : null,
   );
 }

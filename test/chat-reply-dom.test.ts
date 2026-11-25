@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { quoteText, type ChatMessage } from "../src/shared/command.js";
-import { UPDATES_ID } from "../src/shared/conversations.js";
+import { MAX_QUOTE_TEXT, quoteText, type ChatMessage } from "../src/shared/command.js";
+import { answerText, UPDATES_ID } from "../src/shared/conversations.js";
 import { maybeWhen } from "../src/shared/when.js";
 import { probeCloud, resetCloud } from "../web/src/cloud-agent.js";
 import { app, resetSession } from "../web/src/state.js";
@@ -310,6 +310,18 @@ describe("reply in chat", () => {
     const quote = bubble("c9").querySelector<HTMLButtonElement>("button.chat-quote")!;
     expect(quote.querySelector(".chat-quote-who")!.textContent).toBe("Rivet");
     expect(quote.querySelector(".chat-quote-text")!.textContent).toBe(quoteText({ text: LONG }));
+  });
+
+  it("a quoted code-made answer keeps its mark, however long its first line", () => {
+    const mark = "(answered from a code sign-in, not a passkey)";
+    const answer = (text: string, via?: "device-code") => answerText({ decision: "choice", choice: text, itemTitle: "Which one?", ...(via ? { via } : {}) });
+    expect(quoteText({ text: answer("Yes", "device-code") })).toBe(`Chose: Yes ${mark}`);
+    expect(quoteText({ text: answerText({ decision: "approve", itemTitle: "It", text: "two\nlines", via: "device-code" }) })).toBe(`Approved: It ${mark}`);
+    const long = quoteText({ text: answer("x".repeat(200), "device-code") });
+    expect(long).toHaveLength(MAX_QUOTE_TEXT);
+    expect(long.endsWith(`x… ${mark}`)).toBe(true);
+    expect(quoteText({ text: answer("Yes") })).toBe("Chose: Yes");
+    expect(quoteText({ text: answer("x".repeat(200)) })).toHaveLength(MAX_QUOTE_TEXT);
   });
 
   // Before any test gives c1 a label: Chat keeps the labels it has read for the session.

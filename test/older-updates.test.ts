@@ -8,7 +8,7 @@ import { bearer, BOARD_TOKEN, browser, putBoard, revOf, startServer, type TestSe
 
 const BASE = { updatedAt: "2026-10-05T00:00:00.000Z", coming: [], chats: [], shipped: [] };
 const update = (id: string, extra: Record<string, unknown> = {}) => ({ id, kind: "update", title: `Update ${id}`, tag: "Merged", thread: "Docs Sync", ...extra });
-const question = { id: "q1", kind: "decision", title: "Ship it?" };
+const question = { id: "q1", kind: "decision", title: "Ship it?", ask: "Ready to go out." };
 
 describe("Show older", () => {
   let server: TestServer;

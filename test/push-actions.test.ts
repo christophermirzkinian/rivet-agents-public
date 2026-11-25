@@ -55,6 +55,9 @@ describe("a card's push buttons", () => {
       need("x1", { reply: "text" }),
       need("o1", { options: [{ label: "Blue" }, { label: "Red" }] }),
       need("o2", { options: [{ label: "Yes", text: true }, { label: "No" }] }),
+      // Answered in its chat: a notification clips its words (a-1012).
+      need("i1", { options: [{ label: "Yes" }, { label: "No" }], inChat: { label: "To the team" } }),
+      need("i2", { options: [{ label: "Got it" }], inChat: { label: "To the team" } }),
       // An outcome card: its Yes, keep it is not a bare Yes, so it opens the card as before.
       need("o4", { options: [{ label: "Yes, keep it" }, { label: "Change it", text: true }] }),
     ];
@@ -87,8 +90,8 @@ describe("a button's answer at the server", () => {
     server.app.store.addPushSubscription({ endpoint: "https://fcm.googleapis.com/fcm/send/device-1", keys: { p256dh: "BKey1", auth: "auth1" } });
     const cookie = server.cookie();
     const cards = [
-      { id: "c1", kind: "decision", title: "Ship it?" },
-      { id: "c2", kind: "decision", title: "Turn it on?" },
+      { id: "c1", kind: "decision", title: "Ship it?", ask: "Ready to go out." },
+      { id: "c2", kind: "decision", title: "Turn it on?", ask: "It is off now." },
     ];
     expect((await putBoard(server.base, { ...EXAMPLE_BOARD, needs: cards })).status).toBe(200);
     for (let i = 0; i < 50 && sent.length < 2; i += 1) await new Promise((resolve) => setTimeout(resolve, 10));

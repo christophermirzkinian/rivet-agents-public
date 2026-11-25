@@ -133,6 +133,31 @@ test("verify prints the selected option detail from the saved reply", async () =
   assert.equal(JSON.parse(result.stdout).item.choiceDetail, "Deploy to staging only");
 });
 
+test("verify and replies print an answer's stamp, and verify says when a device code's session gave it", async () => {
+  const base = { id: "r_01", itemId: "ship-1", decision: "approve", at: "2026-11-27T01:00:00.000Z" };
+  const coded = { via: "device-code", note: "answered from a code sign-in, not a passkey" };
+  for (const [stamps, shown] of [
+    [{ via: "device-code", item: { id: "ship-1", via: "device-code" } }, coded],
+    [{ item: { id: "ship-1", via: "device-code" } }, coded],
+    [{ passkey: true, item: { id: "ship-1", passkey: true } }, { passkey: true }],
+    [{ item: { id: "ship-1" } }, {}],
+  ]) {
+    const saved = { ...base, ...stamps };
+    const verify = await cli(["verify", "r_01"], { fetch: async () => new Response(JSON.stringify(saved), { status: 200 }) });
+    assert.equal(verify.code, 0, verify.stderr);
+    const { passkey, via, note } = JSON.parse(verify.stdout);
+    assert.deepEqual(JSON.parse(JSON.stringify({ passkey, via, note })), shown);
+    const replies = await cli(["replies"], { fetch: async () => new Response(JSON.stringify({ replies: [saved] }), { status: 200 }) });
+    assert.equal(replies.code, 0, replies.stderr);
+    assert.deepEqual(JSON.parse(replies.stdout).replies, [saved]);
+  }
+});
+
+test("unhold's help says a code-made answer is not the owner's yes", async () => {
+  const help = await cli(["help"]);
+  assert.equal(help.stdout.match(/An answer from a code sign-in is not the owner's yes\n/g)?.length, 2);
+});
+
 test("verify omits malformed legacy choice detail and retains the full bounded detail", async () => {
   for (const detail of [null, {}, 4, [], "", "  ", "x".repeat(1001), "x\n".repeat(489) + "Deploy to staging only"]) {
     const saved = { id: "r_01", decision: "choice", choice: "Proceed", item: { choiceDetail: detail } };
@@ -773,7 +798,7 @@ test("a yes to the old video keeps the hold, whether the bridge takes it during 
     const file = holdsFile([]);
     assert.equal((await cli(["card", "add", "vc-5", "--title", "Theme refresh", "--pr", "41", "--option", "Yes, keep it", "--after", a.file, "--skip-preflight"], { fetch: server.fetch, holdsFile: file })).code, 0);
     const later = new Date(NOW.getTime() + 60_000);
-    const old = { itemId: "vc-5", at: new Date(later.getTime() + 500).toISOString(), decision: "approve", item: { pr: 41, videoSha: a.sha256 } };
+    const old = { itemId: "vc-5", at: new Date(later.getTime() + 500).toISOString(), decision: "approve", item: { pr: 41, videoSha: a.sha256, passkey: true } };
     const fetchFn = /** @type {typeof fetch} */ (async (url, init) => {
       if (during && init?.method === "PATCH") assert.deepEqual(releaseForYes(old, { file }).released, []);
       return server.fetch(url, init);
@@ -782,7 +807,7 @@ test("a yes to the old video keeps the hold, whether the bridge takes it during 
     assert.equal(r.code, 0, r.stderr);
     assert.deepEqual(releaseForYes(old, { file }), { released: [], kept: [{ pr: 41, card: "vc-5", why: "video" }] });
     assert.deepEqual(readHolds(file).holds.map((h) => [h.pr, h.since, h.video]), [[41, later.toISOString(), b.sha256]]);
-    assert.deepEqual(releaseForYes({ ...old, item: { pr: 41, videoSha: b.sha256 } }, { file }).released, [41]);
+    assert.deepEqual(releaseForYes({ ...old, item: { pr: 41, videoSha: b.sha256, passkey: true } }, { file }).released, [41]);
   }
 });
 
@@ -793,7 +818,7 @@ test("a before-only video edit: a yes to the old video taken during the write is
   assert.equal((await cli(["card", "add", "vc-6", "--title", "Theme refresh", "--pr", "41", "--option", "Yes, keep it", "--after", a.file, "--skip-preflight"], { fetch: server.fetch, holdsFile: file })).code, 0);
   let t = NOW.getTime() + 60_000;
   const now = () => new Date((t += 1000));
-  const old = { itemId: "vc-6", at: new Date(NOW.getTime() + 61_500).toISOString(), decision: "approve", item: { pr: 41, videoSha: a.sha256 } };
+  const old = { itemId: "vc-6", at: new Date(NOW.getTime() + 61_500).toISOString(), decision: "approve", item: { pr: 41, videoSha: a.sha256, passkey: true } };
   const fetchFn = /** @type {typeof fetch} */ (async (url, init) => {
     if (init?.method === "PATCH") releaseForYes(old, { file });
     return server.fetch(url, init);
@@ -811,7 +836,7 @@ test("a before-only video edit whose answer is lost: the hold is placed again as
   assert.equal((await cli(["card", "add", "vc-8", "--title", "Theme refresh", "--pr", "41", "--option", "Yes, keep it", "--after", a.file, "--skip-preflight"], { fetch: server.fetch, holdsFile: file })).code, 0);
   let t = NOW.getTime() + 60_000;
   const now = () => new Date((t += 1000));
-  const old = { itemId: "vc-8", at: new Date(NOW.getTime() + 61_500).toISOString(), decision: "approve", item: { pr: 41, videoSha: a.sha256 } };
+  const old = { itemId: "vc-8", at: new Date(NOW.getTime() + 61_500).toISOString(), decision: "approve", item: { pr: 41, videoSha: a.sha256, passkey: true } };
   const fetchFn = /** @type {typeof fetch} */ (async (url, init) => {
     if (init?.method !== "PATCH") return server.fetch(url, init);
     releaseForYes(old, { file });
@@ -849,7 +874,7 @@ test("a reused card id: a yes to the revision about the new PR and video release
   assert.equal((await cli(["card", "add", "vid", "--title", "Theme refresh", "--pr", "41", "--option", "Yes, keep it", "--after", a.file, "--skip-preflight"], { fetch: server.fetch, holdsFile: file })).code, 0);
   const r = await cli(["card", "add", "vid", "--replace", "--title", "Theme refresh", "--pr", "50", "--option", "Yes, keep it", "--after", b.file, "--skip-preflight"], { fetch: server.fetch, holdsFile: file });
   assert.equal(r.code, 0, r.stderr);
-  const yes = releaseForYes({ itemId: "vid", at: new Date(NOW.getTime() + 1_000).toISOString(), decision: "approve", item: { pr: 50, videoSha: b.sha256 } }, { file });
+  const yes = releaseForYes({ itemId: "vid", at: new Date(NOW.getTime() + 1_000).toISOString(), decision: "approve", item: { pr: 50, videoSha: b.sha256, passkey: true } }, { file });
   assert.deepEqual(yes, { released: [50], kept: [{ pr: 41, card: "vid", why: "unnamed" }] });
   assert.deepEqual(readHolds(file).holds.map((h) => h.pr), [41]);
 });
@@ -860,7 +885,7 @@ test("a --pr edit: a yes to the revision before it keeps the new PR's hold", asy
   const file = holdsFile([]);
   assert.equal((await cli(["card", "add", "vc-7", "--title", "Theme refresh", "--pr", "41", "--option", "Yes, keep it", "--after", a.file, "--skip-preflight"], { fetch: server.fetch, holdsFile: file })).code, 0);
   assert.equal((await cli(["card", "edit", "vc-7", "--pr", "50"], { fetch: server.fetch, holdsFile: file })).code, 0);
-  const before = releaseForYes({ itemId: "vc-7", at: new Date(NOW.getTime() + 1_000).toISOString(), decision: "approve", item: { pr: 41, videoSha: a.sha256 } }, { file });
+  const before = releaseForYes({ itemId: "vc-7", at: new Date(NOW.getTime() + 1_000).toISOString(), decision: "approve", item: { pr: 41, videoSha: a.sha256, passkey: true } }, { file });
   assert.deepEqual(before.kept, [{ pr: 50, card: "vc-7", why: "unnamed" }]);
   assert.deepEqual(readHolds(file).holds.map((h) => h.pr), [50]);
 });
@@ -915,7 +940,7 @@ test("rivet hold places its own entry beside a video card's hold, and that card'
   const r = await cli(["hold", "12", "--reason", "not until the review", "--repo", "example-org/example-repo"], holdDeps(file));
   assert.match(r.stdout, /^holds\.json: merge hold on #12 added\n/);
   assert.deepEqual(readHolds(file).holds, [card, { pr: 12, reason: "not until the review" }]);
-  assert.deepEqual(releaseForYes({ itemId: "vc-1", at: new Date(NOW.getTime() + 1_000).toISOString(), decision: "approve", item: { pr: 12 } }, { file }).released, [12]);
+  assert.deepEqual(releaseForYes({ itemId: "vc-1", at: new Date(NOW.getTime() + 1_000).toISOString(), decision: "approve", item: { pr: 12, passkey: true } }, { file }).released, [12]);
   assert.deepEqual(readHolds(file).holds, [{ pr: 12, reason: "not until the review" }]);
 });
 

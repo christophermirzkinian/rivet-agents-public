@@ -304,11 +304,12 @@ const lines = (text) => text.split(/\r\n|\r|\n/);
 
 // A Rivet owner-decision record (templates.mjs githubCommentBody): a "**Owner decision (via Rivet): …**" headline ,
 // field lines up to the first blank line, and its reply marker last (a reply id as validate.mjs takes it). Its "Item:"
-// and "Asked:" fields quote the card's question ("Your yes also lifts the "do not merge" note"), so they are not read;
-// the headline, "Choice:" and "Choice detail:" lines and the owner's own quoted words are read as in any comment.
+// and "Asked:" fields quote the card's question ("Your yes also lifts the "do not merge" note") and its sign-in line
+// (templates.mjs CODE_ANSWER, NO_MARK) is the bridge's own, so they are not read; the headline, "Choice:" and "Choice
+// detail:" lines and the owner's own quoted words are read as in any comment.
 const RECORD_HEAD = /^\*\*Owner decision \(via Rivet\): .*\*\*$/;
 const RECORD_MARK = /^<!-- rivet-reply:[\w.-]{1,100} decision=[a-z]+ -->$/;
-const RECORD_QUESTION = /^(?:Item|Asked): /;
+const RECORD_QUESTION = /^(?:(?:Item|Asked): |answered from a code sign-in, not a passkey$|answered with no passkey mark$)/;
 
 /**
  * A text's lines as written (`raw`) and as they are read for holds (`read`, line for line): a decision record's

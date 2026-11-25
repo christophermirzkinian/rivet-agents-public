@@ -163,7 +163,7 @@ function saveRow(row: BehaviourRow, value: BehaviourValue): void {
         }, LATE_READ_MS);
         return;
       }
-      if (error instanceof api.ApiError && error.status === 403) setSignedInByCode(true);
+      if (api.needsPasskey(error)) setSignedInByCode(true);
       else refused(error);
       // A failed save may still have landed (a cut-off), and a refused switch's file may have moved: read what the
       // server holds now.

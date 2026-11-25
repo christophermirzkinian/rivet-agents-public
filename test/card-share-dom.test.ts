@@ -334,6 +334,11 @@ describe("Share on a card", () => {
     expect(flashed).toEqual(["Copied"]);
   });
 
+  it("sends a card answered in its chat as written (a-1012)", () => {
+    expect(cardShareText({ title: "Rivet lost the file", ask: "Rivet said so", inChat: { label: "To the team" } })).toBe("Rivet lost the file\n\nRivet said so");
+    expect(cardShareText({ title: "Rivet lost the file" })).toBe("Rivet lost the file");
+  });
+
   it("keeps the tap from opening the card's thread", () => {
     const card = document.createElement("article");
     const opened = vi.fn();

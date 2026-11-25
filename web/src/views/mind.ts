@@ -10,6 +10,7 @@ import { agentName, hostedPage } from "../cloud-agent.js";
 import { h, keepFocus } from "../dom.js";
 import { onSessionReset, sameSession } from "../session.js";
 import { readingFrame, readingNotes, type Reading } from "./reading.js";
+import { loadMindSetup, mindSetupReading, openMindSetup, paintMindSetup } from "./mind-setup.js";
 import { textScale } from "./chat-text-size.js";
 
 // Rivet's mind, a menu page: every memory, topic, note and decision in the folders you name as one graph to pinch, drag
@@ -104,10 +105,17 @@ let page: Page | null = null;
 export function mount(el: HTMLElement): void {
   unmount();
   root = el;
+  openMindSetup();
   paint();
-  void loadMind().then(() => {
+  void loadAll().then(() => {
     if (root === el) paint();
   });
+}
+
+/** A hosted machine with no map has the questions instead (mind-setup.ts). */
+async function loadAll(): Promise<void> {
+  await loadMind();
+  if (hostedPage() && mindData.loaded && !mindData.graph?.nodes.length) await loadMindSetup();
 }
 
 export function unmount(): void {
@@ -117,7 +125,7 @@ export function unmount(): void {
 }
 
 export function refresh(): Promise<void> {
-  const load = loadMind().then(() => {
+  const load = loadAll().then(() => {
     if (root) paint();
   });
   paint();
@@ -131,6 +139,12 @@ function paint(): void {
   if (!graph || !graph.nodes.length) {
     page?.destroy();
     page = null;
+    if (hostedPage() && mindData.loaded && mindSetupReading() !== "none") {
+      const setup = mindSetupReading();
+      if (setup === "ready") paintMindSetup(root);
+      else root.replaceChildren(h("div", { class: "mind mind-empty" }, readingFrame({ ...reading, has: false, failed: setup === "failed", busy: setup === "busy" }, () => [])));
+      return;
+    }
     // A map not sent yet is no numbers read: a failed refresh says so plainly, never "the last numbers read".
     const empty = { ...reading, has: mindData.loaded && !mindData.error };
     root.replaceChildren(h("div", { class: "mind mind-empty" }, readingFrame(empty, () => [h("p", { class: "mind-note" }, EMPTY_NOTE)])));

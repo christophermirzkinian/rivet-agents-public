@@ -38,6 +38,7 @@ import {
   type BoardResponse,
   type Need,
   type CardComment,
+  type Decision,
   type PushConfigResponse,
   type Reply,
   type ReplyItem,
@@ -50,6 +51,7 @@ import { GITHUB_STALE_MS } from "../shared/ops.js";
 import { isStale } from "./ops/view.js";
 import { chatName, STORED_NAME } from "../shared/names.js";
 import { workerSnapshotSchema, type WorkersResponse } from "../shared/workers.js";
+import { mayActByCode, releasesHold } from "./answer-acts.js";
 import { createAuth, type Auth } from "./auth.js";
 import { sha256, type Config } from "./config.js";
 import { BridgeChannel, FEATURES_HEADER, parseFeatures } from "./events.js";
@@ -72,6 +74,7 @@ import { Store } from "./store.js";
 import { ShortTitles } from "./short-titles.js";
 import { deriveWorkers } from "./workers.js";
 import { BOARD_MEDIA, parseRedacted, redactBody, redactText } from "./redact.js";
+import { cardFieldRefusals, cardFieldsLine, cardsFieldsLine } from "./card-fields.js";
 import { isRetiredCard, isWait, withoutWaits, withWaits } from "./asks/waits.js";
 import { BehavioursStore, OWNER } from "./behaviours.js";
 import { CARD_VIDEO_SIZES, checkCards, mediaSizeReader } from "./card-check.js";
@@ -229,6 +232,11 @@ export function createApp(
     if (!auth.hasPasskeySession(request)) throw new HttpError(403, `sign in with a passkey to ${to}`);
   }
 
+  /** Whether that answer to the card's revision arms its merge: none down the line from a merged Reopen does. */
+  function arms(need: Need, rev: string, decision: Decision, choice?: string): boolean {
+    return config.merge && armsMerge(need, decision, choice) && !(need.again && isMergedReopen(store.latestReopens([need.id]).get(need.id), rev));
+  }
+
   async function handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const url = new URL(request.url ?? "/", "http://localhost");
     const path = url.pathname;
@@ -253,7 +261,10 @@ export function createApp(
           ? {
               version: stored?.version ?? 0,
               updatedAt: stored?.updatedAt ?? null,
-              board: { ...board, needs: withSeen(store, [...board.needs, ...cards].map((need) => ({ ...need, rev: needRev(need) }))) },
+              board: { ...board, needs: withSeen(store, [...board.needs, ...cards].map((need) => {
+                const rev = needRev(need);
+                return { ...need, ...(rivet ? {} : passkeyAnswers(need, (decision, choice) => arms(need, rev, decision, choice))), rev };
+              })) },
               minimised: store.minimised(),
             }
           : { version: 0, updatedAt: null, board: null, minimised: store.minimised() };
@@ -520,7 +531,7 @@ export function createApp(
   function writeBoard(
     ifMatch: number | null,
     change: BoardChange,
-    { sizeCap = true, progress = false, guard, check = false, sentAs, unpushed }: { sizeCap?: boolean; progress?: boolean; guard?: BoardGuard; check?: boolean; sentAs?: { id: string } & Partial<Need>; unpushed?: string } = {},
+    { sizeCap = true, progress = false, guard, check = false, titled = false, sentAs, unpushed }: { sizeCap?: boolean; progress?: boolean; guard?: BoardGuard; check?: boolean; titled?: boolean; sentAs?: { id: string } & Partial<Need>; unpushed?: string } = {},
   ): { status: number; body: unknown; headers?: Record<string, string> } {
     const stored = store.getBoard();
     if (ifMatch !== null && ifMatch !== (stored?.version ?? 0)) return { status: 409, body: { error: "board version is stale", version: stored?.version ?? 0 } };
@@ -542,6 +553,17 @@ export function createApp(
     const sentLabels = labels(asSent.data as Board);
     const folded = [...labels(parsed.data).entries()].find(([id, size]) => size < (sentLabels.get(id) ?? 0));
     if (folded) return { status: 400, body: { error: `card ${folded[0]}: two options read the same once redacted; reword them` } };
+    // What the app would not draw is refused, never stored unseen: the cards as sent, before news becomes a Got it card or
+    // makes room. A card stored as it is never blocks a write; a wait card is the server's, and say.mjs's may be a title alone.
+    if (check) {
+      const storedNeeds = new Map((stored?.board.needs ?? []).map((need) => [need.id, need]));
+      const clean = <T>(row: T) => redactBody(row, BOARD_MEDIA);
+      const wrong = ((withoutWaits(sent) as Partial<Board>).needs ?? []).flatMap((need) => {
+        const refusals = cardFieldRefusals(need, { stored: storedNeeds.get(need.id), titled, clean });
+        return refusals.length ? [cardFieldsLine(clean({ id: need.id }).id, refusals)] : [];
+      });
+      if (wrong.length) return { status: 422, body: { error: cardsFieldsLine(wrong) } };
+    }
     const refused = stored && guard?.(stored.board, parsed.data);
     // Not a 409, which a whole-board writer (push-board) reads as a stale version and retries.
     if (refused) return { status: 422, body: { error: refused } };
@@ -626,7 +648,7 @@ export function createApp(
           const need = { since: now().toISOString(), ...card, kind: card.kind === QUESTION || card.kind === DECISION ? card.kind : UPDATE };
           return { board: stamped(board, "needs", [...board.needs, need]), item: (stored) => stored.needs.find((one) => one.id === card.id) ?? null };
         },
-        { progress, check, sentAs: sent, ...(silent ? { unpushed: card.id } : {}) },
+        { progress, check, titled: true, sentAs: sent, ...(silent ? { unpushed: card.id } : {}) },
       );
       if (status !== 200) return { status, error: String((body as { error?: unknown }).error) };
       // A full board of question cards makes room by dropping updates, this one included: then it was not added.
@@ -857,6 +879,11 @@ export function createApp(
     } else if (body.choice !== undefined) {
       throw new HttpError(400, "choice is only allowed with decision=choice");
     }
+    // Here a note is an answer by itself (inChatSchema): an app from before that rule sends the pick beside it, and the
+    // note may be against the pick.
+    if (need.inChat?.noted && body.decision === "choice" && (text || images.length || body.files)) {
+      throw new HttpError(400, "this card takes a pick or a note, not both: clear the note, or send it as a comment");
+    }
     if (body.decision === "comment" && !text && !images.length && !body.files) throw new HttpError(400, "a comment needs text, an image or a file");
     if (body.decision === "dismiss" && (text || images.length || body.files)) throw new HttpError(400, "a dismiss carries no answer; send a comment instead");
     // A reject always says why: the app's popup asks, and an old app, worker or outbox entry is held to it.
@@ -889,7 +916,13 @@ export function createApp(
       throw new HttpError(428, `this is a ${need.risk} change: confirm it`);
     }
     // A card reopened after the merge its answer started has merged takes a follow-up: no yes to it merges again.
-    const arming = config.merge && armsMerge(need, body.decision, body.choice) && !(need.again && isMergedReopen(store.latestReopens([need.id]).get(need.id), body.rev));
+    const arming = arms(need, body.rev, body.decision, body.choice);
+    if (arming) requirePasskeySession(request, "merge a pull request");
+    // One read of the session for the refusal and the stamp: an answer it lets through as code-made acts on nothing.
+    const session = auth.sessionKind(request);
+    if (!session) throw new HttpError(401, "sign in first");
+    const shut = session === "passkey" ? null : needsPasskey(need, body.decision, body.choice);
+    if (shut) throw new HttpError(403, `sign in with a passkey to ${shut}`);
     const mergeRefusal = arming ? bridge.cardMergeRefusal() : null;
     if (mergeRefusal) throw new HttpError(424, mergeRefusal);
     const dismissRefusal = body.decision === "dismiss" ? bridge.dismissRefusal() : null;
@@ -905,7 +938,7 @@ export function createApp(
     const choiceDetail = typeof detail === "string" && detail.trim() !== "" && detail.length <= MAX_CHOICE_DETAIL ? detail : undefined;
     // After Answer again, the answer this one changes: Rivet acts on this one instead.
     const earlier = need.again ? store.getReply(need.again.after) : null;
-    const changes = earlier ? { replyId: earlier.id, decision: earlier.decision, ...(earlier.choice ? { choice: earlier.choice } : {}) } : undefined;
+    const changes = earlier ? { replyId: earlier.id, decision: earlier.decision, ...(earlier.choice ? { choice: earlier.choice } : {}), ...(earlier.item.via ? { via: earlier.item.via } : {}) } : undefined;
     // The comparison a merge hold is bound to (bridge/lib/card-holds.mjs cardVideo): on a card with a video in either
     // role, the after media and the before media's sha256 joined by `+` (either alone when the card has only one).
     const after = need.media?.after;
@@ -928,6 +961,7 @@ export function createApp(
       ...(need.headSha ? { headSha: need.headSha } : {}),
       ...(need.risk ? { risk: need.risk } : {}),
       ...(arming ? { merge: true as const } : {}),
+      ...(session === "passkey" ? { passkey: true as const } : { via: session }),
       ...(changes ? { changes } : {}),
       ...(videoSha ? { videoSha } : {}),
       // Every card's links, video or not: a video card's merge hold may be on a PR only a link names (card-holds.mjs).
@@ -967,7 +1001,7 @@ export function createApp(
       json(response, 201, handled);
       return;
     }
-    if (isUpdate(need) && body.decision === "comment") addCommentIfThere(need.id, { from: "owner", text: commentText(text, images.length, files?.length ?? 0), at: reply.at });
+    if (isUpdate(need) && body.decision === "comment") addCommentIfThere(need.id, { from: "owner", text: commentText(text, images.length, files?.length ?? 0), at: reply.at, ...(reply.note ? { note: reply.note } : {}) });
     bridge.send(reply);
     json(response, 201, reply);
   }
@@ -1024,7 +1058,7 @@ export function createApp(
     if (!first) throw new HttpError(409, "this card has no answer to change yet");
     // A merge an answer started is under way the moment it lands: no later answer can take it back while it runs. Once
     // its PR has merged, a new answer is a follow-up.
-    const arming = store.repliesAt(id, rev).find((reply) => reply.item.merge);
+    const arming = store.repliesAt(id, rev).find((reply) => reply.item.merge && mayActByCode(reply));
     // A revision a merged Reopen opened stays merged however often it is reopened: no answer down the line merges again.
     const merged = arming ? isMerged(arming) : isMergedReopen(store.latestReopens([id]).get(id), rev);
     if (arming && !merged) throw new HttpError(409, "that answer started the merge; it can't be changed here");
@@ -1052,7 +1086,8 @@ export function createApp(
     // Its notice names the card as it was reopened, whatever later writes do to the card under its id.
     const notice = { title: next.title, ...(next.chat ? { chat: next.chat } : {}), ...(next.repo ? { repo: next.repo } : {}) };
     announceReopen(store, bridge, store.addReopen({ cardId: id, rev: needRev(next), at, replyId: first.id, merged, ...notice }));
-    return { ...written, item: { ...next, rev: needRev(next) } };
+    const nextRev = needRev(next);
+    return { ...written, item: { ...next, ...passkeyAnswers(next, (decision, choice) => arms(next, nextRev, decision, choice)), rev: nextRev } };
   }
 
   /** The asks a wait card can come from: every one not yet shipped or parked. */
@@ -1315,6 +1350,19 @@ export function withAgain(stored: Board | null, board: Board): Board {
   };
 }
 
+/** What that answer to the card does that only a session a passkey made may, or null; a merge-ready card's merge is createReply's own. */
+function needsPasskey(need: Need, decision: Decision, choice?: string): string | null {
+  return releasesHold(need, decision, choice) ? "release a pull request's merge hold" : null;
+}
+
+/** The card's answers POST /api/replies refuses a session a device code alone made, as the app's window draws them. */
+function passkeyAnswers(need: Need, arms: (decision: Decision, choice?: string) => boolean): Pick<ServedNeed, "passkeyAnswers"> {
+  const shut = (decision: Decision, choice?: string) => arms(decision, choice) || needsPasskey(need, decision, choice) !== null;
+  const labels = (need.options ?? []).map((option) => option.label).filter((label) => shut("choice", label));
+  if (canApprove(need) && shut("approve")) labels.push("approve");
+  return labels.length ? { passkeyAnswers: labels } : {};
+}
+
 /** The served cards, each update card you have seen at its current rev marked so, however old your Seen is. */
 function withSeen(store: Pick<Store, "answeredCards">, needs: ServedNeed[]): ServedNeed[] {
   const updates = needs.filter(isUpdate);
@@ -1398,6 +1446,8 @@ export function needRev(need: Need): string {
     // An update card's: a new comment (Rivet's answer) is a new revision, so the card shows as new again after Seen.
     ...pick(need, ["thread", "tag"]),
     ...(need.comments ? { comments: need.comments } : {}),
+    // Absent on every other card, so their revs are unchanged: without it the words would no longer be shown as they are.
+    ...(need.inChat ? { inChat: need.inChat } : {}),
     // Answer again: a new revision for a new answer, while the first answer to the one before stays of record.
     ...(need.again ? { again: need.again } : {}),
   };

@@ -355,6 +355,10 @@ html.desktop .decide-sheet > .sheet-handle {
   line-height: 1.4;
 }
 
+.decide-sheet .card-body > .wa-held {
+  color: var(--text);
+}
+
 .decide-sheet .ask-points {
   display: flex;
   flex-direction: column;
@@ -673,11 +677,13 @@ html.desktop .decide-sheet > .sheet-handle {
 }
 
 .decide-sheet .choices.paired > .rec,
+.decide-sheet .choices.paired > .merge-passkey,
 .decide-sheet .choices.paired > .wide {
   grid-column: 1 / -1;
 }
 
-.decide-sheet .choices.paired > .rec {
+.decide-sheet .choices.paired > .rec,
+.decide-sheet .choices.paired > .merge-passkey {
   order: -1;
 }
 

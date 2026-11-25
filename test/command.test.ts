@@ -1860,7 +1860,7 @@ describe("a merge-ready card", () => {
     expect(await status([{ label: "Merge", recommended: true }, { label: "Hold it", recommended: true }])).toBe(400);
     expect(await status([{ label: "Merge", recommended: true }, { label: "Hold it" }])).toBe(200);
     // Any other kind keeps its options as they were.
-    expect((await putBoard(server.base, { ...MERGE_BOARD, needs: [{ id: "d", kind: "decision", title: "D", options: [{ label: "A" }, { label: "A" }] }] })).status).toBe(200);
+    expect((await putBoard(server.base, { ...MERGE_BOARD, needs: [{ id: "d", kind: "decision", title: "D", ask: "Which?", options: [{ label: "A" }, { label: "A" }] }] })).status).toBe(200);
   });
 
   it("the card's headSha is part of its rev and goes into the answer's snapshot", async () => {
@@ -1871,6 +1871,69 @@ describe("a merge-ready card", () => {
     await connectBridge(FEATURES);
     const reply = (await (await answer("mr-plain", { decision: "approve" })).json()) as { item: Record<string, unknown> };
     expect(reply.item).toMatchObject({ kind: "merge-ready", pr: 105, headSha: "c".repeat(40) });
+  });
+
+  it.each([
+    ["mr-plain", { decision: "approve" }],
+    ["mr-options", { decision: "choice", choice: "Merge" }],
+  ])("with merging on, refuses the yes on %s from a session a device code alone made and keeps no answer, where a passkey session's arms the merge; with it off the yes arms nothing and goes", async (itemId, body) => {
+    const codeMade = () => {
+      const value = "c".repeat(43);
+      server.app.store.addSession(createHash("sha256").update(value).digest("hex"), 60_000, "device-code");
+      return browser(`__Host-rivet=${value}`);
+    };
+    const answerAs = async (headers: Record<string, string>) => post("/api/replies", { clientId: clientId(), itemId, rev: await revOf(server.base, cookie, itemId), ...body }, headers);
+    const off = await answerAs(codeMade());
+    expect(off.status).toBe(201);
+    expect(((await off.json()) as { item: Record<string, unknown> }).item.merge).toBeUndefined();
+
+    await server.close();
+    server = await startServer({ RIVET_MERGE: "on" }, { now: clock.now });
+    cookie = server.cookie();
+    expect((await putBoard(server.base, MERGE_BOARD)).status).toBe(200);
+    const stream = await connectBridge(`${FEATURES},card-merge`);
+    const refused = await answerAs(codeMade());
+    expect([refused.status, await refused.json()]).toEqual([403, { error: "sign in with a passkey to merge a pull request" }]);
+    expect(server.app.store.listReplies({ limit: 10 })).toEqual([]);
+    expect(await audit()).toEqual([]);
+    const response = await answer(itemId, body);
+    expect(response.status).toBe(201);
+    const reply = (await response.json()) as { id: string; item: Record<string, unknown> };
+    expect(reply.item.merge).toBe(true);
+    await stream.waitFor(1);
+    expect(stream.events().map((event) => [event.event, event.data.id])).toEqual([["reply", reply.id]]);
+    stream.abort();
+  });
+
+  it("a yes that would release a merge hold is refused a session a device code alone made, and only a passkey session's answer carries the server's mark", async () => {
+    vi.stubEnv("RIVET_REPOS", MS);
+    try {
+      const commands = new CommandStore(server.dataDir);
+      commands.putMedia("a".repeat(64), "video/mp4", 1, Date.now());
+      commands.close();
+      const video = { kind: "video", after: { sha256: "a".repeat(64), type: "video/mp4" } };
+      expect((await putBoard(server.base, { ...MERGE_BOARD, needs: [{ id: "held", kind: "approval", title: "Touch guard", ask: "Keep it? (#105)", media: video }, { id: "free", kind: "approval", title: "Menu fix" }] })).status).toBe(200);
+      const value = "c".repeat(43);
+      server.app.store.addSession(createHash("sha256").update(value).digest("hex"), 60_000, "device-code");
+      const byCode = browser(`__Host-rivet=${value}`);
+      const answerAs = async (headers: Record<string, string>, itemId: string, body: Record<string, unknown>) =>
+        post("/api/replies", { clientId: clientId(), itemId, rev: await revOf(server.base, cookie, itemId), ...body }, headers);
+      const refused = await answerAs(byCode, "held", { decision: "approve" });
+      expect([refused.status, await refused.json()]).toEqual([403, { error: "sign in with a passkey to release a pull request's merge hold" }]);
+      expect(server.app.store.listReplies({ limit: 10 })).toEqual([]);
+      const stamps = async (response: Response) => {
+        const { passkey, via, item } = (await response.json()) as { passkey?: boolean; via?: string; item: Record<string, unknown> };
+        return [passkey, via, item.passkey, item.via];
+      };
+      const free = await answerAs(byCode, "free", { decision: "approve", passkey: true, via: "passkey", item: { passkey: true, via: "passkey" } });
+      expect(free.status).toBe(201);
+      expect(await stamps(free)).toEqual([undefined, "device-code", undefined, "device-code"]);
+      const mine = await answer("held", { decision: "approve", passkey: false, via: "device-code", item: { via: "device-code" } });
+      expect(mine.status).toBe(201);
+      expect(await stamps(mine)).toEqual([true, undefined, true, undefined]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("Dismiss on a merge-ready card arms nothing and needs no confirm; it carries no answer; an old bridge refuses it", async () => {
