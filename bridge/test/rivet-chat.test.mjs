@@ -339,7 +339,24 @@ test("a hosted agent's Copilot chat starts on copilot with every tool and path a
   assert.equal(await main(["new", "cp-2", "--cwd", workdir, "--provider", "copilot", "--prompt", "--help"], { ctx: on, out: () => {} }), 0);
   assert.ok(await waitFor(() => runner.read(on, "cp-2").replace(/\n/g, "").includes("--disable-builtin-mcps --secret-env-vars=COPILOT_GITHUB_TOKEN --interactive=--help [0 copilot vars]")), runner.read(on, "cp-2"));
   assert.equal(runner.list(on).find((one) => one.name === "cp-2").provider, "copilot");
-  for (const name of ["cp-1", "cp-2"]) runner.close(on, name);
+  // A phone message starts its chat as the bridge does, with no --provider: the plan that goes first, though Claude is
+  // connected too, and with Copilot the only plan connected.
+  const phone = hosted({ claude: claudeOn, codex: codexOut, "copilot-status": copilotOn });
+  assert.equal(await main(["new", "cp-3", "--cwd", workdir, "--prompt", "hello there"], { ctx: phone, out: () => {} }), 0);
+  assert.equal(runner.list(phone).find((one) => one.name === "cp-3").provider, "copilot", "no --provider: the plan that goes first, not Claude");
+  assert.equal(await main(["new", "cp-4", "--cwd", workdir], { ctx: on, out: () => {} }), 0, "with only GitHub Copilot connected the chat still starts");
+  assert.equal(runner.list(on).find((one) => one.name === "cp-4").provider, "copilot");
+  // A provider named is the one the chat runs on, and one that is none of the three is a usage error.
+  assert.equal(await main(["new", "cp-5", "--cwd", workdir, "--provider", "claude"], { ctx: phone, out: () => {} }), 0);
+  assert.equal(runner.list(phone).find((one) => one.name === "cp-5").provider, "claude");
+  await assert.rejects(main(["new", "cp-6", "--cwd", workdir, "--provider", "other"], { ctx: phone }), (error) => error instanceof Usage && error.message === "--provider is claude, codex or copilot, not other");
+  nothingStarted(phone, "cp-6");
+  for (const name of ["cp-1", "cp-2", "cp-3", "cp-4", "cp-5"]) runner.close(on, name);
+  // An agent file that cannot be read names no plan: the command line starts nothing, rather than a chat on Claude.
+  fs.writeFileSync(agentFile, "{");
+  await assert.rejects(main(["new", "cp-7", "--cwd", workdir], { ctx: phone }), { message: "rivet-chat: Couldn't read which plan goes first (RIVET_AGENT_FILE), so no chat started" });
+  nothingStarted(phone, "cp-7");
+  fs.writeFileSync(agentFile, JSON.stringify({ firstPlan: "copilot" }));
 
   const out = hosted({ claude: claudeOut, codex: codexOut, "copilot-status": copilotOut });
   await assert.rejects(main(["new", "cp-out-1", "--cwd", workdir, "--provider", "copilot", "--prompt", "hello there"], { ctx: out }), { message: "rivet-chat: no chat started. GitHub Copilot isn't connected. Connect Claude, ChatGPT or GitHub Copilot on the Plans page." });
@@ -382,7 +399,9 @@ test("a hosted agent's Copilot chat starts on copilot with every tool and path a
   assert.ok(await waitFor(() => runner.read(plain, "cp-plain").replace(/\n/g, "").includes("agent up as cp-plain: --no-auto-update --disable-builtin-mcps --secret-env-vars=COPILOT_GITHUB_TOKEN --interactive=logout [0 copilot vars]")), runner.read(plain, "cp-plain"));
   assert.equal(fs.existsSync(reads), false, "with no agent file no status is read");
   assert.equal(runner.create(plain, { name: "cp-default", cwd: workdir }).provider, "claude", "and a chat with no provider named is Claude's");
-  for (const name of ["cp-plain", "cp-default"]) runner.close(plain, name);
+  assert.equal(await main(["new", "cp-default-2", "--cwd", workdir], { ctx: plain, out: () => {} }), 0);
+  assert.equal(runner.list(plain).find((one) => one.name === "cp-default-2").provider, "claude", "and so is one the command line starts");
+  for (const name of ["cp-plain", "cp-default", "cp-default-2"]) runner.close(plain, name);
 });
 
 test("at a plan's limit the chat's card names the first other plan that is signed in, GitHub Copilot when it is the one; a Copilot chat's limit is never read", { skip }, async () => {

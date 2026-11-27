@@ -1,11 +1,13 @@
 #!/usr/bin/env node
-// `node scripts/rivet-chat.mjs <command>`: your own Claude Code and Codex chats, in tmux on the rivet-chat socket.
+// `node scripts/rivet-chat.mjs <command>`: your own Claude Code, Codex and Copilot chats, in tmux on the rivet-chat socket.
 // Every command runs through the chat runner (scripts/chat-runner.mjs), which owns the registry
 // (~/.rivet-agents/chats/registry.json) and every tmux call.
 //
-//   new <name> [--cwd <dir>] [--prompt <text> | --prompt-file <f|->] [--provider claude|codex]
-//                                plain `claude` (or `codex`) on your own login, in an existing directory (default the
-//                                current one), with RIVET_CLAUDE_ARGS / RIVET_CODEX_ARGS before the prompt
+//   new <name> [--cwd <dir>] [--prompt <text> | --prompt-file <f|->] [--provider claude|codex|copilot]
+//                                plain `claude` (or `codex`, or `copilot`) on your own login, in an existing directory
+//                                (default the current one), with RIVET_CLAUDE_ARGS / RIVET_CODEX_ARGS /
+//                                RIVET_COPILOT_ARGS before the prompt. With no --provider it is `claude`, or a hosted
+//                                agent's first plan
 //   ls [--json]                  every chat and whether its session is alive, dead (its agent exited) or gone
 //   send <chat> --text <t> | --text-file <f|->
 //                                types the text, then Enter
@@ -23,7 +25,7 @@ import { isMain } from "./is-main.mjs";
 const USAGE = "usage: rivet-chat.mjs new|ls|send|interrupt|read|close|open (see the header)";
 const HELP = [
   "usage: rivet-chat.mjs <command>",
-  "  new <name> [--cwd <dir>] [--prompt <text> | --prompt-file <f|->] [--provider claude|codex]",
+  "  new <name> [--cwd <dir>] [--prompt <text> | --prompt-file <f|->] [--provider claude|codex|copilot]",
   "  ls [--json]",
   "  send <chat> --text <t> | --text-file <f|->",
   "  interrupt <chat>",
@@ -73,8 +75,9 @@ export async function main(argv = process.argv.slice(2), { ctx = runner.context(
     case "new": {
       const name = one(args, "new");
       if (flags.prompt !== undefined && flags["prompt-file"] !== undefined) throw new Usage("give --prompt or --prompt-file, not both");
-      const provider = flags.provider ?? "claude";
-      if (!runner.PROVIDERS.has(provider)) throw new Usage(`--provider is claude or codex, not ${provider}`);
+      // No --provider is none passed on: the runner then picks, a hosted agent's first plan or else Claude.
+      const provider = flags.provider;
+      if (provider !== undefined && !runner.PROVIDERS.has(provider)) throw new Usage(`--provider is claude, codex or copilot, not ${provider}`);
       const entry = runner.create(ctx, {
         name,
         cwd: flags.cwd ?? cwd,
