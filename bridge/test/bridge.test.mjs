@@ -6,7 +6,7 @@ import path from "node:path";
 import { mock, test } from "node:test";
 import { createCommandFamily } from "../lib/actions/command.mjs";
 import { actionTable } from "../lib/actions/index.mjs";
-import { backoffDelay, createBridge, runLoop, UNAUTHORIZED_MS } from "../lib/bridge.mjs";
+import { backoffDelay, createBridge, opsPickupDetail, runLoop, UNAUTHORIZED_MS } from "../lib/bridge.mjs";
 import { releaseForYes } from "../lib/card-holds.mjs";
 import { readMergeHolds } from "../lib/merge-holds.mjs";
 import { StateStore } from "../lib/state.mjs";
@@ -1241,6 +1241,19 @@ test("notifyMonitor types one sanitized line into the monitor chat, and says fal
   assert.equal(await unset.bridge.notifyMonitor("hello"), false);
   const refused = harness({ sendFail: ["monitor"] });
   assert.equal(await refused.bridge.notifyMonitor("hello"), false);
+});
+
+test("a pick-up's reason passes a database's fault texts, each exactly as the server writes it", () => {
+  const good = [
+    "2 of 3 machines running for 21 days",
+    "2 of 3 machines running, checks 6 of 9 passing for 16 minutes",
+    "Checks 6 of 9 passing for 2 hours",
+    "No machines for 1 day",
+    "No machines, Checks 0 of 3 passing for 1 hour",
+    "Not read from Fly for 16 minutes",
+  ];
+  for (const reason of good) assert.equal(opsPickupDetail(reason), reason);
+  for (const reason of ["2 of 3 machines running", "2 of 3 machines running for hunter2", "Not read from Fly for 16 minutes by hunter2", "Checks 6 of 9 passing for a while"]) assert.equal(opsPickupDetail(reason), "", reason);
 });
 /** A runner with its switch on, holding `chats`; records what it is told. */
 

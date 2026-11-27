@@ -32,7 +32,7 @@ function keyPart(name: string, max: number): string {
 
 /**
  * ci: the workflow name; pr: the number; app: its name on the Ops list; runner: the runner name; disk: the volume label;
- * machine: "mac"; schedule: the schedule's id; coming: the PR number, else the item's name. A ci, pr or coming key
+ * machine: "mac", or a database's Fly app name; schedule: the schedule's id; coming: the PR number, else the item's name. A ci, pr or coming key
  * outside the default repo starts with the repo's name, lowercased (GitHub names a repo without regard to case), and "/".
  */
 export function opsStatusKey(kind: OpsStatusKind, name: string, repo: string = NO_REPO): string {

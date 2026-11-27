@@ -270,7 +270,7 @@ function harness({ mode, beat = null, lock = null, knobs = null, at = "/w", ps =
  * A machine for the left-over sweep under `at`: this process under an orphaned ancestor, an orphaned dev server (201) in
  * the chat's folder with a child in it (202) and one outside it (207), and beside them processes the sweep must leave:
  * orphans in a sibling folder, another open chat's folder, a nested folder (205) and the temp folder (212), a shell with a
- * terminal (209), one with a live parent (210) and the tmux server (211), all in the folder. The sweep's own read also
+ * terminal (209), one with a live parent (210), the tmux server (211) and the container VM's daemons (223-229), all in the folder. The sweep's own read also
  * sees shared daemons, sign-ins, editors and ssh's connection master started since the pass began (213-222), each spared with what runs under it.
  */
 function leftovers(at) {
@@ -284,10 +284,18 @@ function leftovers(at) {
     [process.ppid, 1, "??", "zsh"], [process.pid, process.ppid, "??", "node chats-close.mjs"], [201, 1, "??", "node vite"], [202, 201, "??", "pnpm   dev"],
     [207, 201, "??", "esbuild --service"], [203, 1, "??", "node other"], [204, 1, "??", "claude"], [205, 1, "??", "tsx watch"], [206, 1, "??", "sleep 1"],
     [209, 1, "ttys003", "-zsh"], [210, 4321, "??", "node tool"], [211, 1, "??", "/opt/homebrew/bin/tmux -L rivet-chat new-session -d"], [212, 1, "??", "sleep 300"],
+    // The Mac's shared container VM, started from this folder long before the close: Colima, Lima's host agent and
+    // network daemons, and what runs under them; Podman's network proxy and VM.
+    [223, 1, "??", "colima daemon start default --inotify --inotify-runtime docker"], [224, 223, "??", "node colima-child"],
+    [225, 1, "??", "/opt/homebrew/bin/limactl hostagent --pidfile /h/.colima/_lima/colima/ha.pid --socket /h/.colima/_lima/colima/ha.sock colima"],
+    [226, 225, "??", "node hostagent-child"], [227, 1, "??", "/opt/colima/bin/socket_vmnet --vmnet-mode shared /h/.colima/_lima/_networks/shared/socket_vmnet.sock"],
+    [228, 1, "??", "/opt/homebrew/Cellar/podman/5.3.1/libexec/podman/gvproxy -listen-vfkit unixgram:///h/gvproxy.sock"],
+    [229, 1, "??", "/opt/homebrew/Cellar/podman/5.3.1/libexec/podman/vfkit --cpus 4 --memory 2048"],
   ];
   const cwds = [
     [process.ppid, `${at}/done`], [process.pid, `${at}/done`], [201, `${at}/done`], [202, `${at}/done/client`], [207, "/tmp/elsewhere"], [203, `${at}/done-2`],
     [204, `${at}/busy`], [205, `${at}/done/nested/x`], [209, `${at}/done`], [210, `${at}/done`], [211, `${at}/done`], [212, os.tmpdir()], [1, `${at}/done`],
+    [223, `${at}/done`], [224, `${at}/done`], [225, `${at}/done`], [226, `${at}/done`], [227, `${at}/done`], [228, `${at}/done`], [229, `${at}/done`],
     ...spare.map(([pid]) => [pid, `${at}/done`]),
   ];
   return {

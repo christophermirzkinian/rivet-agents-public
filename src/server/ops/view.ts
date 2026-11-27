@@ -16,6 +16,7 @@ import {
   zoneClock,
   type AppStatus,
   type ClaudeUsageSnapshot,
+  type DatabaseStatus,
   type FlySnapshot,
   type GithubSnapshot,
   type Health,
@@ -77,13 +78,22 @@ export function buildOps(input: {
   fly: FlySnapshot | null;
   checks: readonly HealthCheck[];
   health: Record<string, Health>;
+  /** The listed Fly Postgres apps and when each one's current trouble began (databaseTrouble). */
+  databases?: readonly string[];
+  databaseTrouble?: Readonly<Record<string, string>>;
   /** Each failing schedule's newest failed run (SchedulesStore.failingRuns). */
   failingRuns?: readonly (string | null)[];
   /** When the schedules were read. */
   schedulesAt?: string | null;
 }): OpsResponse {
   const { now, github, mac, fly } = input;
-  const apps = buildApps(input.checks, input.health, fly);
+  const flyApps = new Map((fly?.apps ?? []).map((app) => [app.app, app]));
+  const databases = (input.databases ?? []).map((app): DatabaseStatus => {
+    const read = flyApps.get(app);
+    return { app, machines: read?.machines ?? null, checks: read?.checks ?? null, troubleSince: input.databaseTrouble?.[app] ?? null };
+  });
+  // A database is no row on the app list: it has its own.
+  const apps = buildApps(input.checks, input.health, fly && { ...fly, apps: fly.apps.filter((app) => !(input.databases ?? []).includes(app.app)) });
   // An old Mac reading is no disk figure: the chip and the menu badge would hold it frozen.
   const worst = mac && !isStale(mac.at, MAC_STALE_MS, now) ? worstVolume(mac.volumes) : null;
   const freePct = worst ? Math.round((worst.freeBytes / worst.totalBytes) * 1000) / 10 : null;
@@ -99,6 +109,7 @@ export function buildOps(input: {
     flySource: fly?.source ?? null,
     healthStaleSince: staleHealthSince(apps, now),
     apps,
+    databases,
     summary: {
       needs: input.board?.needs.length ?? 0,
       redCi: red.length,

@@ -137,7 +137,7 @@ describe("the banner", () => {
     ]);
   });
 
-  it("still says no phone gets them when this one is blocked and was the last (the 2026-09-30 case)", async () => {
+  it("still says no phone gets them when this one is blocked and was the last", async () => {
     permission = "denied";
     stubBrowser(GONE);
     const health = await import("../web/src/push-health.js");

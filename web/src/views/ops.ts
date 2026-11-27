@@ -21,6 +21,7 @@ import {
   type OpsResponse,
   type Tone,
   macChats,
+  redDatabases,
 } from "../../../src/shared/ops.js";
 import { NO_REPO } from "../../../src/shared/repos.js";
 import type { OpsStatusKind } from "../../../src/shared/ops-status.js";
@@ -30,7 +31,7 @@ import { loadPushHealth, pushHealth } from "../push-health.js";
 import { brokenPrs, ciCurrent, failingSchedules, flyCurrent, githubCurrent, healthCurrent, macCurrent, opsAge, opsData, readingAge, refreshOps, watchOps } from "../ops-data.js";
 import { app, changed, go, refresh as refreshBoard, sameSession, setOpsPage, subscribe, type OpsPage } from "../state.js";
 import { costCard, type PillTone } from "./costs.js";
-import { calm, ciItem, currentAppItem, diskItem, dismissed, macItem, owned, prItem, pushItem, parked, quiet, runnerItem, scheduleItem, shade, type FailedItem } from "./ops-status.js";
+import { calm, ciItem, currentAppItem, databaseItem, diskItem, dismissed, macItem, owned, prItem, pushItem, parked, quiet, runnerItem, scheduleItem, shade, type FailedItem } from "./ops-status.js";
 import { nextBody, planBody } from "./ops-plan.js";
 import { countedSchedules, holdStatusLine, releaseStatusLine, schedulesOwned } from "./status-line.js";
 import { scheduleApi, scheduleLines, schedulesStale } from "./schedules.js";
@@ -64,6 +65,7 @@ const SECTION_TAB: Record<string, OpsPage> = {
   runners: "machines",
   mac: "machines",
   boxes: "machines",
+  databases: "machines",
   schedules: "machines",
 };
 
@@ -246,6 +248,47 @@ function allSections(ops: OpsResponse | null): Section[] {
   return [
     macSection(ops),
     runnersSection(ops),
+    ...databasesSection(ops),
+  ];
+}
+
+/** The red databases a current Fly reading names, as Machines and its Wrong rows both list them. */
+function shownRedDatabases(ops: OpsResponse | null): ReturnType<typeof redDatabases> {
+  return ops ? redDatabases(ops).filter(({ database }) => flyCurrent(ops, database.app)) : [];
+}
+
+/** How many listed databases the page cannot vouch for: all of them while the Fly reading is old or missing, else those Fly could not read. */
+function uncheckedDatabases(ops: OpsResponse | null): number {
+  const databases = ops?.databases ?? [];
+  return ops ? databases.filter((database) => !flyCurrent(ops, database.app)).length : 0;
+}
+
+/**
+ * Databases with a machine stopped or a check failing for over 15 minutes, each with what is wrong, and a grey line
+ * for those Fly could not be read for; no section while every one is read and none is red.
+ */
+function databasesSection(ops: OpsResponse | null): Section[] {
+  const red = shownRedDatabases(ops);
+  const unchecked = uncheckedDatabases(ops);
+  if (!red.length && !unchecked) return [];
+  const headline = red.length ? (red.length === 1 ? "1 needs a look" : `${red.length} need a look`) : "Not checked";
+  return [
+    section("databases", "Databases", red.length ? "bad" : "idle", headline, () =>
+      h(
+        "div",
+        {},
+        red.length
+          ? h(
+              "ul",
+              { class: "ops-rows" },
+              ...red.map(({ database, problem }) =>
+                h("li", { class: "ops-row box s-bad", attrs: { "data-database": database.app } }, h("span", { class: "ops-link" }, h("span", { class: "ops-row-title" }, database.app), h("span", { class: "ops-row-meta" }, problem))),
+              ),
+            )
+          : null,
+        unchecked ? h("p", { class: "ops-row-meta", attrs: { "data-databases-unchecked": String(unchecked) } }, `Fly could not be read: ${unchecked === 1 ? "1 database" : `${unchecked} databases`} not checked`) : null,
+      ),
+    ),
   ];
 }
 
@@ -350,7 +393,12 @@ function pageBody(ops: OpsResponse | null, page: OpsPage): Child[] {
       return [usageHeroes(ops), notices(ops, page), more("usage", usageMore(ops))];
     case "machines":
       // The machine readings and their chart stay in full view.
-      return [notices(ops, page), boxesEl(ops), machinesTrend(ops), h("div", { class: "ops-grid" }, ...pageSections(ops, page)), machineSchedules()];
+    {
+      // A red database leads the page: the Floor's line opens Machines at its top.
+      const sections = pageSections(ops, page);
+      const databases = sections.filter((el) => el.dataset.section === "databases");
+      return [notices(ops, page), ...databases, boxesEl(ops), machinesTrend(ops), h("div", { class: "ops-grid" }, ...sections.filter((el) => !databases.includes(el))), machineSchedules()];
+    }
     default:
       return [notices(ops, page), h("div", { class: "ops-grid" }, ...pageSections(ops, page))];
   }
@@ -547,6 +595,10 @@ export function wrongRows(ops: OpsResponse | null, on: WrongBucket | OpsPage, pe
   });
   part(() => {
     for (const disk of macDisks(ops)) push(wrongRow("disk", disk.tone, `Mac ${disk.volume.label} disk`, `${disk.free}% free${disk.volume.runners ? " · the runners' work directories" : ""}`, disk.item, "mac"));
+  });
+  // Databases with a machine stopped or a check failing for over 15 minutes: Machines' Databases section lists them.
+  part(() => {
+    for (const { database, problem } of shownRedDatabases(ops)) push(wrongRow("machine", "bad", database.app, problem, databaseItem(database, problem), "databases"));
   });
   part(() => {
     const down = offlineRunners(ops);

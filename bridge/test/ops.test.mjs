@@ -530,6 +530,39 @@ test("a run starting between queue reads is counted once", async () => {
   assert.equal(snap.queue.queuedJobs, 4);
 });
 
+test("a queued run GitHub has not updated for a day is no queue and takes no job lookup", async () => {
+  const ago = (/** @type {number} */ hours) => new Date(NOW.getTime() - hours * 3600_000).toISOString().replace(".000Z", "Z");
+  /** @param {{ total_count: number, ids: number[], updated?: unknown[] }} queued @param {number[]} running */
+  const sample = async (queued, running) => {
+    const { exec, calls } = fakeExec((bin, args) => {
+      const path = args.find((arg) => arg.startsWith("repos/")) ?? "";
+      if (path.includes("actions/runs?status=queued")) return JSON.stringify(queued);
+      if (path.includes("actions/runs?status=in_progress")) return JSON.stringify({ total_count: running.length, ids: running });
+      return ghAnswer(bin, args);
+    });
+    const snap = await collectGithub({ exec, ghBin: "gh", now: () => NOW, cache: emptyGithubCache() });
+    const looked = calls.flatMap((c) => /\/actions\/runs\/(\d+)\/jobs\?per_page=50&filter=latest&page=1$/.exec(c.args.find((arg) => arg.startsWith("repos/")) ?? "")?.[1] ?? []).map(Number);
+    return { queue: snap.queue, looked, calls };
+  };
+  const ghosts = [700, 701, 702, 703, 704, 705];
+  const dead = await sample({ total_count: 6, ids: ghosts, updated: ghosts.map(() => ago(17 * 24)) }, [901, 902]);
+  assert.deepEqual(dead.queue, { queuedRuns: 0, runningRuns: 2, queuedJobs: 4, runsComplete: true, jobsComplete: true, sampledRuns: 2 });
+  assert.deepEqual(dead.looked, [901, 902]);
+  assert.ok(dead.calls.some((c) => c.args.some((arg) => arg.includes("status=queued")) && c.args.at(-1) === "{total_count, ids: [.workflow_runs[].id], updated: [.workflow_runs[].updated_at]}"));
+  assert.ok(dead.calls.some((c) => c.args.some((arg) => arg.includes("status=in_progress")) && c.args.at(-1) === "{total_count, ids: [.workflow_runs[].id]}"));
+
+  // Exactly a day, a date that cannot be read and no date are each a queue; a run past the listed page is still a list cut short.
+  const live = await sample({ total_count: 5, ids: [700, 701, 702, 703, 704], updated: [ago(17 * 24), ago(24), "soon", null] }, []);
+  assert.equal(live.queue.queuedRuns, 4);
+  assert.deepEqual(live.looked, [701, 702, 703, 704]);
+  assert.equal((await sample({ total_count: 2, ids: [700, 701] }, [])).queue.queuedRuns, 2);
+  const cut = await sample({ total_count: 7, ids: ghosts, updated: ghosts.map(() => ago(17 * 24)) }, [901]);
+  assert.deepEqual(cut.queue, { queuedRuns: 0, runningRuns: 1, queuedJobs: 2, runsComplete: false, jobsComplete: false, sampledRuns: 1 });
+  // In progress too: it is a running run, looked up once.
+  const started = await sample({ total_count: 1, ids: [700], updated: [ago(17 * 24)] }, [700]);
+  assert.deepEqual(started.looked, [700]);
+});
+
 test("runner aggregate coverage differs from the 50 detail rows", () => {
   for (const total of [50, 100, 101]) {
     const load = parseRunners(JSON.stringify({ total_count: total, runners: Array.from({ length: Math.min(total, 100) }, (_, i) => ({ name: `runner-${i}`, status: "online", busy: true })) }));

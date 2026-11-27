@@ -149,7 +149,13 @@ const READER_DETAILS = [
   `reader empty: (?:ran but wrote nothing(?: for ${SPAN})?|no runs and no PRs|no apps|no repos|no accounts|no packs|nothing read)`,
   "reader wrong: (?:reading time ahead of now|a negative count|an app listed twice|flyctl failed for every app \\(auth\\?\\)|a repo listed twice|no account has a reading)",
 ];
-const OPS_DETAIL_FAULTS = ["[Mm]emory pressure critical", `${N}% free`, "Bridge offline", ...READER_DETAILS].join("|");
+// A database's (databaseProblem); the first takes its checks with it, as the list's own separator would split them.
+const DATABASE_DETAILS = [
+  `(?:${N} of ${N} machines running|No machines)(?:, [Cc]hecks ${N} of ${N} passing)? for ${N} (?:minute|hour|day)s?`,
+  `Checks ${N} of ${N} passing for ${N} (?:minute|hour|day)s?`,
+  `Not read from Fly for ${N} (?:minute|hour|day)s?`,
+];
+const OPS_DETAIL_FAULTS = ["[Mm]emory pressure critical", `${N}% free`, "Bridge offline", ...DATABASE_DETAILS, ...READER_DETAILS].join("|");
 const OPS_DETAIL_RE = new RegExp(`^(?:${OPS_DETAIL_FAULTS})(?:[,;] (?:${OPS_DETAIL_FAULTS}))*$`);
 
 /**

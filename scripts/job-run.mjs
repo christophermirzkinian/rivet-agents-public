@@ -62,7 +62,7 @@ const NO_REPO = { state: /** @type {const} */ ("skipped"), line: "skipped: no re
  *   with raw, stdout alone, whole and untouched, for a machine read that is never reported or logged
  * @typedef {{ env: NodeJS.ProcessEnv, home: string, now: () => number, fetch: typeof fetch, token: () => Promise<string>,
  *   run: (bin: string, args: string[], opts: { cwd: string, timeoutMs: number, raw?: boolean, env?: NodeJS.ProcessEnv, watch?: (stream: "stdout" | "stderr", line: string) => void }) => Promise<Ran>,
- *   detach: (args: string[]) => void, bin: (name: string) => string, stdout: (s: string) => void }} Deps
+ *   detach: (args: string[]) => void, bin: (name: string) => string, stdout: (s: string) => void, sleep?: (ms: number) => Promise<void> }} Deps
  * @typedef {{ script: string, onRed: "card" | "look" } | { probe: "up", app: string, onRed: "card" }} Check
  * @typedef {{ state: "green" | "red" | "skipped", line: string, log?: string[], ran?: boolean }} Outcome ran: the script itself ran and failed
  */
@@ -109,6 +109,26 @@ export const CLONE_SYNC = [
   ["checkout", "-q", "--force", "--detach", "FETCH_HEAD"],
   ["clean", "-fdq"],
 ];
+const GIT_LOCK_ERROR = /cannot lock ref|Unable to create '[^']*\.lock'|unable to update local ref|is at [0-9a-f]+ but expected/i;
+export const SYNC_RETRY_PAUSES_MS = [2_000, 5_000];
+
+/**
+ * One CLONE_SYNC step, again after a pause while it fails on one of git's lock errors: another git command in this
+ * clone (an install's, say) can hold a lock the step needs, a ref's or the index's. The last result.
+ * @param {Deps} d @param {string} repo @param {string[]} args @param {() => number} timeoutMs
+ */
+async function syncStep(d, repo, args, timeoutMs) {
+  const once = () => d.run(GIT, [...HOOKS_OFF, ...args], { cwd: repo, timeoutMs: timeoutMs() });
+  let git = await once();
+  for (const pause of SYNC_RETRY_PAUSES_MS) {
+    if (git.code === 0 || git.timedOut || !git.lines.some((line) => GIT_LOCK_ERROR.test(line))) break;
+    await (d.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))))(pause);
+    // A stop let the jobs lock go meanwhile.
+    if (held.stopping) break;
+    git = await once();
+  }
+  return git;
+}
 
 /**
  * The jobs clone, made from the default repo the first time a run needs it; false when there is none. Called under
@@ -178,7 +198,7 @@ export async function runCheck(d, id, check, budgetMs) {
   try {
     if (!(await cloned(d, repo, Math.min(left(), CLONE_TIMEOUT_MS)))) return { state: "red", line: "The jobs clone ~/.rivet-agents/jobs/repo could not be made." };
     for (const args of CLONE_SYNC) {
-      const git = await d.run(GIT, [...HOOKS_OFF, ...args], { cwd: repo, timeoutMs: Math.min(left(), 120_000) });
+      const git = await syncStep(d, repo, args, () => Math.min(left(), 120_000));
       if (git.code !== 0) return { state: "red", line: `Could not bring the jobs clone up to date (git ${args[0]}).`, log: tidy(git.lines) };
     }
     const manifest = path.join(repo, "package.json");
@@ -304,7 +324,7 @@ async function syncForChat(d, repo) {
   held.lock = lock;
   try {
     if (!(await cloned(d, repo, CLONE_TIMEOUT_MS))) return;
-    for (const args of CLONE_SYNC) if ((await d.run(GIT, [...HOOKS_OFF, ...args], { cwd: repo, timeoutMs: 120_000 })).code !== 0) return;
+    for (const args of CLONE_SYNC) if ((await syncStep(d, repo, args, () => 120_000)).code !== 0) return;
   } finally {
     release(lock);
   }

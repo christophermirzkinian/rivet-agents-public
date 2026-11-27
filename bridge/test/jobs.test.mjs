@@ -12,7 +12,7 @@ import { ExecError } from "../lib/config.mjs";
 import { calendarOf, chatArgs, readCommand, jobLabel, jobPrompt, plistText, programArgs, runJobAction, validJobAction } from "../lib/jobs.mjs";
 import { LAUNCHCTL_BIN } from "../lib/ops/mac.mjs";
 import { collectMac, PLUTIL_BIN } from "../lib/schedules/index.mjs";
-import { CLONE_SYNC, held, main, outputCollector, runCheck, spawnRun, stopped, upUrl } from "../../scripts/job-run.mjs";
+import { CLONE_SYNC, held, main, outputCollector, runCheck, spawnRun, stopped, SYNC_RETRY_PAUSES_MS, upUrl } from "../../scripts/job-run.mjs";
 import { withRival } from "../../scripts/lock-race-fixture.mjs";
 import { tryLock } from "../../scripts/token-lock.mjs";
 
@@ -658,6 +658,39 @@ test("job-run: the background run brings its clone to the default branch, runs o
   } finally {
     r.cleanup();
   }
+});
+
+test("job-run: a clone fetch that loses git's ref lock to another fetch is tried again, and only a lock error is", async () => {
+  const LOCKED = "error: cannot lock ref 'refs/remotes/origin/main': is at 1452042232aa but expected cc29f87f5caa";
+  const go = async (/** @type {string[][]} */ fetches) => {
+    const r = runner({ start: check() });
+    const pauses = [];
+    r.d.sleep = async (ms) => void pauses.push(ms);
+    const run = r.d.run;
+    r.d.run = async (bin, args, opts) => {
+      const ran = await run(bin, args, opts);
+      return bin === "/usr/bin/git" && args.includes("fetch") && fetches.length ? { code: 1, lines: fetches.shift(), timedOut: false } : ran;
+    };
+    try {
+      const code = await main(["--exec", ID, "r-run-0001"], r.d);
+      return { code, pauses, finish: r.puts.at(-1).body, fetched: r.ran.filter((call) => call.args.includes("fetch")).length, ranScript: r.ran.some((call) => call.args[0] === "run") };
+    } finally {
+      r.cleanup();
+    }
+  };
+  const once = await go([[LOCKED]]);
+  assert.deepEqual([once.code, once.finish.state, once.fetched, once.ranScript], [0, "green", 2, true]);
+  assert.deepEqual(once.pauses, SYNC_RETRY_PAUSES_MS.slice(0, 1));
+
+  const other = await go([["fatal: unable to access 'https://github.com/': Could not resolve host: github.com"]]);
+  assert.deepEqual([other.code, other.finish.state, other.fetched, other.ranScript], [1, "red", 1, false]);
+  assert.equal(other.finish.line, "Could not bring the jobs clone up to date (git fetch).");
+  assert.deepEqual(other.pauses, []);
+
+  const stuck = await go([[LOCKED], [LOCKED], [LOCKED], [LOCKED]]);
+  assert.deepEqual([stuck.code, stuck.finish.state, stuck.fetched, stuck.ranScript], [1, "red", 3, false]);
+  assert.equal(stuck.finish.line, "Could not bring the jobs clone up to date (git fetch).");
+  assert.deepEqual(stuck.pauses, SYNC_RETRY_PAUSES_MS);
 });
 
 test("job-run: a secret's name on one line hides its value on the next, in the report, the failure line and the saved log", async () => {

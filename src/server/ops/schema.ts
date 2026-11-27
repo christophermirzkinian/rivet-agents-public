@@ -14,7 +14,7 @@ export const MAX_RUNS = 150;
 export const MAX_MERGED = 600;
 export const MAX_RUNNERS = 50;
 export const MAX_VOLUMES = 12;
-export const MAX_FLY_APPS = 100;
+export const MAX_FLY_APPS = 150;
 export const MAX_RELEASES = 30;
 export { MAX_CLAUDE_LIMITS };
 export const NOTE_MAX = 280;

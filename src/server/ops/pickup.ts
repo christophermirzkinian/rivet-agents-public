@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
-import { diskTone, GITHUB_STALE_MS, MAC_STALE_MS, type OpsResponse } from "../../shared/ops.js";
-import { diskOwnedItem, HANDLER_BY, isOwned, macOwnedItem, recordOf, underWay, type OwnedItem } from "../../shared/ops-owned.js";
+import { diskTone, GITHUB_STALE_MS, MAC_STALE_MS, redDatabases, type OpsResponse } from "../../shared/ops.js";
+import { databaseOwnedItem, diskOwnedItem, HANDLER_BY, isOwned, macOwnedItem, recordOf, underWay, type OwnedItem } from "../../shared/ops-owned.js";
 import { opsStatusKey, statusKeyRepo } from "../../shared/ops-status-key.js";
 import type { OpsStatus, OpsStatusKind } from "../../shared/ops-status.js";
 import { STORED_NAME } from "../../shared/names.js";
@@ -51,6 +51,8 @@ export function isHoldLabel(label: string): boolean {
 export interface RedItem extends OwnedItem {
   name: string;
   detail?: string;
+  /** The start of the item's current trouble: a record older than it is about an earlier break (a database's). */
+  since?: string;
   /** Pick-ups in PICKUP_KEY_WINDOW_MS before its card, in place of PICKUP_KEY_CAP. */
   cap?: number;
   /** A reader's own red (readers.ts): its detail goes with its pick-up and its card. */
@@ -155,7 +157,10 @@ export function planPickups(input: {
     const id = itemId(item);
     if (seen.has(id)) continue;
     seen.add(id);
-    const record = recordOf(item, input.statuses);
+    // A record naming a live chat stays its owner when the item's trouble start moves on. A parked one has no owner,
+    // whatever chat it still names: new trouble is past what was parked.
+    const named = recordOf(item, input.statuses);
+    const record = named && named.state !== "parked" && isLive(named) ? named : recordOf(item, input.statuses, item.since);
     if (input.held.has(id)) continue;
     const status = record && orphaned.has(id) ? { ...record, state: "backlog" as const } : record;
     if (isOwned(item, status, input.workers) || (underWay(status) && status?.by === HANDLER_BY) || inFlight.has(id)) continue;
@@ -220,7 +225,10 @@ export function scheduleRepo(scheduleId: string, needRepo: string | undefined): 
   return needRepo ?? (repo && isRepo(repo) ? repo : NO_REPO);
 }
 
-/** The disk, memory and runner reds the app lists (web/src/views/ops.ts wrongRows), keyed as its failed items are. */
+/**
+ * The disk, memory and runner reds the app lists (web/src/views/ops.ts wrongRows), keyed as its failed items are, and
+ * databases with a machine stopped or a check failing for over DATABASE_TROUBLE_MS.
+ */
 export function machineReds(ops: OpsResponse): RedItem[] {
   const now = Date.parse(ops.now);
   const red: RedItem[] = [];
@@ -246,5 +254,6 @@ export function machineReds(ops: OpsResponse): RedItem[] {
       red.push({ kind: "runner", key: opsStatusKey("runner", runner.name), repo: NO_REPO, name: runner.name, detail: "CI runner offline" });
     }
   }
+  for (const { database, problem } of redDatabases(ops)) red.push({ ...databaseOwnedItem(database.app), name: database.app, detail: problem, ...(database.troubleSince ? { since: database.troubleSince } : {}) });
   return red;
 }

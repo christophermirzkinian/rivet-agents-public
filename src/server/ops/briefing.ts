@@ -69,6 +69,8 @@ export interface BriefingInputs {
   merged: readonly MergedPr[];
   fly: FlySnapshot | null;
   apps: readonly AppStatus[];
+  /** The Fly Postgres apps: no deploy of ours releases them, and no Ops item owns a release of theirs. */
+  databases?: readonly string[];
   mac: MacSnapshot | null;
   macStale: boolean;
   previous: Briefing | null;
@@ -168,8 +170,9 @@ export function composeBriefing(inputs: BriefingInputs, slot: Slot, now: Date): 
   });
 
   const red = inputs.github ? brokenOnMain(inputs.github.runs) : [];
+  const databases = new Set(inputs.databases ?? []);
   const failedReleases = (inputs.fly?.apps ?? []).flatMap((app) =>
-    app.releases
+    (databases.has(app.app) ? [] : app.releases)
       .filter((release) => release.status === "failed" && newImage(app.releases, release) && fresh(`release:${app.app}:${release.version}`, release.at))
       .map((release) => ({ app: app.app, release })),
   );

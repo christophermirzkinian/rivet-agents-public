@@ -4,7 +4,7 @@ import { redactFeed, redactLog, redactScreen } from "../src/server/redact.js";
 import { logFeed } from "../src/shared/log-feed.js";
 import { cleanLine, screenView, toneOf } from "../src/shared/screen-view.js";
 
-// Screens as Claude Code and Codex draw them (shapes read from real chats on 2 Nov; words made up).
+// Screens as Claude Code and Codex draw them (shapes read from real chats; words made up).
 const CLAUDE = [
   "  to read, ending a sentence the read cut off.",
   "  Read 1 file, ran 4 shell commands",

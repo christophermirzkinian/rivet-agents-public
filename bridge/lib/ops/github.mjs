@@ -24,6 +24,8 @@ export const MERGED_DAYS = 14;
 export const SLOW_EVERY = 5;
 export const MERGED_EVERY = 10;
 const MAX_JOB_LOOKUPS = 8;
+/** A run listed as queued and not updated for this long has no job to show: GitHub fails any job queued over 24 hours. */
+const QUEUED_STALE_MS = 24 * 3600_000;
 /** Pages of 50 a queued or running run's jobs are counted to: 100 jobs, as one page of 100 was. */
 const QUEUE_JOB_PAGES = 2;
 const JOB_CACHE_MAX = 500;
@@ -545,10 +547,14 @@ export async function collectGithub(deps) {
     let queue = null;
     try {
       const ids = async (/** @type {string} */ status) => {
-        const doc = parseJson((await get(`repos/${main}/actions/runs?status=${status}&per_page=50`, "{total_count, ids: [.workflow_runs[].id]}")).body, "gh");
+        const dated = status === "queued";
+        const doc = parseJson((await get(`repos/${main}/actions/runs?status=${status}&per_page=50`, dated ? "{total_count, ids: [.workflow_runs[].id], updated: [.workflow_runs[].updated_at]}" : "{total_count, ids: [.workflow_runs[].id]}")).body, "gh");
         if (!Array.isArray(doc?.ids)) throw new Error("gh returned no run ids");
-        const values = doc.ids.filter((id) => Number.isSafeInteger(id));
-        return { values, complete: Number.isSafeInteger(doc.total_count) && doc.total_count === values.length };
+        // A stale queued run is listed, so it counts towards `complete`, but it is no queue and gets no job lookup.
+        // A date that cannot be read is no proof of age.
+        const stale = new Set(dated && Array.isArray(doc.updated) ? doc.ids.filter((_, i) => typeof doc.updated[i] === "string" && now.getTime() - Date.parse(doc.updated[i]) > QUEUED_STALE_MS) : []);
+        const listed = doc.ids.filter((id) => Number.isSafeInteger(id));
+        return { values: listed.filter((id) => !stale.has(id)), complete: Number.isSafeInteger(doc.total_count) && doc.total_count === listed.length };
       };
       const queued = await ids("queued");
       const running = await ids("in_progress");

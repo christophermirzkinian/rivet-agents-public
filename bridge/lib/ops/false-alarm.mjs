@@ -44,6 +44,8 @@ export const HOLD_MS = 20 * 60_000;
 export const RERUN_HOLD_MS = 3 * 3600_000;
 /** After an ask whose answer was lost: long enough for GitHub to show the new attempt if it took it. */
 export const UNSURE_HOLD_MS = 10 * 60_000;
+/** A run listed as queued and not updated for this long is not waiting: GitHub fails any job queued over 24 hours, and a re-run updates its run. */
+const QUEUED_STALE_MS = 24 * 3600_000;
 const KEEP_DAYS = 14;
 const KEEP_MAX = 500;
 const CLASSIFY_MAX = 200;
@@ -237,9 +239,14 @@ export function createFalseAlarmRetry(deps) {
     const { sha: tip } = await gh([`repos/${run.repo}/commits/main`, "--jq", "{sha: .sha}"]);
     if (tip !== run.sha) return { reason: "its SHA is no longer main's tip", busy: false };
     for (const state of ["in_progress", "queued", "pending"]) {
-      const { total } = await gh([`repos/${run.repo}/actions/runs?branch=main&status=${state}&per_page=100`, "--jq", `{total: [.workflow_runs[] | select(.name == ${JSON.stringify(RETRY_WORKFLOW)})] | length}`]);
+      const mine = `[.workflow_runs[] | select(.name == ${JSON.stringify(RETRY_WORKFLOW)})]`;
+      const { total, updated } = await gh([`repos/${run.repo}/actions/runs?branch=main&status=${state}&per_page=100`, "--jq", state === "queued" ? `{total: ${mine} | length, updated: [${mine}[].updated_at]}` : `{total: ${mine} | length}`]);
       if (!Number.isInteger(total)) throw new Error("no count of main's runs");
-      if (total > 0) return { reason: `another main run is ${state}`, busy: true };
+      // A date that cannot be read is no proof of age.
+      const listed = state === "queued" && Array.isArray(updated) ? updated : [];
+      const now = nowMs();
+      const stale = listed.filter((/** @type {unknown} */ at) => typeof at === "string" && now - Date.parse(at) > QUEUED_STALE_MS).length;
+      if (total - stale > 0) return { reason: `another main run is ${state}`, busy: true };
     }
     return null;
   }

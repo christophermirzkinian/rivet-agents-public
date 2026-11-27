@@ -562,7 +562,7 @@ export function mapCopilotEvents(lines) {
 
 // Claude Code's limit lines, as the chat runner reads them (scripts/chat-runner.mjs LIMIT_LINE_RE), and the reset it
 // names: "You've hit your limit · resets 3pm (Pacific/Auckland)", or the older "Claude AI usage limit reached|<epoch>".
-const CLAUDE_LIMIT = /You['’]ve hit your (?:[\w-]+ )?limit|Claude (?:AI )?usage limit reached/;
+const CLAUDE_LIMIT = /\bYou['’]ve (?:hit|reached) your (?:[A-Za-z0-9](?:[\w-]|\.(?=\d))* ){0,3}limit\b|Claude (?:AI )?usage limit reached/;
 const CLAUDE_RESET = /resets ([^(·∙/\n]+?)\s*(?:[(·∙/]|$)/;
 const CLAUDE_EPOCH = /usage limit reached\|(\d{10})\b/;
 // Codex's UsageLimitReachedError (codex-rs/protocol/src/error.rs): "You’ve hit your usage limit. … Try again at 3:05 PM."
@@ -685,7 +685,7 @@ export const codexChatArgs = (env) => [
 // A chat's screen at its limit: Claude Code's reply line ("⎿  You've hit your limit · resets 3pm (Pacific/Auckland)") with
 // no reply after it, or Codex's error line ("■ You’ve hit your usage limit. … try again at 3:05 PM.") with nothing after
 // its own wrapped words but blank lines and the input box: one `›` line and the footer hints under it.
-const CLAUDE_SCREEN_LIMIT = /^\s*⎿\s+(?:You['’]ve hit your (?:[\w-]+ )?limit|Claude (?:AI )?usage limit reached)/;
+const CLAUDE_SCREEN_LIMIT = /^\s*⎿\s+(?:You['’]ve (?:hit|reached) your (?:[A-Za-z0-9](?:[\w-]|\.(?=\d))* ){0,3}limit\b|Claude (?:AI )?usage limit reached)/;
 const CLAUDE_REPLY = /^\s*⏺/;
 const CODEX_SCREEN_LIMIT = /^■ You['’]ve hit your usage limit/;
 // The start of another Codex history cell: an error, a reply, a prompt, a command's output.

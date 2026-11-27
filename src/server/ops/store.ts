@@ -112,6 +112,8 @@ interface Snapshots {
   home: { snapshot: HomeSnapshot; receivedAt: string };
   /** When each runner that reads offline first did, in a row, to tell a retired runner from a down one. */
   runnersOffline: Record<string, string>;
+  /** When each database app that reads in trouble first did, in a row: red once it is over DATABASE_TROUBLE_MS. */
+  databaseTrouble: Record<string, string>;
   /** The bridge's last reading of each repo's open issues, for a project's backlog sheet. */
   backlog: StoredBacklog;
   /** The bridge's own time on the newest backlog reading that finished asks: only a later one finishes more. */

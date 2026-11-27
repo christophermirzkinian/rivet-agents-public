@@ -17,6 +17,8 @@ export function neverRetry(run, names = []) {
 
 export const RUNNING_LIMIT = 8;
 export const QUEUED_LIMIT = 5;
+/** A run listed as queued and not updated for this long is not waiting: GitHub fails any job queued over 24 hours, and a re-run updates its run. */
+const QUEUED_STALE_MS = 24 * 3600_000;
 
 const RECORD_KEEP_MS = 30 * 24 * 3600_000;
 
@@ -265,7 +267,7 @@ export function jobVerdict(messages) {
  *   names: the run's failed jobs and failed steps, and the jobs it skipped, which a re-run would start.
  * @typedef {{ ok: true } | { ok: false, reason: string, busy?: true }} RerunCheck
  *   busy: only for now, so a caller with time left may ask again; anything else goes to a person.
- * @typedef {{ gh: (args: string[]) => Promise<any>, home?: string }} GuardDeps
+ * @typedef {{ gh: (args: string[]) => Promise<any>, home?: string, now?: () => number }} GuardDeps
  */
 
 /**
@@ -291,11 +293,17 @@ async function check(facts, deps) {
     if (NEVER_RETRY_RE.test(name)) return { ok: false, reason: `a job that ships: ${name}` };
   }
 
-  /** @param {string} status */
-  const active = (status) => deps.gh([`repos/${facts.repo}/actions/runs?status=${status}&per_page=1`, "--jq", "{total: .total_count}"]);
-  const [running, queued] = await Promise.all([active("in_progress"), active("queued")]);
+  const [running, queued] = await Promise.all([
+    deps.gh([`repos/${facts.repo}/actions/runs?status=in_progress&per_page=1`, "--jq", "{total: .total_count}"]),
+    deps.gh([`repos/${facts.repo}/actions/runs?status=queued&per_page=100`, "--jq", "{total: .total_count, updated: [.workflow_runs[].updated_at]}"]),
+  ]);
   if (!Number.isInteger(running?.total) || !Number.isInteger(queued?.total)) throw new Error("run counts not read");
   if (running.total >= RUNNING_LIMIT) return { ok: false, reason: `${running.total} runs in progress`, busy: true };
-  if (queued.total >= QUEUED_LIMIT) return { ok: false, reason: `${queued.total} runs queued`, busy: true };
+  // A date that cannot be read is no proof of age, a run past the listed page counts, and so does one listed over the total.
+  const now = (deps.now ?? Date.now)();
+  const listed = Array.isArray(queued.updated) ? queued.updated : [];
+  const stale = listed.filter((/** @type {unknown} */ at) => typeof at === "string" && now - Date.parse(at) > QUEUED_STALE_MS).length;
+  const live = Math.max(queued.total, listed.length) - stale;
+  if (live >= QUEUED_LIMIT) return { ok: false, reason: `${live} runs queued`, busy: true };
   return { ok: true };
 }

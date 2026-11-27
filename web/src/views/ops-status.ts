@@ -10,7 +10,7 @@ import { opsStatusKey } from "../../../src/shared/ops-status-key.js";
 import { appOwnedItem, branchHolder, ciOwnedItem, diskOwnedItem, isFixing, isOwned, isParked, macOwnedItem, recordOf, underWay, type OwnedItem } from "../../../src/shared/ops-owned.js";
 import { dismissMark, notNamed } from "../../../src/shared/ops-dismiss.js";
 import { NO_REPO } from "../../../src/shared/repos.js";
-import { isRed, type AppStatus, type MacSnapshot, type OpsResponse, type MacVolume, type PullRequest, type WorkflowRun } from "../../../src/shared/ops.js";
+import { isRed, type DatabaseStatus, type AppStatus, type MacSnapshot, type OpsResponse, type MacVolume, type PullRequest, type WorkflowRun } from "../../../src/shared/ops.js";
 import { button, h, isHttps } from "../dom.js";
 import * as api from "../api.js";
 import { dismissalWrite, flyCurrent, healthCurrent, noteDismissal, opsData, watchOps } from "../ops-data.js";
@@ -159,6 +159,11 @@ export function runnerItem(name: string): FailedItem {
   return { kind: "runner", key: opsStatusKey("runner", name), title: runnerTitle(name), what: ["Offline"], failedAt: null, repo: NO_REPO, url: null };
 }
 
+/** A database with a machine stopped or a check failing, keyed as the server's red item is (ops-owned.ts databaseOwnedItem). */
+export function databaseItem(database: DatabaseStatus, problem: string): FailedItem {
+  return { kind: "machine", key: opsStatusKey("machine", database.app), title: database.app, what: [problem], failedAt: database.troubleSince, repo: NO_REPO, url: null };
+}
+
 /** The Mac's red faults (memory, the bridge, its runners) as one item; null when it has none. */
 export function macItem(mac: MacSnapshot, bridge: boolean): FailedItem | null {
   const what = [
@@ -175,7 +180,9 @@ export function diskItem(volume: MacVolume): FailedItem {
 }
 
 export function statusOf(item: FailedItem): OpsStatus | null {
-  return recordOf(item, opsData.statuses);
+  // A database's record from before its current trouble began is about an earlier break.
+  const since = item.kind === "machine" ? (opsData.ops?.databases?.find((database) => database.app === item.key)?.troubleSince ?? undefined) : undefined;
+  return recordOf(item, opsData.statuses, since);
 }
 
 /** The live crew the ownership test reads: none once it has lapsed. */
@@ -244,8 +251,14 @@ export function owned(item: FailedItem | null): boolean {
  * a new mark, so a dismissed item is red again (src/shared/ops-dismiss.ts).
  */
 export function markOf(item: FailedItem): string {
-  // An app's run of failed checks grows each probe while it stays down: the same outage, so not a new mark.
-  const what = item.kind === "app" ? item.what.map((line) => line.replace(/ on \d+ checks in a row$/, "")) : item.what;
+  // An app's run of failed checks grows each probe while it stays down, as a database's "for 21 days" grows: the same
+  // outage, so not a new mark.
+  const what =
+    item.kind === "app"
+      ? item.what.map((line) => line.replace(/ on \d+ checks in a row$/, ""))
+      : item.kind === "machine"
+        ? item.what.map((line) => line.replace(/ for \d+ (minute|hour|day)s?$/, ""))
+        : item.what;
   return dismissMark({ since: item.failedAt, title: item.title, what });
 }
 

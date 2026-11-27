@@ -78,6 +78,10 @@ function machineReadAt(status: OpsStatus, view: OpsResponse): string | null {
   const runnersRead = !!github && current(github, GITHUB_STALE_MS) && !github.sources?.runners.failed.length;
   if (status.kind === "machine") {
     if (status.key === "mac" && mac) reads.push(current(mac, MAC_STALE_MS) && mac.memory.pressure !== "unknown" ? mac.at : null);
+    // A database: Fly's current reading of it, never one that failed or that has not read it yet. One in trouble again
+    // is not yet red (DATABASE_TROUBLE_MS) and not back either.
+    const database = view.databases?.find((one) => opsStatusKey("machine", one.app) === status.key);
+    if (database) reads.push(view.flyAt && !view.flyStale && database.machines && !database.troubleSince && !view.flySource?.failed.includes(database.app) ? view.flyAt : null);
   }
   if (status.kind === "disk" && mac) {
     reads.push(current(mac, MAC_STALE_MS) && mac.volumes.some((volume) => opsStatusKey("disk", volume.label) === status.key && volume.totalBytes > 0) ? mac.at : null);
@@ -170,7 +174,9 @@ export function fixCard(status: OpsStatus, readings: FixReadings): { id: string;
           ? `#${foundPr?.number ?? status.key} checks pass`
           : status.kind === "schedule"
             ? `${schedule(status, readings)?.name ?? status.key} passing again`
-            : `${status.kind} ${status.key} fixed`;
+            : status.kind === "machine" && readings.view.databases?.some((one) => opsStatusKey("machine", one.app) === status.key)
+              ? `${status.key} database fixed`
+              : `${status.kind} ${status.key} fixed`;
   const note = status.note?.split("\n")[0]?.trim();
   const full = note ? `${head}: ${note}` : head;
   const title = full.length > MAX_TITLE ? `${full.slice(0, MAX_TITLE - 1)}…` : full;

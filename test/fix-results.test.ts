@@ -203,6 +203,10 @@ describe("Fix result", () => {
     const card = fixCard(status({ note: "Machine restarted, health check OK\nmore detail", chat: "fix-app-tasks-app" }), { view: up, schedules: null });
     expect(card).toEqual({ id: expect.stringMatching(/^fix-app-tasks-app-[0-9a-f]{12}$/), title: "Tasks App back up: Machine restarted, health check OK", tag: "Fixed", chat: "fix-app-tasks-app" });
     expect(fixCard(status({ kind: "pr", key: "177" }), { view: up, schedules: null })).toMatchObject({ title: "#177 checks pass", pr: 177 });
+    // A database is named as one, never "machine orders-db fixed"; another machine keeps its words.
+    const databases = [{ app: "orders-db", machines: { started: 3, total: 3 }, checks: { passing: 9, total: 9 }, troubleSince: null }];
+    expect(fixCard(status({ kind: "machine", key: "orders-db" }), { view: view({ databases }), schedules: null }).title).toBe("orders-db database fixed");
+    expect(fixCard(status({ kind: "machine", key: "mac" }), { view: view({ databases }), schedules: null }).title).toBe("machine mac fixed");
     // Two long keys sharing their first 40 characters, or one key failing twice, never share a card.
     const long = "a".repeat(50);
     const ids = [status({ key: `${long}x` }), status({ key: `${long}y` }), status({ since: NOW.toISOString() })].map((one) => fixCard(one, { view: up, schedules: null }).id);

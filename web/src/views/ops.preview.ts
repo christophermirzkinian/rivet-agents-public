@@ -1,5 +1,5 @@
 // Dev-only preview of Progress, the menu's pages and the search and settings sheets with fake data:
-// web/preview/ops.html?tab=progress|more[&page=usage|machines]&sheet=search|settings&q=notes&set=behaviours
+// web/preview/ops.html?tab=progress|more[&page=usage|machines]&sheet=search|settings&q=notes&set=behaviours[&databases=red]
 // Nothing imports this from the app, so the production build leaves it out.
 import "../styles.css";
 
@@ -426,9 +426,17 @@ if (new URLSearchParams(location.search).get("partial") === "1") {
 }
 if (new URLSearchParams(location.search).get("prfail") === "1" && github.sources) github.sources = { ...github.sources, prs: { failed: ["other-repo"], at: ago(14) } };
 const failedOnMain = github.runs.filter((run) => run.repo === MS && run.status === "completed" && run.conclusion === "failure").length;
+// ?databases=red shows a database with one of three machines stopped for 21 days, beside one that is well.
+const databasesRed = new URLSearchParams(location.search).get("databases") === "red";
 const ops: OpsResponse = {
   now: now.toISOString(),
   bridge: { connected: true },
+  databases: databasesRed
+    ? [
+        { app: "orders-db", machines: { started: 2, total: 3 }, checks: { passing: 6, total: 9 }, troubleSince: ago(21 * 1440) },
+        { app: "billing-db", machines: { started: 3, total: 3 }, checks: { passing: 9, total: 9 }, troubleSince: null },
+      ]
+    : [],
   github: { ...github, merged, stale },
   mac: { ...mac, stale },
   claude: { ...claude, stale },
@@ -591,6 +599,8 @@ if (rivetParam) {
     for (const item of [...github.runs.map(ciItem), ...schedules.items.map(scheduleItem)])
       if (item) statuses.push(opsStatus(item.kind, item.key, "in-progress", 12, { chat: `fix-${item.kind}`, by: "rivet" }));
 }
+// No job due within the hour, so with ?allclear=1 the floor's line is the database's.
+if (databasesRed) statuses.length = 0;
 const audit: AuditEntry[] = [
   { id: "x1", clientId: "c-x1", kind: "merge", at: ago(20), updatedAt: ago(18), status: "merged", repo: MS, pr: 2105 },
   { id: "x2", clientId: "c-x2", kind: "schedule", at: ago(16), updatedAt: ago(9), status: "succeeded", schedule: "Index rebuild", on: true },

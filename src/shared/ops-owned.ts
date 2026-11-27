@@ -90,6 +90,11 @@ export function macOwnedItem(): OwnedItem {
   return { kind: "machine", key: "mac", repo: NO_REPO };
 }
 
+/** A database with a machine stopped or a check failing, by its Fly app name: a machine record, as it is machines that are wrong. */
+export function databaseOwnedItem(app: string): OwnedItem {
+  return { kind: "machine", key: opsStatusKey("machine", app), repo: NO_REPO };
+}
+
 /** A Mac volume nearly full, by its label. */
 export function diskOwnedItem(label: string): OwnedItem {
   return { kind: "disk", key: opsStatusKey("disk", label), repo: NO_REPO };

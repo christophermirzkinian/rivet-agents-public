@@ -6,7 +6,7 @@ import { iso, parseJson } from "./common.mjs";
 
 export const FLY_TIMEOUT_MS = 30_000;
 export const APP_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;
-export const MAX_APPS = 100;
+export const MAX_APPS = 150;
 export const MAX_RELEASES = 30;
 const RELEASE_DAYS = 14;
 const WORD_RE = /^[a-z_]{0,30}$/;

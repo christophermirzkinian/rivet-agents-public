@@ -312,6 +312,79 @@ export interface FlySnapshot {
   source: SourceState | null;
 }
 
+/** A database with a machine not started or a check not passing for longer than this is red; a restart or a failover is shorter. */
+export const DATABASE_TROUBLE_MS = 15 * 60_000;
+
+/** A listed database app has no machine at all, a machine not started, or a Fly check not passing. */
+export function databaseTroubled(app: Pick<FlyApp, "machines" | "checks">): boolean {
+  return app.machines.total === 0 || app.machines.started < app.machines.total || app.checks.passing < app.checks.total;
+}
+
+/**
+ * When each listed database first read in trouble in a row (server time). A database read well drops out, as does one
+ * no longer listed. One Fly could not be read this time (`source.failed`) keeps what it had: a failed read neither
+ * starts nor ends its trouble, and a name Fly does not know (deleted, renamed, out of the token's reach) fails that way,
+ * so it never goes red. One the snapshot neither read nor failed (a bridge whose list stops short of it) is in trouble
+ * too: unread is not well.
+ */
+export function databaseTrouble(previous: Readonly<Record<string, string>>, databases: readonly string[], fly: Pick<FlySnapshot, "apps" | "source">, at: string): Record<string, string> {
+  const failed = new Set(fly.source?.failed ?? []);
+  const read = new Map(fly.apps.map((app) => [app.app, app]));
+  const next: Record<string, string> = {};
+  for (const name of databases) {
+    const app = read.get(name);
+    const since = failed.has(name) ? previous[name] : !app || databaseTroubled(app) ? (previous[name] ?? at) : undefined;
+    if (since) next[name] = since;
+  }
+  return next;
+}
+
+/** A listed database as Ops reads it. */
+export interface DatabaseStatus {
+  app: string;
+  /** Null until Fly has been read for it. */
+  machines: { started: number; total: number } | null;
+  checks: { passing: number; total: number } | null;
+  /** When its current trouble began (databaseTrouble); null while it reads well. */
+  troubleSince: string | null;
+}
+
+/** "2 days", "3 hours", "16 minutes": how long, in the largest whole unit. */
+function howLong(ms: number): string {
+  const [n, unit] = ms >= 86_400_000 ? [Math.floor(ms / 86_400_000), "day"] : ms >= 3_600_000 ? [Math.floor(ms / 3_600_000), "hour"] : [Math.floor(ms / 60_000), "minute"];
+  return `${n} ${unit}${n === 1 ? "" : "s"}`;
+}
+
+/**
+ * What is wrong with a database in trouble for over DATABASE_TROUBLE_MS, "2 of 3 machines running for 21 days" or
+ * "Checks 6 of 9 passing for 2 hours", or "Not read from Fly for 20 minutes" for one a current reading leaves out;
+ * null for one that reads well or whose trouble is younger.
+ */
+export function databaseProblem(database: DatabaseStatus, now: number): string | null {
+  const { machines, checks, troubleSince } = database;
+  if (!troubleSince) return null;
+  const age = now - Date.parse(troubleSince);
+  if (!(age > DATABASE_TROUBLE_MS)) return null;
+  if (!machines || !checks) return `Not read from Fly for ${howLong(age)}`;
+  if (!databaseTroubled({ machines, checks })) return null;
+  const what = [
+    machines.total === 0 ? "No machines" : machines.started < machines.total ? `${machines.started} of ${machines.total} machines running` : "",
+    checks.passing < checks.total ? `${machines.started < machines.total ? "checks" : "Checks"} ${checks.passing} of ${checks.total} passing` : "",
+  ].filter(Boolean);
+  return `${what.join(", ")} for ${howLong(age)}`;
+}
+
+/** The databases that are red now, with what is wrong: none while the Fly reading is old, and not one Fly could not read. */
+export function redDatabases(ops: Pick<OpsResponse, "databases" | "flyStale" | "flySource" | "now">): { database: DatabaseStatus; problem: string }[] {
+  if (ops.flyStale) return [];
+  const failed = new Set(ops.flySource?.failed ?? []);
+  const now = Date.parse(ops.now);
+  return (ops.databases ?? []).flatMap((database) => {
+    const problem = failed.has(database.app) ? null : databaseProblem(database, now);
+    return problem ? [{ database, problem }] : [];
+  });
+}
+
 /** "Fly unreachable for app-a, app-b +3, data from 14:02"; null while every app answered. */
 export function flySourceProblem(fly: Pick<FlySnapshot, "source">): string | null {
   const state = fly.source;
@@ -373,6 +446,8 @@ export interface OpsResponse {
   /** The oldest app check when checks have stopped for BRIEFING_STALE_MS; null while they are current. */
   healthStaleSince: string | null;
   apps: AppStatus[];
+  /** The listed Fly Postgres apps; absent from an older server. */
+  databases?: DatabaseStatus[];
   summary: OpsSummary;
   /** The first of RIVET_REPOS, or null: the app sets it with setDefaultRepo so its status keys match the server's. */
   defaultRepo: string | null;

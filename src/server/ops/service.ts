@@ -12,6 +12,7 @@ import { opsStatusKey } from "../../shared/ops-status-key.js";
 import type { OpsStatus, OpsStatusKind, OpsStatusPut } from "../../shared/ops-status.js";
 import {
   brokenOnMain,
+  databaseTrouble,
   GITHUB_STALE_MS,
   gradeAccounts,
   longRed,
@@ -69,6 +70,8 @@ export interface OpsDeps {
   push: Pick<PushService, "notify" | "flushHeld" | "onDigestSettled" | "onDigestRelease" | "onDigestReword">;
   /** RIVET_HEALTH_URLS: the apps checked, none when it is unset. */
   checks: readonly HealthCheck[];
+  /** The Fly Postgres apps: read from Fly with the other apps, never probed; absent, none. */
+  databases?: readonly string[];
   fetch: typeof fetch;
   now?: () => Date;
   logger?: Pick<Console, "error">;
@@ -104,6 +107,8 @@ export function createOps(deps: OpsDeps) {
   const board = () => deps.store.getBoard()?.board ?? null;
   const open = () => openBoard(deps.store, schedules, board(), now());
   const apps = () => buildApps(deps.checks, opsStore.get("health") ?? {}, opsStore.get("fly"));
+  // A name the checks already have stays theirs: an app is never both.
+  const databases = (deps.databases ?? []).filter((app) => !deps.checks.some((check) => check.name === app));
   /** A deploy job alert's red workflow, by its run while the GitHub snapshot still has it; null for any other alert. */
   const deployJobOwner = (key: string): OwnedItem | null => {
     const [kind, first = ""] = key.split(":");
@@ -127,7 +132,9 @@ export function createOps(deps: OpsDeps) {
   const ownedNow = (): Owned => {
     const statuses = deps.store.listOpsStatuses();
     const workers = deps.workers?.() ?? [];
-    return (item) => isOwned(item, recordOf(item, statuses), workers);
+    // As the app does: a database's record from before its current trouble began is about an earlier break.
+    const troubles = opsStore.get("databaseTrouble") ?? {};
+    return (item) => isOwned(item, recordOf(item, statuses, item.kind === "machine" ? troubles[item.key] : undefined), workers);
   };
   const notProd = ({ key }: { key: string }): boolean => {
     const parts = key.split(":");
@@ -261,6 +268,8 @@ export function createOps(deps: OpsDeps) {
       fly: opsStore.get("fly"),
       checks: deps.checks,
       health: opsStore.get("health") ?? {},
+      databases,
+      databaseTrouble: opsStore.get("databaseTrouble") ?? {},
       // An old schedules reading counts nothing, as the Schedules tab marks it old; its feed cards stay.
       failingRuns: schedules.view(now()).stale ? [] : schedules.failingSchedules(now()).map(({ url }) => url),
       schedulesAt: schedules.view(now()).at,
@@ -332,6 +341,8 @@ export function createOps(deps: OpsDeps) {
     const at = now();
     const snapshot = notAhead(sent, at);
     opsStore.put("fly", snapshot, at);
+    // Server time, as the runners' offline times are: the Mac's clock cannot make a trouble older or younger.
+    opsStore.put("databaseTrouble", databaseTrouble(opsStore.get("databaseTrouble") ?? {}, databases, snapshot, at.toISOString()), at);
     await raise(deployAlerts({ now: at, fly: snapshot, github: null, owned: ownedNow() }));
   }
 
@@ -360,6 +371,7 @@ export function createOps(deps: OpsDeps) {
         merged: opsStore.get("merged") ?? [],
         fly: opsStore.get("fly"),
         apps: apps(),
+        databases,
         mac,
         macStale: isStale(mac?.at, MAC_STALE_MS, at),
         previous: opsStore.latestBriefing(),

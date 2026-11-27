@@ -179,7 +179,7 @@ describe("bridge payload bounds", () => {
     expect(macSnapshotSchema.safeParse({ ...mac(), path: homedir() }).success).toBe(false);
     const app = FLY.apps[0]!;
     expect(flySnapshotSchema.safeParse({ ...FLY, apps: [{ ...app, app: "Bad App" }] }).success).toBe(false);
-    expect(flySnapshotSchema.safeParse({ ...FLY, apps: Array.from({ length: 101 }, () => app) }).success).toBe(false);
+    expect(flySnapshotSchema.safeParse({ ...FLY, apps: Array.from({ length: 151 }, () => app) }).success).toBe(false);
     expect(flySnapshotSchema.safeParse({ ...FLY, apps: [{ ...app, releases: Array.from({ length: 31 }, () => app.releases[0]) }] }).success).toBe(false);
     expect(flySnapshotSchema.safeParse({ ...FLY, apps: [{ ...app, email: "x@y.z" }] }).success).toBe(false);
   });
@@ -369,6 +369,9 @@ describe("composeBriefing", () => {
     expect(failures.tone).toBe("bad");
     expect(failures.lines).toEqual(["example-repo: CI failure", "notes-app v12 release failed", "Deploy Notes App to Fly"]);
     expect(b.headline).toMatch(/^1 merged · 1 shipped · 1 red · 2 failed deploys/);
+    // A database's failed release is no deploy of ours and no Ops item owns it: it is left out.
+    const asDatabase = composeBriefing(inputs({ databases: ["notes-app"] }), slot, at("2026-09-28T02:00:00Z"));
+    expect(asDatabase.items.find((item) => item.key === "failures")?.lines).toEqual(["example-repo: CI failure", "Deploy Notes App to Fly"]);
     expect(b.headline).not.toContain("$");
   });
 

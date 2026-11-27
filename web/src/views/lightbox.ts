@@ -90,7 +90,7 @@ function open(options: {
     "button",
     { class: "btn primary lightbox-close", attrs: { type: "button", "data-use": "lightbox.close" }, on: { click: () => close() } },
     svg(CLOSE, "lightbox-close-icon"),
-    "Close",
+    h("span", { class: "lightbox-close-word" }, "Close"),
   );
   const many = (options.steps?.count ?? 0) > 1;
   let at = options.steps?.start ?? 0;

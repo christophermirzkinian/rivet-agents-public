@@ -6,6 +6,11 @@
  * with a file) and the thread line show at full size, then Answered. A phone shows them in the Decide sheet, its head and
  * switch measured with them; the desktop in the Feed. Names each
  * element past the screen's left or right edge; a strip that scrolls sideways inside a card is measured by its own box.
+ * A row is held to its own box too: a part laid out in a flex or grid box that runs past that box's inside fails, even
+ * while it stays on the screen (a card's tool row was 24 px wider than its card and passed). A part pulled out
+ * by its own negative margins (a card's stage, edge to edge) is where it was put, and a box that clips or scrolls
+ * sideways looks after its own. A phone also opens the long ask's stills in the full-screen viewer, whose bar holds
+ * the most controls (Previous, Next, Download, Share and Close): each keeps a 44 px tap size and none leaves the bar.
  * A view with no card or row in it fails, and so does a drawn still or clip that never loads: a check that measured
  * nothing must not pass. A card's long "Round 1 · ..." thread line once widened the whole list of cards past a phone.
  *   node scripts/feed-cards-fit.mjs [--shots <dir>]
@@ -45,19 +50,30 @@ const SCREENS = [
 function pastEdges() {
   const width = document.documentElement.clientWidth;
   const name = (el) => `${el.tagName.toLowerCase()}${[...el.classList].map((c) => `.${c}`).join("")}`;
-  const cards = [...document.querySelectorAll(".feed, .desk-detail, .decide-sheet, .decide-card, [data-need]")];
+  const cards = [...document.querySelectorAll(".feed, .desk-detail, .decide-sheet, .decide-card, [data-need], .lightbox")];
   const rows = [...document.querySelectorAll("[data-need], .ans-row")].filter((el) => el.getBoundingClientRect().width && el.getBoundingClientRect().height).length;
   const inStrip = (el, card) => {
     for (let up = el.parentElement; up && up !== card; up = up.parentElement) if (/auto|scroll/.test(getComputedStyle(up).overflowX)) return true;
     return false;
   };
+  const px = (value) => parseFloat(value) || 0;
   const past = new Set();
+  const pastRow = new Map();
   for (const card of cards) {
     for (const el of [card, ...card.querySelectorAll("*")]) {
       if (el !== card && inStrip(el, card)) continue;
       const box = el.getBoundingClientRect();
       if (!box.width || !box.height) continue;
       if (box.right > width + 0.5 || box.left < -0.5) past.add(el);
+      // The part's margin box against its row's content box.
+      const row = el === card ? null : el.parentElement;
+      const rs = row && getComputedStyle(row);
+      const cs = getComputedStyle(el);
+      if (!rs || !/flex|grid/.test(rs.display) || rs.overflowX !== "visible" || /absolute|fixed/.test(cs.position)) continue;
+      const outer = row.getBoundingClientRect();
+      const left = outer.left + px(rs.borderLeftWidth) + px(rs.paddingLeft);
+      const right = outer.right - px(rs.borderRightWidth) - px(rs.paddingRight);
+      if (box.right + px(cs.marginRight) > right + 0.5 || box.left - px(cs.marginLeft) < left - 0.5) pastRow.set(el, `${name(el)} runs past its row ${name(row)} (left ${Math.round(box.left)}, right ${Math.round(box.right)}, row ${Math.round(left)} to ${Math.round(right)})`);
     }
   }
   const all = [...past];
@@ -68,7 +84,7 @@ function pastEdges() {
       const box = el.getBoundingClientRect();
       return `${name(el)} (left ${Math.round(box.left)}, right ${Math.round(box.right)}, screen ${width})`;
     });
-  return { rows, past: named };
+  return { rows, past: [...named, ...[...pastRow.values()].slice(0, 6)] };
 }
 
 const settle = async (page) => {
@@ -163,6 +179,26 @@ try {
           return out;
         }, id);
         await check(page, `${screen.name} long ask`, problems);
+        // The same card's stills in the full-screen viewer, opened by the still or thumb that shows.
+        await page.locator(`.decide-sheet [data-need="${id}"] :is(.card-thumb, .media-still)`).filter({ visible: true }).first().click();
+        await page.waitForSelector(".lightbox-bar .lightbox-close");
+        await settle(page);
+        // The bar as it stands: its problems, and the title's font size to prove a text size took.
+        const bar = () => page.evaluate(() => {
+          const controls = [...document.querySelectorAll(".lightbox-bar button")].filter((el) => el.getBoundingClientRect().width);
+          const out = controls.filter((el) => el.getBoundingClientRect().width < 43.5 || el.getBoundingClientRect().height < 43.5).map((el) => `${el.getAttribute("aria-label") ?? el.textContent} is under the 44 px tap size`);
+          if (controls.length !== 5) out.push(`the viewer's bar has ${controls.length} controls, not Previous, Next, Download, Share and Close`);
+          const title = document.querySelector(".lightbox-bar .lightbox-title");
+          return { out, font: title ? parseFloat(getComputedStyle(title).fontSize) : 0 };
+        });
+        const medium = await bar();
+        await check(page, `${screen.name} viewer`, medium.out);
+        // Once more at the Large text size, which widens every word in the bar.
+        await page.evaluate(() => document.documentElement.setAttribute("data-chat-text", "l"));
+        await settle(page);
+        const large = await bar();
+        if (!(large.font > medium.font * 1.1)) large.out.push(`Large text did not take: the title is ${large.font} px, ${medium.font} px before`);
+        await check(page, `${screen.name} viewer, large text`, large.out);
       });
       await view(async () => {
         await page.goto(`${base}preview/desktop.html?tab=cards&v4=1`);

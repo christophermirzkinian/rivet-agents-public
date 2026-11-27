@@ -194,7 +194,7 @@ describe("Rework?", () => {
   });
 });
 
-describe("reading the stored events (27 Oct, the first hour's real events)", () => {
+describe("reading the stored events (the first hour's real events)", () => {
   const scroll = (when: string, id: string, value: number): UsageEventRow => ({ at: when, device: "phone", kind: "scroll", ctl: id, screen: id, value });
   const z = (hms: string) => `2026-11-02T${hms}Z`;
   // Closing Rivet's pane on the Floor: the Chat tab was under it for 605 ms, untapped, its time begun as the pane left.
@@ -259,7 +259,7 @@ describe("reading the stored events (27 Oct, the first hour's real events)", () 
       ...Array.from({ length: 3 }, (_, i) => decideClose(z(`05:0${i}:00.000`))).flat(),
       ...Array.from({ length: 3 }, () => tap(z("06:00:00.000"), "chat.compose.send", "floor.rivet")),
     ];
-    // Read as stored, both read Rework? (the page showed it, 27 Oct).
+    // Read as stored, both read Rework? (the page showed it).
     expect(reworkOf(events).has("chat")).toBe(true);
     expect(reworkOf(events).has("cards")).toBe(true);
     const read = usageReport({ events, first: "2026-10-27T13:00:00.000Z", asks: [], device: "phone", now: new Date("2026-11-03T00:00:00.000Z") });

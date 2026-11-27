@@ -443,10 +443,11 @@ export const parsePsTty = (text) =>
   /** @type {RegExpExecArray[]} */ (text.split("\n").map((l) => /^\s*(\d+)\s+(\d+)\s+(\S+)\s*(.*)$/.exec(l)).filter(Boolean)).map((m) => ({ pid: +m[1], ppid: +m[2], tty: m[3], command: m[4] }));
 
 const NO_TTY_RE = /^\?\??$/;
-// Shared daemons, sign-ins and editors, never a chat's left-over: these only spare, never select. The multiplexers, adb
-// and terminal editors (a headless one may hold unsaved buffers) by program name (a shared server daemonises in whatever
-// folder first started it), the rest anywhere in the command line.
-const SPARE_BIN_RE = /^(tmux|screen|zellij|dtach|abduco|adb|n?vim|vi|emacs(client)?|nano|hx|helix|kak|micro)$/i;
+// Shared daemons, sign-ins and editors, never a chat's left-over: these only spare, never select. The multiplexers, adb,
+// the Mac's shared container VM (Colima, with Lima's limactl host agent and network daemons under it, or Podman's
+// gvproxy and vfkit/krunkit) and terminal editors (a headless one may hold unsaved buffers) by program name (a shared
+// server daemonises in whatever folder first started it), the rest anywhere in the command line.
+const SPARE_BIN_RE = /^(tmux|screen|zellij|dtach|abduco|adb|colima|limactl|socket_vmnet|gvproxy|vfkit|krunkit|n?vim|vi|emacs(client)?|nano|hx|helix|kak|micro)$/i;
 // Any macOS app bundle (an editor `code .` started detached), and ssh's shared connection master and the key agents.
 const SPARE_CMD_RE = new RegExp(`${SIGN_IN.source}|Electron|Code Helper|Cursor|\\.app/Contents/MacOS/|\\[mux\\]|ssh-agent|gpg-agent`, "i");
 /** @param {string} command */

@@ -1198,7 +1198,7 @@ a {
   background: var(--bg-2);
 }
 
-/* Rivet's pick: the yellow answer with its Recommended tag; a risky card's too since the owner. */
+/* Rivet's pick: the yellow answer with its Recommended tag; a risky card's too. */
 .btn.choice.rec {
   border-color: transparent;
   background: linear-gradient(180deg, #ffd25c, #ffbd2e);
@@ -1707,7 +1707,7 @@ a {
 }
 
 /* A sheet slides up from the foot of the screen whole, over a dim that fades in, and slides back down as it closes
-   (sheet.ts leave): no fade on the panel, so the screen under it never shows through (the owner). */
+   (sheet.ts leave): no fade on the panel, so the screen under it never shows through. */
 @keyframes sheet-dim {
   from {
     opacity: 0;
