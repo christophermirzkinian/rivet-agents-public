@@ -31,7 +31,7 @@ export function parseArgs(argv) {
     else if (a === "--text") {
       if (o.text !== undefined) throw new Error("--text given twice");
       o.text = argv[++i];
-      if (o.text === undefined) throw new Error("--text needs the note");
+      if (o.text === undefined || o.text.startsWith("--")) throw new Error("--text needs the note");
     } else throw new Error(`unknown argument ${a}`);
   }
   return o;

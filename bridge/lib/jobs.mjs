@@ -52,11 +52,11 @@ const plain = (v, max) => (typeof v === "string" && v.trim() !== "" && v.trim().
 /**
  * @typedef {{ script: string, where: "mac" | "remote", onRed: "card" | "look" } | { probe: "up", app: string, where: "mac", onRed: "card" }} JobCheck
  * @typedef {{ name: string, words: string, kind: "check" | "task", check?: JobCheck, cron: string }} JobActionSpec
- * @typedef {{ op: "create" | "pause" | "resume" | "run" | "remove", id: string, spec?: JobActionSpec, plan?: "claude" | "chatgpt" }} JobAction plan: run only, that one run's plan
+ * @typedef {{ op: "create" | "pause" | "resume" | "run" | "remove", id: string, spec?: JobActionSpec, plan?: "claude" | "chatgpt" | "copilot" }} JobAction plan: run only, that one run's plan
  * @typedef {{ status: "succeeded" | "refused" | "failed", reason: string }} JobResult
  * @typedef {{ exec: import("./config.mjs").Exec, nodeBin: string, jobRun?: string,
  *   agentsDir?: string, logsDir?: string, uid?: number, macZone?: string, env?: NodeJS.ProcessEnv, sleep?: (ms: number) => Promise<void>,
- *   log: (event: string, fields?: Record<string, unknown>) => void }} JobDeps (env: the PATH and HOME the job runs with)
+ *   log: (event: string, fields?: Record<string, unknown>) => void }} JobDeps (env: the PATH, HOME and optional RIVET_URL the job runs with)
  */
 
 /**
@@ -69,7 +69,7 @@ export function validJobAction(raw) {
   const { op, id, spec, plan } = /** @type {Record<string, unknown>} */ (raw);
   if (typeof op !== "string" || !OPS.has(op) || typeof id !== "string" || !JOB_ID_RE.test(id)) return null;
   const action = /** @type {JobAction["op"]} */ (op);
-  if (plan !== undefined) return action === "run" && spec === undefined && (plan === "claude" || plan === "chatgpt") ? { op: action, id, plan } : null;
+  if (plan !== undefined) return action === "run" && spec === undefined && (plan === "claude" || plan === "chatgpt" || plan === "copilot") ? { op: action, id, plan } : null;
   if (action !== "create") return spec === undefined ? { op: action, id } : null;
   if (!isRecord(spec)) return null;
   const s = /** @type {Record<string, unknown>} */ (spec);
@@ -337,7 +337,7 @@ const xmlString = (text) => {
 };
 
 /**
- * The job's LaunchAgent. launchd starts it with almost no environment, so PATH and HOME are the bridge's own.
+ * The job's LaunchAgent. launchd starts it with almost no environment, so PATH, HOME and any RIVET_URL are the bridge's own.
  * @param {JobDeps} deps @param {JobAction & { spec: JobActionSpec }} action
  */
 export function plistText(deps, action) {
@@ -365,6 +365,7 @@ export function plistText(deps, action) {
     `    ${xmlString(env.PATH ?? "")}`,
     "    <key>HOME</key>",
     `    ${xmlString(env.HOME || os.homedir())}`,
+    ...(env.RIVET_URL ? ["    <key>RIVET_URL</key>", `    ${xmlString(env.RIVET_URL)}`] : []),
     "  </dict>",
     "  <key>StartCalendarInterval</key>",
     "  <array>",

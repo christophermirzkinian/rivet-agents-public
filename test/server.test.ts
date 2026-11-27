@@ -1,11 +1,14 @@
 import { createHash } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { clearedSessionCookie, sessionCookie } from "../src/server/auth.js";
 import { loadConfig, sha256 } from "../src/server/config.js";
+import { HANDLED_DROP_MS, needRev, openBoard } from "../src/server/http.js";
 import { boardSchema, type Board, type Reply } from "../src/shared/board.js";
 import {
   bearer,
@@ -407,7 +410,7 @@ describe("POST /api/replies", () => {
     expect(list.replies).toHaveLength(1);
   });
 
-  it("on a card answered in its chat with a note rule, a pick with a note is refused whatever app sent it, then the pick or the note alone is the one answer (a-1012)", async () => {
+  it("on a card answered in its chat with a note rule, a pick with a note is refused whatever app sent it, then the pick or the note alone is the one answer (a-12)", async () => {
     const card = { id: "in-chat-note", kind: "decision", title: "T", ask: "A", options: [{ label: "Send" }, { label: "Not now" }], inChat: { label: "To the team", noted: "Not sent." } };
     const withCard = (id: string) => server.app.store.putBoard(boardSchema.parse({ ...REPLY_BOARD, needs: [{ ...card, id }] }), null);
     withCard("in-chat-note");
@@ -447,6 +450,184 @@ describe("POST /api/replies", () => {
     board.needs.find((need) => need.id === "pr2022-checkout")!.ask = "The new build: merge it?";
     expect((await putBoard(server.base, board)).status).toBe(200);
     expect((await postReply({ clientId: "client-next-rev", itemId: "pr2022-checkout", decision: "reject", text: "Not this one" })).status).toBe(201);
+  });
+
+  describe("a comment on a card waiting on your pick", () => {
+    const pick = { id: "pick-1", kind: "decision", title: "Which layout?", ask: "A or B?", options: [{ label: "A" }, { label: "B" }] };
+    const asked = { id: "ask-1", kind: "question", title: "What colour?", ask: "Say a colour." };
+    const gotIt = { id: "news-1", kind: "decision", title: "Shipped", options: [{ label: "Got it" }] };
+    const stored = (id: string) => server.app.store.getBoard()!.board.needs.find((need) => need.id === id)!;
+    const open = () => openBoard(server.app.store, { failing: () => [] }, server.app.store.getBoard()!.board, new Date())!.needs.map((need) => need.id);
+    const note = (id: string, text: string) => fetch(`${server.base}/api/board/needs/${id}/comments`, { method: "POST", headers: bearer(BOARD_TOKEN), body: JSON.stringify({ text }) });
+
+    beforeEach(() => {
+      server.app.store.putBoard(boardSchema.parse({ ...REPLY_BOARD, needs: [pick, asked, gotIt] }), null);
+    });
+
+    it("answers a card with options: it leaves Needs you, and a pick or a second comment at that rev is refused with the comment", async () => {
+      const rev = await revOf(server.base, cookie, "pick-1");
+      expect(open()).toEqual(["pick-1", "ask-1"]);
+      expect((await postReply({ clientId: "client-pick-c1", itemId: "pick-1", decision: "comment", text: "Why A?", rev })).status).toBe(201);
+      expect(open()).toEqual(["ask-1"]);
+      // Your comment is your line in Chat, never a line under the card, and the card's revision stays.
+      expect(stored("pick-1").comments).toBeUndefined();
+      expect(await revOf(server.base, cookie, "pick-1")).toBe(rev);
+      for (const late of [
+        await postReply({ clientId: "client-pick-a", itemId: "pick-1", decision: "choice", choice: "A", rev }),
+        await postReply({ clientId: "client-pick-c2", itemId: "pick-1", decision: "comment", text: "And B?", rev }),
+      ]) {
+        expect(late.status).toBe(409);
+        expect(await late.json()).toMatchObject({ error: "This card was already answered.", answered: { decision: "comment", text: "Why A?" } });
+      }
+      expect(open()).toEqual(["ask-1"]);
+    });
+
+    it("Answer again after a comment puts the card back, and the pick lands as a change of the comment", async () => {
+      const rev = await revOf(server.base, cookie, "pick-1");
+      const comment = (await (await postReply({ clientId: "client-again-c", itemId: "pick-1", decision: "comment", text: "Why A?", rev })).json()) as Reply;
+      const stream = await connectBridge("image,chat-window,changes");
+      const opened = await fetch(`${server.base}/api/board/needs/pick-1/again`, { method: "POST", headers: browser(cookie), body: JSON.stringify({ rev }) });
+      expect(opened.status).toBe(200);
+      const { item } = (await opened.json()) as { item: { rev: string; again: unknown } };
+      expect(item.again).toMatchObject({ n: 1, after: comment.id });
+      expect(item.rev).not.toBe(rev);
+      expect(server.app.store.latestReopens(["pick-1"]).get("pick-1")).toMatchObject({ replyId: comment.id });
+      expect(open()).toEqual(["pick-1", "ask-1"]);
+      const picked = await postReply({ clientId: "client-again-p", itemId: "pick-1", decision: "choice", choice: "A", rev: item.rev });
+      expect(picked.status).toBe(201);
+      expect(((await picked.json()) as Reply).item.changes).toEqual({ replyId: comment.id, decision: "comment" });
+      expect(open()).toEqual(["ask-1"]);
+      stream.abort();
+    });
+
+    it("still takes a comment as a question card's answer: it leaves Needs you and a second reply is refused", async () => {
+      expect((await postReply({ clientId: "client-ask-c1", itemId: "ask-1", decision: "comment", text: "Blue" })).status).toBe(201);
+      expect(open()).toEqual(["pick-1"]);
+      const second = await postReply({ clientId: "client-ask-c2", itemId: "ask-1", decision: "comment", text: "Or green" });
+      expect(second.status).toBe(409);
+      expect(await second.json()).toMatchObject({ error: "This card was already answered.", answered: { decision: "comment", text: "Blue" } });
+    });
+
+    it("takes Rivet's line under a choice card and a question card at the same rev, and refuses a Got it card", async () => {
+      for (const id of ["pick-1", "ask-1"]) {
+        const rev = await revOf(server.base, cookie, id);
+        const res = await note(id, "Both fit the phone");
+        expect(res.status, id).toBe(201);
+        expect(((await res.json()) as { item: { comments: unknown[] } }).item.comments).toEqual([expect.objectContaining({ from: "rivet", text: "Both fit the phone" })]);
+        expect(await revOf(server.base, cookie, id), id).toBe(rev);
+      }
+      expect(open()).toEqual(["pick-1", "ask-1"]);
+      const refused = await note("news-1", "x");
+      expect(refused.status).toBe(409);
+      expect(await refused.json()).toMatchObject({ error: "card news-1 is a Got it card: answer in its chat" });
+      expect(stored("news-1").comments).toBeUndefined();
+    });
+
+    it("lets no board write add or drop the lines under a card that is not an update card", async () => {
+      expect((await note("pick-1", "Both fit the phone")).status).toBe(201);
+      const kept = stored("pick-1").comments;
+      expect(kept).toHaveLength(1);
+      const forged = [{ from: "owner", text: "I picked B", at: "2026-10-05T00:00:00.000Z" }];
+      const write = (comments?: unknown) => putBoard(server.base, { ...REPLY_BOARD, needs: [{ ...pick, ...(comments ? { comments } : {}) }, { ...asked, ...(comments ? { comments } : {}) }] });
+      expect((await write()).status).toBe(200);
+      expect(stored("pick-1").comments).toEqual(kept);
+      expect((await write(forged)).status).toBe(200);
+      expect(stored("pick-1").comments).toEqual(kept);
+      expect(stored("ask-1").comments).toBeUndefined();
+    });
+
+    const again = (rev: string) => fetch(`${server.base}/api/board/needs/pick-1/again`, { method: "POST", headers: browser(cookie), body: JSON.stringify({ rev }) });
+
+    it("takes the pick recorded after a comment at one revision, from when a comment left the card open, as its answer of record", async () => {
+      const rev = await revOf(server.base, cookie, "pick-1");
+      const card = { id: "pick-1", title: pick.title, kind: "decision" } as const;
+      server.app.store.addReply({ clientId: "client-then-comment", itemId: "pick-1", itemTitle: pick.title, decision: "comment", text: "Why A?", rev, item: card });
+      const picked = server.app.store.addReply({ clientId: "client-then-pick", itemId: "pick-1", itemTitle: pick.title, decision: "choice", choice: "A", rev, item: card });
+      // A further answer is refused with the pick, not the comment before it.
+      const refused = await postReply({ clientId: "client-then-late", itemId: "pick-1", decision: "choice", choice: "B", rev });
+      expect([refused.status, ((await refused.json()) as { answered: Reply }).answered.id]).toEqual([409, picked.id]);
+      // Answer again withdraws the pick, and the next answer changes it.
+      const stream = await connectBridge("image,chat-window,changes");
+      const opened = await again(rev);
+      expect([opened.status, ((await opened.json()) as { item: { again: { after: string } } }).item.again.after]).toEqual([200, picked.id]);
+      expect(server.app.store.latestReopens(["pick-1"]).get("pick-1")).toMatchObject({ replyId: picked.id });
+      const changed = (await (await postReply({ clientId: "client-then-changed", itemId: "pick-1", decision: "choice", choice: "B" })).json()) as Reply;
+      expect(changed.item.changes).toEqual({ replyId: picked.id, decision: "choice", choice: "A" });
+      expect(server.app.store.cardAnswer("pick-1", pick.title, "2026-01-01T00:00:00.000Z")?.id).toBe(changed.id);
+      stream.abort();
+    });
+
+    it("keeps as answered, at the next start, a card whose comment kept nothing while a comment left it open", async () => {
+      const dataDir = mkdtempSync(join(tmpdir(), "rivet-kept-"));
+      let clock = new Date();
+      const boot = async () => {
+        await server.close();
+        server = await startServer({ RIVET_DATA_DIR: dataDir }, { now: () => clock });
+        cookie = server.cookie();
+      };
+      await boot();
+      server.app.store.putBoard(boardSchema.parse({ ...REPLY_BOARD, needs: [pick, asked] }), null);
+      const rev = needRev(stored("pick-1"));
+      const comment = server.app.store.addReply({ clientId: "client-kept-nothing", itemId: "pick-1", itemTitle: pick.title, decision: "comment", text: "Why A?", rev, item: stored("pick-1") });
+      server.app.store.markHandled(comment.id);
+      expect(server.app.store.keptAnsweredCard("pick-1")).toBeNull();
+
+      await boot();
+      const kept = server.app.store.keptAnsweredCard("pick-1");
+      expect(kept).toMatchObject({ rev, replyId: comment.id, answeredAt: comment.at });
+      expect(server.app.store.keptAnsweredCard("ask-1")).toBeNull();
+      const answered = (await (await fetch(`${server.base}/api/answered`, { headers: { cookie } })).json()) as { cards: { card: { id: string } }[] };
+      expect(answered.cards.map(({ card }) => card.id)).toEqual(["pick-1"]);
+      // Another start changes nothing.
+      await boot();
+      expect(server.app.store.keptAnsweredCard("pick-1")).toEqual(kept);
+
+      // Once its handled comment takes it off the board, Answer again still finds it.
+      clock = new Date(clock.getTime() + HANDLED_DROP_MS + 60_000);
+      const served = (await (await fetch(`${server.base}/api/board`, { headers: { authorization: `Bearer ${BOARD_TOKEN}` } })).json()) as { board: Board };
+      expect((await putBoard(server.base, served.board)).status).toBe(200);
+      expect(server.app.store.getBoard()!.board.needs.map((need) => need.id)).toEqual(["ask-1"]);
+      const stream = await connectBridge("image,chat-window,changes");
+      expect((await again(rev)).status).toBe(200);
+      expect(server.app.store.getBoard()!.board.needs.map((need) => need.id)).toEqual(["ask-1", "pick-1"]);
+      stream.abort();
+      rmSync(dataDir, { recursive: true, force: true });
+    });
+
+    it("at the next start makes such a card its ask's card, and puts its comment in place of an answer kept at an earlier revision only", async () => {
+      const dataDir = mkdtempSync(join(tmpdir(), "rivet-kept-"));
+      const boot = async () => {
+        await server.close();
+        server = await startServer({ RIVET_DATA_DIR: dataDir });
+        cookie = server.cookie();
+      };
+      await boot();
+      const asks = (id: string) => fetch(`${server.base}/api/asks`, { method: "POST", headers: bearer(BOARD_TOKEN), body: JSON.stringify({ id, words: `Layout ${id}`, stage: "building" }) });
+      expect([(await asks("a-linked")).status, (await asks("a-newer")).status]).toEqual([201, 201]);
+      const card = (id: string, askId?: string) => ({ ...pick, id, title: `Layout ${id}`, ...(askId ? { askId } : {}) });
+      server.app.store.putBoard(boardSchema.parse({ ...REPLY_BOARD, needs: [card("pick-linked", "a-linked"), card("pick-older"), card("pick-same"), card("pick-newer", "a-newer")] }), null);
+      const comment = (id: string, rev = needRev(stored(id))) =>
+        server.app.store.addReply({ clientId: `client-${id}-${rev}`, itemId: id, itemTitle: stored(id).title, decision: "comment", text: "Why A?", rev, item: stored(id) });
+      const comments = Object.fromEntries(["pick-linked", "pick-older", "pick-same", "pick-newer"].map((id) => [id, comment(id)]));
+      const before = new Date(Date.now() - 3_600_000).toISOString();
+      const after = new Date(Date.now() + 3_600_000).toISOString();
+      // Kept at an earlier revision, at this one before its comment, and at another one after it.
+      const earlier = comment("pick-older", "rev-earlier");
+      server.app.store.keepAnswered(stored("pick-older"), "rev-earlier", earlier.id, before);
+      server.app.store.keepAnswered(stored("pick-same"), needRev(stored("pick-same")), comments["pick-same"]!.id, before);
+      const later = comment("pick-newer", "rev-later");
+      server.app.store.keepAnswered(stored("pick-newer"), "rev-later", later.id, after);
+
+      await boot();
+      const kept = (id: string) => server.app.store.keptAnsweredCard(id);
+      expect(kept("pick-linked")).toMatchObject({ replyId: comments["pick-linked"]!.id });
+      expect(server.app.store.getAsk("a-linked")?.cardId).toBe("pick-linked");
+      expect(kept("pick-older")).toMatchObject({ rev: needRev(stored("pick-older")), replyId: comments["pick-older"]!.id, answeredAt: comments["pick-older"]!.at });
+      expect(kept("pick-same")).toMatchObject({ replyId: comments["pick-same"]!.id, answeredAt: before });
+      expect(kept("pick-newer")).toMatchObject({ rev: "rev-later", replyId: later.id, answeredAt: after });
+      expect(server.app.store.getAsk("a-newer")?.cardId).toBeUndefined();
+      rmSync(dataDir, { recursive: true, force: true });
+    });
   });
 
   it("Answer again makes an answered card a new revision, whose answer is recorded as a change of the first", async () => {

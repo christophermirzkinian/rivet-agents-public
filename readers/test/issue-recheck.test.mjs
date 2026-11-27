@@ -10,6 +10,35 @@ import { batchPrompt, clusters, mentions, namedPaths, parseLog, parseVerdicts, r
 const TOKEN = `${"gh"}p_${"Q1w2E3r4T5".repeat(4)}`;
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "issue-recheck-"));
 
+test("recheckPass sends whole emoji within the body UTF-16 budget without a suffix", async () => {
+  const dir = tmp();
+  try {
+    const prefixes = [1198, 1199, 1200];
+    const texts = prefixes.map((prefix) => `${"x ".repeat(prefix).slice(0, prefix - 1)}x`.replace(/(.{399}) /g, "$1\n"));
+    const issues = texts.map((text, i) => ({ number: i + 1, title: "Boundary", body: `${text}😀tail`, labels: [], createdAt: "2026-10-01T00:00:00Z" }));
+    const prompts = [];
+    await recheckPass({
+      gh: async () => JSON.stringify(issues),
+      git: async (args) => args[0] === "rev-parse" ? `${"e".repeat(40)}\n` : "",
+      run: async (input) => {
+        prompts.push(input);
+        return JSON.stringify({ is_error: false, result: '{"issues": []}', usage: { input_tokens: 500, output_tokens: 20 } });
+      },
+      spend: new Spend("issue-recheck", 2, { dir: path.join(dir, "spend") }),
+      now: () => new Date("2026-10-08T12:30:00Z"), log: () => {}, dir,
+    });
+    const cuts = [...prompts.join("\n").matchAll(/Body \(trimmed, redacted\):\n([\s\S]*?)\nMain's evidence:/g)].map((m) => m[1]);
+    assert.equal(cuts.length, 3);
+    for (const [i, cut] of cuts.entries()) {
+      assert.equal(cut, `${texts[i]}${i === 0 ? "😀" : ""}`);
+      assert.doesNotMatch(cut, /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u);
+      assert.ok(cut.length <= 1200);
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("namedPaths finds repo paths, once each, and never a parent-relative one", () => {
   assert.deepEqual(namedPaths("See app/sync/src/mirror.ts and ./tools/lib/cost.mjs, again app/sync/src/mirror.ts; not ../etc/passwd.md or a.ts"), [
     "app/sync/src/mirror.ts",

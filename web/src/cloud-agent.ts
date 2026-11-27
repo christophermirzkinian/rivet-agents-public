@@ -7,7 +7,7 @@ import { APP_NAME, appName, checkedAgentName, checkedAppName, RIVET_NAME, nameHo
 export interface CloudAgent {
   name: string | null;
   setupDone: boolean;
-  firstPlan: "claude" | "chatgpt";
+  firstPlan: "claude" | "chatgpt" | "copilot";
   /** The app's name the host gives it; null keeps the build's own. */
   app: string | null;
 }
@@ -15,17 +15,33 @@ export interface CloudAgent {
 export interface Plans {
   claude: boolean;
   chatgpt: boolean;
+  /** Null: its status gave no answer, so it is not known to be signed out. */
+  copilot: boolean | null;
 }
 
 /** The supervisor's own page: a full page load, never the app's router. */
 export const CONNECT_PATH = "/cloud/setup/connect";
 /** Under every message box while no plan is connected, and what a refused send says. */
-export const LOCKED_LINE = "Sending is off until Claude or ChatGPT is connected.";
+const lockedWords = (names: string): string => `Sending is off until ${names} is connected.`;
+const TWO_PLANS = "Claude or ChatGPT";
+/**
+ * The plans this agent can connect, for the lock's words: GitHub Copilot only once its supervisor's status has named
+ * it, so an agent from before it reads as it always has.
+ */
+export const planNames = (): string => (offersCopilot ? "Claude, ChatGPT or GitHub Copilot" : TWO_PLANS);
+/** A live binding: it names the plans of the last plans read (offers), so read it when the words are shown. */
+export let LOCKED_LINE = lockedWords(TWO_PLANS);
+function offers(copilot: boolean): void {
+  offersCopilot = copilot;
+  LOCKED_LINE = lockedWords(planNames());
+}
 const RETRY_MS = [5_000, 15_000, 60_000];
 const ENROL_RETRY_MS = [1_000, 2_000, 4_000];
 
 let hosted: CloudAgent | null = null;
 let plans: Plans | null = null;
+/** The last plans read carried a `copilot` field: this agent's Plans page can connect GitHub Copilot. */
+let offersCopilot = false;
 /** The probe had a definite answer that this is not a hosted machine. */
 let notHosted = false;
 let retries = 0;
@@ -52,7 +68,7 @@ export function parseAgent(body: unknown): CloudAgent | null {
   const { name, setupDone, firstPlan, app, unknown } = body as Record<string, unknown>;
   // `unknown` is a supervisor that can't tell yet whether setup is done (agent.json unwritten): never read as not set up.
   if (typeof setupDone !== "boolean" && unknown !== true) return null;
-  return { name: checkedAgentName(name), setupDone: unknown === true || setupDone === true, firstPlan: firstPlan === "chatgpt" ? "chatgpt" : "claude", app: checkedAppName(app) };
+  return { name: checkedAgentName(name), setupDone: unknown === true || setupDone === true, firstPlan: firstPlan === "chatgpt" || firstPlan === "copilot" ? firstPlan : "claude", app: checkedAppName(app) };
 }
 
 /** The app's name the server put in the page it served (static.ts): a hosted machine's host's, before anyone signs in. */
@@ -70,13 +86,16 @@ export function readServedApp(): void {
 /** No agent read yet: a hosted machine's agent is UNNAMED_AGENT, as the server's is. */
 const nameNoAgent = (): void => nameHostedAgent(servedHosted ? UNNAMED_AGENT : null, servedApp);
 
-/** An older supervisor sends only `loggedIn`, which was Claude's. */
+/**
+ * An older supervisor sends only `loggedIn`, which was Claude's, and one from before GitHub Copilot sends no `copilot`,
+ * which is not connected. A `copilot` of null is a status that gave no answer.
+ */
 export function parsePlans(body: unknown): Plans | null {
   if (!body || typeof body !== "object") return null;
-  const { claude, chatgpt, loggedIn } = body as Record<string, unknown>;
+  const { claude, chatgpt, copilot, loggedIn } = body as Record<string, unknown>;
   const hasClaude = typeof claude === "boolean" ? claude : typeof loggedIn === "boolean" ? loggedIn : null;
   if (hasClaude === null) return null;
-  return { claude: hasClaude, chatgpt: chatgpt === true };
+  return { claude: hasClaude, chatgpt: chatgpt === true, copilot: copilot === null ? null : copilot === true };
 }
 
 /**
@@ -181,8 +200,8 @@ export const agentNoun = (): string => (hostedPage() ? "agent" : RIVET_NAME);
 
 export const tabTitle = (name: string): string => name;
 
-/** Only once the supervisor has said neither plan is connected; an unread status shows nothing. */
-export const needsPlan = (): boolean => hostedPage() && plans !== null && !plans.claude && !plans.chatgpt;
+/** Only once the supervisor has said no plan is connected; an unread status, or a plan it could not check, shows nothing. */
+export const needsPlan = (): boolean => hostedPage() && plans !== null && !plans.claude && !plans.chatgpt && plans.copilot === false;
 
 export function connectPlan(): void {
   location.assign(CONNECT_PATH);
@@ -195,7 +214,7 @@ export function connectPlan(): void {
 export function noPlan(): boolean {
   if (!hostedPage()) return false;
   planApplied = ++planSeq;
-  plans = { claude: false, chatgpt: false };
+  plans = { claude: false, chatgpt: false, copilot: false };
   redraw?.();
   watchPlan();
   return true;
@@ -208,11 +227,14 @@ export function noPlan(): boolean {
 async function readStatus(): Promise<boolean> {
   const at = session;
   const seq = ++planSeq;
-  const status = parsePlans(bodyOf(await readJson("/cloud/connect/status", STATUS_TIMEOUT_MS)));
+  const body = bodyOf(await readJson("/cloud/connect/status", STATUS_TIMEOUT_MS));
+  const status = parsePlans(body);
   if (at !== session || !status || seq <= planApplied) return false;
   planApplied = seq;
-  const changed = status.claude !== plans?.claude || status.chatgpt !== plans?.chatgpt;
+  const named = "copilot" in (body as object);
+  const changed = status.claude !== plans?.claude || status.chatgpt !== plans?.chatgpt || status.copilot !== plans?.copilot || named !== offersCopilot;
   plans = status;
+  offers(named);
   return changed;
 }
 
@@ -317,6 +339,7 @@ export function leaveCloud(): void {
   stopWatch();
   retries = 0;
   plans = null;
+  offers(false);
   hosted = null;
   redraw = null;
   nameNoAgent();
@@ -332,6 +355,7 @@ export function resetCloud(): void {
   servedHosted = false;
   nameHostedAgent(null);
   plans = null;
+  offers(false);
   notHosted = false;
   retries = 0;
   redraw = null;

@@ -11,6 +11,18 @@ import { batchPrompt, mainView, memoryPass, missing, parseBatch, parseNotes, rea
 const TOKEN = `${"gh"}p_${"Q1w2E3r4T5".repeat(4)}`;
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "memory-check-"));
 
+test("batchPrompt keeps emoji whole within the note's UTF-16 budget without a suffix", () => {
+  for (const prefix of [1498, 1499, 1500]) {
+    const text = `${"x ".repeat(prefix).slice(0, prefix - 1)}x`.replace(/.{400}/g, (line, offset) => `${String.fromCharCode(97 + offset / 400)}${line.slice(1, -1)}\n`);
+    const body = `${text}😀tail`;
+    const prompt = batchPrompt([{ id: "n1", file: "note.md", description: "Note", gone: ["a", "b", "c", "tail"].map((name) => ({ name, kind: "name" })), body }]);
+    const cut = prompt.split("Where the note names them (redacted):\n")[1].split("\n\nAnswer")[0];
+    assert.equal(cut, `${text}${prefix === 1498 ? "😀" : ""}`);
+    assert.doesNotMatch(cut, /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u);
+    assert.ok(cut.length <= 1500);
+  }
+});
+
 test("references reads files, pnpm scripts, flags and code names from code spans, and skips what it cannot look up", () => {
   const refs = references(
     "Run `pnpm check:fast` and `node scripts/send-report.mjs --pr 1`; see `tools/lib/cost.mjs`, `usageCost()`, `--no-reply`, `KNOWN_SOURCES`, `~/notes/x.md`, `/tmp/y.json`, `14ee21bd2`, `#461`, `end()`, `ok`, `pnpm install --frozen-lockfile`, `pnpm run install`, `../shared/src/protocol.ts`, `client/dist/index.html`.",

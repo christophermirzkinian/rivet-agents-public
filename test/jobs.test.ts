@@ -1,4 +1,5 @@
 import { mkdtempSync, rmSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -18,10 +19,16 @@ import {
   jobSpecSchema,
   runReportSchema,
   lastRunTimes,
+  limitOther,
   MAX_TASK_RUNS_A_DAY,
   nextRunTime,
+  otherPlan,
   OVERNIGHT_OFF_NOTE,
+  PLAN_NAMES,
+  planLimitSchema,
+  PLANS,
   PLANS_PATH,
+  planSwitchLabel,
   runTimes,
   dayTimeWords,
   taskReportSchema,
@@ -35,6 +42,8 @@ import { setTimeZone } from "../src/shared/when.js";
 // 7:00am Saturday 24 Oct 2026 in the fixed test zone (vitest.setup.ts).
 const SAT_7AM = new Date("2026-10-23T20:00:00.000Z");
 const HOUR = 3_600_000;
+// As src/server/jobs.ts: node:sqlite goes through createRequire under vitest.
+const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as typeof import("node:sqlite");
 
 const check = (overrides: Partial<JobSpec> = {}): JobSpec => ({
   name: "Notes app up",
@@ -465,6 +474,186 @@ describe("JobsStore", () => {
     expect(JSON.stringify(card.need)).not.toMatch(/Use ChatGPT/);
     expect(store.planSwitch("job-j-llllllll", "Use ChatGPT")).toBeNull();
     expect(card.detail).toContain("ChatGPT can't check GitHub from here");
+  });
+
+  it("offers the plan a limit's report names: GitHub Copilot's card, kind and one run, and a report that names none as before", () => {
+    const kindOf = (id: string) => {
+      const db = new DatabaseSync(join(dir, "rivet.sqlite"));
+      try {
+        return (db.prepare("SELECT kind FROM job_cards WHERE job_id = ?").get(id) as { kind: string | null } | undefined)?.kind;
+      } finally {
+        db.close();
+      }
+    };
+    let days = 0;
+    const limited = (id: string, name: string, limit: Record<string, unknown>, line: string) => {
+      // A day each, so the day's task runs never hold one.
+      const at = new Date(SAT_7AM.getTime() + days++ * 24 * HOUR);
+      expect(store.create(id, task({ name }), at).ok).toBe(true);
+      const begun = start(id, at, { usage: 10 });
+      if (!begun?.go) throw new Error("no start");
+      const done = store.report(id, begun.run, "red", line, undefined, at, taskReportSchema.parse({ run: begun.run, state: "red", line, limit }).limit);
+      expect(done.outcome?.fresh).toHaveLength(1);
+      return { fresh: done.outcome!.fresh[0]!, card: store.failing().find((one) => one.scheduleId === `job-${id}`)! };
+    };
+
+    const copilot = limited("j-cccccccc", "On Copilot", { plan: "claude", until: "3 pm", other: "copilot" }, "Claude is at its limit until 3 pm. Use GitHub Copilot for this job?");
+    expect(copilot.fresh).toMatchObject({
+      kind: "decision",
+      title: "On Copilot: Claude is at its limit",
+      ask: "Claude is at its limit until 3 pm. Use GitHub Copilot for this job?",
+      schedule: "job-j-cccccccc",
+      options: [{ label: "Use GitHub Copilot", detail: "It runs once now on GitHub Copilot. Its next run is on the plan that goes first again." }, { label: "Wait for Claude" }],
+    });
+    expect(copilot.card.need).toEqual(copilot.fresh);
+    expect(store.list(SAT_7AM).jobs.find((job) => job.id === "j-cccccccc")!.lastRun).toMatchObject({ result: "red", limit: { plan: "claude", until: "3 pm", other: "copilot" } });
+    expect(copilot.card.detail).toContain("GitHub Copilot is connected");
+    expect(copilot.card.detail).toContain('The answer "Use GitHub Copilot" starts it once on GitHub Copilot by itself');
+    expect(JSON.stringify(copilot.card)).not.toMatch(/ChatGPT/);
+    expect(kindOf("j-cccccccc")).toBe("limit claude copilot");
+    expect(store.planSwitch("job-j-cccccccc", "Use GitHub Copilot")).toEqual({ id: "j-cccccccc", plan: "copilot" });
+    for (const choice of ["Use ChatGPT", "Use Claude", "Wait for Claude", "Use Copilot", undefined]) expect(store.planSwitch("job-j-cccccccc", choice), String(choice)).toBeNull();
+    // Nothing holds a run on GitHub Copilot but the rules every run starts by.
+    expect(store.switchRefusal("j-cccccccc", "copilot", SAT_7AM)).toBeNull();
+
+    // No plan named: the card, kind and switch a build before the third plan made.
+    const plain = limited("j-nnnnnnnn", "No other", { plan: "claude", until: "3 pm" }, "Claude is at its limit until 3 pm. Use ChatGPT for this job?");
+    expect(plain.fresh).toMatchObject({ ask: "Claude is at its limit until 3 pm. Use ChatGPT for this job?", options: [{ label: "Use ChatGPT", detail: "It runs once now on ChatGPT. Its next run is on the plan that goes first again." }, { label: "Wait for Claude" }] });
+    expect(store.list(SAT_7AM).jobs.find((job) => job.id === "j-nnnnnnnn")!.lastRun!.limit).toEqual({ plan: "claude", until: "3 pm" });
+    expect(kindOf("j-nnnnnnnn")).toBe("limit claude");
+    expect(store.planSwitch("job-j-nnnnnnnn", "Use ChatGPT")).toEqual({ id: "j-nnnnnnnn", plan: "chatgpt" });
+    expect(store.planSwitch("job-j-nnnnnnnn", "Use GitHub Copilot")).toBeNull();
+
+    // The plan otherPlan gives, named: the same card and kind as naming none.
+    const named = limited("j-eeeeeeee", "Named other", { plan: "claude", until: "3 pm", other: "chatgpt" }, "Claude is at its limit until 3 pm. Use ChatGPT for this job?");
+    const same = ({ id: _id, schedule: _schedule, title: _title, since: _since, ...rest }: (typeof named)["fresh"]) => rest;
+    expect(same(named.fresh)).toEqual(same(plain.fresh));
+    expect(named.fresh.title).toBe("Named other: Claude is at its limit");
+    expect(kindOf("j-eeeeeeee")).toBe("limit claude");
+    expect(store.planSwitch("job-j-eeeeeeee", "Use ChatGPT")).toEqual({ id: "j-eeeeeeee", plan: "chatgpt" });
+
+    // ChatGPT at its limit: Claude when none is named, GitHub Copilot when it is.
+    const back = limited("j-bbbbbbbb", "Back to Claude", { plan: "chatgpt" }, "ChatGPT is at its limit. Use Claude for this job?");
+    expect(back.fresh).toMatchObject({ ask: "ChatGPT is at its limit. Use Claude for this job?", options: [{ label: "Use Claude" }, { label: "Wait for ChatGPT" }] });
+    expect(kindOf("j-bbbbbbbb")).toBe("limit chatgpt");
+    expect(store.planSwitch("job-j-bbbbbbbb", "Use Claude")).toEqual({ id: "j-bbbbbbbb", plan: "claude" });
+    const across = limited("j-gggggggg", "ChatGPT to Copilot", { plan: "chatgpt", other: "copilot" }, "ChatGPT is at its limit. Use GitHub Copilot for this job?");
+    expect(across.fresh).toMatchObject({ ask: "ChatGPT is at its limit. Use GitHub Copilot for this job?", options: [{ label: "Use GitHub Copilot" }, { label: "Wait for ChatGPT" }] });
+    expect(kindOf("j-gggggggg")).toBe("limit chatgpt copilot");
+    expect(store.planSwitch("job-j-gggggggg", "Use GitHub Copilot")).toEqual({ id: "j-gggggggg", plan: "copilot" });
+    expect(store.planSwitch("job-j-gggggggg", "Use Claude")).toBeNull();
+
+    // GitHub Copilot at its limit: Claude when none is named, ChatGPT when it is.
+    const fromCopilot = limited("j-hhhhhhhh", "Copilot limit", { plan: "copilot", until: "3 pm" }, "GitHub Copilot is at its limit until 3 pm. Use Claude for this job?");
+    expect(fromCopilot.fresh).toMatchObject({ title: "Copilot limit: GitHub Copilot is at its limit", ask: "GitHub Copilot is at its limit until 3 pm. Use Claude for this job?", options: [{ label: "Use Claude" }, { label: "Wait for GitHub Copilot" }] });
+    expect(kindOf("j-hhhhhhhh")).toBe("limit copilot");
+    expect(store.planSwitch("job-j-hhhhhhhh", "Use Claude")).toEqual({ id: "j-hhhhhhhh", plan: "claude" });
+    const toChatGpt = limited("j-iiiiiiii", "Copilot to ChatGPT", { plan: "copilot", other: "chatgpt" }, "GitHub Copilot is at its limit. Use ChatGPT for this job?");
+    expect(toChatGpt.fresh).toMatchObject({ ask: "GitHub Copilot is at its limit. Use ChatGPT for this job?", options: [{ label: "Use ChatGPT" }, { label: "Wait for GitHub Copilot" }] });
+    expect(kindOf("j-iiiiiiii")).toBe("limit copilot chatgpt");
+    expect(store.planSwitch("job-j-iiiiiiii", "Use ChatGPT")).toEqual({ id: "j-iiiiiiii", plan: "chatgpt" });
+  });
+
+  it("reads a card an older build stored by its kind: the plan otherPlan gives, and nothing for a kind that names no other plan", () => {
+    store.create("j-llllllll", task(), SAT_7AM);
+    const begun = start("j-llllllll", SAT_7AM, { usage: 10 });
+    if (!begun?.go) throw new Error("no start");
+    // The run now names GitHub Copilot; the card on file is the one an older build showed.
+    store.report("j-llllllll", begun.run, "red", "Claude is at its limit until 3 pm. Use GitHub Copilot for this job?", undefined, SAT_7AM, { plan: "claude", until: "3 pm", other: "copilot" });
+    const stored = (kind: string | null) => {
+      const db = new DatabaseSync(join(dir, "rivet.sqlite"));
+      try {
+        expect(db.prepare("UPDATE job_cards SET kind = ? WHERE job_id = ?").run(kind, "j-llllllll").changes).toBe(1);
+      } finally {
+        db.close();
+      }
+    };
+    const switches = (choice: string) => store.planSwitch("job-j-llllllll", choice);
+    stored("limit claude");
+    expect(switches("Use ChatGPT")).toEqual({ id: "j-llllllll", plan: "chatgpt" });
+    expect(switches("Use GitHub Copilot"), "the answer reads the card as it was shown").toBeNull();
+    stored("look claude");
+    expect(switches("Use ChatGPT")).toEqual({ id: "j-llllllll", plan: "chatgpt" });
+    stored("limit chatgpt");
+    expect(switches("Use Claude")).toEqual({ id: "j-llllllll", plan: "claude" });
+    stored("look claude copilot");
+    expect(switches("Use GitHub Copilot")).toEqual({ id: "j-llllllll", plan: "copilot" });
+    for (const kind of ["wait claude", "wait claude copilot", "red", null, "limit claude claude", "limit claude gemini", "limit gemini", "limit gemini copilot"]) {
+      stored(kind);
+      for (const choice of ["Use ChatGPT", "Use Claude", "Use GitHub Copilot"]) expect(switches(choice), `${kind}: ${choice}`).toBeNull();
+    }
+  });
+
+  it("asks a red check whose look hit a limit to use GitHub Copilot when its report names it, and starts its fix chat there", () => {
+    store.create("j-kkkkkkkk", check({ check: { script: "memory:lint", where: "mac", onRed: "look" }, name: "Lint" }), SAT_7AM);
+    const red = start("j-kkkkkkkk", SAT_7AM);
+    if (!red?.go) throw new Error("did not start");
+    finish("j-kkkkkkkk", red.run, "red", SAT_7AM, "3 tests failed.");
+    expect(store.look("j-kkkkkkkk", { run: red.run, state: "look", usage: 10 }, SAT_7AM)?.go).toBe(true);
+    const line = "3 tests failed. The check didn't run: Claude is at its limit until 3 pm.";
+    const limit = { plan: "claude", until: "3 pm", connected: true, first: "claude", other: "copilot" } as const;
+    expect(store.report("j-kkkkkkkk", red.run, "red", line, undefined, SAT_7AM, taskReportSchema.parse({ run: red.run, state: "red", line, limit }).limit).status).toBe(200);
+    expect(store.list(SAT_7AM).jobs[0]!.lastRun).toMatchObject({ result: "red", line: "3 tests failed.", lookLimit: limit });
+    const card = store.failing()[0]!;
+    expect(card.need).toMatchObject({
+      title: "Lint is red",
+      options: [
+        { label: "Use GitHub Copilot", detail: "It runs once now on GitHub Copilot: the check, and the look into it if it is still red." },
+        { label: "Fix it", detail: "The fix chat starts on GitHub Copilot." },
+        { label: "Wait for Claude" },
+      ],
+    });
+    expect(card.need.ask).toBe(`3 tests failed (${dayTimeWords(SAT_7AM)}). The check didn't run: Claude is at its limit until 3 pm. Use GitHub Copilot for this job?`);
+    expect(card.detail).toContain("Start its fix chat on GitHub Copilot.");
+    expect(JSON.stringify(card)).not.toMatch(/ChatGPT/);
+    expect(store.planSwitch("job-j-kkkkkkkk", "Use GitHub Copilot")).toEqual({ id: "j-kkkkkkkk", plan: "copilot" });
+    expect(store.planSwitch("job-j-kkkkkkkk", "Use ChatGPT")).toBeNull();
+  });
+
+  it("asks a task that needs what GitHub Copilot can't see to wait for Claude, with no switch", () => {
+    store.create("j-llllllll", task(), SAT_7AM);
+    const run = start("j-llllllll", SAT_7AM, { usage: 10 });
+    if (!run?.go) throw new Error("no start");
+    const line = "Claude is at its limit until 3 pm, so the job did not run. GitHub Copilot can't check GitHub from here.";
+    store.report("j-llllllll", run.run, "red", line, undefined, SAT_7AM, { plan: "claude", until: "3 pm", outside: "GitHub", other: "copilot" });
+    const card = store.failing().find((one) => one.scheduleId === "job-j-llllllll")!;
+    expect(card.need.ask).toBe("Claude is at its limit until 3 pm. GitHub Copilot can't check GitHub from here, so this job waits for Claude.");
+    expect(card.need.options).toEqual([expect.objectContaining({ label: "Wait for Claude", recommended: true })]);
+    expect(JSON.stringify(card.need)).not.toMatch(/Use GitHub Copilot|ChatGPT/);
+    expect(card.detail).toContain("GitHub Copilot can't check GitHub from here");
+    expect(card.detail).toContain("Nothing switched.");
+    for (const choice of ["Use GitHub Copilot", "Use ChatGPT", "Wait for Claude"]) expect(store.planSwitch("job-j-llllllll", choice), choice).toBeNull();
+  });
+
+  it("refuses a limit that offers its own plan, and takes any other plan or none", () => {
+    for (const plan of PLANS) {
+      expect(planLimitSchema.safeParse({ plan, other: plan }).success, plan).toBe(false);
+      expect(taskReportSchema.safeParse({ run: "run-00000001", state: "red", line: "x", limit: { plan, other: plan } }).success, plan).toBe(false);
+      expect(planLimitSchema.parse({ plan })).toEqual({ plan });
+      for (const other of PLANS.filter((one) => one !== plan)) expect(planLimitSchema.parse({ plan, other, until: "3 pm" })).toEqual({ plan, other, until: "3 pm" });
+    }
+    expect(planLimitSchema.safeParse({ plan: "claude", other: "gemini" }).success).toBe(false);
+    expect(planLimitSchema.safeParse({ plan: "claude", other: null }).success).toBe(false);
+    expect(planLimitSchema.safeParse({ plan: "claude", other: "copilot", extra: 1 }).success).toBe(false);
+    expect(planLimitSchema.parse({ plan: "claude", until: "3 pm", connected: true, first: "copilot", other: "copilot", outside: "GitHub" })).toEqual({ plan: "claude", until: "3 pm", connected: true, first: "copilot", other: "copilot", outside: "GitHub" });
+  });
+
+  it("names the plan a limit offers and its switch answer, for each plan", () => {
+    expect(PLANS).toEqual(["claude", "chatgpt", "copilot"]);
+    expect(PLAN_NAMES).toEqual({ claude: "Claude", chatgpt: "ChatGPT", copilot: "GitHub Copilot" });
+    expect(PLANS.map(otherPlan)).toEqual(["chatgpt", "claude", "claude"]);
+    expect(PLANS.map((plan) => limitOther({ plan }))).toEqual(["chatgpt", "claude", "claude"]);
+    expect(PLANS.map((plan) => planSwitchLabel(plan))).toEqual(["Use ChatGPT", "Use Claude", "Use Claude"]);
+    for (const plan of PLANS) {
+      for (const other of PLANS.filter((one) => one !== plan)) {
+        expect(limitOther({ plan, other })).toBe(other);
+        expect(planSwitchLabel(plan, other)).toBe(`Use ${PLAN_NAMES[other]}`);
+      }
+    }
+    expect(planSwitchLabel("claude", "copilot")).toBe("Use GitHub Copilot");
+    expect(planSwitchLabel("chatgpt", "copilot")).toBe("Use GitHub Copilot");
+    expect(planSwitchLabel("copilot", "chatgpt")).toBe("Use ChatGPT");
+    expect(planSwitchLabel("copilot", undefined)).toBe("Use Claude");
   });
 
   it("links a check's red card to the Plans page when its look hit a limit with the other plan not connected", () => {

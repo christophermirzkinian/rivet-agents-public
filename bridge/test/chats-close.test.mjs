@@ -6,7 +6,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { count, keptFromLog, readKnobCap, readRunner, report } from "../lib/chat-count.mjs";
-import { closePass, decide, HEARTBEAT_FRESH_MS, parseArgs, readHeartbeat, realIo, stance, takeLock, writeAtomic, writeHeartbeat } from "../lib/chats-close.mjs";
+import { closePass, decide, GIT_STUCK_LIMIT, GIT_TIMEOUT_MS, HEARTBEAT_FRESH_MS, parseArgs, readHeartbeat, realIo, stance, takeLock, writeAtomic, writeHeartbeat } from "../lib/chats-close.mjs";
 
 const NOW = Date.parse("2026-11-22T10:00:00Z");
 const HOUR = 3600_000;
@@ -202,7 +202,7 @@ test("a command that ignores SIGTERM is still killed at the deadline", () => {
 });
 
 /** A pass on fakes: one finished chat in the app, with the mode, heartbeat and lock given. */
-function harness({ mode, beat = null, lock = null, knobs = null, at = "/w", ps = () => "", lsof = () => "", closeFails = false, runner = () => [] }) {
+function harness({ mode, beat = null, lock = null, knobs = null, at = "/w", ps = () => "", lsof = () => "", closeFails = false, runner = () => [], gitHangs = false, extra = [] }) {
   const base = scratch();
   fs.mkdirSync(base, { recursive: true });
   const heartbeatFile = path.join(base, "closer.json");
@@ -213,16 +213,18 @@ function harness({ mode, beat = null, lock = null, knobs = null, at = "/w", ps =
   if (lock === "held") takeLock(lockFile);
   if (lock === "leftover") fs.writeFileSync(lockFile, "4194311\n");
   const calls = [];
+  const gitTimeouts = [];
   const lines = [];
   const signals = [];
   const termed = new Set();
   const files = new Map([["/mode", `${mode}\n`]]);
   const io = {
     now: () => NOW,
-    run: (cmd, args) => {
+    run: (cmd, args, opts) => {
       calls.push([cmd, ...args].join(" "));
+      if (cmd === "git") gitTimeouts.push(opts?.timeout);
       const a = args.join(" ");
-      if (cmd === "app" && a.startsWith("terminal list")) return JSON.stringify({ result: { terminals: [{ handle: "t1", worktreePath: `${at}/done`, title: "✳ idle" }, { handle: "t2", worktreePath: `${at}/busy`, title: "⠋ work" }], truncated: false } });
+      if (cmd === "app" && a.startsWith("terminal list")) return JSON.stringify({ result: { terminals: [{ handle: "t1", worktreePath: `${at}/done`, title: "✳ idle" }, { handle: "t2", worktreePath: `${at}/busy`, title: "⠋ work" }, ...extra.map((n, i) => ({ handle: `x${i}`, worktreePath: `${at}/${n}`, title: "✳ idle" }))], truncated: false } });
       if (cmd === "app" && a.startsWith("worktree ps")) return JSON.stringify({ result: { worktrees: [{ path: `${at}/done`, agents: [{ state: "done", updatedAt: NOW - 2 * HOUR }] }, { path: `${at}/busy`, agents: [{ state: "working", updatedAt: NOW }] }] } });
       if (cmd === "app" && a.startsWith("terminal close") && closeFails) throw Object.assign(new Error("no such terminal"), { stderr: "no such terminal" });
       if (a.includes(" board --out ")) {
@@ -232,6 +234,7 @@ function harness({ mode, beat = null, lock = null, knobs = null, at = "/w", ps =
       if (a.includes(" ask list ")) return "[]";
       if (cmd === "ps") return ps(a);
       if (cmd === "lsof") return lsof();
+      if (cmd === "git" && gitHangs) throw Object.assign(new Error("spawnSync git ETIMEDOUT"), { code: "ETIMEDOUT", signal: "SIGKILL" });
       if (cmd === "git") return { "remote get-url origin": "https://github.com/o/r.git", "rev-parse HEAD": "abc", "rev-parse --abbrev-ref HEAD": "feat" }[args.slice(2).join(" ")] ?? "";
       if (cmd === "gh") return "[]";
       return "{}";
@@ -260,7 +263,7 @@ function harness({ mode, beat = null, lock = null, knobs = null, at = "/w", ps =
   };
   const cfg = { protected: [], protectedFolder: null, app: "app", keepListFile: null, modeFile: "/mode", logFile: "/log" };
   const pass = (from, rowClose = true) => closePass({ from, rowClose, io, cfg, home: base, tmp: base, heartbeatFile, lockFile, knobsFile });
-  return { base, pass, calls, lines, signals, closes:() => calls.filter((c) => c.startsWith("app terminal close")) };
+  return { base, io, pass, calls, lines, signals, gitTimeouts, closes:() => calls.filter((c) => c.startsWith("app terminal close")) };
 }
 
 /**
@@ -302,6 +305,48 @@ test("a closed chat's orphaned left-overs in its folder end by pid after its ter
   // ps and lsof read again after the close, not only at the pass's start.
   const close = h.calls.findIndex((c) => c.startsWith("app terminal close"));
   assert.ok(h.calls.slice(close).some((c) => c.startsWith("lsof ")) && h.calls.slice(close).some((c) => c.startsWith("ps ")));
+  assert.ok(h.lines.some((l) => / close done left-overs ended 201 node vite, 202 pnpm dev$/.test(l)), h.lines.join("\n"));
+});
+
+test("a left-over surviving SIGKILL EPERM is not reported ended", async (t) => {
+  const at = "/w/R/foo";
+  const h = harness({ mode: "close", at, ...leftovers(at), runner: () => [{ worktree: `${at}/done/nested` }] });
+  const kill = h.io.kill;
+  h.io.kill = (pid, signal) => {
+    if (pid !== 201) return kill(pid, signal);
+    if (signal !== 0) h.signals.push([pid, signal]);
+    if (signal === "SIGKILL") throw Object.assign(new Error("EPERM"), { code: "EPERM" });
+    return true;
+  };
+  let clock = NOW;
+  t.mock.method(Date, "now", () => (clock += 3_001));
+  assert.deepEqual((await h.pass("cron")).closed, ["done"]);
+  assert.deepEqual(h.signals, [[201, "SIGTERM"], [202, "SIGTERM"], [201, "SIGKILL"]]);
+  assert.equal(h.io.kill(201, 0), true);
+  assert.ok(h.lines.some((l) => / close done left-overs ended 202 pnpm dev$/.test(l)), h.lines.join("\n"));
+  assert.ok(!h.lines.some((l) => /left-overs ended .*201\b/.test(l)), h.lines.join("\n"));
+});
+
+test("a left-over that ends on SIGKILL but answers kill(0) until reaped is still reported ended", async (t) => {
+  const at = "/w/R/foo";
+  const h = harness({ mode: "close", at, ...leftovers(at), runner: () => [{ worktree: `${at}/done/nested` }] });
+  const kill = h.io.kill;
+  let zombieChecks = 0;
+  let pauses = 0;
+  h.io.pause = () => void (pauses += 1);
+  h.io.kill = (pid, signal) => {
+    if (pid !== 201) return kill(pid, signal);
+    if (signal !== 0) h.signals.push([pid, signal]);
+    if (signal === "SIGKILL") zombieChecks = 2;
+    if (signal === 0 && zombieChecks === 0 && h.signals.some(([p, s]) => p === 201 && s === "SIGKILL")) throw Object.assign(new Error("ESRCH"), { code: "ESRCH" });
+    if (signal === 0 && zombieChecks > 0) zombieChecks -= 1;
+    return true;
+  };
+  let clock = NOW;
+  t.mock.method(Date, "now", () => (clock += 400));
+  assert.deepEqual((await h.pass("cron")).closed, ["done"]);
+  assert.deepEqual(h.signals, [[201, "SIGTERM"], [202, "SIGTERM"], [201, "SIGKILL"]]);
+  assert.ok(pauses > 0);
   assert.ok(h.lines.some((l) => / close done left-overs ended 201 node vite, 202 pnpm dev$/.test(l)), h.lines.join("\n"));
 });
 
@@ -399,6 +444,28 @@ test("cron: the switch off in the knobs file, or a knobs file it cannot read, li
   }
   const none = harness({ mode: "bridge", beat: NOW - 16 * 60_000 });
   assert.deepEqual((await none.pass("cron")).closed, ["done"], "no knobs file");
+});
+
+test("a hanging git keeps every chat and is given up on after two timeouts in a pass", async () => {
+  const h = harness({ mode: "bridge", beat: NOW - 16 * 60_000, gitHangs: true });
+  const result = await h.pass("cron");
+  assert.deepEqual(result.closed, []);
+  assert.equal(h.calls.filter((c) => c.startsWith("git ")).length, 2);
+  assert.deepEqual(h.gitTimeouts, [GIT_TIMEOUT_MS, GIT_TIMEOUT_MS], "each git call carries the 10 s cap");
+});
+
+test("after two git timeouts the pass calls git no more and keeps the chats left", async () => {
+  const h = harness({ mode: "bridge", beat: NOW - 16 * 60_000, gitHangs: true, extra: ["third", "fourth"] });
+  const result = await h.pass("cron");
+  assert.deepEqual(result.closed, []);
+  assert.equal(h.calls.filter((c) => c.startsWith("git ")).length, GIT_STUCK_LIMIT);
+});
+
+test("a run's own shorter timeout holds; the 60 s cap still bounds a longer one", () => {
+  const io = realIo(dir);
+  const started = Date.now();
+  assert.throws(() => io.run("sleep", ["3"], { timeout: 300 }), (/** @type {any} */ e) => e.signal === "SIGKILL");
+  assert.ok(Date.now() - started < 2000, `took ${Date.now() - started} ms`);
 });
 
 test("a held lock: the cron skips; the bridge counts and closes nothing; a leftover lock file is taken", darwinOnly, async () => {

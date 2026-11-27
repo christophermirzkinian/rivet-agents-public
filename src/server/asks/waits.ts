@@ -308,7 +308,8 @@ export function withWaits({ board, stored, asks, answers, answered = [], yeses =
         made.push(before);
         continue;
       }
-      made.push({ ...card, id: before.id, ...(before.since ? { since: before.since } : {}) });
+      // The lines under it (his comments, the crew's notes) stay: they are the server's, never its source's.
+      made.push({ ...card, id: before.id, ...(before.since ? { since: before.since } : {}), ...(before.comments?.length ? { comments: before.comments } : {}) });
       continue;
     }
     const startedAt = Date.parse(item.at ?? "");

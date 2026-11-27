@@ -20,7 +20,21 @@ interface Reply { id: string; itemId: string; item?: { pr?: number; repo?: strin
 interface Ask { replyId?: string; chat?: string; repo?: string; prs?: number[]; card?: string }
 
 const args = process.argv.slice(2);
-const flag = (name: string) => args.flatMap((arg, index) => (arg === name && args[index + 1] ? [args[index + 1]!] : []));
+const values = new Map<string, string[]>();
+try {
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i]!;
+    if (arg === "--apply") continue;
+    if (!["--since", "--pair", "--skip"].includes(arg)) throw new Error(`unknown argument ${arg}`);
+    const value = args[++i];
+    if (!value || value.startsWith("-")) throw new Error(`${arg} needs a value`);
+    values.set(arg, [...(values.get(arg) ?? []), value]);
+  }
+} catch (error) {
+  console.error(`tidy-conversations: ${(error as Error).message}`);
+  process.exit(2);
+}
+const flag = (name: string) => values.get(name) ?? [];
 const apply = args.includes("--apply");
 const since = flag("--since")[0] ?? new Date(Date.now() - 36 * 3_600_000).toISOString();
 const skipped = flag("--skip");

@@ -195,6 +195,18 @@ const workers = {
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 let sendDelay = { on: true, seconds: 10 };
+/** ?commented=1: his comment answered a card (a-11), so its line has no Open card and one card still waits. */
+const commented: unknown[] = [];
+if (new URLSearchParams(location.search).has("commented")) {
+  const card = { id: "sign-up-loading-bar", kind: "decision", title: "Sign-up page: same loading bar?", ask: "The sign-up page gets the poster and small bar Checkout now opens on.", rev: "r1" };
+  const open = { id: "checkout-loading-bar", kind: "decision", title: "Checkout: new start screen, OK to ship?", ask: "Checkout now opens on its poster with a small bar.", rev: "r1" };
+  const text = "Does the bar match Checkout's colours, or is it the old orange?";
+  needs.splice(0, needs.length, ...([open, card] as unknown as ServedNeed[]));
+  commented.push({ id: "reply-commented", itemId: card.id, itemTitle: card.title, decision: "comment", text, rev: card.rev, at: ago(0.6), handled: true, item: card });
+  const lines = [mine("c3", "c3", 0.6, `Comment: ${text}`, { card: card.id, status: "sent" }), say("c4", "c3", 0.3, "Same colours as Checkout: the gold bar on the dark poster.")];
+  messages.push(...lines);
+  titles.c3 = "Sign-up page loading bar";
+}
 const passThrough = window.fetch.bind(window);
 window.fetch = async (input, init) => {
   const url = new URL(String(input), location.origin);
@@ -203,7 +215,7 @@ window.fetch = async (input, init) => {
   if (path.startsWith("/media/")) return (await previewMediaFile(path)) ?? passThrough(input, init);
   if (path === "/api/board") return json(board);
   if (path === "/api/workers") return json(workers);
-  if (path === "/api/replies") return json({ replies: [] });
+  if (path === "/api/replies") return json({ replies: commented });
   // One ask with a time, so the head's clock shows: ?late=1 makes it late (the clock turns amber).
   if (path === "/api/asks")
     return json({

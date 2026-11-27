@@ -485,6 +485,42 @@ describe("run reports", () => {
     expect(jobRuns()).toHaveLength(1);
     mac.abort();
   });
+
+  it("sends the Mac one Run now on GitHub Copilot for a limit card that offers it, and refuses a limit that offers its own plan", async () => {
+    const TASK = { name: "Issues", words: "look over the open site issues", kind: "task", when: { every: "day", at: "07:00" }, cards: "red" };
+    const [switched, busy, own] = [await madeJob(TASK), await madeJob({ ...TASK, name: "PRs", words: "look over the open PRs" }), await madeJob({ ...TASK, name: "Runs", words: "look over the failed runs" })];
+    const mac = await connectBridge();
+    const jobRuns = () => mac.events().filter((one) => one.event === "job" && (one.data.job as { op?: string } | undefined)?.op === "run");
+    const limited = async (id: string, run: string, limit: Record<string, string>) => {
+      await report(id, { run, state: "start", usage: 10 });
+      return send("PUT", `/api/bridge/jobs/${id}/report`, { run, state: "red", line: "Claude is at its limit until 3 pm. Use GitHub Copilot for this job?", limit }, bearer(BRIDGE_TOKEN));
+    };
+    const cardOf = async (id: string) => (await board()).needs.find((need) => need.schedule === `job-${id}`)!;
+    const answer = (card: { id: string; rev: string }, choice: string) => send("POST", "/api/replies", { clientId: clientId(), itemId: card.id, decision: "choice", choice, rev: card.rev }, browser(cookie));
+
+    expect((await limited(switched, "run-00000001", { plan: "claude", until: "3 pm", other: "copilot" })).status).toBe(200);
+    const card = await cardOf(switched);
+    expect(card).toMatchObject({ ask: "Claude is at its limit until 3 pm. Use GitHub Copilot for this job?", options: [{ label: "Use GitHub Copilot" }, { label: "Wait for Claude" }] });
+    expect((await answer(card, "Use GitHub Copilot")).status).toBe(201);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(jobRuns().map((one) => one.data.job)).toEqual([{ op: "run", id: switched, plan: "copilot" }]);
+
+    // A switch that cannot start says which plan it was for.
+    expect((await limited(busy, "run-00000002", { plan: "claude", other: "copilot" })).status).toBe(200);
+    const busyCard = await cardOf(busy);
+    await report(busy, { run: "run-00000003", state: "start", usage: 10 });
+    const refused = await answer(busyCard, "Use GitHub Copilot");
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toMatchObject({ error: "It couldn't start on GitHub Copilot: it is running now." });
+
+    // A limit that offers its own plan is no report: the run stays as it was, with no card.
+    expect((await limited(own, "run-00000004", { plan: "claude", other: "claude" })).status).toBe(400);
+    expect((await limited(own, "run-00000004", { plan: "copilot", other: "copilot" })).status).toBe(400);
+    expect(await cardOf(own)).toBeUndefined();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(jobRuns()).toHaveLength(1);
+    mac.abort();
+  });
 });
 
 describe("the overnight-jobs switch", () => {
@@ -542,7 +578,7 @@ describe("the overnight-jobs switch", () => {
   });
 });
 
-describe("a session a device code alone made (a-1010)", () => {
+describe("a session a device code alone made (a-10)", () => {
   const NIGHTLY = "github:acme/app/nightly.yml";
   let byCode: string;
   const audit = async () => ((await (await fetch(`${server.base}/api/audit`, { headers: { cookie } })).json()) as { entries: AuditEntry[] }).entries;

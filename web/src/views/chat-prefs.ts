@@ -3,7 +3,7 @@
 // store is the truth and the phone's copy follows it.
 import { REPLY_STYLE_ID, TEXT_SIZE_ID, type BehaviourRow, type BehaviourValue } from "../../../src/shared/behaviours.js";
 import * as api from "../api.js";
-import { onSessionReset } from "../session.js";
+import { onSessionReset, StaleSession } from "../session.js";
 import { isStyle, savedChatReplyStyle, setChatReplyStyle } from "./chat-reply-style.js";
 import { isSize, savedChatTextSize, setChatTextSize } from "./chat-text-size.js";
 import { flash } from "./toast.js";
@@ -20,10 +20,42 @@ function pref(id: string): Pref | null {
   return null;
 }
 
-/** The phone's copy follows a stored row. */
-export function cacheChatPref(row: BehaviourRow): void {
+/** Local picks and Settings saves invalidate only that preference in an older list. */
+const versions = new Map<string, number>();
+/** Chat picks whose save has not answered yet: no list read before it landed may move that preference. */
+const pending = new Map<string, number>();
+
+/** Taken before a list is requested, and passed to syncChatPrefs with its answer. */
+export function chatPrefsMark(): ReadonlyMap<string, number> {
+  return new Map(versions);
+}
+
+/** Chat picks only, counted per preference: a Settings save sent before one must not undo it. */
+const picks = new Map<string, number>();
+/** A save from a session that has ended settles nothing in the next one. */
+let session = 0;
+onSessionReset(() => {
+  session += 1;
+  pending.clear();
+});
+
+/** Taken when Settings sends a save, and passed to cacheChatPref with its answer. */
+export function chatPicksMark(): ReadonlyMap<string, number> {
+  return new Map(picks);
+}
+
+/** Whether a list sent at `before` is older than a Chat pick on this preference, landed or not. */
+function overtaken(id: string, before: ReadonlyMap<string, number>): boolean {
+  return before.get(id) !== versions.get(id) || (pending.get(id) ?? 0) > 0;
+}
+
+/** The phone's copy follows a stored row, unless a Chat pick came after the save was sent (`picksBefore`). */
+export function cacheChatPref(row: BehaviourRow, picksBefore?: ReadonlyMap<string, number>): void {
   const found = pref(row.id);
-  if (found && row.updatedAt !== null) found.cache(row.value?.[found.key]);
+  if (found && row.updatedAt !== null && !(picksBefore && picksBefore.get(row.id) !== picks.get(row.id))) {
+    versions.set(row.id, (versions.get(row.id) ?? 0) + 1);
+    found.cache(row.value?.[found.key]);
+  }
 }
 
 /**
@@ -46,14 +78,15 @@ function carry(row: BehaviourRow, key: string, local: string): Promise<Behaviour
 }
 
 /** The rows with the phone's own pick saved where the store has none yet, and the phone's copy following the rest. */
-export async function syncChatPrefs(rows: readonly BehaviourRow[]): Promise<BehaviourRow[]> {
+export async function syncChatPrefs(rows: readonly BehaviourRow[], before: ReadonlyMap<string, number>): Promise<BehaviourRow[]> {
   return Promise.all(
     rows.map(async (row) => {
       const found = pref(row.id);
-      if (!found) return row;
+      if (!found || overtaken(row.id, before)) return row;
       const local = found.saved();
       if (row.updatedAt !== null || local === null) {
-        cacheChatPref(row);
+        // A list follows the store; only a local pick or Settings save advances its version.
+        if (row.updatedAt !== null) found.cache(row.value?.[found.key]);
         return row;
       }
       return carry(row, found.key, local);
@@ -75,7 +108,22 @@ export function repaintAfterList(el: Element, paint: () => void): void {
 
 /** A pick made in Chat, saved to the store; the phone's copy already holds it, and follows the store again on a failure. */
 export function saveChatPref(id: string, value: BehaviourValue, what: string): void {
-  api.putBehaviour(id, value).catch(() => {
+  versions.set(id, (versions.get(id) ?? 0) + 1);
+  picks.set(id, (picks.get(id) ?? 0) + 1);
+  pending.set(id, (pending.get(id) ?? 0) + 1);
+  const sentIn = session;
+  const settle = () => {
+    if (sentIn !== session) return;
+    // A list sent while this save was out may predate it in the store: its mark no longer matches.
+    versions.set(id, (versions.get(id) ?? 0) + 1);
+    const left = (pending.get(id) ?? 1) - 1;
+    if (left > 0) pending.set(id, left);
+    else pending.delete(id);
+  };
+  api.putBehaviour(id, value).then(settle, (error: unknown) => {
+    settle();
+    // Signed out before it answered: nothing to tell this session.
+    if (error instanceof StaleSession) return;
     flash(`Couldn't save the ${what}. Try again.`, "error");
     void loadChatPrefs();
   });
@@ -83,8 +131,9 @@ export function saveChatPref(id: string, value: BehaviourValue, what: string): v
 
 /** The first list after sign-in, for the migration and the phone's copy. */
 export async function loadChatPrefs(): Promise<void> {
+  const before = chatPrefsMark();
   try {
-    await syncChatPrefs((await api.getBehaviours()).behaviours);
+    await syncChatPrefs((await api.getBehaviours()).behaviours, before);
     for (const ref of pickers) {
       const el = ref.deref();
       if (!el) pickers.delete(ref);

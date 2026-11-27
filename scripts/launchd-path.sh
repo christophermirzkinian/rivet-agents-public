@@ -8,6 +8,12 @@ launchd_path() {
   local local_bin="$HOME/.local/bin"
   local out="" dir
   while IFS= read -r dir; do
+    # A trailing slash names the same directory, so it never slips an entry past the patterns below. Any checkout's
+    # .claude/bin goes too: a reinstall from a chat runner's worktree put its .claude/bin gh wrapper first, and the
+    # bridge lost every GitHub read when that worktree went (26 Nov 2026). Codex's per-run temp dirs (*/tmp/arg0/*) and
+    # the helper dir inside its installed package (*/codex-path) vanish the same way, on cleanup or an upgrade.
+    while [[ "$dir" == */ && "$dir" != / ]]; do dir="${dir%/}"; done
+    [[ "$dir" == */.claude/bin || "$dir" == */tmp/arg0/* || "$dir" == */codex-path ]] && continue
     case "$dir" in
       /*) ;;
       *) continue ;;

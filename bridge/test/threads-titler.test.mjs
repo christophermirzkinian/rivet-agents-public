@@ -104,11 +104,11 @@ test("a bad answer is a strike; the third gives the thread up with an all-null a
   const strikes = new Map();
   const call = makeCall(server.fetch);
   const run = async () => cliOut(`Here you go: ${SECRET}`);
-  for (let pass = 1; pass < MAX_STRIKES; pass++) {
+  for (let pass = 1; pass < 3; pass++) {
     assert.deepEqual(await titlePass({ call, run, strikes, log: (event, fields) => logs.push([event, fields]) }), { titled: 0, gaveUp: 0 });
     assert.equal(strikes.get("m-1"), pass);
+    assert.deepEqual(server.state.posts, []);
   }
-  assert.deepEqual(server.state.posts, []);
   assert.deepEqual(await titlePass({ call, run, strikes, log: (event, fields) => logs.push([event, fields]) }), { titled: 0, gaveUp: 1 });
   assert.deepEqual(server.state.posts, [{ id: "m-1", body: { title: null, tag: null, project: null } }]);
   assert.equal(strikes.size, 0);
@@ -263,7 +263,8 @@ test("a refusal that exits 1 is a strike, not a failure that ends every pass, an
     const log = (event, fields) => logs.push([event, fields]);
     assert.deepEqual(await titlePass({ call, run, strikes, log }), { titled: 1, gaveUp: 0 });
     assert.deepEqual(logs[0], ["threads-titler-bad-answer", { thread: "m-1", strike: 1, reason: "the model refused" }]);
-    for (let pass = 2; pass < MAX_STRIKES; pass++) await titlePass({ call, run, strikes, log });
+    assert.equal(MAX_STRIKES, 3, "the passes below give up on the third");
+    assert.deepEqual(await titlePass({ call, run, strikes, log }), { titled: 0, gaveUp: 0 });
     assert.deepEqual(await titlePass({ call, run, strikes, log }), { titled: 0, gaveUp: 1 });
     assert.deepEqual(server.state.posts.map((post) => post.id), ["m-2", "m-1"]);
     assert.deepEqual(server.state.posts[1].body, { title: null, tag: null, project: null });

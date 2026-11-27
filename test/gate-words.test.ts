@@ -10,7 +10,7 @@ import { describe as describeError } from "../web/src/dom.js";
 import { gateWords, type GateScreen } from "../web/src/gate-words.js";
 import { StaleSession } from "../web/src/session.js";
 
-// What a person reads when a sign-in fails (a-1020): never the browser's or the server's own text.
+// What a person reads when a sign-in fails (a-10): never the browser's or the server's own text.
 
 const SCREENS: GateScreen[] = ["passkey", "passkey-or-code", "set-up", "code", "start", "devices"];
 const OTHER = "Something went wrong. Try again in a minute.";

@@ -67,7 +67,7 @@ export interface TestServer {
 
 export async function startServer(
   env: Record<string, string | undefined> = {},
-  options: { pushSender?: PushSender; now?: () => Date; quiet?: boolean; logs?: string[] } = {},
+  options: { pushSender?: PushSender; now?: () => Date; quiet?: boolean; logs?: string[]; sendCapBytes?: number; uploadIdleMs?: number } = {},
 ): Promise<TestServer> {
   const dir = mkdtempSync(join(tmpdir(), "rivet-test-"));
   const webRoot = join(dir, "web");
@@ -87,6 +87,8 @@ export async function startServer(
       ...env,
     }),
     webRoot,
+    ...(options.sendCapBytes === undefined ? {} : { sendCapBytes: options.sendCapBytes }),
+    ...(options.uploadIdleMs === undefined ? {} : { uploadIdleMs: options.uploadIdleMs }),
   };
   const app = createApp(config, { error: (message: string) => void options.logs?.push(message) }, options);
   // Quiet hours would make every push test depend on the time of day it runs at.

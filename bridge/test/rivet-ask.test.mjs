@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { EMPTY_DONE_REFUSAL, emptyDoneLine } from "../lib/asks.mjs";
 import { nextAskId, parseArgs, parseDueTime, run, when } from "../../scripts/rivet.mjs";
 
 const TOKEN = "cd".repeat(32);
@@ -11,6 +12,8 @@ const TOKEN = "cd".repeat(32);
 const ZONE = "Pacific/Port_Moresby";
 const ENV = { RIVET_BRIDGE_DEV: "1", RIVET_BOARD_TOKEN: TOKEN, RIVET_URL: "http://localhost:5999", RIVET_TIME_ZONE: ZONE, PATH: "" };
 const NOW = "2026-10-01T02:00:00.000Z";
+/** What a move to done says is done: 6 words or more, as the Done card needs. */
+const SAID = "The banner chart now shows a week";
 
 /**
  * An asks server in memory: GET, POST and PATCH like the real routes.
@@ -116,7 +119,7 @@ test("parses the ask commands and refuses bad usage", () => {
   assert.deepEqual([open.cmd, open.sub, open.args, open.prs], ["ask", "open", ["make it bigger"], [12, 13]]);
   assert.deepEqual(open.fields, { who: "owner", cardId: "c1", chat: "quiz-app", replyId: "r_1" });
   assert.equal(parseArgs(["ask", "close", "a-1", "parked", "--issue", "266"]).fields.issue, 266);
-  assert.equal(parseArgs(["ask", "status", "a-1", "done", "--if-match", "3"]).ifMatch, "3");
+  assert.equal(parseArgs(["ask", "status", "a-1", "done", "--note", SAID, "--if-match", "3"]).ifMatch, "3");
   assert.equal(parseArgs(["ask", "open", "x", "--repo", "example-org/example-repo"]).fields.repo, "example-org/example-repo");
   assert.equal(parseArgs(["ask", "list", "--all"]).all, true);
   assert.equal(parseArgs(["ask", "status", "a-1", "needs-you", "--card", "c1"]).fields.stage, "needs-you");
@@ -124,7 +127,7 @@ test("parses the ask commands and refuses bad usage", () => {
   assert.equal(parseArgs(["ask", "status", "a-1", "needs-you"]).fields.cardId, undefined);
   assert.equal(parseArgs(["ask", "set", "a-1", "--stage", "needs-you"]).fields.cardId, undefined);
   assert.equal(parseArgs(["ask", "status", "a-1", "review"]).fields.stage, "review");
-  assert.equal(parseArgs(["ask", "close", "a-1", "done"]).fields.stage, "done");
+  assert.equal(parseArgs(["ask", "close", "a-1", "done", "--note", SAID]).fields.stage, "done");
   assert.equal(parseArgs(["ask", "list", "--status", "building"]).fields.stage, "building");
   assert.equal(parseArgs(["ask", "list", "--stage", "needs-you"]).fields.stage, "needs-you");
   const from = parseArgs(["ask", "open", "--from", "m_9", "--who", "rivet", "--stage", "building", "--due", "90", "--why", "two PRs"]);
@@ -152,16 +155,52 @@ test("parses the ask commands and refuses bad usage", () => {
   assert.throws(() => parseArgs(["ask", "set", "a-1", "--stage", "finished"]), usage("--stage is one of"));
 });
 
+test("a move to done says what is done in 6 words or more: --done items, else --note, else --why", async () => {
+  const empty = usage(EMPTY_DONE_REFUSAL);
+  assert.throws(() => parseArgs(["ask", "close", "a-1", "done", "--note", "answered"]), empty);
+  assert.throws(() => parseArgs(["ask", "set", "a-1", "--stage", "done", "--why", "done"]), empty);
+  assert.throws(() => parseArgs(["ask", "status", "a-1", "done", "--note", "Done. Fixed. Closed. Finished. Answered. Done."]), empty);
+  assert.throws(() => parseArgs(["ask", "close", "a-1", "done", "--note", "the chart shows a week"]), empty);
+  // With no line given here, the ask's stored why may say it (or it is already done): the server decides.
+  assert.equal(parseArgs(["ask", "close", "a-1", "done"]).fields.stage, "done");
+  // The --done items are the line, so a long note does not cover short items.
+  assert.throws(() => parseArgs(["ask", "close", "a-1", "done", "--note", SAID, "--done", "Chart"]), empty);
+  assert.equal(parseArgs(["ask", "close", "a-1", "done", "--note", SAID]).fields.note, SAID);
+  assert.equal(parseArgs(["ask", "set", "a-1", "--stage", "done", "--why", SAID]).fields.why, SAID);
+  assert.deepEqual(parseArgs(["ask", "close", "a-1", "done", "--done", "Chart shows a week", "--done", "Totals per day"]).doneItems, ["Chart shows a week", "Totals per day"]);
+  // A slash or bracket is no word: done said over and over is still only done.
+  assert.equal(emptyDoneLine("done / done / done / done"), true);
+  assert.equal(emptyDoneLine("(done) (done) (done) (done) (done) (done)"), true);
+  assert.equal(emptyDoneLine("Shipped the Windows app, signed and tested"), false);
+  assert.throws(() => parseArgs(["ask", "close", "a-1", "done", "--note", "(done) (done) (done) (done) (done) (done)"]), empty);
+  // Off a move to done there is nothing to say, and listing the done asks is a filter.
+  assert.equal(parseArgs(["ask", "close", "a-1", "shipped"]).fields.stage, "shipped");
+  assert.equal(parseArgs(["ask", "list", "--stage", "done"]).fields.stage, "done");
+
+  const server = stubServer([mk({ id: "a-1" })]);
+  const refused = await cli(["ask", "close", "a-1", "done", "--note", "answered"], { fetch: server.fetch });
+  assert.equal(refused.code, 2);
+  assert.ok(refused.stderr.includes(EMPTY_DONE_REFUSAL), refused.stderr);
+  const why = await cli(["ask", "set", "a-1", "--stage", "done", "--why", "done"], { fetch: server.fetch });
+  assert.equal(why.code, 2);
+  assert.ok(why.stderr.includes(EMPTY_DONE_REFUSAL), why.stderr);
+  assert.deepEqual(server.state.calls, [], "nothing is sent");
+  const closed = await cli(["ask", "close", "a-1", "done", "--note", SAID], { fetch: server.fetch });
+  assert.equal(closed.code, 0, closed.stderr);
+  assert.deepEqual(server.state.calls.at(-1)?.body, { stage: "done", note: SAID });
+  assert.equal(server.state.asks[0].stage, "done");
+});
+
 test("parses the done card's --done and --media, and refuses them off a move to done", () => {
-  const set = parseArgs(["ask", "set", "a-1", "--stage", "done", "--done", "A", "--done", "B", "--media", "shot.png"]);
-  assert.deepEqual([set.fields, set.doneItems, set.doneMedia, set.media.stills], [{ stage: "done" }, ["A", "B"], "shot.png", ["shot.png"]]);
-  const close = parseArgs(["ask", "close", "a-1", "done", "--done", "A", "--media", "clip.MP4", "--poster", "first.jpg", "--skip-corner-check"]);
-  assert.deepEqual([close.doneItems, close.media.after, close.media.poster, close.media.skipCorner, close.media.stills], [["A"], "clip.MP4", "first.jpg", true, []]);
-  assert.deepEqual(parseArgs(["ask", "status", "a-1", "done", "--done", "A"]).doneItems, ["A"]);
-  assert.equal(parseArgs(["ask", "close", "a-1", "done", "--media", "shot.jpeg"]).doneMedia, "shot.jpeg");
-  const three = ["--done", "1", "--done", "2", "--done", "3"];
+  const set = parseArgs(["ask", "set", "a-1", "--stage", "done", "--done", SAID, "--done", "B", "--media", "shot.png"]);
+  assert.deepEqual([set.fields, set.doneItems, set.doneMedia, set.media.stills], [{ stage: "done" }, [SAID, "B"], "shot.png", ["shot.png"]]);
+  const close = parseArgs(["ask", "close", "a-1", "done", "--done", SAID, "--media", "clip.MP4", "--poster", "first.jpg", "--skip-corner-check"]);
+  assert.deepEqual([close.doneItems, close.media.after, close.media.poster, close.media.skipCorner, close.media.stills], [[SAID], "clip.MP4", "first.jpg", true, []]);
+  assert.deepEqual(parseArgs(["ask", "status", "a-1", "done", "--done", SAID]).doneItems, [SAID]);
+  assert.equal(parseArgs(["ask", "close", "a-1", "done", "--note", SAID, "--media", "shot.jpeg"]).doneMedia, "shot.jpeg");
+  const three = ["--done", SAID, "--done", "2", "--done", "3"];
   assert.equal(parseArgs(["ask", "set", "a-1", "--stage", "done", ...three]).doneItems?.length, 3);
-  assert.equal(parseArgs(["ask", "set", "a-1", "--stage", "done", "--done", "x".repeat(160)]).doneItems?.[0].length, 160);
+  assert.equal(parseArgs(["ask", "set", "a-1", "--stage", "done", "--done", "word ".repeat(32)]).doneItems?.[0].length, 160);
 
   const off = usage("go with a move to done");
   assert.throws(() => parseArgs(["ask", "set", "a-1", "--done", "A"]), off);
@@ -218,18 +257,18 @@ function stillExec(width, height) {
 test("--done items ride on the move to done", async () => {
   const server = mediaServer([mk({ id: "a-1" }), mk({ id: "a-2" }), mk({ id: "a-3" }), mk({ id: "a-4" })]);
   const patches = () => server.state.calls.filter((call) => call.method === "PATCH");
-  const set = await cli(["ask", "set", "a-1", "--stage", "done", "--done", "A", "--done", "B"], { fetch: server.fetch });
+  const set = await cli(["ask", "set", "a-1", "--stage", "done", "--done", SAID, "--done", "B"], { fetch: server.fetch });
   assert.equal(set.code, 0, set.stderr);
-  assert.deepEqual(patches().at(-1), { method: "PATCH", path: "/api/asks/a-1", body: { stage: "done", done: ["A", "B"] }, ifMatch: undefined });
+  assert.deepEqual(patches().at(-1), { method: "PATCH", path: "/api/asks/a-1", body: { stage: "done", done: [SAID, "B"] }, ifMatch: undefined });
   const close = await cli(["ask", "close", "a-2", "done", "--note", "shipped", "--done", "The banner chart shows a week"], { fetch: server.fetch });
   assert.equal(close.code, 0, close.stderr);
   assert.deepEqual(patches().at(-1)?.body, { stage: "done", note: "shipped", done: ["The banner chart shows a week"] });
-  const status = await cli(["ask", "status", "a-3", "done", "--done", "1", "--done", "2", "--done", "3"], { fetch: server.fetch });
+  const status = await cli(["ask", "status", "a-3", "done", "--done", SAID, "--done", "2", "--done", "3"], { fetch: server.fetch });
   assert.equal(status.code, 0, status.stderr);
-  assert.deepEqual(patches().at(-1)?.body, { stage: "done", done: ["1", "2", "3"] });
+  assert.deepEqual(patches().at(-1)?.body, { stage: "done", done: [SAID, "2", "3"] });
   // A move with no --done sends none.
-  assert.equal((await cli(["ask", "close", "a-4", "done"], { fetch: server.fetch })).code, 0);
-  assert.deepEqual(patches().at(-1)?.body, { stage: "done" });
+  assert.equal((await cli(["ask", "close", "a-4", "done", "--note", SAID], { fetch: server.fetch })).code, 0);
+  assert.deepEqual(patches().at(-1)?.body, { stage: "done", note: SAID });
   assert.deepEqual(server.media, []);
 });
 
@@ -248,12 +287,12 @@ test("--media is checked, uploaded, then named on the move to done; a still over
   assert.deepEqual(server.order, [`PUT /api/bridge/media/${sha256}`, "PATCH /api/asks/a-1"], "uploaded before the ask names it");
   assert.deepEqual(server.state.calls.at(-1)?.body, { stage: "done", done: ["The banner is on the Lab"], doneMedia: { kind: "stills", stills: [{ sha256, type: "image/png" }] } });
   // 1600 px on the longest side is the most a still may be.
-  const edge = await cli(["ask", "set", "a-2", "--stage", "done", "--media", png], { ...deps, fetch: server.fetch, exec: stillExec(1600, 900) });
+  const edge = await cli(["ask", "set", "a-2", "--stage", "done", "--note", SAID, "--media", png], { ...deps, fetch: server.fetch, exec: stillExec(1600, 900) });
   assert.equal(edge.code, 0, edge.stderr);
-  assert.deepEqual(server.state.calls.at(-1)?.body, { stage: "done", doneMedia: { kind: "stills", stills: [{ sha256, type: "image/png" }] } });
+  assert.deepEqual(server.state.calls.at(-1)?.body, { stage: "done", note: SAID, doneMedia: { kind: "stills", stills: [{ sha256, type: "image/png" }] } });
 
   const big = mediaServer([mk({ id: "a-1" })]);
-  const refused = await cli(["ask", "close", "a-1", "done", "--done", "Shipped", "--media", png], { ...deps, fetch: big.fetch, exec: stillExec(2000, 900) });
+  const refused = await cli(["ask", "close", "a-1", "done", "--done", SAID, "--media", png], { ...deps, fetch: big.fetch, exec: stillExec(2000, 900) });
   assert.equal(refused.code, 5);
   assert.match(refused.stderr, /rivet: shot\.png: 2000x900, over 1600 px on its longest side; scale it down \(sips -Z 1600 shot\.png\)/);
   assert.deepEqual(big.order, [], "nothing uploaded or patched");
@@ -279,7 +318,7 @@ test("past the pre-flight, a picture the server will not take costs the picture,
   assert.deepEqual(full.media, []);
   // A pre-flight problem is still exit 5 with nothing sent.
   const big = mediaServer([mk({ id: "a-1" })], 507);
-  const refused = await cli(["ask", "close", "a-1", "done", "--done", "Shipped", "--media", png], { ...deps, fetch: big.fetch, exec: stillExec(2000, 900) });
+  const refused = await cli(["ask", "close", "a-1", "done", "--done", SAID, "--media", png], { ...deps, fetch: big.fetch, exec: stillExec(2000, 900) });
   assert.equal(refused.code, 5);
   assert.deepEqual(big.order, []);
 });
@@ -410,7 +449,7 @@ test("ask open, status, close and list against the asks routes", async () => {
   const parked = await cli(["ask", "close", "a-8", "parked", "--issue", "266", "--note", "after Lisbon"], { fetch: server.fetch });
   assert.equal(parked.stdout, "a-8 parked #266, due 1:30pm, version 3\n");
   assert.deepEqual(server.state.calls.at(-1)?.body, { stage: "parked", note: "after Lisbon", issue: 266 });
-  const closed = await cli(["ask", "close", "a-20", "done"], { fetch: server.fetch });
+  const closed = await cli(["ask", "close", "a-20", "done", "--note", SAID], { fetch: server.fetch });
   assert.equal(closed.stdout, "a-20 done, version 2\n");
 
   const list = await cli(["ask", "list"], { fetch: server.fetch });
@@ -422,7 +461,12 @@ test("ask open, status, close and list against the asks routes", async () => {
   const shipped = await cli(["ask", "list", "--stage", "shipped", "--json"], { fetch: server.fetch });
   assert.equal(server.state.calls.at(-1)?.path, "/api/asks?stage=shipped");
   assert.deepEqual(JSON.parse(shipped.stdout).asks.map((/** @type {any} */ a) => a.id), ["a-7"]);
-  const all = await cli(["ask", "list", "--all"], { fetch: server.fetch });
+  // Listing the done asks is a filter, never a move to done that must say what is done.
+  const done = await cli(["ask", "list", "--stage", "done", "--json"], { fetch: server.fetch });
+  assert.equal(done.code, 0, done.stderr);
+  assert.equal(server.state.calls.at(-1)?.path, "/api/asks?stage=done");
+  assert.deepEqual(JSON.parse(done.stdout).asks.map((/** @type {any} */ a) => a.id), ["a-20"]);
+  const all =await cli(["ask", "list", "--all"], { fetch: server.fetch });
   assert.equal(all.stdout, list.stdout);
   assert.deepEqual(server.state.calls.slice(-2).map((call) => call.path), ["/api/asks?all=1", "/api/asks?all=1&before=2"]);
   assert.equal((await cli(["ask", "list"], { fetch: stubServer().fetch })).stdout, "no asks\n");

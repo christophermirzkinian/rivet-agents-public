@@ -63,7 +63,7 @@ export const GET_TIMEOUT_MS = 20_000;
  */
 export const WRITE_TIMEOUT_MS = 30_000;
 
-/** An upload's deadline: half a minute plus a second per 64 KB, so a slow line still gets a 25 MB file up. */
+/** An upload's deadline: half a minute plus a second per 64 KB, so a slow line still gets a file up (the server gives a 500 MB one an hour). */
 export const uploadTimeoutMs = (bytes: number) => 30_000 + Math.ceil(bytes / 65_536) * 1000;
 
 /** A signal that aborts at `ms`, or when `outer` does; `timedOut()` tells the two apart, `done()` stops the clock. */

@@ -181,7 +181,7 @@ describe("What you used", () => {
     await flush();
     await flush();
     expect(host.querySelector(".used-note.no")!.textContent).toBe("Not sent. Try again.");
-    // A hosted agent with no plan: the locked line on its own.
+    // A hosted agent with no plan: the locked line on its own, naming the two plans while no status has named a third.
     const { NoPlan } = await import("../web/src/api.js");
     api.askUsage.mockRejectedValueOnce(new NoPlan());
     host.querySelector<HTMLButtonElement>('[data-id="chat.aloud"] [data-use="used.rework"]')!.click();

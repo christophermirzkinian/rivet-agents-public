@@ -6,6 +6,8 @@ import {
   askCreateSchema,
   askPatchSchema,
   DUE_SLACK_MS,
+  EMPTY_DONE_REFUSAL,
+  emptyDoneLine,
   MAX_ASK_PRS,
   MAX_ASK_WORDS,
   MAX_ASKS,
@@ -20,7 +22,7 @@ import {
   type AskStage,
 } from "../../shared/asks.js";
 import type { AuditEntry } from "../../shared/command.js";
-import { doneCardPoster } from "../asks/done-card.js";
+import { doneCardPoster, doneItems } from "../asks/done-card.js";
 import { decodeSegment, hasBearer, HttpError, json, readJson, requireBearer } from "../httputil.js";
 import { ASK_DONE_MEDIA, parseRedacted } from "../redact.js";
 import type { Store } from "../store.js";
@@ -114,6 +116,11 @@ export function register(router: Router): void {
     // The card is posted once, on the move: details sent after it would be dropped unseen, so say so.
     if (current.stage === "done" && (parsed.data.done !== undefined || parsed.data.doneMedia !== undefined)) throw new HttpError(400, "the ask is already done and its Done card has gone out: done and doneMedia go with the move to done");
     const next = patched(current, parsed.data, now());
+    // A caller's move into done says what is done: its Done card shows only that line. The closes
+    // no caller makes (an issue closed, a pickup settled) post theirs as before.
+    if (current.stage !== "done" && next.stage === "done" && emptyDoneLine(doneItems(next, { note: parsed.data.note, done: parsed.data.done }).join(" "))) {
+      throw new HttpError(400, EMPTY_DONE_REFUSAL);
+    }
     if (!store.replaceAsk(next, current.version)) {
       json(response, 409, { error: "ask version is stale", version: store.getAsk(id)?.version ?? 0 });
       return;

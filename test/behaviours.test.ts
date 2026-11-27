@@ -222,7 +222,7 @@ describe("the behaviours routes", () => {
     }
   });
 
-  describe("for a session a device code alone made (a-1010)", () => {
+  describe("for a session a device code alone made (a-10)", () => {
     const REFUSED = [403, { error: "sign in with a passkey to change what your agent does by itself" }];
     let byCode: Record<string, string>;
     const put = (id: string, body: unknown, headers = byCode) => fetch(`${server.base}/api/behaviours/${id}`, { method: "PUT", headers, body: JSON.stringify(body) });

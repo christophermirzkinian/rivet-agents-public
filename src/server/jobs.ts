@@ -15,6 +15,7 @@ import {
   MAX_ACTIVE_JOBS,
   MAX_TASK_RUNS_A_DAY,
   nextRunTime,
+  limitOther,
   otherPlan,
   OVERNIGHT_OFF_NOTE,
   PLAN_NAMES,
@@ -369,7 +370,7 @@ export class JobsStore {
    * What holds a chat on `plan` (a task's run, a check's look, a limit card's switch) from starting now; `own` is one of
    * The owner's own Run nows. Claude's usage holds only a chat on Claude: `usage` is the Mac's reading, null when not known,
    * and undefined for a switch, whose run reads it when it asks to start. A chat on ChatGPT is held by ChatGPT's known
-   * limit instead.
+   * limit instead, and so is one on GitHub Copilot, which has none known while its limit is not read.
    */
   private chatHold(now: Date, own: boolean, plan: Plan, usage?: number | null): string | null {
     if (!own && !this.overnight().on) return OVERNIGHT_OFF_NOTE;
@@ -621,8 +622,8 @@ export class JobsStore {
     const job = this.all().find((one) => jobScheduleKey(one.id) === key);
     if (!job) return null;
     const row = this.cardRow(job.id);
-    const limited = switchPlan(row ? (row.kind ?? "red") : cardKind(redStreak(this.counted(job.id))));
-    return limited && choice === planSwitchLabel(limited) ? { id: job.id, plan: otherPlan(limited) } : null;
+    const offer = switchPlan(row ? (row.kind ?? "red") : cardKind(redStreak(this.counted(job.id))));
+    return offer && choice === planSwitchLabel(offer.plan, offer.other) ? { id: job.id, plan: offer.other } : null;
   }
 
   /**
@@ -746,19 +747,23 @@ function lookLimit(streak: readonly JobRun[]): PlanLimit | undefined {
 
 /**
  * Which card a streak makes (redCard), stored with the card when it is shown: `limit <plan>` for a task's limit card,
- * `look <plan>` for a check's look limit card that offers the other plan, or `red`.
+ * `look <plan>` for a check's look limit card that offers another plan, or `red`. The plan the card offers follows
+ * when it is not the one otherPlan gives, so a card shown before there was a third plan keeps its kind.
  */
 function cardKind(streak: readonly JobRun[]): string {
   if (!streak.length) return "red";
-  if (!streak.some((run) => !run.limit)) return `${streak[0]!.limit!.outside ? "wait" : "limit"} ${streak[0]!.limit!.plan}`;
+  const offered = (limit: PlanLimit): string => (limitOther(limit) === otherPlan(limit.plan) ? limit.plan : `${limit.plan} ${limitOther(limit)}`);
+  if (!streak.some((run) => !run.limit)) return `${streak[0]!.limit!.outside ? "wait" : "limit"} ${offered(streak[0]!.limit!)}`;
   const look = lookLimit(streak);
-  return look?.connected ? `look ${look.plan}` : "red";
+  return look?.connected ? `look ${offered(look)}` : "red";
 }
 
-/** The plan a card of this kind offers to switch from. */
-function switchPlan(kind: string): Plan | undefined {
-  const [what, plan] = kind.split(" ");
-  return (what === "limit" || what === "look") && PLANS.includes(plan as Plan) ? (plan as Plan) : undefined;
+/** The plan a card of this kind offers to switch from, and the one it offers. */
+function switchPlan(kind: string): { plan: Plan; other: Plan } | undefined {
+  const [what, plan, named] = kind.split(" ");
+  if ((what !== "limit" && what !== "look") || !PLANS.includes(plan as Plan)) return undefined;
+  const other = named === undefined ? otherPlan(plan as Plan) : (named as Plan);
+  return PLANS.includes(other) && other !== plan ? { plan: plan as Plan, other } : undefined;
 }
 
 function limitWords(limit: PlanLimit): string {
@@ -782,7 +787,7 @@ function redCard(job: Stored, streak: readonly JobRun[], id: string, plansUrl: s
   const failed = streak.find((run) => !run.limit);
   if (!failed) {
     const limit = newest.limit!;
-    const other = PLAN_NAMES[otherPlan(limit.plan)];
+    const other = PLAN_NAMES[limitOther(limit)];
     const wait = { label: waitLabel(limit.plan), detail: WAIT_DETAIL };
     return {
       id,
@@ -791,7 +796,7 @@ function redCard(job: Stored, streak: readonly JobRun[], id: string, plansUrl: s
       ask: limit.outside ? `${limitWords(limit)} ${other} can't check ${limit.outside} from here, so this job waits for ${PLAN_NAMES[limit.plan]}.` : `${limitWords(limit)} Use ${other} for this job?`,
       since: first.finishedAt ?? first.at,
       schedule: jobScheduleKey(job.id),
-      options: limit.outside ? [{ ...wait, recommended: true }] : [{ label: planSwitchLabel(limit.plan), detail: `It runs once now on ${other}. Its next run is on the plan that goes first again.` }, wait],
+      options: limit.outside ? [{ ...wait, recommended: true }] : [{ label: planSwitchLabel(limit.plan, limitOther(limit)), detail: `It runs once now on ${other}. Its next run is on the plan that goes first again.` }, wait],
       ...(plans.length ? { links: plans } : {}),
     };
   }
@@ -815,7 +820,7 @@ function redCard(job: Stored, streak: readonly JobRun[], id: string, plansUrl: s
 
 /** The plan a look limit card's Fix it opens its chat on when the plan that goes first is the one at its limit. */
 function fixOn(look: PlanLimit): Plan | undefined {
-  return look.connected && look.first === look.plan ? otherPlan(look.plan) : undefined;
+  return look.connected && look.first === look.plan ? limitOther(look) : undefined;
 }
 
 /**
@@ -826,7 +831,7 @@ function fixOn(look: PlanLimit): Plan | undefined {
 function lookCard(job: Stored, streak: readonly JobRun[], id: string, look: PlanLimit, links: NonNullable<Need["links"]>): Need {
   const failed = streak[0]!;
   const first = streak[streak.length - 1]!;
-  const other = PLAN_NAMES[otherPlan(look.plan)];
+  const other = PLAN_NAMES[limitOther(look)];
   const fix = { label: "Fix it", detail: fixOn(look) ? `The fix chat starts on ${other}.` : `The fix chat starts on ${look.first ? `${PLAN_NAMES[look.first]}, ` : ""}the plan that goes first.` };
   return {
     id,
@@ -837,7 +842,7 @@ function lookCard(job: Stored, streak: readonly JobRun[], id: string, look: Plan
     schedule: jobScheduleKey(job.id),
     options: look.connected
       ? [
-          { label: planSwitchLabel(look.plan), detail: `It runs once now on ${other}: the check, and the look into it if it is still red.` },
+          { label: planSwitchLabel(look.plan, limitOther(look)), detail: `It runs once now on ${other}: the check, and the look into it if it is still red.` },
           fix,
           { label: waitLabel(look.plan), detail: WAIT_DETAIL },
         ]
@@ -870,9 +875,9 @@ function redDetail(job: Stored, newest: JobRun): string {
   const what = job.spec.check ? `a check, ${checkWords(job.spec.check)}` : "a task";
   const log = newest.log?.slice(-5).join(" | ");
   if (newest.limit) {
-    const other = PLAN_NAMES[otherPlan(newest.limit.plan)];
+    const other = PLAN_NAMES[limitOther(newest.limit)];
     if (newest.limit.outside) return `${RIVET_NAME} job ${job.id} "${job.spec.name}" did not run: ${PLAN_NAMES[newest.limit.plan]} is at its usage limit${newest.limit.until ? ` until ${newest.limit.until}` : ""} and ${other} can't check ${newest.limit.outside} from here, so it waits for its next time. Nothing switched.`.slice(0, 2000);
-    return `${RIVET_NAME} job ${job.id} "${job.spec.name}" did not run: ${PLAN_NAMES[newest.limit.plan]} is at its usage limit${newest.limit.until ? ` until ${newest.limit.until}` : ""} and ${other} is connected. The answer "${planSwitchLabel(newest.limit.plan)}" starts it once on ${other} by itself; "${waitLabel(newest.limit.plan)}" leaves it for its next time on the plan that goes first. Nothing switched without asking.`.slice(0, 2000);
+    return `${RIVET_NAME} job ${job.id} "${job.spec.name}" did not run: ${PLAN_NAMES[newest.limit.plan]} is at its usage limit${newest.limit.until ? ` until ${newest.limit.until}` : ""} and ${other} is connected. The answer "${planSwitchLabel(newest.limit.plan, limitOther(newest.limit))}" starts it once on ${other} by itself; "${waitLabel(newest.limit.plan)}" leaves it for its next time on the plan that goes first. Nothing switched without asking.`.slice(0, 2000);
   }
   return `${RIVET_NAME} job ${job.id} "${job.spec.name}" (${what}; the owner's words: "${job.spec.words}"). Newest red run ${dayTimeWords(newest.at)}: ${runLine(newest)}${log ? ` Last lines: ${log}` : ""}${newest.url ? ` Link: ${newest.url}` : ""}. To fix it: rivet fix schedule ${jobScheduleKey(job.id)}.`.slice(0, 2000);
 }

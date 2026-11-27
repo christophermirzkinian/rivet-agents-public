@@ -57,6 +57,30 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+it("keeps emoji whole at body, label and description UTF-16 limits", () => {
+  const loneSurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u;
+  const max = 120;
+  for (const prefix of [max - 2, max - 1, max]) {
+    const text = `${"x ".repeat(prefix).slice(0, prefix - 1)}x`;
+    const cut = clean(`${text}😀tail`, max);
+    expect(cut).not.toMatch(loneSurrogate);
+    expect(cut.length).toBeLessThanOrEqual(max + 2);
+    expect(cut).toBe(`${text}${prefix === max - 2 ? "😀" : ""}\n…`);
+  }
+  const title = `${"x ".repeat(58)}xx`;
+  write("memory/topic-emoji-boundary.md", `---\nname: Emoji\ndescription: ${title}😀tail\ntype: feedback\n---\nBody.`);
+  const label = byId(build()).get("topic-emoji-boundary")!.label;
+  expect(label).toBe(`${title}…`);
+  expect(label).not.toMatch(loneSurrogate);
+  expect(label.length).toBeLessThanOrEqual(120);
+  const description = `${"x ".repeat(198)}xx`;
+  write("memory/topic-emoji-boundary.md", `---\nname: Emoji\ndescription: ${description}😀tail\ntype: feedback\n---\nBody.`);
+  const desc = byId(build()).get("topic-emoji-boundary")!.desc;
+  expect(desc).toBe(`${description}…`);
+  expect(desc).not.toMatch(loneSurrogate);
+  expect(desc.length).toBeLessThanOrEqual(400);
+});
+
 describe("mind-export", () => {
   it("reads memories, hubs, notes and decisions into one graph Rivet takes", () => {
     const graph = build();
@@ -177,4 +201,43 @@ describe("mind-export", () => {
       expect(fetch).toHaveBeenCalledTimes(2);
     });
   });
+});
+
+it("preserves the previous sent receipt when its replacement write fails partway", async () => {
+  const { default: fs } = await import("node:fs");
+  const state = join(dir, "state");
+  const sentFile = join(state, "sent.json");
+  const previous = JSON.stringify({ digest: "previous-graph", at: NOW - 3_600_000 });
+  write("state/sent.json", previous);
+  const now = vi.spyOn(Date, "now").mockReturnValue(NOW);
+  const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+  vi.stubGlobal("fetch", fetch);
+  vi.stubEnv("RIVET_BRIDGE_DEV", "1");
+  vi.stubEnv("RIVET_BRIDGE_TOKEN", "ab".repeat(32));
+  const realWrite = fs.writeFileSync;
+  let attempted = false;
+  let usedDescriptor = false;
+  const writing = vi.spyOn(fs, "writeFileSync").mockImplementation((file, data, options) => {
+    if (typeof file === "number" || file === sentFile) {
+      attempted = true;
+      usedDescriptor = typeof file === "number";
+      realWrite(file, String(data).slice(0, 8), options);
+      throw new Error("injected partial receipt write");
+    }
+    return realWrite(file, data, options);
+  });
+  try {
+    await expect(main(["--state", state, "--memory", join(dir, "memory")], { RIVET_BRIDGE_DEV: "1", RIVET_BRIDGE_TOKEN: "ab".repeat(32), RIVET_URL: "http://127.0.0.1:8130" }))
+      .rejects.toThrow("injected partial receipt write");
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(attempted).toBe(true);
+    expect(readFileSync(sentFile, "utf8")).toBe(previous);
+    expect(usedDescriptor).toBe(true);
+    expect(fs.readdirSync(state).sort()).toEqual(["sent.json"]);
+  } finally {
+    writing.mockRestore();
+    now.mockRestore();
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  }
 });

@@ -141,11 +141,12 @@ export const FILE_EXTENSIONS = {
 } as const;
 export type FileType = (typeof FILE_EXTENSIONS)[keyof typeof FILE_EXTENSIONS];
 export const FILE_TYPES = [...new Set(Object.values(FILE_EXTENSIONS))] as readonly FileType[];
-/** Video and sound you attach (a track, a screen recording): a few minutes of it, so a cap of its own. */
+/** Video and sound you attach (a track, a screen recording). */
 export const AV_TYPES = ["video/mp4", "video/quicktime", "video/webm", "audio/mpeg", "audio/mp4", "audio/wav", "audio/aac", "audio/ogg", "audio/flac"] as const satisfies readonly FileType[];
-export const MAX_AV_BYTES = 100 * 1024 * 1024;
+/** Each file you attach, whatever its type. The server streams it to disk, never to memory. */
+export const MAX_SEND_BYTES = 500 * 1024 * 1024;
 export const isAvType = (type: string): boolean => (AV_TYPES as readonly string[]).includes(type);
-/** Files that take video and sound's cap: those, a ZIP (a folder of art or sounds at once) and a 3D model. */
+/** Files that are usually big, so the server takes few at once: video, sound, a ZIP (a folder of art or sounds at once) and a 3D model. */
 export const BIG_TYPES = [...AV_TYPES, "application/zip", "model/gltf-binary"] as const satisfies readonly FileType[];
 export const isBigType = (type: string): boolean => (BIG_TYPES as readonly string[]).includes(type);
 /** Documents in one chat message, one chat window or one card reply. */
@@ -349,7 +350,7 @@ export const needSchema = z
     thread: text(80).refine((value) => value.trim() !== "", "a thread must not be blank").optional(),
     /** An update card's tag: what happened (Merged, Deployed, Red fixed, Chat finished, Nightly…). */
     tag: text(40).refine((value) => value.trim() !== "", "a tag must not be blank").optional(),
-    /** An update card's lines under it, oldest first: your comments and Rivet's answers. */
+    /** The lines under a card, oldest first: your comments (under an update card only) and Rivet's answers (rivet card note: any card but a Got it one). */
     comments: z.array(commentSchema).max(MAX_COMMENTS).optional(),
     /** A plan card's dot points under its main point. */
     points: z
@@ -392,7 +393,7 @@ export const needSchema = z
         if (need[field] !== undefined) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [field], message: `an update card takes no ${field}: make it a question card` });
       }
     } else {
-      for (const field of ["thread", "tag", "comments"] as const) {
+      for (const field of ["thread", "tag"] as const) {
         if (need[field] !== undefined) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [field], message: `only an update card takes ${field}` });
       }
     }

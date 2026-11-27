@@ -5,8 +5,8 @@ import type { Ask } from "../src/shared/asks.js";
 import type { Reply, ServedNeed } from "../src/shared/board.js";
 import type { Worker } from "../src/shared/workers.js";
 
-// Seven stored cards, each answered at its current revision, and two chats on the map with an ask still at needs-you. The Floor's
-// pill, Decide N and Cards must say the same thing.
+// Seven stored cards, each answered at its current revision, and two chats on the map with an ask still at needs-you.
+// The Floor's pill, Decide N and Cards must say the same thing.
 
 const ASKS = vi.hoisted(() => ({ open: [] as unknown[] }));
 vi.mock("../web/src/views/your-asks.js", async (importOriginal) => ({
@@ -18,15 +18,15 @@ const R = "example-org/example-repo";
 const NOW = Date.now();
 const iso = (ago: number) => new Date(NOW - ago * 60_000).toISOString();
 const SEVEN: [id: string, rev: string, decision: Reply["decision"]][] = [
-  ["out-76b444aa", "a824312710eee7da", "choice"],
-  ["out-dc75deca", "8026f137f50ee3a9", "comment"],
-  ["keeps-breaking-dc10", "050b1ce88ea6e9f5", "choice"],
-  ["out-1bd2869b", "ae29c2216ac23423", "choice"],
-  ["out-a1279a2b", "1986d6e22a6023da", "choice"],
-  ["out-07eb8de8", "95b8e4ffaf79f055", "choice"],
-  ["out-a652a90d", "0d445382e5ceb787", "comment"],
+  ["out-1a2b3c4d", "0123456789abcdef", "choice"],
+  ["out-2b3c4d5e", "123456789abcdef0", "comment"],
+  ["keeps-failing-ab12", "23456789abcdef01", "choice"],
+  ["out-3c4d5e6f", "3456789abcdef012", "choice"],
+  ["out-4d5e6f70", "456789abcdef0123", "choice"],
+  ["out-5e6f7081", "56789abcdef01234", "choice"],
+  ["out-6f708192", "6789abcdef012345", "comment"],
 ];
-const CHATS: Record<string, string> = { "out-a1279a2b": "cover-build", "out-a652a90d": "site-study" };
+const CHATS: Record<string, string> = { "out-4d5e6f70": "cover-build", "out-6f708192": "site-study" };
 
 const need = ([id, rev]: (typeof SEVEN)[number], i: number): ServedNeed =>
   ({ id, rev, kind: "decision", title: `Card ${i + 1}`, ask: "Which one?", since: iso(90 - i), options: [{ label: "Yes" }, { label: "No" }], ...(CHATS[id] ? { chat: CHATS[id] } : {}) }) as ServedNeed;
@@ -39,7 +39,7 @@ const flush = async () => {
   for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
 };
 
-describe("the Floor and Cards on the board of 4 Nov", async () => {
+describe("the Floor and Cards on a board of answered cards", async () => {
   const { deskBubble, mountDesks } = await import("../web/src/views/desks.js");
   const { agentLines } = await import("../web/src/views/desks-life.js");
   const { askingCards, cardsOf, openDecide } = await import("../web/src/views/decide-sheet.js");
@@ -135,12 +135,12 @@ describe("the Floor and Cards on the board of 4 Nov", async () => {
   });
 
   it("counts a card again the moment one is open: the pill, Decide N and Open all say 2", () => {
-    app.replies.delete("out-a1279a2b");
-    app.replies.delete("out-a652a90d");
+    app.replies.delete("out-4d5e6f70");
+    app.replies.delete("out-6f708192");
     changed();
-    expect(askingCards().map((card) => card.id).sort()).toEqual(["out-a1279a2b", "out-a652a90d"]);
+    expect(askingCards().map((card) => card.id).sort()).toEqual(["out-4d5e6f70", "out-6f708192"]);
     expect(pills()).toEqual(["2 need you"]);
-    openDecide(["out-a1279a2b"]);
+    openDecide(["out-4d5e6f70"]);
     expect(seg("open")).toBe("Open 2");
   });
 });

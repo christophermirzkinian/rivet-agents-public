@@ -6,7 +6,7 @@ import { hostedPage } from "./cloud-agent.js";
 import { StaleSession } from "./session.js";
 
 /**
- * What the screens before sign-in, and Settings › Devices, say when the browser or the server refuses (a-1020). Only a
+ * What the screens before sign-in, and Settings › Devices, say when the browser or the server refuses (a-10). Only a
  * sentence from this file, or one api.ts wrote itself, reaches them: a text that is not known gets the plain fallback.
  */
 export type GateScreen =

@@ -6,12 +6,14 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { HttpError, readJson } from "../src/server/httputil.js";
-import { MAX_FILE_BYTES, MAX_IMAGE_BYTES, MAX_MEDIA_BYTES } from "../src/shared/command.js";
+import { MAX_IMAGE_BYTES, MAX_MEDIA_BYTES } from "../src/shared/command.js";
 import { probeBodyBudget } from "./body-budget-probe.js";
 import { bearer, BOARD_TOKEN, BRIDGE_TOKEN, browser, putBoard, startServer, type TestServer } from "./helpers.js";
 
 let server: TestServer;
-beforeEach(async () => { server = await startServer(); });
+/** Under MAX_SEND_BYTES (500 MB), which is too much to stream in a test. */
+const SEND_CAP = MAX_MEDIA_BYTES;
+beforeEach(async () => { server = await startServer({}, { sendCapBytes: SEND_CAP }); });
 afterEach(async () => { await server.close(); });
 
 /** Leave the chunked body unfinished: a refusal must arrive without waiting for EOF. */
@@ -64,7 +66,7 @@ describe("body limits over HTTP", () => {
 
   it.each([
     ["images", "POST", "/api/images", MAX_IMAGE_BYTES, {}],
-    ["files", "POST", "/api/files", MAX_FILE_BYTES, { "x-file-name": "big.pdf" }],
+    ["files", "POST", "/api/files", SEND_CAP, { "x-file-name": "big.pdf" }],
     ["bridge media", "PUT", `/api/bridge/media/${"a".repeat(64)}`, MAX_MEDIA_BYTES, { "content-type": "video/mp4" }],
   ] as const)("returns 413 for chunked %s and removes every temporary file", async (_name, method, path, cap, extra) => {
     const headers = method === "PUT" ? bearer(BOARD_TOKEN) : browser(server.cookie());

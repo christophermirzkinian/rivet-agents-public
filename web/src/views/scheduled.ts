@@ -8,6 +8,7 @@ import { when } from "../../../src/shared/when.js";
 import { NO_REPO } from "../../../src/shared/repos.js";
 import { ApiError, call } from "../api.js";
 import * as cmd from "../command-api.js";
+import { latestRead } from "../latest-read.js";
 import { button, describe, h, keepFocus } from "../dom.js";
 import { changed, sameSession, signedOut, subscribe } from "../state.js";
 import { watchOps } from "../ops-data.js";
@@ -31,6 +32,7 @@ type Op = "pause" | "resume" | "run" | "remove";
 
 let jobs: JobsResponse | null = null;
 let loadError: string | null = null;
+const jobsReads = latestRead();
 /** What each job's last button is doing or did, by job id. */
 const pending = new Map<string, { text: string; tone: "wait" | "ok" | "bad" }>();
 onSessionReset(() => {
@@ -76,14 +78,15 @@ const shown = (view: JobsResponse | null) => JSON.stringify(view && { jobs: view
 /** Reads the jobs; the app redraws only when what it shows changed, as the status line polls this every minute. */
 export async function loadJobs(): Promise<void> {
   const current = sameSession();
+  const latest = jobsReads.start();
   const was = `${shown(jobs)}${loadError}`;
   try {
     const next = await jobsApi.get();
-    if (!current()) return;
+    if (!current() || !latest()) return;
     jobs = next;
     loadError = null;
   } catch (failure) {
-    if (!current()) return;
+    if (!current() || !latest()) return;
     loadError = failure instanceof Error ? failure.message : "Couldn't read the jobs.";
   }
   if (`${shown(jobs)}${loadError}` !== was) changed();
@@ -98,6 +101,7 @@ function send(job: Job, op: Op): void {
   const settle = (entry: AuditEntry) => {
     const ok = entry.status === "succeeded";
     pending.set(job.id, { text: entry.detail?.reason ?? (ok ? "Done." : "The Mac did not do it."), tone: ok ? "ok" : "bad" });
+    // Starting the completion read invalidates every poll begun before the operation landed.
     void loadJobs();
   };
   (op === "remove" ? jobsApi.remove(job.id, clientId) : jobsApi.change(job.id, op, clientId)).then(

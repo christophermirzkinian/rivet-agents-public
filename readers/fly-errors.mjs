@@ -505,7 +505,13 @@ async function main() {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  runReader(JOB, main).then((code) => {
-    process.exitCode = code;
-  });
+  const unexpected = process.argv.slice(2).find((arg) => arg !== "--dry-run");
+  if (unexpected !== undefined) {
+    console.error(`usage: fly-errors.mjs [--dry-run]: unexpected argument ${JSON.stringify(unexpected)}`);
+    process.exitCode = 2;
+  } else {
+    runReader(JOB, main).then((code) => {
+      process.exitCode = code;
+    });
+  }
 }

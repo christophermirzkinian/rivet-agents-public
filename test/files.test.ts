@@ -1,18 +1,19 @@
 import { createHash } from "node:crypto";
 import { readdirSync } from "node:fs";
-import { request as httpRequest } from "node:http";
+import { request as httpRequest, type IncomingMessage } from "node:http";
 import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { BATCH_QUIET_MS } from "../src/server/commandstore.js";
-import { fileDisposition } from "../src/server/media.js";
+import { declaresBody } from "../src/server/httputil.js";
+import { BODY_TIMEOUT_MS, fileDisposition, SEND_TIMEOUT_MS, UPLOAD_IDLE_MS } from "../src/server/media.js";
 // @ts-expect-error the fetch script is plain JavaScript
 import { checkListing } from "../scripts/attachments.mjs";
 // @ts-expect-error the bridge is plain JavaScript
 import { FILE_NAME_RE } from "../bridge/lib/validate.mjs";
-import { ATTACHMENT_NAME_PATTERN, attachmentName, BIG_TYPES, FILE_TYPES, fileTypeOf, MAX_AV_BYTES, type FileRef, type Reply } from "../src/shared/board.js";
-import { MAX_FILE_BYTES, type AuditEntry, type ChatPage } from "../src/shared/command.js";
+import { ATTACHMENT_NAME_PATTERN, attachmentName, FILE_TYPES, fileTypeOf, MAX_SEND_BYTES, type FileRef, type Reply } from "../src/shared/board.js";
+import { MAX_MEDIA_BYTES, type AuditEntry, type ChatPage } from "../src/shared/command.js";
 import {
   bearer,
   BOARD_TOKEN,
@@ -61,11 +62,13 @@ let server: TestServer;
 let cookie: string;
 let clock: ReturnType<typeof fakeClock>;
 let seq = 0;
+/** The cap these tests run under, a little over the old 25 MB one: MAX_SEND_BYTES itself (500 MB) is too much to stream in a test. */
+const SEND_CAP = MAX_MEDIA_BYTES + 4 * 1024 * 1024;
 const clientId = () => `client-${Date.now()}-${(seq += 1)}`;
 
 beforeEach(async () => {
   clock = fakeClock();
-  server = await startServer({}, { now: clock.now });
+  server = await startServer({}, { now: clock.now, sendCapBytes: SEND_CAP });
   cookie = server.cookie();
   await putBoard(server.base);
 });
@@ -157,9 +160,10 @@ describe("attachment names", () => {
     for (const type of FILE_TYPES) {
       const listed = { files: [{ sha256: "a".repeat(64), name: attachmentName("file", type), type, size: 1 }], images: [] };
       expect(checkListing(listed).items, type).toHaveLength(1);
-      const big = { files: [{ ...listed.files[0]!, size: 60 * 1024 * 1024 }], images: [] };
-      if ((BIG_TYPES as readonly string[]).includes(type)) expect(checkListing(big).items, type).toHaveLength(1);
-      else expect(() => checkListing(big), type).toThrow();
+      const big = { files: [{ ...listed.files[0]!, size: MAX_SEND_BYTES }], images: [] };
+      expect(checkListing(big).items, type).toHaveLength(1);
+      const over = { files: [{ ...listed.files[0]!, size: MAX_SEND_BYTES + 1 }], images: [] };
+      expect(() => checkListing(over), type).toThrow();
     }
   });
 });
@@ -277,7 +281,11 @@ describe("upload", () => {
     expect((await upload(PDF, "a.pdf", bearer(BOARD_TOKEN))).status).toBe(403);
   });
 
-  it("refuses a file over 25 MB, declared or streamed", async () => {
+  it("caps every sent file at 500 MB", () => {
+    expect(MAX_SEND_BYTES).toBe(500 * 1024 * 1024);
+  });
+
+  it("refuses a file over the cap, declared or streamed", async () => {
     const declared = await new Promise<number>((resolve, reject) => {
       const req = httpRequest(
         {
@@ -285,7 +293,7 @@ describe("upload", () => {
           port: server.port,
           method: "POST",
           path: "/api/files",
-          headers: { ...browser(cookie), "x-file-name": "big.pdf", "content-length": String(MAX_FILE_BYTES + 1) },
+          headers: { ...browser(cookie), "x-file-name": "big.pdf", "content-length": String(SEND_CAP + 1) },
         },
         (res) => {
           res.resume();
@@ -296,34 +304,52 @@ describe("upload", () => {
       req.end();
     });
     expect(declared).toBe(413);
-    const big = Buffer.concat([PDF, Buffer.alloc(MAX_FILE_BYTES, 0x20)]);
+    const big = Buffer.concat([PDF, Buffer.alloc(SEND_CAP, 0x20)]);
     expect(await oversizedStatus(upload(big, "big.pdf"))).toBe(413);
     expect(readdirSync(mediaDir()).filter((file) => !file.startsWith("."))).toEqual([]);
   });
 
-  it("takes a video or sound file up to 100 MB, not over", async () => {
-    const video = Buffer.concat([MP4, Buffer.alloc(MAX_FILE_BYTES, 0x20)]);
+  it("takes a file of any type over the old 25 MB, up to the cap and not over", async () => {
+    const video = Buffer.concat([MP4, Buffer.alloc(MAX_MEDIA_BYTES, 0x20)]);
     const taken = await upload(video, "music.mp4");
     expect(taken.status).toBe(201);
     expect(await taken.json()).toMatchObject({ sha256: sha(video), name: "music.mp4", type: "video/mp4", size: video.length });
-    const huge = Buffer.concat([MP4, Buffer.alloc(MAX_AV_BYTES, 0x20)]);
+    const huge = Buffer.concat([MP4, Buffer.alloc(SEND_CAP, 0x20)]);
     expect(await oversizedStatus(upload(huge, "huge.mp4"))).toBe(413);
-    const folder = Buffer.concat([ZIP, Buffer.alloc(MAX_FILE_BYTES, 0x20)]);
+    const folder = Buffer.concat([ZIP, Buffer.alloc(MAX_MEDIA_BYTES, 0x20)]);
     expect(await upload(folder, "sounds.zip").then((response) => response.status)).toBe(201);
-    const gif = Buffer.concat([GIF, Buffer.alloc(MAX_FILE_BYTES, 0x20)]);
-    expect(await oversizedStatus(upload(gif, "big.gif"))).toBe(413);
-    const mail = Buffer.concat([EML, Buffer.alloc(MAX_FILE_BYTES, 0x20)]);
-    expect(await oversizedStatus(upload(mail, "big.eml"))).toBe(413);
+    // A document, a picture and an email had 25 MB; they take the same cap now.
+    const paper = Buffer.concat([PDF, Buffer.alloc(MAX_MEDIA_BYTES, 0x20)]);
+    expect(await upload(paper, "big.pdf").then((response) => response.status)).toBe(201);
+    const gif = Buffer.concat([GIF, Buffer.alloc(MAX_MEDIA_BYTES, 0x20)]);
+    expect(await upload(gif, "big.gif").then((response) => response.status)).toBe(201);
+    const mail = Buffer.concat([EML, Buffer.alloc(MAX_MEDIA_BYTES, 0x20)]);
+    expect(await upload(mail, "big.eml").then((response) => response.status)).toBe(201);
+    const hugeFolder = Buffer.concat([ZIP, Buffer.alloc(SEND_CAP, 0x20)]);
+    expect(await oversizedStatus(upload(hugeFolder, "huge.zip"))).toBe(413);
   });
 
-  it("takes two video or sound uploads at once, not a third", async () => {
+  it("takes two big uploads at once, not a third, whatever its type", async () => {
+    const declares = (name: string, length: number) =>
+      new Promise<number>((resolve, reject) => {
+        const req = httpRequest(
+          { host: "127.0.0.1", port: server.port, method: "POST", path: "/api/files", headers: { ...browser(cookie), "x-file-name": name, "content-length": String(length) } },
+          (res) => {
+            res.resume();
+            resolve(res.statusCode ?? 0);
+            req.destroy();
+          },
+        );
+        req.on("error", reject);
+        req.write(PDF);
+      });
     const open = () => {
       const req = httpRequest({
         host: "127.0.0.1",
         port: server.port,
         method: "POST",
         path: "/api/files",
-        headers: { ...browser(cookie), "x-file-name": "slow.mp4", "content-length": String(50 * 1024 * 1024) },
+        headers: { ...browser(cookie), "x-file-name": "slow.mp4", "content-length": String(SEND_CAP) },
       });
       req.on("error", () => {});
       req.write(MP4);
@@ -333,10 +359,43 @@ describe("upload", () => {
     await new Promise((resolve) => setTimeout(resolve, 200));
     const third = await upload(MP4, "third.mp4");
     expect(third.status).toBe(429);
+    // A document that says it is over the old 25 MB is a big upload too; a small one is still taken.
+    expect(await declares("big.pdf", MAX_MEDIA_BYTES + 1)).toBe(429);
     expect((await upload(PDF, "paper.pdf")).status).toBe(201);
     for (const req of slow) req.destroy();
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect((await upload(MP4, "after.mp4")).status).toBe(201);
+  });
+
+  it("cuts a big upload that stops sending, so it gives its slot back", async () => {
+    expect(UPLOAD_IDLE_MS).toBe(2 * 60 * 1000);
+    await server.close();
+    server = await startServer({}, { sendCapBytes: SEND_CAP, uploadIdleMs: 150 });
+    cookie = server.cookie();
+    const closed: Promise<void>[] = [];
+    for (let i = 0; i < 2; i += 1) {
+      const req = httpRequest({
+        host: "127.0.0.1",
+        port: server.port,
+        method: "POST",
+        path: "/api/files",
+        headers: { ...browser(cookie), "x-file-name": "gone.mp4", "content-length": String(SEND_CAP) },
+      });
+      // The phone never closes its side: the server is the one to end it.
+      closed.push(new Promise((resolve) => req.on("error", () => resolve()).on("close", () => resolve())));
+      req.write(MP4);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect((await upload(MP4, "third.mp4")).status).toBe(429);
+    await Promise.all(closed);
+    // The phone sees its connection close a moment before the server has removed the part file and freed the slot.
+    let after = await upload(MP4, "after.mp4");
+    for (let tries = 0; after.status === 429 && tries < 40; tries += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      after = await upload(MP4, "after.mp4");
+    }
+    expect(after.status).toBe(201);
+    expect(readdirSync(mediaDir()).filter((name) => name.startsWith(".upload-"))).toEqual([]);
   });
 
   it("serves video and sound playable in the browser's own player, and waits long enough for one", async () => {
@@ -345,14 +404,24 @@ describe("upload", () => {
     expect(served.headers.get("content-type")).toBe("video/mp4");
     expect(served.headers.get("content-security-policy")).toBe("default-src 'none'; media-src 'self'; frame-ancestors 'none'");
     expect(served.headers.get("x-content-type-options")).toBe("nosniff");
-    expect(server.app.server.requestTimeout).toBeGreaterThanOrEqual(15 * 60 * 1000);
+    expect(server.app.server.requestTimeout).toBe(SEND_TIMEOUT_MS);
+    expect(SEND_TIMEOUT_MS).toBe(60 * 60 * 1000);
+    expect(BODY_TIMEOUT_MS).toBe(20 * 60 * 1000);
+    // Only a request that declares a body is timed at those twenty minutes: an event stream or a download never is.
+    const asks = (headers: Record<string, string>) => declaresBody({ headers } as unknown as IncomingMessage);
+    expect(asks({})).toBe(false);
+    expect(asks({ "content-length": "0" })).toBe(false);
+    expect(asks({ "content-length": "12" })).toBe(true);
+    expect(asks({ "transfer-encoding": "chunked" })).toBe(true);
   });
 
-  it("lets the Mac's fetch take a video up to 100 MB and a document only up to 25 MB", () => {
+  it("lets the Mac's fetch take any file up to 500 MB, not over", () => {
     const listing = (type: string, name: string, size: number) => ({ files: [{ sha256: "a".repeat(64), name, type, size }], images: [] });
     expect(checkListing(listing("video/mp4", "music.mp4", 60 * 1024 * 1024)).items).toHaveLength(1);
-    expect(() => checkListing(listing("video/mp4", "music.mp4", 100 * 1024 * 1024 + 1))).toThrow();
-    expect(() => checkListing(listing("application/pdf", "big.pdf", 60 * 1024 * 1024))).toThrow();
+    expect(checkListing(listing("application/zip", "art.zip", MAX_SEND_BYTES)).items).toHaveLength(1);
+    expect(checkListing(listing("application/pdf", "big.pdf", 60 * 1024 * 1024)).items).toHaveLength(1);
+    expect(() => checkListing(listing("application/zip", "art.zip", MAX_SEND_BYTES + 1))).toThrow();
+    expect(() => checkListing(listing("application/pdf", "big.pdf", MAX_SEND_BYTES + 1))).toThrow();
   });
 });
 

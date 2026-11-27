@@ -866,6 +866,14 @@ export class Store {
     let row = this.db.prepare("SELECT * FROM replies WHERE item_id = ? AND item_title = ? AND at >= ? ORDER BY at, rowid LIMIT 1").get(itemId, title, since) as
       | Row
       | undefined;
+    // A comment then a pick at that same revision (rows kept from when a comment left a choice card open): the pick is
+    // its answer. A card whose only replies there are comments is answered by the first; a later showing's pick never counts.
+    if (row?.decision === "comment") {
+      const pick = this.db.prepare("SELECT * FROM replies WHERE item_id = ? AND rev = ? AND decision != 'comment' AND at >= ? ORDER BY at, rowid LIMIT 1").get(itemId, row.rev as string, row.at as string) as
+        | Row
+        | undefined;
+      if (pick) row = pick;
+    }
     const changed = this.db.prepare("SELECT * FROM replies WHERE item_id = ? AND json_extract(item, '$.changes.replyId') = ? ORDER BY at, rowid LIMIT 1");
     // Each change names an earlier answer, and Answer again counts to 1000.
     for (let n = 0; row && n < 1000; n += 1) {
@@ -1139,7 +1147,7 @@ export class Store {
     const rows = this.db
       .prepare(
         `SELECT item_id, choice, json_extract(item, '$.repo') AS repo, json_extract(item, '$.pr') AS pr, item, MAX(at) AS at
-         FROM replies WHERE item_id LIKE 'wait-%' GROUP BY item_id, repo, pr`,
+         FROM replies WHERE decision != 'comment' AND item_id LIKE 'wait-%' GROUP BY item_id, repo, pr`,
       )
       .all() as Row[];
     const latest = new Map<string, { at: string; yes: boolean; pr?: string }>();

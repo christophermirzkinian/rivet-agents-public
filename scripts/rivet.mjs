@@ -5,7 +5,9 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as runner from "./chat-runner.mjs";
+import { EMPTY_DONE_REFUSAL, emptyDoneLine } from "../bridge/lib/asks.mjs";
 import { CARD_REFUSAL_MAX, emailButtonLink, hasMedia, mediaFlag, mediaOf, readMedia, replyRecord, serverError, uploadClips } from "../bridge/lib/board-client.mjs";
+import { cardFieldRefusals, cardFieldsLine } from "../bridge/lib/card-fields.mjs";
 import { chatDir, makeExec, readToken, resolveBin, serverOrigin } from "../bridge/lib/config.mjs";
 import { cardHoldPrs, definitiveRefusal, dropCardHold, holdForCard, isVideoCard } from "../bridge/lib/card-holds.mjs";
 import { HOLDS_FILE, readHolds, updateHolds } from "../bridge/lib/holds-file.mjs";
@@ -15,6 +17,7 @@ import { MAX_OPS_STATUS_CAUSE, MAX_OPS_STATUS_ETA, MAX_OPS_STATUS_NOTE, MAX_OPS_
 import { holdLine } from "../bridge/lib/pr-holds.mjs";
 import { logForced, mismatch, refusal, strong } from "../bridge/lib/chat-guard.mjs";
 import { routeChat } from "../bridge/lib/route-chat.mjs";
+import { sendRefusal } from "../bridge/lib/redact-check.mjs";
 import { redactKeepingLines } from "../bridge/lib/redact-cut.mjs";
 import { sanitizeLine } from "../bridge/lib/templates.mjs";
 import {
@@ -65,8 +68,10 @@ export const USAGE = `Rivet's board, asks, replies and chats from the command li
   rivet card add|edit <id> --args -         the card flags as a JSON array of words on stdin, so a card's text
                                              never sits in the command's arguments
   rivet card drop <id>...                   remove cards
-  rivet card note <id> --text "<words>"     answer your comment on an update card: a line under it, the card
-                                             shows as new again, and the line is a reply to your comment in Chat
+  rivet card note <id> --text "<words>"     answer your comment on a card (update, choice, decision or question;
+                                             not Got it): a line under it, a reply to your comment in Chat; an update
+                                             card shows as new again, a card you already answered does not come back
+                                             to Decide
   rivet media check <file>... [--before a --after b] [--viewport WxH] [--allow-webm] [--skip-corner-check]
                                              the card media checks alone (exit 5 on a problem)
   rivet ask open ["<your words>"] [--from <message id>] [--who ${ASK_WHO.join("|")}] [--stage s] [--due <when>] [--why "<one line>"]
@@ -90,7 +95,8 @@ export const USAGE = `Rivet's board, asks, replies and chats from the command li
                                              line in plain English with no PR numbers, and --media, one still (png or
                                              jpg, at most 1600 px a side) or one mp4 clip (--poster for its first frame),
                                              checked and uploaded as card add's are. With no --done it says the --note,
-                                             else the ask's last --why
+                                             else the --why. That line says what was decided, built or found, in 6
+                                             words or more: a bare "answered" or "done" is refused, here and by the server
   rivet ask list [--stage s] [--all] [--json]
                                              what the app shows (unfinished asks, and shipped, parked or done in the last 3 days);
                                              --all for every ask; each with its due time and how often it moved
@@ -136,6 +142,11 @@ Card flags: --kind (default decision; a card is for what you must confirm or cho
   --before --after --poster --still (x8) --audio (x6) [--label] --file (x4 documents) --skip-corner-check
   --viewport WxH --allow-webm --skip-preflight   (videos and stills are checked before any upload)
   --json <file|-> is read first and the flags override it; --json-out prints the server's answer.
+  A card add or edit with a field a card, its options or its links do not have, an ask text that is only an ask's id,
+  or a new decision or choice card with no --ask is refused, naming what to use instead (heading and bullets: --ask;
+  image: --still; ask "a-N": --ask-id).
+  A card add or edit whose text the redactor would change (a key, a token, a password, an escape code, a line it
+                   would hide whole) is refused before anything is sent: the refusal names only the field, the line and the rule
   rivet status set <kind> <key> --state <s> [--note t] [--eta t] [--why t] [--cause t --prevent t] [--chat c] [--pr N] [--issue N] [--by c] [--force]
                                              what is being done about a failed Ops item; the app shows it as the item's pill.
                                              investigating and in-progress need --eta (minutes, a local time like 3pm or
@@ -725,6 +736,13 @@ function checkAsk(o, count) {
   const why = /** @type {string | undefined} */ (f.why);
   if (why !== undefined && !(oneLine(why) && why.length <= MAX_ASK_WHY)) throw new UsageError(`--why is one line of 1 to ${MAX_ASK_WHY} characters`);
   if (f.due !== undefined && !oneLine(f.due)) throw new UsageError('--due is minutes ("90"), a clock time ("3pm", "15:30", "tonight") or an ISO time');
+  // A move to done says what is done, as its Done card shows: the --done items, else --note, else --why.
+  // With none given here the ask's stored why may say it, and an ask already done needs no line, so the server decides
+  // (PATCH /api/asks refuses the same empty line with this message).
+  if (f.stage === "done" && (o.sub === "set" || o.sub === "status" || o.sub === "close")) {
+    const said = o.doneItems?.length ? o.doneItems.join(" ") : (note ?? why);
+    if (said !== undefined && emptyDoneLine(said)) throw new UsageError(EMPTY_DONE_REFUSAL);
+  }
   if (f.progress !== undefined) f.progress = progressValue(/** @type {string} */ (f.progress));
 }
 
@@ -1296,6 +1314,13 @@ async function card(o, d) {
   }
   if (o.askFile !== undefined) o.fields.ask = fs.readFileSync(o.askFile, "utf8").trimEnd();
   const body = cardBody(o, base, d.now());
+  let unfit = cardFieldRefusals(body, { whole: o.sub === "add" });
+  // Only what the write changes is judged, so a card that may be stored is read before it is refused.
+  if (unfit.length && (o.sub === "edit" || o.replace)) unfit = cardFieldRefusals(body, { whole: o.sub === "add", stored: await storedNeed(await connect(d), id) });
+  if (unfit.length) {
+    d.stderr(`rivet: ${sanitizeLine(cardFieldsLine(id, unfit), CARD_REFUSAL_MAX)}\n`);
+    return 1;
+  }
   // A card added from inside a runner chat names that chat, so the answer is typed back into it: the runner sets
   // RIVET_CHAT_NAME in the chat's environment. A --chat (or the --json's) still wins.
   const own = d.env.RIVET_CHAT_NAME;
@@ -1316,6 +1341,18 @@ async function card(o, d) {
     if (repo) body.repo = repo;
     else if (o.sub === "edit") body.repo = null;
   }
+  // The card's proof lines and its sound clips' names are its text too.
+  const holdingLines = /** @type {any} */ (body.evidence)?.holding;
+  const redaction = sendRefusal([
+    ...cardTextFields(body, "--"),
+    ...(Array.isArray(holdingLines) ? holdingLines : []).map((/** @type {unknown} */ line, /** @type {number} */ i) => /** @type {[string, unknown]} */ ([`--holding ${i + 1}`, line])),
+    ...o.media.audio.map(({ label }, i) => /** @type {[string, unknown]} */ ([`--label ${i + 1}`, label])),
+  ]);
+  if (redaction.refusal) {
+    d.stderr(`rivet: ${redaction.refusal}\n`);
+    return 1;
+  }
+  for (const note of redaction.notes) d.stderr(`rivet: note: ${note}\n`);
   if (hasMedia(o.media)) {
     if (o.skipPreflight)
       d.stderr("rivet: WARNING --skip-preflight: this media is NOT checked (codec, size, blank frames, padding, before/after size); your phone may not play it\n");
@@ -1456,6 +1493,39 @@ function checkShape(card) {
     );
   const news = ["thread", "tag"].find((field) => card[field] !== undefined && card[field] !== null);
   if (news) throw new UsageError(`--${news} goes with --kind update`);
+}
+
+/**
+ * The human-text fields of a card (label, text), each label with `prefix` before it.
+ * @param {any} card @param {string} prefix @returns {[string, unknown][]}
+ */
+function cardTextFields(card, prefix) {
+  const list = (/** @type {unknown} */ v) => (Array.isArray(v) ? v : []);
+  return [
+    ...["title", "ask", "tag", "thread", "eta"].map((/** @type {string} */ field) => /** @type {[string, unknown]} */ ([`${prefix}${field}`, card?.[field]])),
+    ...list(card?.points).map((/** @type {unknown} */ point, /** @type {number} */ i) => /** @type {[string, unknown]} */ ([`${prefix}point ${i + 1}`, point])),
+    ...list(card?.steps).map((/** @type {any} */ step, /** @type {number} */ i) => /** @type {[string, unknown]} */ ([`${prefix}step ${i + 1}`, typeof step === "string" ? step : step?.label])),
+    ...list(card?.links).map((/** @type {any} */ link, /** @type {number} */ i) => /** @type {[string, unknown]} */ ([`${prefix}link ${i + 1}`, link?.label])),
+    ...list(card?.options).flatMap((/** @type {any} */ opt, /** @type {number} */ i) => /** @type {[string, unknown][]} */ ([
+      [`${prefix}option ${i + 1}`, opt?.label],
+      [`${prefix}option ${i + 1} short`, opt?.short],
+      [`${prefix}option ${i + 1} detail`, opt?.detail],
+    ])),
+    [`${prefix}why`, card?.evidence?.why],
+    [`${prefix}review-note`, card?.evidence?.reviewNote],
+    [`${prefix}ci-note`, card?.evidence?.ciNote],
+  ];
+}
+
+/**
+ * The card `id` as the server holds it, or undefined when it holds none.
+ * @param {Awaited<ReturnType<typeof connect>>} c @param {string} id @returns {Promise<any>}
+ */
+async function storedNeed(c, id) {
+  const res = await c.request("GET", "/api/board");
+  if (!res.ok) throw new Error(await serverError(res));
+  const doc = await res.json();
+  return doc?.board?.needs?.find((/** @type {any} */ need) => need?.id === id);
 }
 
 /**

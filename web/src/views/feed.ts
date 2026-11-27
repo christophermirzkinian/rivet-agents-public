@@ -285,7 +285,8 @@ function topCard(need: ServedNeed, minimisable = false, sheet = false): HTMLElem
             ...links.map(cardLink),
           )
         : null,
-      ...(isUpdate(need) ? (need.comments ?? []) : []).map((note) =>
+      // An update card's lines (his comments, the monitor's answers), and the monitor's notes under any other card.
+      ...(need.comments ?? []).map((note) =>
         h("p", { class: note.from === "rivet" ? "upd-note h" : "upd-note" }, h("b", {}, note.from === "rivet" ? `${agentName()}: ` : "You: "), ...linkify(note.text)),
       ),
       listed && !phone
@@ -1091,7 +1092,7 @@ async function send(need: ServedNeed, answer: Answer, confirm: boolean): Promise
       return signedOut("Your session ended. Sign in again.");
     }
     if (failure !== "retry") {
-      card.pending = null;
+      if (card.pending?.clientId === pending.clientId) card.pending = null;
       outbox.forget(pending.clientId);
     }
     app.front = need.id;

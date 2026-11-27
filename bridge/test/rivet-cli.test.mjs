@@ -304,12 +304,12 @@ test("a card's --pr with no --repo is the working folder's repo's PR; outside an
     asked += 1;
     return folder;
   };
-  const added = await cli(["card", "add", "bb", "--title", "Build", "--pr", "27", "--option", "Merge"], { fetch: server.fetch, folderRepo });
+  const added = await cli(["card", "add", "bb", "--title", "Build", "--ask", "Which?", "--pr", "27", "--option", "Merge"], { fetch: server.fetch, folderRepo });
   assert.equal(added.code, 0, added.stderr);
   assert.equal(server.state.board.needs[0].repo, "example-org/example-repo");
 
   // --repo is taken as given, and an edit that names no PR keeps the stored card's repo.
-  const named = await cli(["card", "add", "ms", "--title", "Main", "--pr", "7", "--repo", "example-org/other-repo"], { fetch: server.fetch, folderRepo });
+  const named = await cli(["card", "add", "ms", "--title", "Main", "--ask", "Which?", "--pr","7", "--repo", "example-org/other-repo"], { fetch: server.fetch, folderRepo });
   assert.equal(named.code, 0, named.stderr);
   assert.equal(server.state.board.needs[1].repo, "example-org/other-repo");
   const before = asked;
@@ -329,7 +329,7 @@ test("a card's --pr with no --repo is the working folder's repo's PR; outside an
   const retarget = await cli(["card", "edit", "bb", "--pr", "28"], { fetch: server.fetch, folderRepo });
   assert.equal(retarget.code, 0, retarget.stderr);
   assert.equal(server.state.board.needs[0].repo, undefined);
-  const loose = await cli(["card", "add", "none", "--title", "Main", "--pr", "8"], { fetch: server.fetch, folderRepo });
+  const loose = await cli(["card", "add", "none", "--title", "Main", "--ask", "Which?", "--pr","8"], { fetch: server.fetch, folderRepo });
   assert.equal(loose.code, 0, loose.stderr);
   assert.equal(server.state.board.needs.find((/** @type {any} */ n) => n.id === "none").repo, undefined);
 
@@ -341,10 +341,10 @@ test("a card's --pr with no --repo is the working folder's repo's PR; outside an
     assert.deepEqual(args.slice(2), ["remote", "get-url", "origin"]);
     return { ...answer(args), stderr: "" };
   });
-  const viaGit = await cli(["card", "add", "g1", "--title", "G", "--pr", "4"], { fetch: server.fetch, folderRepo: undefined, exec: git(() => ({ stdout: "git@github.com:example-org/example-repo.git\n" })) });
+  const viaGit = await cli(["card", "add", "g1", "--title", "G", "--ask", "Which?", "--pr", "4"], { fetch: server.fetch, folderRepo: undefined, exec: git(() => ({ stdout: "git@github.com:example-org/example-repo.git\n" })) });
   assert.equal(viaGit.code, 0, viaGit.stderr);
   assert.equal(server.state.board.needs.find((/** @type {any} */ n) => n.id === "g1").repo, "example-org/example-repo");
-  const noCheckout = await cli(["card", "add", "g2", "--title", "G", "--pr", "4"], {
+  const noCheckout = await cli(["card", "add", "g2", "--title", "G", "--ask", "Which?", "--pr", "4"], {
     fetch: server.fetch,
     folderRepo: undefined,
     exec: git(() => {
@@ -354,7 +354,7 @@ test("a card's --pr with no --repo is the working folder's repo's PR; outside an
   assert.equal(noCheckout.code, 0, noCheckout.stderr);
   assert.equal(server.state.board.needs.find((/** @type {any} */ n) => n.id === "g2").repo, undefined);
   const count = server.state.board.needs.length;
-  const elsewhere = await cli(["card", "add", "g3", "--title", "G", "--pr", "4"], { fetch: server.fetch, folderRepo: undefined, exec: git(() => ({ stdout: "https://example.com/x/y.git\n" })) });
+  const elsewhere = await cli(["card", "add", "g3", "--title", "G", "--ask", "Which?", "--pr", "4"], { fetch: server.fetch, folderRepo: undefined, exec: git(() => ({ stdout: "https://example.com/x/y.git\n" })) });
   assert.equal(elsewhere.code, 2);
   assert.match(elsewhere.stderr, /origin is not a GitHub URL: give --repo/);
   assert.equal(server.state.board.needs.length, count);
@@ -382,10 +382,10 @@ test("card add, edit and drop against the board routes", async () => {
     id: "pick-one",
   });
 
-  const again = await cli(["card", "add", "pick-one", "--title", "x"], { fetch: server.fetch });
+  const again = await cli(["card", "add", "pick-one", "--title", "x", "--ask", "Which?"], { fetch: server.fetch });
   assert.equal(again.code, 1);
   assert.match(again.stderr, /http 409: card pick-one already exists \(add --replace to overwrite it\)/);
-  const replaced = await cli(["card", "add", "pick-one", "--title", "Replaced", "--replace", "--json-out"], { fetch: server.fetch });
+  const replaced = await cli(["card", "add", "pick-one", "--title", "Replaced", "--ask", "Which?", "--replace", "--json-out"], { fetch: server.fetch });
   assert.equal(replaced.code, 0, replaced.stderr);
   assert.equal(JSON.parse(replaced.stdout).item.title, "Replaced");
   assert.equal(server.state.calls.at(-1)?.path, "/api/board/needs/pick-one");
@@ -424,7 +424,7 @@ test("card add, edit and drop against the board routes", async () => {
 
 test("board, replies and handled", async () => {
   const server = stubServer();
-  for (const id of ["a", "b", "c", "d", "e"]) assert.equal((await cli(["card", "add", id, "--title", id.toUpperCase()], { fetch: server.fetch })).code, 0);
+  for (const id of ["a", "b", "c", "d", "e"]) assert.equal((await cli(["card", "add", id, "--title", id.toUpperCase(), "--ask", "Which?"], { fetch: server.fetch })).code, 0);
 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rivet-board-"));
   const out = path.join(dir, "board.json");
@@ -459,10 +459,10 @@ test("card drop with --if-match follows the version each drop returns", async ()
 test("card add inside a chat names that chat, so the answer comes back to it; --chat wins and an edit names none", async () => {
   const server = stubServer();
   const inChat = { env: { ...ENV, RIVET_CHAT_NAME: "chat-dac06ed5e7f8" }, fetch: server.fetch };
-  const own = await cli(["card", "add", "colours", "--title", "Pick a colour"], inChat);
+  const own = await cli(["card", "add", "colours", "--title", "Pick a colour", "--ask", "Which?"], inChat);
   assert.equal(own.code, 0, own.stderr);
   assert.equal(server.state.board.needs.find((n) => n.id === "colours")?.chat, "chat-dac06ed5e7f8");
-  const named = await cli(["card", "add", "named", "--title", "t", "--chat", "myproject"], inChat);
+  const named = await cli(["card", "add", "named", "--title", "t", "--ask", "Which?", "--chat", "myproject"], inChat);
   assert.equal(named.code, 0, named.stderr);
   assert.equal(server.state.board.needs.find((n) => n.id === "named")?.chat, "myproject");
   assert.match(named.stderr, /card named names chat myproject, not this chat \(chat-dac06ed5e7f8\): its answer is typed there/);
@@ -476,10 +476,10 @@ test("card add inside a chat names that chat, so the answer comes back to it; --
   assert.match(moved.stderr, /card named names chat elsewhere, not this chat/);
   const blank = await cli(["card", "edit", "named", "--chat", ""], inChat);
   assert.doesNotMatch(blank.stderr, /not this chat/);
-  const outside = await cli(["card", "add", "plain", "--title", "t"], { fetch: server.fetch });
+  const outside = await cli(["card", "add", "plain", "--title", "t", "--ask", "Which?"], { fetch: server.fetch });
   assert.equal(outside.code, 0, outside.stderr);
   assert.equal(server.state.board.needs.find((n) => n.id === "plain")?.chat, undefined);
-  const odd = await cli(["card", "add", "odd", "--title", "t"], { env: { ...ENV, RIVET_CHAT_NAME: "not a name" }, fetch: server.fetch });
+  const odd = await cli(["card", "add", "odd", "--title", "t", "--ask", "Which?"], { env: { ...ENV, RIVET_CHAT_NAME: "not a name" }, fetch: server.fetch });
   assert.equal(odd.code, 0, odd.stderr);
   assert.equal(server.state.board.needs.find((n) => n.id === "odd")?.chat, undefined);
 });
@@ -493,12 +493,12 @@ test("card add --reply-to files it in your ask's conversation and says where; co
   assert.throws(() => parseArgs(["conversation", "merge", "ceaa1361"]), usage("--into"));
 
   server.state.filed["page-v2-486"] = { id: "9410d117", title: "Page packages", via: "reply-to" };
-  const added = await cli(["card", "add", "page-v2-486", "--title", "Lobby v2", "--reply-to", "9410d117"], { fetch: server.fetch });
+  const added = await cli(["card", "add", "page-v2-486", "--title", "Lobby v2", "--ask", "Which?", "--reply-to", "9410d117"], { fetch: server.fetch });
   assert.equal(added.code, 0, added.stderr);
   assert.equal(server.state.board.needs[0].replyTo, "9410d117");
   assert.equal(added.stderr, "rivet: card page-v2-486 is in conversation \"Page packages\" (9410d117, by reply-to)\n");
   // A decision nothing links: the CLI says your answer would start a new one; an update card nothing links says nothing.
-  const loose = await cli(["card", "add", "kids-cooking", "--title", "Pick one"], { fetch: server.fetch });
+  const loose = await cli(["card", "add", "kids-cooking", "--title", "Pick one", "--ask", "Which?"], { fetch: server.fetch });
   assert.match(loose.stderr, /card kids-cooking joins no conversation yet: your answer starts a new one\. Pass --reply-to/);
   const update = await cli(["card", "add", "upd-note", "--kind", "update", "--title", "Merged"], { fetch: server.fetch });
   assert.equal(update.code, 0, update.stderr);
@@ -542,7 +542,7 @@ test("a merged, shipped, info or briefing card is refused: finished work takes n
     assert.equal(refused.code, 2, kind);
     assert.match(refused.stderr, /finished work takes no card, close its ask with rivet ask close <id> done\|shipped; what you must confirm is --kind decision with an --option for each choice; progress and status are --kind decision --option "Got it"/);
   }
-  const tagged = await cli(["card", "add", "q", "--title", "Ship it?", "--tag", "Merged"], { fetch: server.fetch });
+  const tagged = await cli(["card", "add", "q", "--title", "Ship it?", "--ask", "Which?", "--tag", "Merged"], { fetch: server.fetch });
   assert.equal(tagged.code, 2);
   assert.match(tagged.stderr, /--tag goes with --kind update/);
   assert.equal(server.state.board.needs.length, 0);
@@ -709,7 +709,7 @@ test("a video card about a PR holds its merge in holds.json before it is posted"
     if (init?.method === "PUT" && String(url).includes("/api/board/needs/")) atPut.push(fs.readFileSync(file, "utf8"));
     return server.fetch(url, init);
   });
-  const argv = ["card", "add", "vc-1", "--title", "Menu redesign: crests", "--pr", "41", "--option", "Yes, keep it", "--after", clip, "--skip-preflight"];
+  const argv = ["card", "add", "vc-1", "--title", "Menu redesign: crests", "--ask", "Keep it?","--pr", "41", "--option", "Yes, keep it", "--after", clip, "--skip-preflight"];
   const r = await cli(argv, { fetch: fetchFn, holdsFile: file });
   assert.equal(r.code, 0, r.stderr);
   assert.match(r.stderr, /rivet: held #41 until the owner's yes on video card vc-1 \(holds\.json\)\n/);
@@ -726,8 +726,8 @@ test("a video card about a PR holds its merge in holds.json before it is posted"
 
   // A card with no video, or about another repo's PR, holds nothing.
   const plain = holdsFile([]);
-  assert.equal((await cli(["card", "add", "p", "--title", "Theme refresh", "--pr", "41", "--option", "Yes"], { fetch: server.fetch, holdsFile: plain })).code, 0);
-  const other = await cli(["card", "add", "g", "--title", "Other", "--pr", "5", "--repo", "example-org/other-repo", "--option", "Yes", "--after", clip, "--skip-preflight"], { fetch: server.fetch, holdsFile: plain });
+  assert.equal((await cli(["card", "add", "p", "--title", "Theme refresh", "--ask", "Keep it?","--pr", "41", "--option", "Yes"], { fetch: server.fetch, holdsFile: plain })).code, 0);
+  const other = await cli(["card", "add", "g", "--title", "Other", "--ask", "Keep it?", "--pr", "5", "--repo", "example-org/other-repo", "--option", "Yes", "--after", clip, "--skip-preflight"], { fetch: server.fetch, holdsFile: plain });
   assert.equal(other.code, 0, other.stderr);
   assert.match(other.stderr, /card g is about example-org\/other-repo#5: holds\.json holds only example-org\/example-repo PRs/);
   assert.deepEqual(readHolds(plain).holds, []);
@@ -736,7 +736,7 @@ test("a video card about a PR holds its merge in holds.json before it is posted"
 test("a video card whose hold cannot be written is not posted; a refused post takes its new hold back, an unsure one keeps it", async () => {
   const server = stubServer();
   const clip = clipFile();
-  const argv = ["card", "add", "vc-2", "--title", "Theme refresh", "--pr", "41", "--option", "Yes, keep it", "--after", clip, "--skip-preflight"];
+  const argv = ["card", "add", "vc-2", "--title", "Theme refresh", "--ask", "Keep it?","--pr", "41", "--option", "Yes, keep it", "--after", clip, "--skip-preflight"];
   const bad = holdsFile("[{\"pr\": 1}]");
   const refused = await cli(argv, { fetch: server.fetch, holdsFile: bad });
   assert.equal(refused.code, 1);
@@ -775,7 +775,7 @@ test("an edit that puts a PR on a video card holds it, and a new video re-stamps
   const server = stubServer();
   const clip = clipFile();
   const file = holdsFile([]);
-  const added = await cli(["card", "add", "vc-4", "--title", "Theme refresh", "--option", "Yes, keep it", "--after", clip, "--skip-preflight"], { fetch: server.fetch, holdsFile: file });
+  const added = await cli(["card", "add", "vc-4", "--title", "Theme refresh", "--ask", "Keep it?","--option", "Yes, keep it", "--after", clip, "--skip-preflight"], { fetch: server.fetch, holdsFile: file });
   assert.equal(added.code, 0, added.stderr);
   assert.deepEqual(readHolds(file).holds, []);
   const edited = await cli(["card", "edit", "vc-4", "--pr", "41"], { fetch: server.fetch, holdsFile: file });
@@ -796,7 +796,7 @@ test("a yes to the old video keeps the hold, whether the bridge takes it during 
   for (const during of [true, false]) {
     const server = stubServer();
     const file = holdsFile([]);
-    assert.equal((await cli(["card", "add", "vc-5", "--title", "Theme refresh", "--pr", "41", "--option", "Yes, keep it", "--after", a.file, "--skip-preflight"], { fetch: server.fetch, holdsFile: file })).code, 0);
+    assert.equal((await cli(["card", "add", "vc-5", "--title", "Theme refresh", "--ask", "Keep it?","--pr", "41", "--option", "Yes, keep it", "--after", a.file, "--skip-preflight"], { fetch: server.fetch, holdsFile: file })).code, 0);
     const later = new Date(NOW.getTime() + 60_000);
     const old = { itemId: "vc-5", at: new Date(later.getTime() + 500).toISOString(), decision: "approve", item: { pr: 41, videoSha: a.sha256, passkey: true } };
     const fetchFn = /** @type {typeof fetch} */ (async (url, init) => {
@@ -815,7 +815,7 @@ test("a before-only video edit: a yes to the old video taken during the write is
   const { a, b } = twoClips();
   const server = stubServer();
   const file = holdsFile([]);
-  assert.equal((await cli(["card", "add", "vc-6", "--title", "Theme refresh", "--pr", "41", "--option", "Yes, keep it", "--after", a.file, "--skip-preflight"], { fetch: server.fetch, holdsFile: file })).code, 0);
+  assert.equal((await cli(["card", "add", "vc-6", "--title", "Theme refresh", "--ask", "Keep it?","--pr", "41", "--option", "Yes, keep it", "--after", a.file, "--skip-preflight"], { fetch: server.fetch, holdsFile: file })).code, 0);
   let t = NOW.getTime() + 60_000;
   const now = () => new Date((t += 1000));
   const old = { itemId: "vc-6", at: new Date(NOW.getTime() + 61_500).toISOString(), decision: "approve", item: { pr: 41, videoSha: a.sha256, passkey: true } };
@@ -833,7 +833,7 @@ test("a before-only video edit whose answer is lost: the hold is placed again as
   const { a, b } = twoClips();
   const server = stubServer();
   const file = holdsFile([]);
-  assert.equal((await cli(["card", "add", "vc-8", "--title", "Theme refresh", "--pr", "41", "--option", "Yes, keep it", "--after", a.file, "--skip-preflight"], { fetch: server.fetch, holdsFile: file })).code, 0);
+  assert.equal((await cli(["card", "add", "vc-8", "--title", "Theme refresh", "--ask", "Keep it?","--pr", "41", "--option", "Yes, keep it", "--after", a.file, "--skip-preflight"], { fetch: server.fetch, holdsFile: file })).code, 0);
   let t = NOW.getTime() + 60_000;
   const now = () => new Date((t += 1000));
   const old = { itemId: "vc-8", at: new Date(NOW.getTime() + 61_500).toISOString(), decision: "approve", item: { pr: 41, videoSha: a.sha256, passkey: true } };
@@ -853,7 +853,7 @@ test("the hold placed again after the write is this write's: a same-id writer's 
   const { a, b } = twoClips();
   const server = stubServer();
   const file = holdsFile([]);
-  assert.equal((await cli(["card", "add", "vc-9", "--title", "Theme refresh", "--pr", "41", "--option", "Yes, keep it", "--after", a.file, "--skip-preflight"], { fetch: server.fetch, holdsFile: file })).code, 0);
+  assert.equal((await cli(["card", "add", "vc-9", "--title", "Theme refresh", "--ask", "Keep it?","--pr", "41", "--option", "Yes, keep it", "--after", a.file, "--skip-preflight"], { fetch: server.fetch, holdsFile: file })).code, 0);
   const fetchFn = /** @type {typeof fetch} */ (async (url, init) => {
     if (init?.method === "PATCH") {
       // A yes cleared the hold, and a same-id writer placed its own before its refusal comes back.
@@ -871,8 +871,8 @@ test("a reused card id: a yes to the revision about the new PR and video release
   const { a, b } = twoClips();
   const server = stubServer();
   const file = holdsFile([]);
-  assert.equal((await cli(["card", "add", "vid", "--title", "Theme refresh", "--pr", "41", "--option", "Yes, keep it", "--after", a.file, "--skip-preflight"], { fetch: server.fetch, holdsFile: file })).code, 0);
-  const r = await cli(["card", "add", "vid", "--replace", "--title", "Theme refresh", "--pr", "50", "--option", "Yes, keep it", "--after", b.file, "--skip-preflight"], { fetch: server.fetch, holdsFile: file });
+  assert.equal((await cli(["card", "add", "vid", "--title", "Theme refresh", "--ask", "Keep it?","--pr", "41", "--option", "Yes, keep it", "--after", a.file, "--skip-preflight"], { fetch: server.fetch, holdsFile: file })).code, 0);
+  const r = await cli(["card", "add", "vid", "--replace", "--title", "Theme refresh", "--ask", "Keep it?","--pr", "50", "--option", "Yes, keep it", "--after", b.file, "--skip-preflight"], { fetch: server.fetch, holdsFile: file });
   assert.equal(r.code, 0, r.stderr);
   const yes = releaseForYes({ itemId: "vid", at: new Date(NOW.getTime() + 1_000).toISOString(), decision: "approve", item: { pr: 50, videoSha: b.sha256, passkey: true } }, { file });
   assert.deepEqual(yes, { released: [50], kept: [{ pr: 41, card: "vid", why: "unnamed" }] });
@@ -883,7 +883,7 @@ test("a --pr edit: a yes to the revision before it keeps the new PR's hold", asy
   const { a } = twoClips();
   const server = stubServer();
   const file = holdsFile([]);
-  assert.equal((await cli(["card", "add", "vc-7", "--title", "Theme refresh", "--pr", "41", "--option", "Yes, keep it", "--after", a.file, "--skip-preflight"], { fetch: server.fetch, holdsFile: file })).code, 0);
+  assert.equal((await cli(["card", "add", "vc-7", "--title", "Theme refresh", "--ask", "Keep it?","--pr", "41", "--option", "Yes, keep it", "--after", a.file, "--skip-preflight"], { fetch: server.fetch, holdsFile: file })).code, 0);
   assert.equal((await cli(["card", "edit", "vc-7", "--pr", "50"], { fetch: server.fetch, holdsFile: file })).code, 0);
   const before = releaseForYes({ itemId: "vc-7", at: new Date(NOW.getTime() + 1_000).toISOString(), decision: "approve", item: { pr: 41, videoSha: a.sha256, passkey: true } }, { file });
   assert.deepEqual(before.kept, [{ pr: 50, card: "vc-7", why: "unnamed" }]);
@@ -901,7 +901,7 @@ test("a refused writer takes back only the hold that is still its own: a same-id
     holdForCard({ id: "vc-6", pr: 41, media: { kind: "video", after: { sha256: "a".repeat(64), type: "video/mp4" } } }, { file, now: later, restamp: true, write: "w-b" });
     return new Response(JSON.stringify({ error: "bad card" }), { status: 400 });
   });
-  const a = await cli(["card", "add", "vc-6", "--title", "Theme refresh", "--pr", "41", "--option", "Yes, keep it", "--after", clip, "--skip-preflight"], { fetch: fetchFn, holdsFile: file });
+  const a = await cli(["card", "add", "vc-6", "--title", "Theme refresh", "--ask", "Keep it?","--pr", "41", "--option", "Yes, keep it", "--after", clip, "--skip-preflight"], { fetch: fetchFn, holdsFile: file });
   assert.equal(a.code, 1);
   assert.deepEqual(readHolds(file).holds.map((h) => [h.pr, h.card, h.since]), [[41, "vc-6", later.toISOString()]]);
 });
@@ -910,7 +910,7 @@ test("a same-id --pr edit with no new video, made during a refused writer's dela
   const server = stubServer();
   const clip = clipFile();
   const file = holdsFile([]);
-  assert.equal((await cli(["card", "add", "v", "--title", "Theme refresh", "--option", "Yes, keep it", "--after", clip, "--skip-preflight"], { fetch: server.fetch, holdsFile: file })).code, 0);
+  assert.equal((await cli(["card", "add", "v", "--title", "Theme refresh", "--ask", "Keep it?","--option", "Yes, keep it", "--after", clip, "--skip-preflight"], { fetch: server.fetch, holdsFile: file })).code, 0);
   assert.deepEqual(readHolds(file).holds, []);
   /** @type {{ code: number, stderr: string } | undefined} */
   let b;
@@ -920,7 +920,7 @@ test("a same-id --pr edit with no new video, made during a refused writer's dela
     b = await cli(["card", "edit", "v", "--pr", "41"], { fetch: server.fetch, holdsFile: file });
     return new Response(JSON.stringify({ error: "media unavailable" }), { status: 422 });
   });
-  const a = await cli(["card", "add", "v", "--replace", "--title", "Theme refresh", "--pr", "41", "--option", "Yes, keep it", "--after", clip, "--skip-preflight"], { fetch: fetchFn, holdsFile: file });
+  const a = await cli(["card", "add", "v", "--replace", "--title", "Theme refresh", "--ask", "Keep it?","--pr", "41", "--option", "Yes, keep it", "--after", clip, "--skip-preflight"], { fetch: fetchFn, holdsFile: file });
   assert.equal(a.code, 1);
   assert.equal(b?.code, 0, b?.stderr);
   assert.deepEqual(readHolds(file).holds.map((h) => [h.pr, h.card]), [[41, "v"]]);
@@ -994,11 +994,11 @@ test("card add prints the card checker's warnings, and its refusal whole", async
     }
     return server.fetch(url, init);
   };
-  const refused = await cli(["card", "add", "cam-pick", "--title", "Camera"], { fetch: fetchFn });
+  const refused = await cli(["card", "add", "cam-pick", "--title", "Camera", "--ask", "Which?"], { fetch: fetchFn });
   assert.equal(refused.code, 1);
   assert.ok(refused.stderr.includes(`rivet: http 422: ${long}\n`), refused.stderr);
   refuse = false;
-  const added = await cli(["card", "add", "cam-pick", "--title", "Camera"], { fetch: fetchFn });
+  const added = await cli(["card", "add", "cam-pick", "--title", "Camera", "--ask", "Which?"], { fetch: fetchFn });
   assert.equal(added.code, 0, added.stderr);
   assert.equal(added.stdout, "added card cam-pick, version 1\n");
   assert.match(added.stderr, /^rivet: card checker warning: card cam-pick: the title has 13 words \(at most 12\);/m);
@@ -1007,9 +1007,107 @@ test("card add prints the card checker's warnings, and its refusal whole", async
   assert.match(edited.stderr, /^rivet: card checker warning: card cam-pick: the title has 13 words/m);
 });
 
+test("card add and edit refuse fields a card does not have, an ask that is only an ask's id and a missing description, before any call", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rivet-fields-"));
+  const write = (/** @type {any} */ card) => {
+    const file = path.join(dir, "card.json");
+    fs.writeFileSync(file, JSON.stringify(card));
+    return file;
+  };
+  const server = stubServer();
+  const add = (/** @type {any} */ card, /** @type {string[]} */ ...flags) => cli(["card", "add", "looks", "--json", write(card), ...flags], { fetch: server.fetch });
+  const looks = { kind: "choice", title: "Looks", options: [{ label: "Calm" }, { label: "Bold" }] };
+  for (const [card, what] of /** @type {[any, RegExp][]} */ ([
+    [{ ...looks, ask: "Which?", heading: "Looks" }, /^rivet: card looks: a card has no field heading: put it in the ask text \(--ask or --ask-file\), bullets as lines starting "- "\n$/],
+    [{ ...looks, ask: "Which?", bullets: ["one"] }, /a card has no field bullets: .*lines starting "- "/],
+    [{ ...looks, ask: "Which?", options: [{ label: "Calm", image: "/tmp/a.png" }] }, /option 1 has no field image: put each picture on the card with --still <file>/],
+    [{ ...looks, ask: "a-14" }, /the ask text is only an ask's id: name the ask with --ask-id a-N/],
+    [{ ...looks, ask: "a-14 (option B)" }, /only an ask's id/],
+    [looks, /a choice card needs a description: say in --ask/],
+  ])) {
+    const refused = await add(card);
+    assert.equal(refused.code, 1, refused.stderr);
+    assert.match(refused.stderr, what);
+  }
+  const bare = await cli(["card", "add", "looks", "--title", "Ship it?"], { fetch: server.fetch });
+  assert.equal(bare.code, 1);
+  assert.match(bare.stderr, /a decision card needs a description/);
+  assert.deepEqual(server.state.calls, []);
+
+  const added = await add(looks, "--ask", "Which?\n- Calm\n- Bold", "--ask-id", "a-14");
+  assert.equal(added.code, 0, added.stderr);
+
+  // A card stored with the old fields: an edit of something else and --unset heading go through, a new one does not.
+  server.state.board.needs.push({ ...looks, id: "old", heading: "Looks", bullets: ["one"], ask: "a-14", since: NOW.toISOString() });
+  const old = () => server.state.board.needs.find((/** @type {any} */ need) => need.id === "old");
+  const edit = (/** @type {string[]} */ ...flags) => cli(["card", "edit", "old", ...flags], { fetch: server.fetch });
+  assert.equal((await edit("--title", "Looks, again")).code, 0);
+  // Its own JSON sent back with only the title changed, by edit and by add --replace.
+  const { id: _id, since: _since, ...asStored } = old();
+  assert.equal((await edit("--json", write({ ...asStored, title: "Looks, twice" }))).code, 0);
+  assert.equal((await cli(["card", "add", "old", "--replace", "--json", write(asStored)], { fetch: server.fetch })).code, 0);
+  assert.equal((await edit("--unset", "heading", "--unset", "bullets")).code, 0);
+  assert.equal(old().title, "Looks, again");
+  assert.ok(!("heading" in old()) && !("bullets" in old()));
+  const before = JSON.stringify(old());
+  for (const refused of [await edit("--json", write({ heading: "Again" })), await edit("--ask", "a-14 b")]) {
+    assert.equal(refused.code, 1, refused.stderr);
+    assert.match(refused.stderr, /^rivet: card old: /);
+  }
+  assert.equal(JSON.stringify(old()), before);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("card add and edit refuse text the redactor would change, by field, line and rule, before anything is sent", async () => {
+  const server = stubServer();
+  const token = `ghp_${"A1b2".repeat(9)}`;
+  const refusal = (/** @type {string} */ found) =>
+    `rivet: refused, nothing was sent: the redactor would take this out (a key, token, password, escape code or hidden line), and the board would show [redacted] there. Take it out and send it again:\n  ${found}\n`;
+
+  const refused = await cli(["card", "add", "deploy-key", "--title", "Deploy key", "--ask", `Use this one?\n${token}`, "--option", "Yes"], { fetch: server.fetch });
+  assert.equal(refused.code, 1);
+  assert.equal(refused.stderr, refusal("--ask: line 2 (github token)"));
+  assert.equal(refused.stdout, "");
+  assert.deepEqual(server.state.calls, []);
+
+  // A home folder shows as ~ on the board, which loses nothing: the card goes as written.
+  const ask = `The log is at ${os.homedir()}/x.log`;
+  const added = await cli(["card", "add", "deploy-key", "--title", "Deploy key", "--ask", ask, "--option", "Yes"], { fetch: server.fetch });
+  assert.doesNotMatch(added.stderr, /refused|redact/);
+  assert.equal(added.code, 0, added.stderr);
+  assert.equal(server.state.board.needs[0].ask, ask);
+
+  const calls = server.state.calls.length;
+  const edited = await cli(["card", "edit", "deploy-key", "--option", "Yes", "--detail", "DB_PASSWORD=hunter2hunter2", "--why", "Acme™ ships"], { fetch: server.fetch });
+  assert.equal(edited.code, 1);
+  assert.equal(
+    edited.stderr,
+    refusal("--option 1 detail: line 1 (a value named as a secret)\n  --why: line 1 (the whole line would be hidden: a look-alike form such as ™ or ² does that, write TM or 2)"),
+  );
+  assert.equal(server.state.calls.length, calls);
+  assert.equal(server.state.board.needs[0].ask, ask);
+  for (const { stderr } of [refused, edited]) assert.doesNotMatch(stderr, /A1b2|ghp_|hunter|Acme/);
+
+  const noted = await cli(["card", "edit", "deploy-key", "--ask", `The build ${"a1b2c3d4".repeat(8)} is up`], { fetch: server.fetch });
+  assert.equal(noted.stderr, "rivet: note: --ask: line 1 holds a long token-shaped value; the board shows [redacted] in its place\n");
+  assert.equal(noted.code, 0);
+  assert.equal(server.state.board.needs[0].ask, `The build ${"a1b2c3d4".repeat(8)} is up`);
+
+  // A proof line and a sound clip's name are the card's text too, and a password in a URL is no long id.
+  const before = server.state.calls.length;
+  const held = await cli(["card", "edit", "deploy-key", "--holding", "CI green", "--holding", `db ${["postgres:", "", "app:Hunter2pwHunter2pw"].join("/")}@db.internal/app`], { fetch: server.fetch });
+  assert.equal(held.stderr, refusal("--holding 2: line 1 (a secret-shaped value)"));
+  const clip = await cli(["card", "edit", "deploy-key", "--audio", "/nowhere/a.mp3", "--label", token], { fetch: server.fetch });
+  assert.equal(clip.stderr, refusal("--label 1: line 1 (github token)"));
+  const oneWord = await cli(["card", "edit", "deploy-key", "--title", "Acme™"], { fetch: server.fetch });
+  assert.equal(oneWord.stderr, refusal("--title: line 1 (the whole line would be hidden: a look-alike form such as ™ or ² does that, write TM or 2)"));
+  for (const { code } of [held, clip, oneWord]) assert.equal(code, 1);
+  assert.equal(server.state.calls.length, before);
+});
+
 test("--email-button adds a button opening the email of that subject", async () => {
   const server = stubServer();
-  const added = await cli(["card", "add", "lab-links", "--title", "Lab links", "--email-button", 'Lab "links" & keys'], { fetch: server.fetch });
+  const added = await cli(["card", "add", "lab-links", "--title", "Lab links", "--ask", "Which?", "--email-button", 'Lab "links" & keys'], { fetch: server.fetch });
   assert.equal(added.code, 0, added.stderr);
   assert.deepEqual(server.state.board.needs[0].links, [{ label: "Open the email", url: `https://mail.google.com/mail/#search/${encodeURIComponent('subject:"Lab "links" & keys"')}` }]);
   await assert.rejects(async () => parseArgs(["card", "add", "x", "--email-button", " "]), usage("--email-button takes the email's subject"));

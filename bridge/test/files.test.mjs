@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
-import { download, parseArgs } from "../../scripts/attachments.mjs";
+import { download, parseArgs, STALE_TMP_MS } from "../../scripts/attachments.mjs";
 import { validateCommand } from "../lib/actions/command.mjs";
 import { appChatLine, MAX_APP_CHAT_LINE, MAX_APP_CHAT_TEXT } from "../lib/command-templates.mjs";
 import { chatLine, githubCommentBody, MAX_LINE } from "../lib/templates.mjs";
@@ -92,7 +92,7 @@ test("two files under one name are named where the attachments script saves them
 test("attachments.mjs takes one id, --out and --json", () => {
   assert.deepEqual(parseArgs(["m1", "--out", "/tmp/x", "--json"]), { id: "m1", out: "/tmp/x", json: true });
   assert.deepEqual(parseArgs(["--help"]), { help: true });
-  for (const bad of [["../etc"], ["m1", "m2"], ["m1", "--out"], ["m1", "--force"]]) assert.throws(() => parseArgs(bad));
+  for (const bad of [["../etc"], ["m1", "m2"], ["m1", "--out"], ["m1", "--out", "--json"], ["m1", "--force"]]) assert.throws(() => parseArgs(bad));
 });
 
 /** A stand-in server for the two board routes; `listing` is the attachments answer, `bodies` each sha's bytes. */
@@ -151,6 +151,26 @@ test("downloads every file and photo into <out>/<id>/, private, checked against 
     assert.equal(fs.statSync(path.join(dir, "photo-1.jpg")).mode & 0o777, 0o600);
     assert.deepEqual(fs.readdirSync(dir).sort(), ["Report.pdf", "photo-1.jpg", "report (2).pdf"]);
     assert.ok(server.seen.every(([, auth]) => auth === `Bearer ${"t".repeat(64)}`));
+  } finally {
+    await server.close();
+    fs.rmSync(out, { recursive: true, force: true });
+  }
+});
+
+test("removes a killed run's part-written temp file once it is stale, and leaves a live run's alone", async () => {
+  const pdf = Buffer.from("%PDF-1.7 hello");
+  const listing = { id: "m1", files: [{ sha256: sha(pdf), name: "a.pdf", type: "application/pdf", size: pdf.length }], images: [] };
+  const server = await stub(listing, { [sha(pdf)]: pdf });
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), "rivet-files-"));
+  try {
+    const dir = path.join(out, "m1");
+    fs.mkdirSync(dir);
+    const [stale, live, other] = [`.${sha(pdf)}.0123abcd.tmp`, `.${sha(pdf)}.89ef4567.tmp`, ".notes.tmp"];
+    for (const name of [stale, live, other]) fs.writeFileSync(path.join(dir, name), "part");
+    const old = new Date(Date.now() - STALE_TMP_MS - 60_000);
+    for (const name of [stale, other]) fs.utimesSync(path.join(dir, name), old, old);
+    await download({ id: "m1", out, origin: server.origin, token: "t", fetch });
+    assert.deepEqual(fs.readdirSync(dir).sort(), [live, other, "a.pdf"].sort());
   } finally {
     await server.close();
     fs.rmSync(out, { recursive: true, force: true });

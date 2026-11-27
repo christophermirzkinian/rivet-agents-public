@@ -55,7 +55,7 @@ describe("a card's push buttons", () => {
       need("x1", { reply: "text" }),
       need("o1", { options: [{ label: "Blue" }, { label: "Red" }] }),
       need("o2", { options: [{ label: "Yes", text: true }, { label: "No" }] }),
-      // Answered in its chat: a notification clips its words (a-1012).
+      // Answered in its chat: a notification clips its words (a-12).
       need("i1", { options: [{ label: "Yes" }, { label: "No" }], inChat: { label: "To the team" } }),
       need("i2", { options: [{ label: "Got it" }], inChat: { label: "To the team" } }),
       // An outcome card: its Yes, keep it is not a bare Yes, so it opens the card as before.

@@ -7,15 +7,18 @@ import { APP_NAME } from "../../src/shared/names.js";
 import { clock, shortDate } from "../../src/shared/when.js";
 import * as api from "./api.js";
 import { button, describe, h, ICONS, svg } from "./dom.js";
+import { latestRead } from "./latest-read.js";
 import { enablePush, environment, needsInstall, type PushState } from "./push.js";
 import { onSessionReset, signedInByCode } from "./session.js";
 import { changed } from "./state.js";
 import { flash } from "./views/toast.js";
 
 let health: PushConfigResponse | null = null;
+const reads = latestRead();
 let busy = false;
 const listeners = new Set<() => void>();
 onSessionReset(() => {
+  reads.invalidate();
   health = null;
   busy = false;
 });
@@ -26,12 +29,14 @@ export function pushHealth(): PushConfigResponse | null {
 
 /** Asks the server again; a failed check keeps what it last said. */
 export async function loadPushHealth(): Promise<void> {
+  const latest = reads.start();
   let next: PushConfigResponse;
   try {
     next = await api.pushConfig();
   } catch {
     return;
   }
+  if (!latest()) return;
   // Polled with the board, so only a change redraws.
   if (JSON.stringify(next) === JSON.stringify(health)) return;
   health = next;
@@ -46,6 +51,7 @@ export function onPushChanged(listener: () => void): () => void {
 
 /** Tells every view that shows this phone's push to read it again, and asks the server for the phone count. */
 export async function pushChanged(): Promise<void> {
+  reads.invalidate();
   for (const listener of listeners) listener();
   await loadPushHealth();
 }

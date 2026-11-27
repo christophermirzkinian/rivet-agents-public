@@ -276,7 +276,7 @@ describe("the red jobs sheet", () => {
   });
 });
 
-describe("the red jobs sheet in a window signed in with a code alone (a-1010)", () => {
+describe("the red jobs sheet in a window signed in with a code alone (a-10)", () => {
   const LINE = "Resume or set a job from a phone or computer signed in with a passkey.";
   const labels = (row: Element) => [...row.querySelectorAll("button")].map((b) => b.textContent).filter((label) => label !== "Dismiss");
   afterEach(() => setSignedInByCode(false));

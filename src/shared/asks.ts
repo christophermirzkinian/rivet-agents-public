@@ -20,6 +20,21 @@ export const MAX_ASK_SOURCE = 200;
 /** A done card says what is done in at most this many short items (the card rule: a heading and up to 3). */
 export const MAX_DONE_ITEMS = 3;
 export const MAX_DONE_ITEM = 160;
+/**
+ * The fewest words a done card's line says, so it says what is done and never a bare "done".
+ * bridge/lib/asks.mjs keeps the same rule for `rivet ask`; keep the two in step.
+ */
+export const MIN_DONE_WORDS = 6;
+const EMPTY_DONE_WORDS = /^(?:answered|done|finished|fixed|closed|complete|completed|ok|okay|resolved|sorted)$/i;
+export const EMPTY_DONE_REFUSAL = `a move to done says what was decided, built or found, in at least ${MIN_DONE_WORDS} words (--done items or --note): the owner's Done card shows only that line, never "answered" or "done"`;
+
+/** A done line that tells the owner nothing: under MIN_DONE_WORDS words, or only answered, done, finished, fixed or closed. */
+export function emptyDoneLine(text: string | undefined): boolean {
+  // A word is a run of letters or digits (an apostrophe inside it too): a slash or bracket is no word, so "done / done"
+  // and "(done)" read as done.
+  const words = (text ?? "").split(/[^\p{L}\p{N}']+/u).map((word) => word.replace(/^'+|'+$/g, "")).filter(Boolean);
+  return words.length < MIN_DONE_WORDS || words.every((word) => EMPTY_DONE_WORDS.test(word));
+}
 /** The two labels a done card's text leads its lines with; the app draws them as labels (web/src/views/feed.ts). */
 export const YOU_ASKED_LABEL = "You asked:";
 /** The id of an ask's Done card (`doneCardId` on the server). */

@@ -17,6 +17,8 @@ import { pathToFileURL } from "node:url";
 
 import { makeExec, readToken, serverOrigin } from "../bridge/lib/config.mjs";
 import { redactKeepingLines } from "../bridge/lib/redact-cut.mjs";
+import { takeUnits } from "../bridge/lib/text-units.mjs";
+import { writeFileAtomic } from "../bridge/lib/write-file-atomic.mjs";
 
 export const BODY_MAX = 6000;
 const LABEL_MAX = 120;
@@ -42,7 +44,7 @@ const oneLine = (text) => text.replace(/\s+/g, " ").trim();
 export function clean(text, max = BODY_MAX) {
   const kept = redactKeepingLines(text).trim();
   if (kept.length <= max) return kept;
-  const cut = kept.slice(0, max);
+  const cut = takeUnits(kept, max);
   const line = cut.lastIndexOf("\n");
   return `${(line > max / 2 ? cut.slice(0, line) : cut).trimEnd()}\n…`;
 }
@@ -242,7 +244,7 @@ function flags(argv) {
   /** @type {Record<string, string>} */
   const out = {};
   for (let i = 0; i < argv.length; i += 2) {
-    if (!argv[i]?.startsWith("--") || argv[i + 1] === undefined) throw new Error(`bad flag ${argv[i]}`);
+    if (!argv[i]?.startsWith("--") || argv[i + 1] === undefined || argv[i + 1].startsWith("--")) throw new Error(`bad flag ${argv[i]}`);
     out[argv[i].slice(2)] = argv[i + 1];
   }
   return out;
@@ -283,7 +285,7 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   }
   const token = await readToken(makeExec(), "RIVET_BRIDGE_TOKEN", env);
   await sendToRivet(serverOrigin(env.RIVET_URL || undefined), token, body);
-  writeFileSync(sentFile, JSON.stringify({ digest, at: now }));
+  writeFileAtomic(sentFile, JSON.stringify({ digest, at: now }));
   console.log(`${new Date(now).toISOString()} ${said} sent`);
 }
 

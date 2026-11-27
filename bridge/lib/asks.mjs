@@ -16,6 +16,15 @@ export const MAX_ASK_WHY = 200;
 /** src/shared/asks.ts MAX_DONE_ITEMS and MAX_DONE_ITEM: what a done card says is done. */
 export const MAX_DONE_ITEMS = 3;
 export const MAX_DONE_ITEM = 160;
+/** src/shared/asks.ts MIN_DONE_WORDS, emptyDoneLine and EMPTY_DONE_REFUSAL: a done card says what is done. Keep in step. */
+export const MIN_DONE_WORDS = 6;
+const EMPTY_DONE_WORDS = /^(?:answered|done|finished|fixed|closed|complete|completed|ok|okay|resolved|sorted)$/i;
+export const EMPTY_DONE_REFUSAL = `a move to done says what was decided, built or found, in at least ${MIN_DONE_WORDS} words (--done items or --note): the owner's Done card shows only that line, never "answered" or "done"`;
+/** @param {string | undefined} text */
+export function emptyDoneLine(text) {
+  const words = (text ?? "").split(/[^\p{L}\p{N}']+/u).map((word) => word.replace(/^'+|'+$/g, "")).filter(Boolean);
+  return words.length < MIN_DONE_WORDS || words.every((word) => EMPTY_DONE_WORDS.test(word));
+}
 /** The longest side of a done card's still, in pixels: bigger ones are slow on the owner's phone and no sharper. */
 export const MAX_DONE_STILL = 1600;
 const MAX_ASK_PRS = 50;

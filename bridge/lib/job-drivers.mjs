@@ -1,7 +1,7 @@
-// The plan a job's chat runs on: Claude through `claude -p`, as every job ran before, or ChatGPT through
-// `codex exec --json`. A hosted agent names its agent file in RIVET_AGENT_FILE and picks its first plan there
+// The plan a job's chat runs on: Claude through `claude -p`, as every job ran before, ChatGPT through
+// `codex exec --json`, or GitHub Copilot through `copilot -p`. A hosted agent names its agent file in RIVET_AGENT_FILE and picks its first plan there
 // (`firstPlan`); with no agent file every chat runs on Claude with the command line it always had, so the owner's
-// own setup never changes. A plan at its usage limit never hands the job to the other plan by itself: the two are
+// own setup never changes. A plan at its usage limit never hands the job to another plan by itself: each is
 // billed and limited apart, so the run says so and asks.
 import fs from "node:fs";
 import path from "node:path";
@@ -9,12 +9,29 @@ import path from "node:path";
 import { chatArgs } from "./jobs.mjs";
 import { redactLines } from "./redact.mjs";
 
-/** @typedef {"claude" | "chatgpt"} Plan */
+/** @typedef {"claude" | "chatgpt" | "copilot"} Plan */
 /** @type {readonly Plan[]} */
-export const PLANS = Object.freeze(["claude", "chatgpt"]);
-export const PLAN_NAMES = Object.freeze({ claude: "Claude", chatgpt: "ChatGPT" });
-/** @param {Plan} plan @returns {Plan} */
+export const PLANS = Object.freeze(["claude", "chatgpt", "copilot"]);
+export const PLAN_NAMES = Object.freeze({ claude: "Claude", chatgpt: "ChatGPT", copilot: "GitHub Copilot" });
+/** The plans besides `plan`, in the order they are offered. @param {Plan} plan @returns {Plan[]} */
+export const otherPlans = (plan) => PLANS.filter((one) => one !== plan);
+/**
+ * The plan a limit offers when its report names none (src/shared/jobs.ts otherPlan): what a report said before there
+ * was a third plan, so a report that offers this one still names none and reads the same to any server.
+ * @param {Plan} plan @returns {Plan}
+ */
 export const otherPlan = (plan) => (plan === "claude" ? "chatgpt" : "claude");
+/** "Claude", "Claude or ChatGPT", "Claude, ChatGPT or GitHub Copilot". @param {readonly Plan[]} plans */
+export const planList = (plans) => {
+  const names = plans.map((plan) => PLAN_NAMES[plan]);
+  return names.length > 1 ? `${names.slice(0, -1).join(", ")} or ${names.at(-1)}` : (names[0] ?? "");
+};
+/**
+ * The plans a machine can connect: GitHub Copilot only where its status command is installed, so words on an agent
+ * from before it name the two plans they always have.
+ * @param {boolean} copilot @returns {readonly Plan[]}
+ */
+export const plansHere = (copilot) => (copilot ? PLANS : PLANS.filter((plan) => plan !== "copilot"));
 /** @param {unknown} value @returns {value is Plan} */
 export const isPlan = (value) => typeof value === "string" && /** @type {readonly string[]} */ (PLANS).includes(value);
 
@@ -100,14 +117,19 @@ export function codexArgs(id, run, spec, paths, where) {
 const LOOK_LOG_LINES = 80;
 const LOOK_LOG_CHARS = 12_000;
 
+const CODEX_LOOK = "Look with shell commands that only read, such as ls, cat, grep, git log, git show, git diff and git status, in this checkout.";
+const COPILOT_LOOK = "Look with the tools that only read files, view, rg and glob, in this checkout. You have no shell and no other tool.";
+
 /**
  * What a Codex job chat is told. It has a shell, not Claude's tools or `job read`, so it reads this checkout with
- * commands, says so when the words need anything outside it, and ends on the verdict line codexVerdict takes.
+ * commands, says so when the words need anything outside it, and ends on the verdict line codexVerdict takes. A
+ * Copilot job chat is told the same with its own way to look (copilotPrompt): its read tools, as it has no shell.
  * @param {string} id @param {import("./jobs.mjs").ChatSpec} spec @param {import("./jobs.mjs").ChatPaths} paths
+ * @param {string} [look] how this plan's chat reads the checkout
  */
-export function codexPrompt(id, spec, paths) {
+export function codexPrompt(id, spec, paths, look = CODEX_LOOK) {
   const rules = [
-    "Look with shell commands that only read, such as ls, cat, grep, git log, git show, git diff and git status, in this checkout.",
+    look,
     "Change nothing: no edits, commits, pushes, installs or deploys. Use no network.",
     "You can see only this checkout. If the words need anything outside it (GitHub issues, pull requests or CI runs, a website), never guess: end with RED: can't see <what> from here.",
   ];
@@ -159,16 +181,17 @@ function bareVerdict(line) {
  * otherwise it is a red that says what ChatGPT could not check or reach.
  * @param {string} message @param {boolean} task @param {string} [words] a task's words @param {string[]} [events] the
  *   run's events as Codex wrote them, before any redaction (codexWatch), one event a line
+ * @param {string} [name] the plan the red line names
  * @returns {{ state: "green" | "red", line: string } | null}
  */
-export function codexVerdict(message, task, words = "", events = []) {
+export function codexVerdict(message, task, words = "", events = [], name = "ChatGPT") {
   const lines = redactLines(message.split("\n")).map((line) => line.trim()).filter(Boolean);
   const last = lines.at(-1) === undefined ? undefined : bareVerdict(lines.at(-1));
   if (task && last === "GREEN") {
     const outside = outsideNeed(words);
-    if (outside) return { state: "red", line: `ChatGPT can't check ${outside} from here yet` };
+    if (outside) return { state: "red", line: `${name} can't check ${outside} from here yet` };
     const unreached = codexUnreached(events);
-    return unreached ? { state: "red", line: `ChatGPT couldn't reach ${unreached} from here` } : { state: "green", line: lines.at(-2) ?? "Green." };
+    return unreached ? { state: "red", line: `${name} couldn't reach ${unreached} from here` } : { state: "green", line: lines.at(-2) ?? "Green." };
   }
   const red = last ? /^RED:\s*(\S.*)$/.exec(last) : null;
   return red ? { state: "red", line: red[1] } : null;
@@ -396,6 +419,147 @@ function itemLines(item) {
   }
 }
 
+// --- GitHub Copilot ---
+
+// The tools a Copilot job chat is given, by the names Copilot CLI 1.0.116 sends its model: the three that only read
+// files. Of its eighteen, the others run a shell (bash, read_bash, stop_bash, list_bash), write (apply_patch), reach the
+// network (web_fetch, fetch_copilot_cli_documentation, semantic_code_search), or start skills, stores and other agents.
+export const COPILOT_READ_TOOLS = Object.freeze(["view", "rg", "glob"]);
+
+/** @param {string} id @param {import("./jobs.mjs").ChatSpec} spec @param {import("./jobs.mjs").ChatPaths} paths */
+export const copilotPrompt = (id, spec, paths) => codexPrompt(id, spec, paths, COPILOT_LOOK);
+
+/**
+ * Every Copilot chat and job passes this: the CLI then leaves the named variable out of the environment of each shell
+ * command and MCP server it starts. The machine's `copilot` wrapper sets that variable to a stand-in of a token's shape
+ * (no credential), and without the flag an `env` dump saved under projects/ would look as if it held one. It is a name
+ * handed to the CLI: nothing here sets, reads or logs the variable.
+ */
+export const COPILOT_HIDE_ENV = "--secret-env-vars=COPILOT_GITHUB_TOKEN";
+
+/**
+ * A Copilot job runs with its own empty settings folder, made for the run and removed after it. The CLI runs a
+ * checkout's hooks and starts its MCP servers once the home's saved settings trust that folder or one above it, and
+ * runs the home's own hooks and MCP servers anywhere: each is a command line, which a read-only job must never start.
+ * The CLI has no flag for it, only this variable, which names a folder and holds nothing of the owner's.
+ * @param {NodeJS.ProcessEnv} env @param {string} dir an empty folder @returns {NodeJS.ProcessEnv}
+ */
+export const copilotJobEnv = (env, dir) => ({ ...env, COPILOT_HOME: dir });
+
+/**
+ * `copilot -p` for a job's chat, read-only three times over: its model is given only the tools that read files
+ * (--available-tools), every write, shell command and URL is denied by rule (--deny-tool, which wins over any allow),
+ * and nothing is allowed, so a run with nobody there denies whatever would ask. Each held by itself against a stand-in
+ * for the API that asked for a shell command, a patch and a page. It reads no AGENTS.md, starts no built-in MCP server,
+ * never updates itself, and reads no file outside the checkout. Like a Codex job it has no `job read` or `job report`:
+ * it ends on a verdict line (copilotPrompt) that job-run reads from its last message (copilotWatch) and reports itself.
+ * Every option takes its value after `=`: several of Copilot's take a list, which would swallow what follows.
+ * Every flag is in Copilot CLI 1.0.116 (`copilot --help`, `copilot help permissions`).
+ * @param {string} id @param {string} run @param {import("./jobs.mjs").ChatSpec} spec @param {import("./jobs.mjs").ChatPaths} paths
+ */
+export function copilotArgs(id, run, spec, paths) {
+  // chatArgs holds the ids and paths to their patterns; it throws on any it refuses.
+  chatArgs(id, run, spec, paths);
+  return [
+    `--prompt=${copilotPrompt(id, spec, paths)}`,
+    "--silent",
+    "--output-format=json",
+    "--no-auto-update",
+    "--disable-builtin-mcps",
+    "--no-ask-user",
+    "--no-custom-instructions",
+    "--disallow-temp-dir",
+    `--available-tools=${COPILOT_READ_TOOLS.join(",")}`,
+    "--deny-tool=write",
+    "--deny-tool=shell",
+    "--deny-tool=url",
+    COPILOT_HIDE_ENV,
+  ];
+}
+
+/** A Copilot `--output-format json` event, or null for a line that is not one. @param {string} raw */
+function copilotEvent(raw) {
+  if (!raw.startsWith("{")) return null;
+  try {
+    const event = JSON.parse(raw);
+    return event && typeof event === "object" && typeof event.type === "string" ? event : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A Copilot run's evidence, read from each whole stdout line as Copilot wrote it, before the run's log is redacted and
+ * cut to 500 characters a line (which leaves most of its events unparsable): its last message with words in it, which
+ * holds the verdict; the first tool it asked for that is not one of its read tools, which was refused; and the error
+ * its session ended on. None of it is logged from here.
+ */
+export function copilotWatch() {
+  let message = "";
+  let refused = /** @type {string | null} */ (null);
+  let error = /** @type {string | null} */ (null);
+  const note = (/** @type {unknown} */ name) => {
+    if (!refused && typeof name === "string" && !COPILOT_READ_TOOLS.includes(name)) refused = name.slice(0, 40);
+  };
+  return {
+    /** @param {"stdout" | "stderr"} stream @param {string} raw */
+    line(stream, raw) {
+      const event = stream === "stdout" ? copilotEvent(raw) : null;
+      if (!event) return;
+      const data = event.data && typeof event.data === "object" ? event.data : {};
+      if (event.type === "assistant.message") {
+        if (text(data.content)) message = data.content;
+        // What it asked for counts whether or not the CLI went on to start it: a tool turned down early has no start.
+        for (const asked of Array.isArray(data.toolRequests) ? data.toolRequests : []) note(asked && typeof asked === "object" ? asked.name : null);
+      } else if (event.type === "tool.execution_start") note(data.toolName);
+      else if (event.type === "session.error") error = text(data.message) ?? error;
+    },
+    message: () => message,
+    refused: () => refused,
+    error: () => error,
+  };
+}
+
+/**
+ * A Copilot job chat's verdict, read as a Codex chat's is (codexVerdict) from its last message. A task's GREEN stands
+ * only when its words need nothing outside the checkout and it asked for no tool but its read tools: one that asked
+ * for a shell, a write or a page was refused it, so what it then calls green it did not check.
+ * @param {string} message @param {boolean} task @param {string} [words] @param {string | null} [refused] copilotWatch's
+ * @returns {{ state: "green" | "red", line: string } | null}
+ */
+export function copilotVerdict(message, task, words = "", refused = null) {
+  const verdict = codexVerdict(message, task, words, [], PLAN_NAMES.copilot);
+  if (verdict?.state !== "green" || !refused) return verdict;
+  return { state: "red", line: `${PLAN_NAMES.copilot} can't use ${redactLines([refused])[0].replace(/[^\w.-]/g, "")} in a job, so it could not check this` };
+}
+
+/**
+ * Copilot's events as the lines a Claude chat's text output gives: what it said, a short mark for each tool it asked
+ * for, and `error`, the failure its session ended on, or null. The run's output is redacted and cut as it comes, so an
+ * event cut short is left out: the verdict is never read from here (copilotWatch).
+ * Event shapes: Copilot CLI 1.0.116, `-p --output-format json`.
+ * @param {string[]} lines @returns {{ lines: string[], error: string | null }}
+ */
+export function mapCopilotEvents(lines) {
+  /** @type {string[]} */
+  const out = [];
+  let error = /** @type {string | null} */ (null);
+  for (const raw of lines) {
+    if (!raw.trim()) continue;
+    const event = copilotEvent(raw);
+    if (!event) {
+      if (!raw.startsWith('{"type":')) out.push(raw);
+      continue;
+    }
+    const data = event.data && typeof event.data === "object" ? event.data : {};
+    if (event.type === "assistant.message") out.push(...(text(data.content)?.split("\n") ?? []));
+    else if (event.type === "tool.execution_start") out.push(`tool ${text(data.toolName) ?? "?"}`);
+    else if (event.type === "session.error") error = text(data.message) ?? error;
+  }
+  if (error) out.push(error);
+  return { lines: out, error };
+}
+
 // Claude Code's limit lines, as the chat runner reads them (scripts/chat-runner.mjs LIMIT_LINE_RE), and the reset it
 // names: "You've hit your limit · resets 3pm (Pacific/Auckland)", or the older "Claude AI usage limit reached|<epoch>".
 const CLAUDE_LIMIT = /You['’]ve hit your (?:[\w-]+ )?limit|Claude (?:AI )?usage limit reached/;
@@ -415,12 +579,12 @@ const capped = (/** @type {string | undefined} */ until) => (until ? clock(until
 /**
  * The plan's usage limit, when the run stopped on it: `until` is the reset as the CLI wrote it, at most 40 characters,
  * or null when it named none. Only a failed run is read, and only its last lines, so a chat that merely talks about
- * limits is no limit.
+ * limits is no limit. Copilot's limit is not read yet: a run that stopped on it is a plain failed run.
  * @param {Plan} plan @param {{ code: number | null, lines: string[] }} ran @param {string | null} [error] Codex's failure
  * @returns {{ until: string | null } | null}
  */
 export function limitOf(plan, ran, error = null) {
-  if (ran.code === 0) return null;
+  if (ran.code === 0 || plan === "copilot") return null;
   if (plan === "chatgpt") {
     if (!error || !CODEX_LIMIT.test(error)) return null;
     return { until: capped(CODEX_RESET.exec(error)?.[1]) };
@@ -436,18 +600,68 @@ export function limitOf(plan, ran, error = null) {
 export const limitWords = (plan, until) => `${PLAN_NAMES[plan]} is at its limit${until ? ` until ${until}` : ""}`;
 
 /**
- * The limit card's words. Nothing here runs a job on the other plan: only the card's answer runs it there, once, and
+ * The limit card's words. Nothing here runs a job on another plan: only the card's answer runs it there, once, and
  * every other run reads the plan that goes first, the agent's own choice on its Plans page.
- * @param {Plan} plan @param {string | null} until
+ * @param {Plan} plan @param {string | null} until @param {Plan} other the connected plan the card offers
  */
-export const limitAsk = (plan, until) => `${limitWords(plan, until)}. Use ${PLAN_NAMES[otherPlan(plan)]} for this job?`;
+export const limitAsk = (plan, until, other) => `${limitWords(plan, until)}. Use ${PLAN_NAMES[other]} for this job?`;
+
+/**
+ * The plan a limit card offers for a job, of the other plans that are connected, in their order: the first that can
+ * see what the job's words need. Only Claude's job chat reaches outside the checkout, so a job that needs to is
+ * offered Claude when it is there, and otherwise the first, which the card says cannot check it (`outside`).
+ * @param {readonly Plan[]} on the other plans that are connected @param {string | null} outside outsideNeed's
+ * @returns {{ plan: Plan, outside: string | null } | null}
+ */
+export function limitOffer(on, outside) {
+  if (!on.length) return null;
+  if (outside && on.includes("claude")) return { plan: "claude", outside: null };
+  return { plan: on[0], outside: on[0] === "claude" ? null : outside };
+}
+
+/**
+ * The other plans' sign-in, read one at a time: `on`, those connected, in their order, and `unknown`, those whose
+ * status gave no answer. It only chooses words and what a card offers: nothing moves to another plan by itself. A
+ * machine with no \`copilot-status\` has no Copilot, so there it is not connected rather than unknown.
+ * @param {Plan} plan @param {(one: Plan) => Promise<{ code: number | null, lines: string[] } | null>} statusOf a
+ *   plan's status run, or null when its status command is not on this machine
+ * @returns {Promise<{ on: Plan[], unknown: Plan[] }>}
+ */
+export async function othersOn(plan, statusOf) {
+  /** @type {{ on: Plan[], unknown: Plan[] }} */
+  const out = { on: [], unknown: [] };
+  for (const one of otherPlans(plan)) {
+    const ran = await statusOf(one);
+    const signedIn = ran ? connected(one, ran) : one === "copilot" ? false : null;
+    if (signedIn === true) out.on.push(one);
+    else if (signedIn === null) out.unknown.push(one);
+  }
+  return out;
+}
+
+/**
+ * A limit's report: the plan at its limit, until when, and \`other\`, the plan its card offers, named only when it is
+ * not the one a report with none means (otherPlan).
+ * @param {Plan} plan @param {string | null} until @param {Plan | null} other
+ * @returns {{ plan: Plan, until?: string, other?: Plan }}
+ */
+export const limitReport = (plan, until, other) => ({ plan, ...(until ? { until } : {}), ...(other && other !== otherPlan(plan) ? { other } : {}) });
 
 // --- chats (scripts/chat-runner.mjs): the same plans for a hosted agent's tmux chats ---
 
 /** The chat runner's provider for each plan. */
-export const CHAT_PROVIDER = Object.freeze({ claude: "claude", chatgpt: "codex" });
+export const CHAT_PROVIDER = Object.freeze({ claude: "claude", chatgpt: "codex", copilot: "copilot" });
 /** @param {string} provider @returns {Plan} */
-export const planOfProvider = (provider) => (provider === "codex" ? "chatgpt" : "claude");
+export const planOfProvider = (provider) => (provider === "codex" ? "chatgpt" : provider === "copilot" ? "copilot" : "claude");
+
+/**
+ * The arguments a Copilot chat starts with. It never updates itself (the build that runs is the one installed) and
+ * starts no built-in MCP server. A hosted agent's runs with every tool and path allowed, as its Claude chat does there
+ * under the machine's managed settings: Copilot has no managed settings file to say so, so its flags do; URLs it still
+ * asks about. Anywhere else it asks before each edit and command, as Copilot does by default.
+ * @param {NodeJS.ProcessEnv} env
+ */
+export const copilotChatArgs = (env) => [...(plansOn(env) ? ["--allow-all-tools", "--allow-all-paths"] : []), "--no-auto-update", "--disable-builtin-mcps", COPILOT_HIDE_ENV];
 
 /**
  * The arguments a hosted agent's Codex chat starts with, the nearest to its Claude chat's: plain interactive `claude`,
@@ -481,10 +695,12 @@ const CODEX_INPUT = /^›(?:\s|$)/;
 const SCREEN_LINES = 30;
 
 /**
- * The plan's usage limit when a chat's screen ends on it, from the last lines tmux shows; null otherwise.
- * @param {string} provider the chat's ("claude" or "codex") @param {string[]} lines @returns {{ until: string | null } | null}
+ * The plan's usage limit when a chat's screen ends on it, from the last lines tmux shows; null otherwise. A Copilot
+ * chat's screen is not read for one yet.
+ * @param {string} provider the chat's ("claude", "codex" or "copilot") @param {string[]} lines @returns {{ until: string | null } | null}
  */
 export function screenLimit(provider, lines) {
+  if (provider === "copilot") return null;
   const tail = lines.slice(-SCREEN_LINES);
   if (provider === "codex") {
     const at = tail.findLastIndex((line) => CODEX_SCREEN_LIMIT.test(line));
@@ -504,18 +720,25 @@ export function screenLimit(provider, lines) {
   return limitOf("claude", { code: 1, lines: [tail[at].replace(/^\s*⎿\s+/, "")] });
 }
 
-/** The status command that says whether a plan is signed in: exit 0 when it is (`claude auth status` prints loggedIn). */
-export const STATUS_ARGS = Object.freeze({ claude: ["auth", "status", "--json"], chatgpt: ["login", "status"] });
+/**
+ * The status command that says whether a plan is signed in: exit 0 when it is (`claude auth status` prints loggedIn).
+ * Claude and ChatGPT are asked through their own CLI; Copilot through `copilot-status`, which a hosted agent's machine
+ * has beside it and which takes no arguments.
+ */
+export const STATUS_BIN = Object.freeze({ claude: "claude", chatgpt: "codex", copilot: "copilot-status" });
+export const STATUS_ARGS = Object.freeze({ claude: ["auth", "status", "--json"], chatgpt: ["login", "status"], copilot: [] });
 
 /**
  * Whether a plan is signed in on this machine, from its own CLI's status: Claude's JSON says loggedIn, Codex's
- * `login status` exits 0 or says "Not logged in" on stderr. Only a definite answer is false; a timeout, a missing CLI or
- * any other failure is null, unknown. Nothing is read from either credential.
+ * `login status` exits 0 or says "Not logged in" on stderr, and `copilot-status` exits 0 or exits 1 with the line
+ * "Not connected". Only a definite answer is false; a timeout, a missing CLI or any other failure is null, unknown.
+ * Nothing is read from any credential.
  * @param {Plan} plan @param {{ code: number | null, lines: string[], timedOut?: boolean }} ran @returns {boolean | null}
  */
 export function connected(plan, ran) {
   if (ran.code === null || ran.timedOut) return null;
   if (plan === "chatgpt") return ran.code === 0 ? true : ran.lines.some((line) => /^\s*Not logged in\s*$/.test(line)) ? false : null;
+  if (plan === "copilot") return ran.code === 0 ? true : ran.code === 1 && ran.lines.some((line) => /^\s*Not connected\s*$/.test(line)) ? false : null;
   let loggedIn;
   try {
     loggedIn = JSON.parse(ran.lines.join("\n"))?.loggedIn;
@@ -530,18 +753,20 @@ export const uncheckedLine = (plan) => `Couldn't check ${PLAN_NAMES[plan]} just 
 
 /**
  * The words for a chat that was not started because its plan is signed out; the caller ends the sentence. Nothing moves
- * to the other plan by itself, so when that one is connected the words name the Plans page's own way out (Make first),
- * or say that it already goes first.
+ * to another plan by itself, so when one is connected the words name the Plans page's own way out (Make first), or say
+ * that it already goes first.
  * @param {Plan} plan @param {boolean} task a task's run, rather than a red check's look or a chat
- * @param {boolean} [otherOn] the other plan is connected @param {Plan | null} [first] the plan that goes first
+ * @param {readonly Plan[]} [on] the other plans that are connected @param {Plan | null} [first] the plan that goes first
+ * @param {readonly Plan[]} [here] the plans this machine can connect (plansHere)
  */
-export const notConnectedLine = (plan, task, otherOn = false, first = plan) => {
-  const [name, other] = [PLAN_NAMES[plan], PLAN_NAMES[otherPlan(plan)]];
-  const fix = !otherOn
-    ? "Connect Claude or ChatGPT on the Plans page"
-    : first === otherPlan(plan)
-      ? `Connect ${name} on the Plans page. ${other} goes first and is connected`
-      : `Connect ${name}, or make ${other} first, on the Plans page`;
+export const notConnectedLine = (plan, task, on = [], first = plan, here = PLANS) => {
+  const name = PLAN_NAMES[plan];
+  const others = on.filter((one) => one !== plan);
+  const fix = !others.length
+    ? `Connect ${planList(PLANS.filter((one) => one === plan || here.includes(one)))} on the Plans page`
+    : first && first !== plan && others.includes(first)
+      ? `Connect ${name} on the Plans page. ${PLAN_NAMES[first]} goes first and is connected`
+      : `Connect ${name}, or make ${planList(others)} first, on the Plans page`;
   return `${name} isn't connected${task ? ", so the job did not run" : ""}. ${fix}`;
 };
 
@@ -563,5 +788,11 @@ export const DRIVERS = Object.freeze({
     bin: "codex",
     args: codexArgs,
     read: mapCodexEvents,
+  },
+  copilot: {
+    plan: "copilot",
+    bin: "copilot",
+    args: copilotArgs,
+    read: mapCopilotEvents,
   },
 });

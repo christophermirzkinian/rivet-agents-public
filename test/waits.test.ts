@@ -1,7 +1,12 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ANSWER_QUIET_MS, MAX_WAITS, stemOf, waitStem, withWaits, yesKey, type AskLike, type WaitInput } from "../src/server/asks/waits.js";
 import { needRev, withAgain } from "../src/server/http.js";
+import { Store } from "../src/server/store.js";
 import type { Board, BoardChat, ComingItem, Need } from "../src/shared/board.js";
 import { NO_REPO } from "../src/shared/board.js";
 import { bearer, BOARD_TOKEN, browser, fakeClock, revOf, startServer, type TestServer } from "./helpers.js";
@@ -218,6 +223,25 @@ describe("withWaits", () => {
     expect(kept.map((card) => card.id)).toEqual([reopened.id]);
     const answered = run({ board: board(), stored: board({ needs: [reopened] }), answers: new Map([[`${reopened.id}\n${needRev(reopened)}`, NOW.toISOString()]]) });
     expect(answered).toEqual([]);
+  });
+
+  it("drops a reopened Your OK whose source ended once you comment on it: the comment is its answer (store.answerTimes)", () => {
+    const store = new Store(mkdtempSync(join(tmpdir(), "rivet-waits-")));
+    const first = run({ board: board({ coming: [okRow()] }) });
+    const reopened = { ...first[0]!, again: { n: 1, after: "r1" } } as Need;
+    const stored = board({ needs: [reopened] });
+    expect(run({ board: board(), stored, answers: store.answerTimes([reopened.id]) }).map((card) => card.id)).toEqual([reopened.id]);
+    store.addReply({ clientId: "client-comment", itemId: reopened.id, itemTitle: reopened.title, decision: "comment", text: "Which build?", rev: needRev(reopened), item: reopened });
+    expect(run({ board: board(), stored, answers: store.answerTimes([reopened.id]) })).toEqual([]);
+    store.close();
+  });
+
+  it("keeps the lines under a stored wait card when a board write makes it again from its source", () => {
+    const first = run({ board: board({ coming: [okRow()] }) });
+    const comments = [{ from: "owner", text: "Which build?", at: NOW.toISOString() }, { from: "rivet", text: "The one from today", at: NOW.toISOString() }];
+    const commented = { ...first[0]!, comments } as Need;
+    const again = run({ board: board({ coming: [okRow()] }), stored: board({ needs: [commented] }) });
+    expect(again.map((card) => [card.id, card.comments])).toEqual([[commented.id, comments]]);
   });
 
   it("drops a reopened ask or moved-time card, a kind no longer made", () => {
@@ -449,6 +473,24 @@ describe("wait cards on the server", () => {
     expect(await waits()).toEqual([]);
   });
 
+  it("a comment on a Your OK card answers it and quiets its chat: a new Your OK for the same chat waits out the quiet", async () => {
+    await put(board({ coming: [okRow()] }));
+    const [card] = await waits();
+    const comment = await fetch(`${server.base}/api/replies`, {
+      method: "POST",
+      headers: browser(cookie),
+      body: JSON.stringify({ clientId: "client-wait-comment", itemId: card!.id, decision: "comment", text: "Is the build louder?", rev: await revOf(server.base, cookie, card!.id) }),
+    });
+    expect(comment.status).toBe(201);
+    expect((await put(board({ coming: [okRow({ stage: "building" })] }))).status).toBe(200);
+    clock.advance(60_000);
+    expect((await put(board({ coming: [okRow({ what: "v3 sound pass" })] }))).status).toBe(200);
+    expect(await waits()).toEqual([]);
+    pastQuiet();
+    expect((await put(board({ coming: [okRow({ what: "v3 sound pass" })] }))).status).toBe(200);
+    expect((await waits()).map((need) => need.title)).toEqual(["Your OK: Daily build v2 sound pass"]);
+  });
+
   it("a Your OK answered Yes asks again once its row has left owner-ok and come back", async () => {
     await put(board({ coming: [okRow()] }));
     const [card] = await waits();
@@ -520,7 +562,7 @@ describe("wait cards on the server", () => {
     expect((await send("PATCH", "/api/asks/a-1", { stage: "building" })).status).toBe(200);
     for (const [h, why] of [[1, undefined], [2, "tests were red"], [3, "deploy queue"], [4, "review found a gap"]] as const) expect((await send("PATCH", "/api/asks/a-1", { due: inHours(h), ...(why ? { why } : {}) })).status).toBe(200);
     expect(await waits()).toEqual([]);
-    expect((await send("PATCH", "/api/asks/a-1", { stage: "done" })).status).toBe(200);
+    expect((await send("PATCH", "/api/asks/a-1", { stage: "done", note: "Cache keys are never forgotten now" })).status).toBe(200);
     // The close's Done card is on the board, unpushed.
     expect((await read()).needs.map((need: { id: string }) => need.id)).toEqual(["ask-a-1-done"]);
     expect(ids()).toEqual([]);

@@ -818,30 +818,30 @@ describe("chat files", () => {
     expect(link.getAttribute("rel")).toBe("noopener");
   });
 
-  it("refuses a file over 25 MB without uploading it, and removes a chip with its ×", async () => {
+  it("refuses a file over 500 MB without uploading it, and removes a chip with its ×", async () => {
     chat.mount(root);
     await settle();
     const big = new File(["x"], "huge.pdf", { type: "application/pdf" });
-    Object.defineProperty(big, "size", { value: 25 * 1024 * 1024 + 1 });
+    Object.defineProperty(big, "size", { value: 500 * 1024 * 1024 + 1 });
     pick([big, new File(["a,b"], "sheet.csv", { type: "text/csv" })]);
     const preview = root.querySelector<HTMLElement>(".attach-preview")!;
-    expect(preview.querySelector(".attach-notice")!.textContent).toBe("That file is over 25 MB. Send a smaller one.");
+    expect(preview.querySelector(".attach-notice")!.textContent).toBe("That file is over 500 MB. Send a smaller one.");
     await settle();
     expect(fileUploads).toEqual(["sheet.csv"]);
     preview.querySelector<HTMLButtonElement>(".attach-doc .attach-remove")!.click();
     expect(preview.querySelector(".attach-tile")).toBeNull();
   });
 
-  it("takes a video or sound file up to 100 MB as a file", async () => {
+  it("takes a video or sound file up to 500 MB as a file", async () => {
     chat.mount(root);
     await settle();
     const video = new File(["x"], "monkey.mp4", { type: "video/mp4" });
-    Object.defineProperty(video, "size", { value: 60 * 1024 * 1024 });
+    Object.defineProperty(video, "size", { value: 250 * 1024 * 1024 });
     const huge = new File(["x"], "long.mov", { type: "video/quicktime" });
-    Object.defineProperty(huge, "size", { value: 100 * 1024 * 1024 + 1 });
+    Object.defineProperty(huge, "size", { value: 500 * 1024 * 1024 + 1 });
     pick([video, huge, new File(["x"], "beat.m4a", { type: "audio/mp4" })]);
     const preview = root.querySelector<HTMLElement>(".attach-preview")!;
-    expect(preview.querySelector(".attach-notice")!.textContent).toBe("That video or sound file is over 100 MB. Send a shorter one.");
+    expect(preview.querySelector(".attach-notice")!.textContent).toBe("That video or sound file is over 500 MB. Send a shorter one.");
     await settle();
     await settle();
     expect(fileUploads).toEqual(["monkey.mp4", "beat.m4a"]);
@@ -2138,7 +2138,7 @@ describe("sorting a pick", () => {
     expect(sortPick(new File(["x"], "page.html", { type: "" }))).toMatchObject({ kind: "refused" });
   });
 
-  it("sends a GIF as it is, a HEIC or a WebP as a photo, a ZIP or a model up to 100 MB, and never an SVG", () => {
+  it("sends a GIF as it is, a HEIC or a WebP as a photo, a ZIP or a model up to 500 MB, and never an SVG", () => {
     expect(sortPick(new File(["x"], "20261006_075301.heic", { type: "image/heic" }))).toEqual({ kind: "photo" });
     expect(sortPick(new File(["x"], "IMG_2.HEIF", { type: "" }))).toEqual({ kind: "photo" });
     expect(sortPick(new File(["x"], "dance.gif", { type: "image/gif" }))).toEqual({ kind: "file" });
@@ -2149,22 +2149,26 @@ describe("sorting a pick", () => {
     expect(sortPick(new File(["x"], "monkey.glb", { type: "" }))).toEqual({ kind: "file" });
     const big = (name: string) => {
       const file = new File(["x"], name);
-      Object.defineProperty(file, "size", { value: 100 * 1024 * 1024 + 1 });
+      Object.defineProperty(file, "size", { value: 500 * 1024 * 1024 + 1 });
       return file;
     };
-    expect(sortPick(big("art.zip"))).toEqual({ kind: "refused", reason: "That file is over 100 MB. Send a smaller one." });
-    expect(sortPick(big("note.ogg"))).toEqual({ kind: "refused", reason: "That video or sound file is over 100 MB. Send a shorter one." });
+    // A 250 MB zip goes.
+    const zip = new File(["x"], "art.zip");
+    Object.defineProperty(zip, "size", { value: 250 * 1024 * 1024 });
+    expect(sortPick(zip)).toEqual({ kind: "file" });
+    expect(sortPick(big("art.zip"))).toEqual({ kind: "refused", reason: "That file is over 500 MB. Send a smaller one." });
+    expect(sortPick(big("note.ogg"))).toEqual({ kind: "refused", reason: "That video or sound file is over 500 MB. Send a shorter one." });
     expect(sortPick(new File(["x"], "logo.svg", { type: "" }))).toMatchObject({ kind: "refused" });
     expect(ACCEPT.split(",")).toEqual(expect.arrayContaining([".heic", ".heif", ".gif", ".ogg", ".opus", ".flac", ".zip", ".glb", "image/heic", "audio/ogg", "model/gltf-binary"]));
     expect(ACCEPT).not.toMatch(/svg/);
   });
 
-  it("sends an email as a file up to 25 MB, and the picker offers it", () => {
+  it("sends an email as a file up to 500 MB, and the picker offers it", () => {
     expect(sortPick(new File(["x"], "Logo from Sam.eml", { type: "message/rfc822" }))).toEqual({ kind: "file" });
     expect(sortPick(new File(["x"], "Invoice.MSG", { type: "" }))).toEqual({ kind: "file" });
     const big = new File(["x"], "big.eml");
-    Object.defineProperty(big, "size", { value: 25 * 1024 * 1024 + 1 });
-    expect(sortPick(big)).toEqual({ kind: "refused", reason: "That file is over 25 MB. Send a smaller one." });
+    Object.defineProperty(big, "size", { value: 500 * 1024 * 1024 + 1 });
+    expect(sortPick(big)).toEqual({ kind: "refused", reason: "That file is over 500 MB. Send a smaller one." });
     expect(ACCEPT.split(",")).toEqual(expect.arrayContaining([".eml", ".msg", "message/rfc822", "application/vnd.ms-outlook"]));
   });
 });

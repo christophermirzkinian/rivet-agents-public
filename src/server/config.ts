@@ -27,6 +27,10 @@ export interface Config {
   monitorChat: string;
   /** RIVET_OVERNIGHT_NOTICE_SEEN=1: only marks the retired overnight-jobs notice seen; the app shows nothing for it. */
   overnightNoticeSeen?: boolean;
+  /** Tests only, never read from the environment: a cap under MAX_SEND_BYTES, so a test need not stream 500 MB to pass it. */
+  sendCapBytes?: number;
+  /** Tests only, never read from the environment: how long an upload may send nothing, under UPLOAD_IDLE_MS. */
+  uploadIdleMs?: number;
   /** RIVET_DEVICE_SESSION=on, exactly: POST /api/auth/device-session signs a device in with a device code alone, for
    * the desktop app, whose window cannot make a passkey. Anything else leaves the route 404 and the page not offering it. */
   deviceSession: boolean;

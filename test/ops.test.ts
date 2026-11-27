@@ -2085,7 +2085,7 @@ describe("ops routes", () => {
     const posted = await fetch(`${server.base}/api/replies`, {
       method: "POST",
       headers: browser(cookie),
-      body: JSON.stringify({ clientId: "client-0002", itemId: "pr2022-checkout", decision: "comment", text: "Looks good", rev }),
+      body: JSON.stringify({ clientId: "client-0002", itemId: "pr2022-checkout", decision: "choice", choice: "Approve and merge", rev }),
     });
     expect(posted.status).toBe(201);
     expect(await read()).toEqual({ needs: 1, crew: "idle" });

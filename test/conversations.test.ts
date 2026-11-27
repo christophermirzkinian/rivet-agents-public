@@ -2,10 +2,11 @@ import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { BATCH_QUIET_MS, CommandStore, TOPIC_LINES_STAY_FROM } from "../src/server/commandstore.js";
-import { MAX_CARDS } from "../src/server/http.js";
+import { MAX_CARDS, openBoard } from "../src/server/http.js";
 import { conversationStage, conversationSummary, idle, isClosed, isDone, linkedPrs, resolveConversation } from "../src/server/conversations.js";
 import { rivetPayload } from "../src/server/push.js";
 import { wantsText } from "../src/shared/answers.js";
+import type { Reply } from "../src/shared/board.js";
 import type { ChatMessage, ChatPage } from "../src/shared/command.js";
 import type { CardThreadsResponse } from "../src/shared/threads.js";
 import { answerText, IDLE_ARCHIVE_MS, linksChat, TEAM_ROOM_ID, UPDATES_ID, type ConversationDetail, type ConversationPage, type ConversationsResponse } from "../src/shared/conversations.js";
@@ -382,6 +383,36 @@ describe("conversation routes", () => {
     expect(page).toEqual([ask, posted.id, followUp.id, answer, reply.id]);
     const chat = ((await (await send("GET", "/api/chat?chat=1", undefined, browser(cookie))).json()) as { messages: ChatMessage[] }).messages;
     expect(chat.filter((message) => (message.threadId ?? message.id) === ask).map((message) => message.id)).toEqual(page);
+  });
+
+  it("a comment on a choice card answers it and is your line in its conversation; a reply to it and a card note land under it there", async () => {
+    await list();
+    const ask = await owner("Which loading bar for the header?", { conversation: null });
+    clock.advance(BATCH_QUIET_MS);
+    expect((await send("PUT", "/api/board/needs/loading-bar", { kind: "decision", title: "Header loading bar", ask: "Pick one", replyTo: ask, options: [{ label: "Gold" }, { label: "Orange" }] })).status).toBe(200);
+    const needsYou = () => openBoard(server.app.store, { failing: () => [] }, server.app.store.getBoard()!.board, new Date())!.needs.map((need) => need.id);
+    expect(needsYou()).toContain("loading-bar");
+    const rev = await revOf(server.base, cookie, "loading-bar");
+    const commented = await send("POST", "/api/replies", { clientId: "reply-bar-comment", itemId: "loading-bar", decision: "comment", rev, text: "Does gold match the logo?" }, browser(cookie));
+    expect(commented.status).toBe(201);
+    const comment = (await commented.json()) as Reply;
+    expect(needsYou()).not.toContain("loading-bar");
+    const reply = await rivet("Yes, the same gold as the logo.", { replyTo: comment.id });
+    expect((await send("POST", "/api/board/needs/loading-bar/comments", { text: "The orange one is the old bar." })).status).toBe(201);
+    const { messages } = await open(ask);
+    const yours = messages.find((message) => message.id === comment.id)!;
+    expect(yours).toMatchObject({ from: "owner", text: answerText(comment), card: "loading-bar", cardTitle: "Header loading bar" });
+    expect(yours.text).toContain("Does gold match the logo?");
+    const under = messages.slice(messages.indexOf(yours) + 1);
+    expect(under.map((message) => [message.from, message.text, message.replyTo])).toEqual([
+      ["rivet", "Yes, the same gold as the logo.", comment.id],
+      ["rivet", "The orange one is the old bar.", comment.id],
+    ]);
+    expect(reply.threadId).toBe(ask);
+    // The note is a line under the card too, and leaves it answered: it does not come back to Needs you.
+    expect(server.app.store.getBoard()!.board.needs.find((need) => need.id === "loading-bar")!.comments).toEqual([expect.objectContaining({ from: "rivet", text: "The orange one is the old bar." })]);
+    expect(await revOf(server.base, cookie, "loading-bar")).toBe(rev);
+    expect(needsYou()).not.toContain("loading-bar");
   });
 
   it("a reply that asks you something is a question card you type into, beside one line that opens it", async () => {
@@ -962,23 +993,25 @@ describe("conversation routes", () => {
     expect((await list("?older=1")).conversations.find((row) => row.id === old)).toMatchObject({ closed: true });
   });
 
-  it("a Done card's posted line is what is done, joined with a dot, else what was asked; the same words on another card keep their first line", async () => {
+  it("a Done card's posted line is what is done, joined with a dot, or its note; a bare close is refused; the same words on another card keep their first line", async () => {
     await list();
     const ask = await owner("Make the cards bigger", { conversation: null });
     clock.advance(BATCH_QUIET_MS);
     // The Done card comes only from the ask's move to done: the board refuses a bare Got it card on the owner's ask.
-    const close = async (id: string, who: string, done?: string[]) => {
+    const close = async (id: string, who: string, said: { done?: string[]; note?: string }) => {
       expect((await send("POST", "/api/asks", { id, words: "Make the cards bigger", who, replyId: ask, stage: "queued" })).status, id).toBe(201);
-      expect((await send("PATCH", `/api/asks/${id}`, { stage: "done", ...(done ? { done } : {}) })).status, id).toBe(200);
+      expect((await send("PATCH", `/api/asks/${id}`, { stage: "done", ...said })).status, id).toBe(200);
     };
     const line = async (id: string) => (await open(ask)).messages.find((message) => message.posted?.id === id)?.posted?.ask;
-    await close("a-1", "owner", ["The cards are bigger", "The chips match"]);
-    await close("a-2", "rivet", ["The cards are bigger"]);
-    await close("a-3", "owner");
-    expect((await send("PUT", "/api/board/needs/cards-bigger-look", { kind: "decision", title: "Cards", ask: "You asked: Make the cards bigger\nDone: The cards are bigger", options: [{ label: "Keep" }, { label: "Undo" }], replyTo: ask })).status).toBe(200);
+    await close("a-1", "owner", { done: ["The cards are bigger", "The chips match"] });
+    await close("a-2", "rivet", { done: ["The cards are bigger on every table"] });
+    expect((await send("POST", "/api/asks", { id: "a-3", words: "Make the cards bigger", who: "owner", replyId: ask, stage: "queued" })).status).toBe(201);
+    expect((await send("PATCH", "/api/asks/a-3", { stage: "done" })).status).toBe(400);
+    expect((await send("PATCH", "/api/asks/a-3", { stage: "done", note: "Bigger cards now ship on the Lab" })).status).toBe(200);
+    expect((await send("PUT", "/api/board/needs/cards-bigger-look", { kind: "decision", title: "Cards", ask: "You asked: Make the cards bigger\nDone: The cards are bigger on every table", options: [{ label: "Keep" }, { label: "Undo" }], replyTo: ask })).status).toBe(200);
     expect(await line("ask-a-1-done")).toBe("The cards are bigger · The chips match");
-    expect(await line("ask-a-2-done")).toBe("The cards are bigger");
-    expect(await line("ask-a-3-done")).toBe("Make the cards bigger");
+    expect(await line("ask-a-2-done")).toBe("The cards are bigger on every table");
+    expect(await line("ask-a-3-done")).toBe("Bigger cards now ship on the Lab");
     expect(await line("cards-bigger-look")).toBe("You asked: Make the cards bigger");
   });
 
@@ -1157,7 +1190,7 @@ describe("conversation routes", () => {
     const lobby = await owner("Lobby copy", { conversation: null });
     expect((await send("POST", "/api/asks", { id: "a-73", words: "Lobby copy", replyId: lobby, stage: "building", repo: "example-org/example-repo" })).status).toBe(201);
     clock.advance(BATCH_QUIET_MS);
-    expect((await send("PATCH", "/api/asks/a-73", { stage: "done" })).status).toBe(200);
+    expect((await send("PATCH", "/api/asks/a-73", { stage: "done", note: "The lobby copy now shows the new words" })).status).toBe(200);
     expect((await list()).conversations.find((row) => row.id === lobby)?.appOnly).toBe(false);
   });
 

@@ -7,10 +7,14 @@ import { when } from "../../../src/shared/when.js";
 import { noTimeYet, stageWord } from "../../../src/shared/words.js";
 import { ApiError, getAsks } from "../api.js";
 import { describe, h } from "../dom.js";
+import { latestRead } from "../latest-read.js";
+import { onSessionReset } from "../session.js";
 import { openSheet } from "./sheet.js";
 import { flash } from "./toast.js";
 
 const TITLE_MAX = 90;
+const reads = latestRead();
+onSessionReset(() => reads.invalidate());
 
 export interface NotDoneRow {
   id: string;
@@ -63,13 +67,16 @@ export function notDoneList(rows: readonly NotDoneRow[]): HTMLElement {
 
 /** Reads the asks and opens the list; a refusal says why and opens nothing. */
 export async function openNotDone(signedOut: () => void): Promise<void> {
+  const current = reads.start();
   try {
     const { asks } = await getAsks();
+    if (!current()) return;
     const rows = notDone(asks, Date.now());
     // No bare count of late ones (§3d): each late row says its own time.
     const title = rows.length ? `${rows.length} not done` : "Not done yet";
-    openSheet(title, { mount: (body) => body.replaceChildren(notDoneList(rows)), unmount: () => {} });
+    openSheet(title, { mount: (body) => body.replaceChildren(notDoneList(rows)), unmount: () => { if (current()) reads.invalidate(); } });
   } catch (error) {
+    if (!current()) return;
     if (error instanceof ApiError && error.status === 401) return signedOut();
     flash(describe(error), "error");
   }

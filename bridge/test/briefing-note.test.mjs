@@ -5,10 +5,20 @@ import { checkNote, parseArgs } from "../../scripts/briefing-note.mjs";
 
 // say's `--text --stdin` once sent the owner "--stdin" 14 times; a briefing note is refused the same way.
 test("briefing-note refuses a note that starts with --, and keeps one with -- later on", () => {
-  assert.deepEqual(parseArgs(["--text", "--stdin"]), { text: "--stdin" });
+  assert.throws(() => parseArgs(["--text", "--stdin"]), { message: "--text needs the note" });
   assert.equal(checkNote("--stdin").error, '--text got "--stdin" as the note, a flag; give --text the note itself. Nothing was sent');
   assert.match(String(checkNote("  --help").error), /^--text got "--help" as the note/);
   assert.match(String(checkNote(String(parseArgs(["--text", "-h"]).text)).error), /^--text got "-h" as the note/);
   assert.deepEqual(checkNote("Merged -- the gate was green"), { line: "Merged -- the gate was green" });
   assert.deepEqual(checkNote("- one bullet"), { line: "- one bullet" });
+});
+
+test("briefing-note --text needs a value of its own and accepts single-dash notes", () => {
+  for (const rest of [[], ["--help"], ["--"]]) {
+    assert.throws(() => parseArgs(["--text", ...rest]), { message: "--text needs the note" });
+  }
+  for (const value of ["-", "-note", "- one bullet"]) {
+    assert.deepEqual(parseArgs(["--text", value]), { text: value });
+    assert.deepEqual(checkNote(value), { line: value });
+  }
 });

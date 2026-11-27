@@ -126,8 +126,8 @@ describe("the agent's name", () => {
 });
 
 describe("a hosted agent with no plan connected", () => {
-  const LOCKED = "Sending is off until Claude or ChatGPT is connected.";
-  const host = (status?: { claude: boolean; chatgpt: boolean }) =>
+  const LOCKED = "Sending is off until Claude, ChatGPT or GitHub Copilot is connected.";
+  const host = (status?: { claude: boolean; chatgpt: boolean; copilot?: boolean | null }) =>
     (cloud = { "/cloud/agent": { name: "Pip", setupDone: true, firstPlan: "claude" }, ...(status ? { "/cloud/connect/status": status } : {}) });
   const pane = () => document.querySelector("aside.side")!;
   const box = () => pane().querySelector<HTMLTextAreaElement>(".chat-text")!;
@@ -157,10 +157,10 @@ describe("a hosted agent with no plan connected", () => {
 
   it("says to connect one on the home screen, locks the message box and sends nothing", async () => {
     const assign = vi.spyOn(location, "assign").mockImplementation(() => {});
-    host({ claude: false, chatgpt: false });
+    host({ claude: false, chatgpt: false, copilot: false });
     await start(true);
     const says = document.querySelector(".home .noplan-box")!;
-    expect(says.querySelector(".noplan-title")!.textContent).toBe("Connect Claude or ChatGPT to start");
+    expect(says.querySelector(".noplan-title")!.textContent).toBe("Connect Claude, ChatGPT or GitHub Copilot to start");
     expect(says.querySelector(".noplan-words")!.textContent).toBe("Pip can't take jobs until one is connected. It takes about a minute.");
     const connect = says.querySelector<HTMLButtonElement>("button")!;
     expect(connect.textContent).toBe("Connect now");
@@ -177,7 +177,7 @@ describe("a hosted agent with no plan connected", () => {
   });
 
   it("says so on a phone's home screen too, and its chat sheet is locked", async () => {
-    host({ claude: false, chatgpt: false });
+    host({ claude: false, chatgpt: false, copilot: false });
     await start();
     expect(document.querySelector(".home .noplan-box")).not.toBeNull();
     document.querySelector<HTMLElement>('.home-dock [data-key="rivet"]')!.click();
@@ -188,10 +188,10 @@ describe("a hosted agent with no plan connected", () => {
   });
 
   it("unlocks with no reload once a plan is connected", async () => {
-    host({ claude: false, chatgpt: false });
+    host({ claude: false, chatgpt: false, copilot: false });
     await start(true);
     expectLocked();
-    host({ claude: false, chatgpt: true });
+    host({ claude: false, chatgpt: true, copilot: false });
     await comeBack();
     expectOpen();
     box().value = "Hello";
@@ -201,14 +201,73 @@ describe("a hosted agent with no plan connected", () => {
   });
 
   it("unlocks by itself on the next status read while the desk stays in front", async () => {
-    host({ claude: false, chatgpt: false });
+    host({ claude: false, chatgpt: false, copilot: false });
     await start(true);
     expectLocked();
-    host({ claude: true, chatgpt: false });
+    host({ claude: true, chatgpt: false, copilot: false });
     vi.advanceTimersByTime(15_000);
     await settle();
     expectOpen();
     expect(document.querySelector(".noplan-box")).toBeNull();
+  });
+
+  it("locks while GitHub Copilot is not connected either, and unlocks once it is the plan connected", async () => {
+    host({ claude: false, chatgpt: false, copilot: false });
+    await start(true);
+    expectLocked();
+    host({ claude: false, chatgpt: false, copilot: true });
+    await comeBack();
+    expectOpen();
+    box().value = "Hello";
+    sendButton().click();
+    await settle();
+    expect(sends()).toBe(1);
+  });
+
+  it("names Claude and ChatGPT alone on an agent whose status has no copilot field, and GitHub Copilot too once it has one", async () => {
+    const TWO = "Sending is off until Claude or ChatGPT is connected.";
+    const title = () => document.querySelector(".home .noplan-box .noplan-title")!.textContent;
+    host({ claude: false, chatgpt: false });
+    await start(true);
+    expect(title()).toBe("Connect Claude or ChatGPT to start");
+    expect([box().disabled, line().hidden, line().textContent]).toEqual([true, false, TWO]);
+    expect(document.body.textContent).not.toContain("Copilot");
+
+    // The supervisor is updated under the open app: its next status names the third plan, and so do the words.
+    host({ claude: false, chatgpt: false, copilot: false });
+    vi.advanceTimersByTime(15_000);
+    await settle();
+    expect(title()).toBe("Connect Claude, ChatGPT or GitHub Copilot to start");
+    expectLocked();
+
+    host({ claude: false, chatgpt: false });
+    await comeBack();
+    expect(title()).toBe("Connect Claude or ChatGPT to start");
+    expect([box().disabled, line().hidden, line().textContent]).toEqual([true, false, TWO]);
+  });
+
+  it("says the two plans when a send is refused for want of a plan on an agent whose status has no copilot field", async () => {
+    host({ claude: true, chatgpt: false });
+    await start(true);
+    expectOpen();
+    const answered = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation((input, init) =>
+      String(input) === "/api/chat" && init?.method === "POST"
+        ? Promise.resolve(new Response(JSON.stringify({ error: "no-plan", connect: "/cloud/setup/connect" }), { status: 409, headers: { "content-type": "application/json" } }))
+        : answered(input, init),
+    );
+    box().value = "Hello";
+    sendButton().click();
+    await settle();
+    expect([box().disabled, line().hidden, line().textContent]).toEqual([true, false, "Sending is off until Claude or ChatGPT is connected."]);
+    expect(document.querySelector(".home .noplan-box .noplan-title")!.textContent).toBe("Connect Claude or ChatGPT to start");
+    expect(document.body.textContent).not.toContain("Copilot");
+  });
+
+  it("locks nothing while GitHub Copilot's status gave no answer, even with the others not connected", async () => {
+    host({ claude: false, chatgpt: false, copilot: null });
+    await start(true);
+    expectOpen();
   });
 
   it("locks nothing while the status is unread", async () => {
@@ -218,7 +277,7 @@ describe("a hosted agent with no plan connected", () => {
   });
 
   it("locks when a send comes back refused for want of a plan, with no raw error and no second send", async () => {
-    host({ claude: true, chatgpt: false });
+    host({ claude: true, chatgpt: false, copilot: false });
     await start(true);
     expectOpen();
     const answered = vi.mocked(fetch).getMockImplementation()!;

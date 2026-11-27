@@ -230,7 +230,7 @@ describe("Settings › Behaviours", () => {
   });
 });
 
-describe("Settings › Behaviours in a window signed in with a code alone (a-1010)", () => {
+describe("Settings › Behaviours in a window signed in with a code alone (a-10)", () => {
   const LINE = "Change this from a phone or computer signed in with a passkey.";
   const TEXT_SIZE: BehaviourRow = {
     ...base,

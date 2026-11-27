@@ -41,6 +41,24 @@ test("say refuses a relative path, a URL, the wrong kind of file, a repeat and a
   assert.throws(() => parseArgs(["--image", "/a/s.png", "--reply-to", "../x"]), /--reply-to must match/);
 });
 
+test("say value flags need their own value and keep single-dash text", () => {
+  const flags = ["--ask", "--chat", "--pr", "--repo", "--allow-word", "--file", "--text", "--reply-to", "--image", "--video", "--title", "--tag", "--thread", "--schedule", "--ack"];
+  for (const flag of flags) {
+    // --ack alone at the end deliberately uses the existing default words.
+    const tails = flag === "--ack" ? [["--help"], ["--"]] : [[], ["--help"], ["--"]];
+    for (const tail of tails) {
+      assert.throws(() => parseArgs([flag, ...tail]), { message: new RegExp(`^${flag} (?:needs a value|takes |got )`) });
+    }
+  }
+  for (const value of ["-", "-caption", "- one bullet"]) {
+    assert.deepEqual(parseArgs(["--allow-word", value, "--text", value, "--tag", value, "--thread", value]), {
+      images: [], allowWords: [value], text: value, tag: value, thread: value,
+    });
+    assert.deepEqual(parseArgs(["--new", "--title", value, "--text", value]), { images: [], new: true, title: value, text: value });
+    assert.deepEqual(parseArgs(["--reply-to", "m1", "--ack", value]), { images: [], replyTo: "m1", ack: value });
+  }
+});
+
 test("the say request names photos and video by sha, once each, and leaves out what is not there", () => {
   const a = "a".repeat(64);
   const b = "b".repeat(64);

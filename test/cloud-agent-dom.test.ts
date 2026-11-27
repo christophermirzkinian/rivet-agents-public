@@ -1,14 +1,17 @@
 // @vitest-environment happy-dom
+import { setFlagsFromString } from "node:v8";
+import { runInNewContext } from "node:vm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { APP_NAME, appName, chatName, RIVET_NAME, rivetWords, STORED_NAME, UNNAMED_AGENT } from "../src/shared/names.js";
 import type { Worker } from "../src/shared/workers.js";
-import { agentName, agentNoun, CONNECT_PATH, hostedPage, leaveCloud, needsPlan, noPlan, ownMachineAfterEnrol, parseAgent, parsePlans, probeCloud, readCloud, readServedApp, resetCloud, tabTitle } from "../web/src/cloud-agent.js";
+import { agentName, agentNoun, CONNECT_PATH, hostedPage, LOCKED_LINE, leaveCloud, needsPlan, noPlan, ownMachineAfterEnrol, parseAgent, parsePlans, planNames, probeCloud, readCloud, readServedApp, resetCloud, tabTitle } from "../web/src/cloud-agent.js";
 import type { Ask } from "../src/shared/asks.js";
 import { opsData } from "../web/src/ops-data.js";
 import { heardAnswer, resetSleep, watchInput } from "../web/src/rivet-sleep.js";
 import { app, changed } from "../web/src/state.js";
 import { mount as mountOps, unmount as unmountOps } from "../web/src/views/ops.js";
+import { lockedLine } from "../web/src/views/plan-lock.js";
 import { openStatus as openRunner, runnerItem } from "../web/src/views/ops-status.js";
 import { openMore } from "../web/src/views/chat-more.js";
 import { activityRows, askedBy, WHO_CHIPS, WHO_EMPTY } from "../web/src/views/chat-ticket.js";
@@ -60,6 +63,11 @@ describe("parseAgent", () => {
     expect(parseAgent({ name: "Pip", setupDone: true, app: "Acme Agents" })).toEqual({ name: "Pip", setupDone: true, firstPlan: "claude", app: "Acme Agents" });
   });
 
+  it("keeps GitHub Copilot as the plan that goes first, and reads one it does not know as Claude", () => {
+    expect(parseAgent({ name: "Pip", setupDone: true, firstPlan: "copilot" })).toEqual({ name: "Pip", setupDone: true, firstPlan: "copilot", app: null });
+    for (const firstPlan of ["gemini", "Copilot", "github", "", null, 3, ["copilot"]]) expect(parseAgent({ name: "Pip", setupDone: true, firstPlan })?.firstPlan).toBe("claude");
+  });
+
   it("takes a name and an app by the server's rule, anything else as none, as the server does", () => {
     for (const name of ["Dr. Pip", "Pip_2", "A".repeat(25), "<b>Pip</b>", "Rivet and Bolt", "rivet jr"]) expect(parseAgent({ name, setupDone: true })?.name).toBeNull();
     expect(parseAgent({ name: "Rivetyun", setupDone: true, app: "<i>Acme</i>" })).toMatchObject({ name: "Rivetyun", app: null });
@@ -81,9 +89,24 @@ describe("parseAgent", () => {
 
 describe("parsePlans", () => {
   it("reads each plan, and an older supervisor's loggedIn as Claude", () => {
-    expect(parsePlans({ claude: false, chatgpt: true, github: false, loggedIn: false })).toEqual({ claude: false, chatgpt: true });
-    expect(parsePlans({ loggedIn: true })).toEqual({ claude: true, chatgpt: false });
-    expect(parsePlans({ loggedIn: false })).toEqual({ claude: false, chatgpt: false });
+    expect(parsePlans({ claude: false, chatgpt: true, github: false, loggedIn: false })).toEqual({ claude: false, chatgpt: true, copilot: false });
+    expect(parsePlans({ loggedIn: true })).toEqual({ claude: true, chatgpt: false, copilot: false });
+    expect(parsePlans({ loggedIn: false })).toEqual({ claude: false, chatgpt: false, copilot: false });
+  });
+
+  it("reads GitHub Copilot as connected, not connected, or null when its status gave no answer; a body without it as not connected", () => {
+    expect(parsePlans({ claude: false, chatgpt: false, copilot: true })).toEqual({ claude: false, chatgpt: false, copilot: true });
+    expect(parsePlans({ claude: false, chatgpt: false, copilot: false })).toEqual({ claude: false, chatgpt: false, copilot: false });
+    expect(parsePlans({ claude: false, chatgpt: false, copilot: null })).toEqual({ claude: false, chatgpt: false, copilot: null });
+    expect(parsePlans({ claude: false, chatgpt: false })).toEqual({ claude: false, chatgpt: false, copilot: false });
+    expect(parsePlans({ claude: true, chatgpt: true, copilot: null })).toEqual({ claude: true, chatgpt: true, copilot: null });
+    expect(parsePlans({ loggedIn: false, copilot: true })).toEqual({ claude: false, chatgpt: false, copilot: true });
+    for (const copilot of ["yes", 1, undefined, {}]) expect(parsePlans({ claude: false, chatgpt: false, copilot })).toEqual({ claude: false, chatgpt: false, copilot: false });
+  });
+
+  it("does not read GitHub Copilot alone as an answer", () => {
+    expect(parsePlans({ copilot: true })).toBeNull();
+    expect(parsePlans({ copilot: null })).toBeNull();
   });
 
   it("reads an answer with no plan in it as unread", () => {
@@ -252,11 +275,121 @@ describe("readCloud", () => {
     expect(menuList().querySelector('[data-key="connect"]')).toBeNull();
   });
 
+  it("with GitHub Copilot the only plan connected needs none, and needs one once it is not", async () => {
+    answers["/cloud/agent"] = () => json({ name: "Pip", setupDone: true, firstPlan: "copilot" });
+    answers["/cloud/connect/status"] = () => json({ claude: false, chatgpt: false, copilot: true });
+    await readCloud(() => {});
+    expect(needsPlan()).toBe(false);
+    expect(menuList().querySelector('[data-key="connect"]')).toBeNull();
+
+    answers["/cloud/connect/status"] = () => json({ claude: false, chatgpt: false, copilot: false });
+    await readCloud(() => {});
+    expect(needsPlan()).toBe(true);
+    expect(menuList().querySelector('[data-key="connect"]')!.textContent).toBe("Connect a plan");
+  });
+
+  it("never needs a plan while GitHub Copilot's status gave no answer, even with the others not connected", async () => {
+    const onChange = vi.fn();
+    answers["/cloud/agent"] = () => json({ name: "Pip", setupDone: true, firstPlan: "claude" });
+    answers["/cloud/connect/status"] = () => json({ claude: false, chatgpt: false, copilot: null });
+    await readCloud(onChange);
+    expect(needsPlan()).toBe(false);
+    expect(menuList().querySelector('[data-key="connect"]')).toBeNull();
+
+    answers["/cloud/connect/status"] = () => json({ claude: false, chatgpt: false, copilot: false });
+    await readCloud(onChange);
+    expect(needsPlan(), "an answer of not connected locks").toBe(true);
+    expect(onChange, "and the change is drawn").toHaveBeenCalledTimes(2);
+
+    answers["/cloud/connect/status"] = () => json({ claude: false, chatgpt: false, copilot: null });
+    await readCloud(onChange);
+    expect(needsPlan(), "and no answer again lifts it").toBe(false);
+    expect(onChange).toHaveBeenCalledTimes(3);
+  });
+
+  it("reads a status with no GitHub Copilot in it as not connected: an older supervisor's, and one with only loggedIn", async () => {
+    answers["/cloud/agent"] = () => json({ name: "Pip", setupDone: true, firstPlan: "claude" });
+    answers["/cloud/connect/status"] = () => json({ claude: false, chatgpt: false });
+    await readCloud(() => {});
+    expect(needsPlan()).toBe(true);
+
+    answers["/cloud/connect/status"] = () => json({ loggedIn: true });
+    await readCloud(() => {});
+    expect(needsPlan()).toBe(false);
+
+    answers["/cloud/connect/status"] = () => json({ loggedIn: false });
+    await readCloud(() => {});
+    expect(needsPlan()).toBe(true);
+  });
+
   it("needs no plan while the status cannot be read", async () => {
     answers["/cloud/agent"] = () => json({ name: null, setupDone: true, firstPlan: "claude" });
     await readCloud(() => {});
     expect(document.title).toBe("Agent");
     expect(needsPlan()).toBe(false);
+  });
+});
+
+describe("the plans the lock's words name", () => {
+  const TWO = ["Sending is off until Claude or ChatGPT is connected.", "Claude or ChatGPT"];
+  const THREE = ["Sending is off until Claude, ChatGPT or GitHub Copilot is connected.", "Claude, ChatGPT or GitHub Copilot"];
+  const words = () => [LOCKED_LINE, planNames()];
+  const read = async (status: unknown) => {
+    answers["/cloud/connect/status"] = () => json(status);
+    await readCloud(() => {});
+  };
+  beforeEach(() => {
+    answers["/cloud/agent"] = () => json({ name: "Pip", setupDone: true, firstPlan: "claude" });
+  });
+
+  it("are Claude and ChatGPT before any status is read, and on an agent whose status has no copilot field", async () => {
+    expect(words()).toEqual(TWO);
+    await probeCloud();
+    expect(words()).toEqual(TWO);
+    await read({ claude: false, chatgpt: false });
+    expect([needsPlan(), ...words()]).toEqual([true, ...TWO]);
+    await read({ claude: false, chatgpt: false, github: false, loggedIn: false });
+    expect(words()).toEqual(TWO);
+    await read({ loggedIn: false });
+    expect(words()).toEqual(TWO);
+    await read({ claude: true, chatgpt: false });
+    expect([needsPlan(), ...words()]).toEqual([false, ...TWO]);
+  });
+
+  it("name GitHub Copilot once the status has a copilot field, whatever its value", async () => {
+    for (const copilot of [false, null, true, "yes", 0]) {
+      resetCloud();
+      expect(words()).toEqual(TWO);
+      await read({ claude: false, chatgpt: false, copilot });
+      expect(words(), String(copilot)).toEqual(THREE);
+    }
+    await read({ loggedIn: false, copilot: false });
+    expect(words()).toEqual(THREE);
+  });
+
+  it("follow the last status read, either way", async () => {
+    await read({ claude: false, chatgpt: false });
+    expect(words()).toEqual(TWO);
+    await read({ claude: false, chatgpt: false, copilot: false });
+    expect(words()).toEqual(THREE);
+    await read({ claude: false, chatgpt: false });
+    expect(words()).toEqual(TWO);
+  });
+
+  it("keep the last status's words through a read that gave none, and go back to the two at a sign-out or a reset", async () => {
+    await read({ claude: false, chatgpt: false, copilot: false });
+    expect(words()).toEqual(THREE);
+    await read({ copilot: true });
+    expect(words()).toEqual(THREE);
+    answers["/cloud/connect/status"] = () => new Response("down", { status: 502 });
+    await readCloud(() => {});
+    expect(words()).toEqual(THREE);
+    leaveCloud();
+    expect(words()).toEqual(TWO);
+    await read({ claude: false, chatgpt: false, copilot: null });
+    expect(words()).toEqual(THREE);
+    resetCloud();
+    expect(words()).toEqual(TWO);
   });
 });
 
@@ -801,7 +934,7 @@ describe("the monitor's name everywhere it is read (RIVET_NAME)", () => {
 
   it("locks the worker sheet's message box while a hosted agent has no plan, its line the way to Connect, and unlocks it once one is connected", async () => {
     answers["/cloud/agent"] = () => json({ name: "Pip", setupDone: true, firstPlan: "claude" });
-    answers["/cloud/connect/status"] = () => json({ claude: false, chatgpt: false });
+    answers["/cloud/connect/status"] = () => json({ claude: false, chatgpt: false, copilot: false });
     vi.stubGlobal("SpeechRecognition", class {});
     await readCloud(changed);
     shown();
@@ -813,7 +946,8 @@ describe("the monitor's name everywhere it is read (RIVET_NAME)", () => {
     expect(mic.getAttribute("aria-label")).toBe(`Dictate ${text.getAttribute("aria-label")}`);
     expect(mic.getAttribute("aria-label")).not.toBe("Dictate text");
     expect(document.querySelectorAll(".cmd-send .noplan-line")).toHaveLength(1);
-    expect(line.textContent).toBe("Sending is off until Claude or ChatGPT is connected.");
+    expect(line.textContent).toBe("Sending is off until Claude, ChatGPT or GitHub Copilot is connected.");
+    expect(line.textContent).toBe(LOCKED_LINE);
     expect(line.getAttribute("href")).toBe(CONNECT_PATH);
     expect(line.querySelector(".noplan-mark")).not.toBeNull();
 
@@ -823,23 +957,101 @@ describe("the monitor's name everywhere it is read (RIVET_NAME)", () => {
     expect(document.querySelector(".cmd-send .sheet-where")!.textContent).toBe(said("Pip").where);
   });
 
+  it("unlocks the worker sheet's message box when GitHub Copilot is the plan connected, and leaves it open while its status gave no answer", async () => {
+    answers["/cloud/agent"] = () => json({ name: "Pip", setupDone: true, firstPlan: "copilot" });
+    answers["/cloud/connect/status"] = () => json({ claude: false, chatgpt: false, copilot: false });
+    await readCloud(changed);
+    shown();
+    const text = document.querySelector<HTMLTextAreaElement>(".cmd-send .cmd-text")!;
+    const send = document.querySelector<HTMLButtonElement>('.cmd-send [data-use="worker.send"]')!;
+    expect([text.disabled, send.disabled]).toEqual([true, true]);
+    expect(document.querySelector(".cmd-send .noplan-line")!.textContent).toBe("Sending is off until Claude, ChatGPT or GitHub Copilot is connected.");
+
+    answers["/cloud/connect/status"] = () => json({ claude: false, chatgpt: false, copilot: true });
+    await readCloud(changed);
+    expect([text.disabled, send.disabled]).toEqual([false, false]);
+    expect(document.querySelector(".cmd-send .sheet-where")!.textContent).toBe(said("Pip").where);
+
+    answers["/cloud/connect/status"] = () => json({ claude: false, chatgpt: false, copilot: false });
+    await readCloud(changed);
+    expect([text.disabled, send.disabled]).toEqual([true, true]);
+
+    answers["/cloud/connect/status"] = () => json({ claude: false, chatgpt: false, copilot: null });
+    await readCloud(changed);
+    expect([text.disabled, send.disabled]).toEqual([false, false]);
+  });
+
+  it("keeps a locked line's words current while it is off the page, so a sheet that puts it back names the plans of the last read", async () => {
+    answers["/cloud/agent"] = () => json({ name: "Pip", setupDone: true, firstPlan: "claude" });
+    answers["/cloud/connect/status"] = () => json({ claude: false, chatgpt: false });
+    await readCloud(changed);
+    const line = lockedLine();
+    document.body.append(line);
+    changed();
+    expect(line.textContent).toBe("Sending is off until Claude or ChatGPT is connected.");
+
+    line.remove();
+    changed();
+    answers["/cloud/connect/status"] = () => json({ claude: false, chatgpt: false, copilot: false });
+    await readCloud(changed);
+    document.body.append(line);
+    expect(line.textContent).toBe("Sending is off until Claude, ChatGPT or GitHub Copilot is connected.");
+    line.remove();
+  });
+
+  it("lets go of a locked line nothing holds any more: its listener never keeps it", async () => {
+    // A garbage collection on demand, as in mutationObserverGc.test.ts; a weak hold keeps its target until its job ends.
+    setFlagsFromString("--expose-gc");
+    const gc = runInNewContext("gc") as () => void;
+    const turn = () => new Promise((resolve) => setTimeout(resolve, 0));
+    const dropped = (() => {
+      const line = lockedLine(true);
+      document.body.append(line);
+      changed();
+      line.remove();
+      return new WeakRef(line);
+    })();
+    changed();
+    await turn();
+    gc();
+    expect(dropped.deref()).toBeUndefined();
+    changed();
+  });
+
   it("locks a card's message box, its mic, photos and Send while a hosted agent has no plan, and unlocks it once one is connected", async () => {
     vi.stubGlobal("SpeechRecognition", class {});
     answers["/cloud/agent"] = () => json({ name: "Pip", setupDone: true, firstPlan: "claude" });
-    answers["/cloud/connect/status"] = () => json({ claude: false, chatgpt: false });
+    answers["/cloud/connect/status"] = () => json({ claude: false, chatgpt: false, copilot: false });
     await readCloud(changed);
     const need = { id: "n-plan", kind: "approval", title: "Card", ask: "Ship it?", rev: "1" } as const;
     document.body.replaceChildren(answerCard(need));
     const parts = () => [".say-text", ".dictate-mic", ".attach-btn", ".say-send"].map((one) => document.querySelector<HTMLButtonElement>(`.say-line ${one}`)!.disabled);
     const line = document.querySelector<HTMLAnchorElement>(".say-line .noplan-line")!;
     expect(parts()).toEqual([true, true, true, true]);
-    expect([line.hidden, line.textContent, line.getAttribute("href")]).toEqual([false, "Sending is off until Claude or ChatGPT is connected.", CONNECT_PATH]);
+    expect([line.hidden, line.textContent, line.getAttribute("href")]).toEqual([false, "Sending is off until Claude, ChatGPT or GitHub Copilot is connected.", CONNECT_PATH]);
     expect(line.querySelector(".noplan-mark")).not.toBeNull();
 
     answers["/cloud/connect/status"] = () => json({ claude: true, chatgpt: false });
     await readCloud(changed);
     expect(parts()).toEqual([false, false, false, false]);
     expect(line.hidden).toBe(true);
+  });
+
+  it("names GitHub Copilot in a locked box's line only on an agent whose status has a copilot field", async () => {
+    answers["/cloud/agent"] = () => json({ name: "Pip", setupDone: true, firstPlan: "claude" });
+    answers["/cloud/connect/status"] = () => json({ claude: false, chatgpt: false });
+    await readCloud(changed);
+    shown();
+    expect(document.querySelector(".cmd-send .noplan-line")!.textContent).toBe("Sending is off until Claude or ChatGPT is connected.");
+    const need = { id: "n-two", kind: "approval", title: "Card", ask: "Ship it?", rev: "1" } as const;
+    document.body.replaceChildren(answerCard(need));
+    expect(document.querySelector(".say-line .noplan-line")!.textContent).toBe("Sending is off until Claude or ChatGPT is connected.");
+    expect(document.body.textContent).not.toContain("Copilot");
+
+    answers["/cloud/connect/status"] = () => json({ claude: false, chatgpt: false, copilot: false });
+    await readCloud(changed);
+    shown();
+    expect(document.querySelector(".cmd-send .noplan-line")!.textContent).toBe("Sending is off until Claude, ChatGPT or GitHub Copilot is connected.");
   });
 
   it("locks a question card's Send answer with its box, and unlocks it once a plan is connected", async () => {

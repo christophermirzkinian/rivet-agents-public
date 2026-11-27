@@ -17,12 +17,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { logForced, mismatch, refusal as misplacedRefusal } from "../bridge/lib/chat-guard.mjs";
-import { agentName, CHAT_PROVIDER, codexChatArgs, connected, FIRST_PLAN_UNREAD, firstPlan, limitWords, notConnectedLine, otherPlan, PLAN_NAMES, planOfProvider, plansOn, screenLimit, STATUS_ARGS } from "../bridge/lib/job-drivers.mjs";
+import { agentName, CHAT_PROVIDER, codexChatArgs, connected, copilotChatArgs, FIRST_PLAN_UNREAD, firstPlan, limitWords, notConnectedLine, otherPlans, PLAN_NAMES, planOfProvider, plansHere, plansOn, screenLimit, STATUS_ARGS, STATUS_BIN } from "../bridge/lib/job-drivers.mjs";
 import { loadProjects, projectsFromFolders } from "../bridge/lib/projects.mjs";
 import { repoAllowlist } from "../src/shared/repos.ts";
 
 export const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
-export const PROVIDERS = new Set(["claude", "codex"]);
+export const PROVIDERS = new Set(["claude", "codex", "copilot"]);
 const SOCKET_RE = /^[A-Za-z0-9._-]{1,64}$/;
 const ENV_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 // The tmux server keeps the environment it was started with, so it gets only these, never a secret.
@@ -39,7 +39,7 @@ const PLAIN_PATH_RE = /^[A-Za-z0-9._/@+-]+$/;
 
 /**
  * The runner's context: every root and dependency, injectable. `bins` maps a provider to the program it runs
- * (default its own name on PATH).
+ * (default its own name on PATH), and `copilot-status` to the program that says whether Copilot is signed in.
  */
 export function context(opts = {}) {
   const env = opts.env ?? process.env;
@@ -53,7 +53,7 @@ export function context(opts = {}) {
     socketPath: opts.socketPath ?? socketPathFor(env, socket),
     registry: opts.registry ?? path.join(home, ".rivet-agents", "chats", "registry.json"),
     tmuxBin: opts.tmuxBin ?? "tmux",
-    bins: { claude: "claude", codex: "codex", ...(opts.bins ?? {}) },
+    bins: { claude: "claude", codex: "codex", copilot: "copilot", "copilot-status": "copilot-status", ...(opts.bins ?? {}) },
     now: opts.now ?? (() => Date.now()),
     lockWaitMs: opts.lockWaitMs ?? 10_000,
     routeLists: opts.routeLists ?? (() => projectLists(env, home)),
@@ -256,9 +256,17 @@ export function findChat(doc, ref) {
 
 const extraArgs = (value) => String(value ?? "").split(/\s+/).filter(Boolean);
 
-/** A chat's argv: the provider's program, the user's extra args (RIVET_CLAUDE_ARGS / RIVET_CODEX_ARGS), then its prompt. */
+/**
+ * A chat's argv: the provider's program, the user's extra args (RIVET_CLAUDE_ARGS / RIVET_CODEX_ARGS /
+ * RIVET_COPILOT_ARGS), then its prompt.
+ */
 export function launchFor(ctx, provider, prompt = null) {
-  if (!PROVIDERS.has(provider)) throw new Error(`rivet-chat: --provider is claude or codex, not ${provider}`);
+  if (!PROVIDERS.has(provider)) throw new Error(`rivet-chat: --provider is claude, codex or copilot, not ${provider}`);
+  if (provider === "copilot") {
+    // Copilot takes a chat's first words as an option's value, and after `=` words that name a flag are never read as one.
+    const args = [...copilotChatArgs(ctx.env), ...extraArgs(ctx.env.RIVET_COPILOT_ARGS)];
+    return { command: ctx.bins.copilot, args: prompt ? [...args, `--interactive=${prompt}`] : args };
+  }
   const extra = extraArgs(provider === "codex" ? ctx.env.RIVET_CODEX_ARGS : ctx.env.RIVET_CLAUDE_ARGS);
   // A hosted agent's Codex chat asks as its Claude chat does (bridge/lib/job-drivers.mjs codexChatArgs).
   const args = provider === "codex" && plansOn(ctx.env) ? [...codexChatArgs(ctx.env), ...extra] : extra;
@@ -375,15 +383,18 @@ function firstProvider(env) {
 
 /**
  * A hosted agent's chat runs on its owner's own plan, so one whose plan is definitely signed out is refused before
- * anything starts; a status that gave no answer starts it as it always has. The other plan's status only chooses the
- * words: a chat never moves to it by itself.
+ * anything starts; a status that gave no answer starts it as it always has. The other plans' status only chooses the
+ * words: a chat never moves to one by itself.
  */
 function refuseSignedOut(ctx, provider) {
   if (!plansOn(ctx.env)) return;
   const plan = planOfProvider(provider);
   if (connected(plan, signInStatus(ctx, plan)) !== false) return;
-  const other = otherPlan(plan);
-  throw new Error(`rivet-chat: no chat started. ${notConnectedLine(plan, false, connected(other, signInStatus(ctx, other)) === true, firstPlan(ctx.env))}.`);
+  const others = otherPlans(plan).map((other) => ({ other, ran: signInStatus(ctx, other) }));
+  const on = others.filter(({ other, ran }) => connected(other, ran) === true).map(({ other }) => other);
+  // A machine with no copilot-status cannot connect GitHub Copilot, so the words there do not name it.
+  const here = plansHere(!others.some(({ other, ran }) => other === "copilot" && ran.missing));
+  throw new Error(`rivet-chat: no chat started. ${notConnectedLine(plan, false, on, firstPlan(ctx.env), here)}.`);
 }
 
 /**
@@ -524,20 +535,20 @@ export function read(ctx, ref, { lines = 60 } = {}) {
 }
 
 /**
- * A plan's sign-in status from its own CLI, in the environment a pane gets: { code, lines }, stdout then stderr (Codex
- * says "Not logged in" on stderr). A CLI that would not start or ran out of time has code null. It is read from the home
- * folder, never a chat's own, whose project settings could answer for the plan.
+ * A plan's sign-in status from its own CLI (Copilot's from `copilot-status`), in the environment a pane gets:
+ * { code, lines }, stdout then stderr (Codex says "Not logged in" on stderr). A CLI that would not start or ran out of
+ * time has code null. It is read from the home folder, never a chat's own, whose project settings could answer for the plan.
  */
 function signInStatus(ctx, plan) {
   const env = Object.fromEntries(PANE_ENV.filter((name) => ctx.env[name] !== undefined).map((name) => [name, ctx.env[name]]));
-  const r = spawnSync(ctx.bins[CHAT_PROVIDER[plan]], [...STATUS_ARGS[plan]], { cwd: ctx.home, env, encoding: "utf8", timeout: 15_000, stdio: ["ignore", "pipe", "pipe"] });
-  if (r.error) return { code: null, lines: [] };
-  return { code: r.status, lines: plan === "claude" ? String(r.stdout ?? "").split("\n") : `${r.stdout ?? ""}\n${r.stderr ?? ""}`.split("\n") };
+  const r = spawnSync(ctx.bins[STATUS_BIN[plan]] ?? STATUS_BIN[plan], [...STATUS_ARGS[plan]], { cwd: ctx.home, env, encoding: "utf8", timeout: 15_000, stdio: ["ignore", "pipe", "pipe"] });
+  if (r.error) return { code: null, lines: [], missing: /** @type {NodeJS.ErrnoException} */ (r.error).code === "ENOENT" };
+  return { code: r.status, lines: plan === "claude" ? String(r.stdout ?? "").split("\n") : `${r.stdout ?? ""}\n${r.stderr ?? ""}`.split("\n"), missing: false };
 }
 
 /**
- * A hosted agent's chats whose screen ends on their plan's usage limit, each asked about once: when the other plan is
- * signed in, `post` gets the card's words; no chat is ever moved to the other plan. A chat's mark goes once its screen no
+ * A hosted agent's chats whose screen ends on their plan's usage limit, each asked about once: when another plan is
+ * signed in, `post` gets the card's words; no chat is ever moved to another plan. A chat's mark goes once its screen no
  * longer shows the limit, so a later limit asks again. Nothing is read on a machine with no agent file.
  * The agent runtime's supervisor calls it once a minute and posts each ask as a board card.
  * @param {ReturnType<typeof context>} ctx
@@ -575,8 +586,9 @@ export async function limitCheck(ctx, { post, status = signInStatus }) {
     if (hit) {
       if (entry.limitSeen !== seen) remember(undefined);
       if ((entry.limitAsked ?? null) === mark) continue;
-      const other = otherPlan(plan);
-      if (connected(other, status(ctx, other)) !== true) continue;
+      // The first of the other plans that is signed in, in their order.
+      const other = otherPlans(plan).find((one) => connected(one, status(ctx, one)) === true);
+      if (!other) continue;
       const Other = PLAN_NAMES[other];
       const ask = {
         chat: `${entry.name} ${entry.started}`,

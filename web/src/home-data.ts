@@ -1,6 +1,7 @@
 import type { HomeReading, HomeResponse } from "../../src/shared/home.js";
 import { call } from "./api.js";
 import { describe } from "./dom.js";
+import { latestRead } from "./latest-read.js";
 import { onSessionReset, StaleSession } from "./session.js";
 
 // The Home page's reading, shared by the page and its menu row, and the words both say.
@@ -12,19 +13,24 @@ export const HOME_ICON =
   '<svg viewBox="0 0 24 24"><path d="M4 11.2L12 4.5l8 6.7V19a1.5 1.5 0 0 1-1.5 1.5h-4v-5.5h-5v5.5h-4A1.5 1.5 0 0 1 4 19z" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/></svg>';
 
 export const homeData: { home: HomeResponse | null; error: string | null } = { home: null, error: null };
+const reads = latestRead();
 onSessionReset(() => {
+  reads.invalidate();
   homeData.home = null;
   homeData.error = null;
 });
 
 /** Reads Home; true when a reading landed. One from a session that has ended changes nothing. */
 export async function loadHome(): Promise<boolean> {
+  const latest = reads.start();
   try {
-    homeData.home = await call<HomeResponse>("GET", "/api/home");
+    const next = await call<HomeResponse>("GET", "/api/home");
+    if (!latest()) return false;
+    homeData.home = next;
     homeData.error = null;
     return true;
   } catch (err) {
-    if (err instanceof StaleSession) return false;
+    if (!latest() || err instanceof StaleSession) return false;
     homeData.error = describe(err);
     return false;
   }

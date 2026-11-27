@@ -5,7 +5,7 @@ import { test } from "node:test";
 
 import { cardFieldRefusals, cardFieldsLine, cardsFieldsLine, isAskIdOnly } from "../lib/card-fields.mjs";
 
-const CARD = { id: "c1", kind: "choice", title: "Which look?", ask: "Two looks.\n- Calm\n- Bold", askId: "a-1014", options: [{ label: "Calm", detail: "Dark" }, { label: "Bold", recommended: true }] };
+const CARD = { id: "c1", kind: "choice", title: "Which look?", ask: "Two looks.\n- Calm\n- Bold", askId: "a-14", options: [{ label: "Calm", detail: "Dark" }, { label: "Bold", recommended: true }] };
 
 test("a normal card is taken", () => {
   assert.deepEqual(cardFieldRefusals(CARD), []);
@@ -14,9 +14,9 @@ test("a normal card is taken", () => {
   assert.deepEqual(cardFieldRefusals({ id: "m", kind: "merge-ready", title: "Merge?", pr: 7 }), []);
 });
 
-test("the card of 25 Nov is refused whole: each field by its name, with what to use instead", () => {
+test("a card of unknown fields is refused whole: each field by its name, with what to use instead", () => {
   const { askId, ...card } = CARD;
-  const bad = { ...card, ask: "a-1014", heading: "Usage", bullets: ["one"], options: [{ label: "Calm", id: "a", image: "/tmp/a.png" }] };
+  const bad = { ...card, ask: "a-14", heading: "Looks", bullets: ["one"], options: [{ label: "Calm", id: "a", image: "/tmp/a.png" }] };
   assert.deepEqual(cardFieldRefusals(bad), [
     'a card has no field heading: put it in the ask text (--ask or --ask-file), bullets as lines starting "- "',
     'a card has no field bullets: put it in the ask text (--ask or --ask-file), bullets as lines starting "- "',
@@ -44,10 +44,10 @@ test("an unknown field with no better name is told the fields there are, and its
 });
 
 test("an ask text that is only an ask's id, with or without an option, is refused; one that says something is not", () => {
-  for (const ask of ["a-1014", " a-1014 ", "A-1014", "ask a-1014", "(a-1014)", "a-1010 b", "a-1014:b", "a-1014 (option B)", "a-1014, option 2", "a-1014 option2", "a-1014 (option Yes)"]) assert.ok(isAskIdOnly(ask), ask);
-  assert.ok(isAskIdOnly("a-1014: Calm, dark look", ["Bold", "Calm (dark) look"]));
-  assert.equal(cardFieldRefusals({ ...CARD, ask: "a-1014 Calm" }).length, 1);
-  for (const ask of ["a-1014b", "a-1014 ελα δω", "a-1014 option Yes, or wait","a-1014: which look?", "Pick one for a-1014", "a-1014 and a-1012 both", "Plan A-1 is ready", "", undefined]) assert.ok(!isAskIdOnly(ask), String(ask));
+  for (const ask of ["a-14", " a-14 ", "A-14", "ask a-14", "(a-14)", "a-10 b", "a-14:b", "a-14 (option B)", "a-14, option 2", "a-14 option2", "a-14 (option Yes)"]) assert.ok(isAskIdOnly(ask), ask);
+  assert.ok(isAskIdOnly("a-14: Calm, dark look", ["Bold", "Calm (dark) look"]));
+  assert.equal(cardFieldRefusals({ ...CARD, ask: "a-14 Calm" }).length, 1);
+  for (const ask of ["a-14b", "a-14 ελα δω", "a-14 option Yes, or wait","a-14: which look?", "Pick one for a-14", "a-14 and a-12 both", "Plan A-1 is ready", "", undefined]) assert.ok(!isAskIdOnly(ask), String(ask));
 });
 
 test("a decision or choice card with no description is refused, and news (Got it) is not", () => {
@@ -60,19 +60,19 @@ test("a decision or choice card with no description is refused, and news (Got it
 
 test("a card edit's body is judged by what it changes: no description needed, and a null takes a field off", () => {
   assert.deepEqual(cardFieldRefusals({ title: "New", heading: null, bullets: null }, { whole: false }), []);
-  assert.equal(cardFieldRefusals({ heading: "Usage" }, { whole: false }).length, 1);
-  assert.equal(cardFieldRefusals({ ask: "a-1014" }, { whole: false }).length, 1);
+  assert.equal(cardFieldRefusals({ heading: "Looks" }, { whole: false }).length, 1);
+  assert.equal(cardFieldRefusals({ ask: "a-14" }, { whole: false }).length, 1);
 });
 
 test("a card stored with the old fields passes as it is, and only what a write adds or changes is refused", () => {
-  const stored = { id: "c", kind: "choice", title: "Which?", heading: "Usage", bullets: ["one"], ask: "a-1014", options: [{ label: "A", id: "a", image: "/a.png" }, { label: "B", id: "b" }] };
+  const stored = { id: "c", kind: "choice", title: "Which?", heading: "Looks", bullets: ["one"], ask: "a-14", options: [{ label: "A", id: "a", image: "/a.png" }, { label: "B", id: "b" }] };
   assert.deepEqual(cardFieldRefusals({ ...stored, title: "Which one?" }, { stored }), []);
   assert.deepEqual(cardFieldRefusals({ ...stored, options: [stored.options[1], stored.options[0]] }, { stored }), []);
   const { heading, ...without } = stored;
   assert.deepEqual(cardFieldRefusals(without, { stored }), []);
   assert.match(cardFieldRefusals({ ...stored, heading: "Other" }, { stored })[0], /no field heading/);
   assert.match(cardFieldRefusals({ ...stored, options: [{ label: "B", id: "a" }] }, { stored })[0], /option 1 has no field id/);
-  assert.match(cardFieldRefusals({ ...stored, ask: "a-1015" }, { stored })[0], /only an ask's id/);
+  assert.match(cardFieldRefusals({ ...stored, ask: "a-15" }, { stored })[0], /only an ask's id/);
   const bare = { id: "d", kind: "decision", title: "Ship it?" };
   assert.deepEqual(cardFieldRefusals({ ...bare, title: "Ship it now?" }, { stored: bare }), []);
   assert.equal(cardFieldRefusals({ ...CARD, ask: undefined }, { stored: CARD }).length, 1);
@@ -84,7 +84,7 @@ test("a card stored with the old fields passes as it is, and only what a write a
 test("a card's words are judged as they would be stored, and options that are no list of options are refused", () => {
   const clean = (/** @type {any} */ row) => JSON.parse(JSON.stringify(row ?? null).replaceAll("~", ""));
   assert.match(cardFieldRefusals({ ...CARD, ask: "~" }, { clean })[0], /needs a description/);
-  assert.match(cardFieldRefusals({ ...CARD, ask: "~a-1014 Calm", options: [{ label: "~Calm" }] }, { clean })[0], /only an ask's id/);
+  assert.match(cardFieldRefusals({ ...CARD, ask: "~a-14 Calm", options: [{ label: "~Calm" }] }, { clean })[0], /only an ask's id/);
   assert.match(cardFieldRefusals({ id: "u", kind: "update", title: "Look", options: { label: "A", image: "/a.png" } })[0], /^options is not a list/);
   for (const option of ["A", null, [{ image: "/a.png" }]]) assert.match(cardFieldRefusals({ id: "u", kind: "update", title: "Look", options: [option] })[0], /^option 1 is not an option/);
 });
@@ -92,5 +92,5 @@ test("a card's words are judged as they would be stored, and options that are no
 test("a card that may be its title alone (say.mjs) still needs an ask that is more than an ask's id", () => {
   const card = { id: "c", kind: "decision", title: "Which look?" };
   assert.deepEqual(cardFieldRefusals(card, { titled: true }), []);
-  assert.equal(cardFieldRefusals({ ...card, ask: "a-1014" }, { titled: true }).length, 1);
+  assert.equal(cardFieldRefusals({ ...card, ask: "a-14" }, { titled: true }).length, 1);
 });

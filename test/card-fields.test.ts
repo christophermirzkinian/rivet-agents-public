@@ -33,8 +33,8 @@ describe("a card with fields the app does not draw, on the board routes", () => 
   });
 
   const BASE = { updatedAt: "2026-11-25T00:00:00.000Z", coming: [], chats: [], shipped: [] };
-  const CARD = { kind: "choice", title: "Usage: which look?", ask: "Two looks.\n- Calm\n- Bold", askId: "a-1014", options: [{ label: "Calm" }, { label: "Bold" }] };
-  const OLD = { id: "old", kind: "choice", title: "Which?", heading: "Usage", bullets: ["one"], ask: "a-1014", options: [{ label: "A", id: "a", image: "/a.png" }, { label: "B", id: "b" }] };
+  const CARD = { kind: "choice", title: "Looks: which one?", ask: "Two looks.\n- Calm\n- Bold", askId: "a-14", options: [{ label: "Calm" }, { label: "Bold" }] };
+  const OLD = { id: "old", kind: "choice", title: "Which?", heading: "Looks", bullets: ["one"], ask: "a-14", options: [{ label: "A", id: "a", image: "/a.png" }, { label: "B", id: "b" }] };
   const send = (method: string, url: string, body: unknown) => fetch(`${server.base}${url}`, { method, headers: bearer(BOARD_TOKEN), body: JSON.stringify(body) });
   const errorOf = async (res: Response) => {
     expect(res.status).toBe(422);
@@ -59,20 +59,20 @@ describe("a card with fields the app does not draw, on the board routes", () => 
   });
 
   it("refuses a field the card or its options do not have, naming it and what to use, and stores nothing", async () => {
-    const error = await errorOf(await send("PUT", "/api/board/needs/pick?create=only", { ...CARD, heading: "Usage", bullets: ["a"], options: [{ label: "Calm", image: "/a.png" }, { label: "Bold" }] }));
+    const error = await errorOf(await send("PUT", "/api/board/needs/pick?create=only", { ...CARD, heading: "Looks", bullets: ["a"], options: [{ label: "Calm", image: "/a.png" }, { label: "Bold" }] }));
     expect(error).toMatch(/^card pick: a card has no field heading: put it in the ask text .*; a card has no field bullets: .*; option 1 has no field image: put each picture on the card with --still/);
     expect(stored("pick")).toBeUndefined();
   });
 
   it("refuses an ask that is only an ask's id, and a decision or choice card with no description", async () => {
-    expect(await errorOf(await send("PUT", "/api/board/needs/pick", { ...CARD, ask: "a-1014 (option B)" }))).toContain("--ask-id a-N");
+    expect(await errorOf(await send("PUT", "/api/board/needs/pick", { ...CARD, ask: "a-14 (option B)" }))).toContain("--ask-id a-N");
     for (const kind of ["decision", "choice"]) {
       expect(await errorOf(await send("PUT", "/api/board/needs/pick", { ...CARD, kind, ask: undefined }))).toContain(`a ${kind} card needs a description`);
     }
   });
 
   it("refuses them in a whole-board write too, naming the card", async () => {
-    expect(await errorOf(await putBoard(server.base, { ...BASE, needs: [{ id: "ok", ...CARD }, { id: "pick", ...CARD, heading: "Usage" }] }))).toMatch(/^card pick: a card has no field heading/);
+    expect(await errorOf(await putBoard(server.base, { ...BASE, needs: [{ id: "ok", ...CARD }, { id: "pick", ...CARD, heading: "Looks" }] }))).toMatch(/^card pick: a card has no field heading/);
   });
 
   it("still reads and edits a card stored with the old fields, and takes them off with null", async () => {

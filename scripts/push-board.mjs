@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
+import { writeFileAtomic } from "../bridge/lib/write-file-atomic.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -86,10 +87,10 @@ function parseArgs(argv) {
     else if (a === "--handled" || a === "--verify" || a === "--media") {
       setMode(a.slice(2));
       o.id = argv[++i];
-      if (o.id === undefined) throw new Error(`${a} needs ${a === "--media" ? "an item" : "a reply"} id`);
+      if (o.id === undefined || o.id.startsWith("--")) throw new Error(`${a} needs ${a === "--media" ? "an item" : "a reply"} id`);
     } else if (a === "--if-match") {
       o.ifMatch = argv[++i];
-      if (o.ifMatch === undefined) throw new Error("--if-match needs a version");
+      if (o.ifMatch === undefined || o.ifMatch.startsWith("--")) throw new Error("--if-match needs a version");
     } else if (a === "--replace") o.replace = true;
     else if (a.startsWith("-")) throw new Error(`unknown option ${a}`);
     else {
@@ -535,7 +536,7 @@ async function main() {
       process.stdout.write(`${JSON.stringify({ media: mediaOf(clips) }, null, 2)}\n`);
       return 0;
     }
-    fs.writeFileSync(/** @type {string} */ (o.file), board);
+    writeFileAtomic(/** @type {string} */ (o.file), board);
   }
   if (o.mode === "push" || o.mode === "media") {
     const file = /** @type {string} */ (o.file);
@@ -603,7 +604,7 @@ async function main() {
             // Only onto the card that was read: one given another PR or chat meanwhile is read again next push.
             if (ofChat && need.pr === ofChat.pr && need.chat === ofChat.chat && need.repo === undefined) need.repo = ofChat.repo;
           }
-          fs.writeFileSync(file, boardText(dropped ? withoutRows(withRows(latest, added, day, placeholders), dropped) : withRows(latest, added, day, placeholders)));
+          writeFileAtomic(file, boardText(dropped ? withoutRows(withRows(latest, added, day, placeholders), dropped) : withRows(latest, added, day, placeholders)));
         } catch {
           learnt = false;
           process.stderr.write(`push-board: ${file} is not valid JSON now; the kept items stay on the server and are kept again next push\n`);
@@ -611,7 +612,7 @@ async function main() {
       }
       // A kept row left out of the file must not enter the base, or the next push would read it as the monitor's delete.
       const pushed = JSON.parse(learnt ? body : text);
-      fs.writeFileSync(sidecar, `${JSON.stringify({ version: doc.version, pushedAt: new Date().toISOString(), ...keysOf(pushed), digests: cardDigests(pushed) }, null, 2)}\n`);
+      writeFileAtomic(sidecar, `${JSON.stringify({ version: doc.version, pushedAt: new Date().toISOString(), ...keysOf(pushed), digests: cardDigests(pushed) }, null, 2)}\n`);
       return 0;
     }
   }

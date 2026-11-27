@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { takeUnits } from "../bridge/lib/text-units.mjs";
 import { makeGh } from "../bridge/lib/gh-login.mjs";
 import { formatLog, makeExec, resolveBin } from "../bridge/lib/config.mjs";
 import { NO_RUN } from "../bridge/lib/scheduled-run.mjs";
@@ -235,7 +236,7 @@ export async function recheckPass(deps) {
     .map((i) => ({
       number: i.number,
       title: oneLine(i.title, 200),
-      body: redact(String(i.body ?? "")).slice(0, BODY_CHARS),
+      body: takeUnits(redact(String(i.body ?? "")), BODY_CHARS),
       labels: Array.isArray(i.labels) ? i.labels.map((l) => oneLine(String(l?.name ?? ""), 50)).filter(Boolean) : [],
       createdAt: i.createdAt,
       fullBody: String(i.body ?? ""),
@@ -342,7 +343,13 @@ async function pass(repo, dryRun, log) {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  runReader(JOB, main).then((code) => {
-    process.exitCode = code;
-  });
+  const unexpected = process.argv.slice(2).find((arg) => arg !== "--dry-run");
+  if (unexpected !== undefined) {
+    console.error(`usage: issue-recheck.mjs [--dry-run]: unexpected argument ${JSON.stringify(unexpected)}`);
+    process.exitCode = 2;
+  } else {
+    runReader(JOB, main).then((code) => {
+      process.exitCode = code;
+    });
+  }
 }

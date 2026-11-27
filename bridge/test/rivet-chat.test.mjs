@@ -54,7 +54,42 @@ test("parseArgs refuses an unknown option and a value flag with no value", () =>
 test("launchFor puts the user's extra args first and the prompt after --", () => {
   const c = runner.context({ env: { RIVET_CLAUDE_ARGS: "--model x", TMUX_TMPDIR: os.tmpdir() }, socket: "unused" });
   assert.deepEqual(runner.launchFor(c, "claude", "logout"), { command: "claude", args: ["--model", "x", "--", "logout"] });
-  assert.throws(() => runner.launchFor(c, "other"), /claude or codex/);
+  assert.throws(() => runner.launchFor(c, "other"), { message: "rivet-chat: --provider is claude, codex or copilot, not other" });
+});
+
+test("launchFor gives a Copilot chat its prompt as one option's value, after the user's extra args; only a hosted agent's allows every tool and path", () => {
+  const env = { RIVET_COPILOT_ARGS: "--model z", RIVET_CLAUDE_ARGS: "--model x", RIVET_CODEX_NO_SANDBOX: "1", TMUX_TMPDIR: os.tmpdir() };
+  const plain = runner.context({ env, socket: "unused" });
+  assert.deepEqual([plain.bins.copilot, plain.bins["copilot-status"]], ["copilot", "copilot-status"]);
+  assert.deepEqual(runner.launchFor(plain, "copilot", "hi"), { command: "copilot", args: ["--no-auto-update", "--disable-builtin-mcps", "--secret-env-vars=COPILOT_GITHUB_TOKEN", "--model", "z", "--interactive=hi"] });
+  assert.deepEqual(runner.launchFor(plain, "copilot"), { command: "copilot", args: ["--no-auto-update", "--disable-builtin-mcps", "--secret-env-vars=COPILOT_GITHUB_TOKEN", "--model", "z"] });
+  const hosted = runner.context({ env: { ...env, RIVET_AGENT_FILE: "/nonexistent/agent.json" }, socket: "unused", bins: { copilot: "/opt/copilot" } });
+  assert.deepEqual(runner.launchFor(hosted, "copilot", "hi"), { command: "/opt/copilot", args: ["--allow-all-tools", "--allow-all-paths", "--no-auto-update", "--disable-builtin-mcps", "--secret-env-vars=COPILOT_GITHUB_TOKEN", "--model", "z", "--interactive=hi"] });
+  assert.deepEqual(runner.launchFor(hosted, "copilot").args, ["--allow-all-tools", "--allow-all-paths", "--no-auto-update", "--disable-builtin-mcps", "--secret-env-vars=COPILOT_GITHUB_TOKEN", "--model", "z"]);
+  const bare = runner.context({ env: { TMUX_TMPDIR: os.tmpdir(), RIVET_AGENT_FILE: "/nonexistent/agent.json" }, socket: "unused" });
+  assert.deepEqual(runner.launchFor(bare, "copilot").args, ["--allow-all-tools", "--allow-all-paths", "--no-auto-update", "--disable-builtin-mcps", "--secret-env-vars=COPILOT_GITHUB_TOKEN"]);
+  // A prompt that names a subcommand or a flag stays inside that one argument.
+  for (const prompt of ["--help", "logout", "--allow-all-urls --yolo", "-- --yolo", "a=b"]) {
+    for (const c of [plain, hosted]) {
+      const { args } = runner.launchFor(c, "copilot", prompt);
+      assert.deepEqual(args, [...runner.launchFor(c, "copilot").args, `--interactive=${prompt}`], prompt);
+      assert.ok(!args.includes("--"), "no bare -- for Copilot");
+    }
+    assert.ok(!runner.launchFor(plain, "copilot", prompt).args.some((arg) => /^--allow|^--yolo/.test(arg)), `${prompt}: a chat that is not a hosted agent's allows nothing`);
+  }
+  assert.ok(!runner.launchFor(hosted, "copilot", "hi").args.some((arg) => /^--yolo$|^--allow-all$|^--allow-all-urls$/.test(arg)), "URLs it still asks about");
+  assert.deepEqual([...runner.PROVIDERS], ["claude", "codex", "copilot"]);
+});
+
+test("a pane is given none of Copilot's own environment variables, and the runner's source names none", () => {
+  const text = fs.readFileSync(path.join(import.meta.dirname, "..", "..", "scripts", "chat-runner.mjs"), "utf8");
+  const list = /^const PANE_ENV = (\[[^\]]*\]);$/m.exec(text);
+  assert.ok(list, "PANE_ENV is one list of names");
+  const names = JSON.parse(list[1]);
+  assert.ok(names.includes("PATH") && names.includes("HOME"));
+  assert.deepEqual(names.filter((name) => /^COPILOT_|^GH_|^GITHUB_/.test(name)), []);
+  for (const name of ["COPILOT_API_URL", "COPILOT_GITHUB_TOKEN", "COPILOT_DEBUG_GITHUB_API_URL", "COPILOT_AUTO_UPDATE"]) assert.ok(!text.includes(name), name);
+  assert.deepEqual([...new Set(text.match(/[A-Z0-9_]*COPILOT_[A-Za-z0-9_]*/g) ?? [])], ["RIVET_COPILOT_ARGS"], "the one name with COPILOT_ in it is Rivet's own");
 });
 
 test("new, ls, send, read and close a chat on a throwaway socket", { skip }, async () => {
@@ -143,13 +178,14 @@ test("a hosted agent's chat starts on its first plan and, at that plan's limit, 
   await waitFor(() => /usage limit/.test(runner.read(c, "plans")));
   const posts = [];
   const post = (ask) => posts.push(ask);
-  assert.deepEqual(await runner.limitCheck(c, { post, status: () => ({ code: 0, lines: ['{"loggedIn": false}'] }) }), []);
+  const copilotOut = { code: 1, lines: ["Not connected"] };
+  assert.deepEqual(await runner.limitCheck(c, { post, status: (_ctx, plan) => (plan === "copilot" ? copilotOut : { code: 0, lines: ['{"loggedIn": false}'] }) }), []);
   assert.deepEqual(await runner.limitCheck(c, { post, status: () => ({ code: null, lines: [] }) }), [], "a status that could not be read is not signed in, and asks nothing");
   assert.deepEqual(posts, []);
   const statuses = [];
   const signedIn = (_ctx, plan) => (statuses.push(plan), { code: 0, lines: ['{"loggedIn": true}'] });
   const asked = await runner.limitCheck(c, { post, status: signedIn });
-  assert.deepEqual(statuses, ["claude"]);
+  assert.deepEqual(statuses, ["claude"], "the first signed in is the one offered, and no later plan's status is read");
   assert.equal(asked.length, 1);
   assert.deepEqual(posts, asked);
   assert.equal(asked[0].text, "ChatGPT is at its limit until 3:05 pm. Chat plans waits for it. Claude is ready: ask your agent to start a new chat on Claude. New chats start on the plan that goes first: change it on the Plans page.");
@@ -211,7 +247,9 @@ test("a hosted agent's chat whose plan is signed out starts nothing and says so;
   const claudeOn = cli("claude-on", `echo '{"loggedIn": true}'; exit 0`);
   const codexOut = cli("codex-out", "echo 'Not logged in' >&2; exit 1");
   const codexOn = cli("codex-on", "echo 'Logged in using ChatGPT'; exit 0");
-  const hosted = (bins) => runner.context({ env: { ...ctx.env, HOME: home, RIVET_AGENT_FILE: agentFile }, home, socket: "rivet-chat-test", bins });
+  // No Copilot on this machine: a copilot-status that is not there, never one the machine running the test may have.
+  const noCopilot = path.join(root, "no-copilot-status");
+  const hosted = (bins) => runner.context({ env: { ...ctx.env, HOME: home, RIVET_AGENT_FILE: agentFile }, home, socket: "rivet-chat-test", bins: { "copilot-status": noCopilot, ...bins } });
   const nothingStarted = (c, name) => {
     assert.equal(runner.readRegistry(c).chats[name], undefined, `${name} has no registry entry`);
     assert.equal(runner.sessions(c).has(name), false, `${name} has no tmux session`);
@@ -221,6 +259,21 @@ test("a hosted agent's chat whose plan is signed out starts nothing and says so;
   await assert.rejects(main(["new", "out-1", "--cwd", workdir, "--prompt", "hello there"], { ctx: both }), { message: "rivet-chat: no chat started. Claude isn't connected. Connect Claude or ChatGPT on the Plans page." });
   nothingStarted(both, "out-1");
   assert.deepEqual([...new Set(fs.readFileSync(reads, "utf8").trim().split("\n"))], [fs.realpathSync(home)], "a status is read from the home folder, never the chat's own");
+  assert.throws(() => runner.create(both, { name: "out-1b", cwd: workdir, provider: "codex" }), { message: "rivet-chat: no chat started. ChatGPT isn't connected. Connect Claude or ChatGPT on the Plans page." }, "a machine with no copilot-status names the two plans it can connect");
+  nothingStarted(both, "out-1b");
+
+  // A machine that has copilot-status can connect GitHub Copilot, so the words name it: signed out, or with no answer.
+  const copilotStatus = (name, answer) => {
+    const file = path.join(root, `${name}.sh`);
+    fs.writeFileSync(file, `#!/bin/sh\n${answer}\n`, { mode: 0o755 });
+    return file;
+  };
+  const three = hosted({ claude: claudeOut, codex: codexOut, "copilot-status": copilotStatus("copilot-status-out-4", "echo 'Not connected'; exit 1") });
+  assert.throws(() => runner.create(three, { name: "out-1c", cwd: workdir }), { message: "rivet-chat: no chat started. Claude isn't connected. Connect Claude, ChatGPT or GitHub Copilot on the Plans page." });
+  nothingStarted(three, "out-1c");
+  assert.throws(() => runner.create(three, { name: "out-1d", cwd: workdir, provider: "codex" }), { message: "rivet-chat: no chat started. ChatGPT isn't connected. Connect Claude, ChatGPT or GitHub Copilot on the Plans page." });
+  const unsure = hosted({ claude: claudeOut, codex: codexOut, "copilot-status": copilotStatus("copilot-status-unsure-4", "exit 3") });
+  assert.throws(() => runner.create(unsure, { name: "out-1e", cwd: workdir }), { message: "rivet-chat: no chat started. Claude isn't connected. Connect Claude, ChatGPT or GitHub Copilot on the Plans page." }, "only a copilot-status that is not there takes GitHub Copilot off the words");
 
   const other = hosted({ claude: claudeOut, codex: codexOn });
   assert.throws(() => runner.create(other, { name: "out-2", cwd: workdir }), { message: "rivet-chat: no chat started. Claude isn't connected. Connect Claude, or make ChatGPT first, on the Plans page." });
@@ -244,6 +297,140 @@ test("a hosted agent's chat whose plan is signed out starts nothing and says so;
   assert.equal(runner.create(plain, { name: "plain-out", cwd: workdir }).provider, "claude");
   assert.equal(fs.existsSync(reads), false, "with no agent file no status is read");
   runner.close(plain, "plain-out");
+});
+
+test("a hosted agent's Copilot chat starts on copilot with every tool and path allowed, its sign-in read from copilot-status; signed out, it starts nothing", { skip }, async () => {
+  const home = path.join(root, "home5");
+  fs.mkdirSync(home);
+  const agentFile = path.join(root, "agent-copilot.json");
+  fs.writeFileSync(agentFile, JSON.stringify({ firstPlan: "copilot" }));
+  const reads = path.join(root, "copilot-reads");
+  const script = (name, body) => {
+    const file = path.join(root, `${name}.sh`);
+    fs.writeFileSync(file, `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+    return file;
+  };
+  // A fake copilot-status: it notes the folder it was asked in, its arguments and how many COPILOT_ variables it was given.
+  const status = (name, answer) => script(name, `echo "$(pwd)|$#|$(env | grep -c '^COPILOT_')" >> ${reads}; ${answer}`);
+  const agentUp = 'echo "agent up as $RIVET_CHAT_NAME: $* [$(env | grep -c \'^COPILOT_\') copilot vars]"\nwhile IFS= read -r line; do echo "got:$line"; done';
+  const cli = (name, answer) => script(name, `if [ "$1" = auth ] || [ "$1" = login ]; then ${answer}; fi\n${agentUp}`);
+  const copilot = script("copilot-agent", agentUp);
+  const copilotOn = status("copilot-status-on", "exit 0");
+  const copilotOut = status("copilot-status-out", "echo 'Not connected'; exit 1");
+  const claudeOut = cli("claude-out-5", `echo '{"loggedIn": false}'; exit 1`);
+  const claudeOn = cli("claude-on-5", `echo '{"loggedIn": true}'; exit 0`);
+  const codexOut = cli("codex-out-5", "echo 'Not logged in' >&2; exit 1");
+  const codexOn = cli("codex-on-5", "echo 'Logged in using ChatGPT'; exit 0");
+  // The caller's environment holds Copilot's own variables; none is the runner's to pass on.
+  const callerEnv = { ...ctx.env, HOME: home, COPILOT_API_URL: "http://127.0.0.1:9", COPILOT_GITHUB_TOKEN: "not-for-the-pane", COPILOT_AUTO_UPDATE: "1" };
+  const hosted = (bins) => runner.context({ env: { ...callerEnv, RIVET_AGENT_FILE: agentFile }, home, socket: "rivet-chat-test", bins: { copilot, ...bins } });
+  const nothingStarted = (c, name) => {
+    assert.equal(runner.readRegistry(c).chats[name], undefined, `${name} has no registry entry`);
+    assert.equal(runner.sessions(c).has(name), false, `${name} has no tmux session`);
+  };
+
+  const on = hosted({ claude: claudeOut, codex: codexOut, "copilot-status": copilotOn });
+  const entry = runner.create(on, { name: "cp-1", cwd: workdir, prompt: "hello there" });
+  assert.deepEqual([entry.provider, entry.status], ["copilot", "running"], "with no provider named, the plan that goes first");
+  assert.equal(fs.readFileSync(reads, "utf8").trim(), `${fs.realpathSync(home)}|0|0`, "copilot-status is run once, in the home folder, with no arguments and none of Copilot's variables");
+  const up = "agent up as cp-1: --allow-all-tools --allow-all-paths --no-auto-update --disable-builtin-mcps --secret-env-vars=COPILOT_GITHUB_TOKEN --interactive=hello there [0 copilot vars]";
+  assert.ok(await waitFor(() => runner.read(on, "cp-1").replace(/\n/g, "").includes(up.replace(/\n/g, ""))), runner.read(on, "cp-1"));
+  assert.doesNotMatch(runner.read(on, "cp-1", { lines: 200 }), /not-for-the-pane/);
+  assert.equal(await main(["new", "cp-2", "--cwd", workdir, "--provider", "copilot", "--prompt", "--help"], { ctx: on, out: () => {} }), 0);
+  assert.ok(await waitFor(() => runner.read(on, "cp-2").replace(/\n/g, "").includes("--disable-builtin-mcps --secret-env-vars=COPILOT_GITHUB_TOKEN --interactive=--help [0 copilot vars]")), runner.read(on, "cp-2"));
+  assert.equal(runner.list(on).find((one) => one.name === "cp-2").provider, "copilot");
+  for (const name of ["cp-1", "cp-2"]) runner.close(on, name);
+
+  const out = hosted({ claude: claudeOut, codex: codexOut, "copilot-status": copilotOut });
+  await assert.rejects(main(["new", "cp-out-1", "--cwd", workdir, "--provider", "copilot", "--prompt", "hello there"], { ctx: out }), { message: "rivet-chat: no chat started. GitHub Copilot isn't connected. Connect Claude, ChatGPT or GitHub Copilot on the Plans page." });
+  nothingStarted(out, "cp-out-1");
+  const one = hosted({ claude: claudeOut, codex: codexOn, "copilot-status": copilotOut });
+  assert.throws(() => runner.create(one, { name: "cp-out-2", cwd: workdir }), { message: "rivet-chat: no chat started. GitHub Copilot isn't connected. Connect GitHub Copilot, or make ChatGPT first, on the Plans page." });
+  nothingStarted(one, "cp-out-2");
+  const two = hosted({ claude: claudeOn, codex: codexOn, "copilot-status": copilotOut });
+  assert.throws(() => runner.create(two, { name: "cp-out-3", cwd: workdir }), { message: "rivet-chat: no chat started. GitHub Copilot isn't connected. Connect GitHub Copilot, or make Claude or ChatGPT first, on the Plans page." });
+  nothingStarted(two, "cp-out-3");
+  assert.deepEqual(runner.list(two).filter((one) => one.status === "running"), [], "and none on another plan in its place");
+
+  // Copilot as another plan: connected, the words name it; and a plan named for one chat is the one checked.
+  fs.writeFileSync(agentFile, JSON.stringify({ firstPlan: "claude" }));
+  const claudeFirst = hosted({ claude: claudeOut, codex: codexOut, "copilot-status": copilotOn });
+  assert.throws(() => runner.create(claudeFirst, { name: "cp-out-4", cwd: workdir }), { message: "rivet-chat: no chat started. Claude isn't connected. Connect Claude, or make GitHub Copilot first, on the Plans page." });
+  const both = hosted({ claude: claudeOut, codex: codexOn, "copilot-status": copilotOn });
+  assert.throws(() => runner.create(both, { name: "cp-out-5", cwd: workdir }), { message: "rivet-chat: no chat started. Claude isn't connected. Connect Claude, or make ChatGPT or GitHub Copilot first, on the Plans page." });
+  const named = hosted({ claude: claudeOn, codex: codexOut, "copilot-status": copilotOut });
+  assert.throws(() => runner.create(named, { name: "cp-out-6", cwd: workdir, provider: "copilot" }), { message: "rivet-chat: no chat started. GitHub Copilot isn't connected. Connect GitHub Copilot on the Plans page. Claude goes first and is connected." });
+  for (const name of ["cp-out-4", "cp-out-5", "cp-out-6"]) nothingStarted(named, name);
+
+  // Only exit 1 with the line "Not connected" is signed out; any other answer, or no copilot-status, starts the chat.
+  fs.writeFileSync(agentFile, JSON.stringify({ firstPlan: "copilot" }));
+  for (const [name, answer] of [["cp-unknown-1", "echo 'Not connected'; exit 2"], ["cp-unknown-2", "echo 'Error: keychain locked'; exit 1"], ["cp-unknown-3", "exit 1"]]) {
+    fs.rmSync(reads, { force: true });
+    const c = hosted({ claude: claudeOn, codex: codexOn, "copilot-status": status(`status-${name}`, answer) });
+    assert.equal(runner.create(c, { name, cwd: workdir }).provider, "copilot", `${name}: only a definite signed-out answer refuses`);
+    assert.equal(fs.readFileSync(reads, "utf8").trim(), `${fs.realpathSync(home)}|0|0`, `${name}: its status was read once`);
+    runner.close(c, name);
+  }
+  const absent = hosted({ claude: claudeOn, codex: codexOn, "copilot-status": path.join(root, "no-copilot-status") });
+  assert.equal(runner.create(absent, { name: "cp-absent", cwd: workdir }).provider, "copilot");
+  runner.close(absent, "cp-absent");
+
+  // With no agent file: no status is read and nothing is allowed.
+  fs.rmSync(reads, { force: true });
+  const plain = runner.context({ env: callerEnv, home, socket: "rivet-chat-test", bins: { claude: claudeOut, codex: codexOut, copilot, "copilot-status": copilotOut } });
+  assert.equal(runner.create(plain, { name: "cp-plain", cwd: workdir, provider: "copilot", prompt: "logout" }).provider, "copilot");
+  assert.ok(await waitFor(() => runner.read(plain, "cp-plain").replace(/\n/g, "").includes("agent up as cp-plain: --no-auto-update --disable-builtin-mcps --secret-env-vars=COPILOT_GITHUB_TOKEN --interactive=logout [0 copilot vars]")), runner.read(plain, "cp-plain"));
+  assert.equal(fs.existsSync(reads), false, "with no agent file no status is read");
+  assert.equal(runner.create(plain, { name: "cp-default", cwd: workdir }).provider, "claude", "and a chat with no provider named is Claude's");
+  for (const name of ["cp-plain", "cp-default"]) runner.close(plain, name);
+});
+
+test("at a plan's limit the chat's card names the first other plan that is signed in, GitHub Copilot when it is the one; a Copilot chat's limit is never read", { skip }, async () => {
+  const home = path.join(root, "home6");
+  fs.mkdirSync(home);
+  const agentFile = path.join(root, "agent-limit.json");
+  fs.writeFileSync(agentFile, JSON.stringify({ firstPlan: "chatgpt" }));
+  const limited = path.join(root, "limited-6.sh");
+  fs.writeFileSync(limited, "#!/bin/sh\necho '■ You’ve hit your usage limit. Upgrade to Pro or try again at 3:05 PM.'\nwhile IFS= read -r line; do echo \"got:$line\"; done\n", { mode: 0o755 });
+  const statusOn = path.join(root, "copilot-status-on-6.sh");
+  fs.writeFileSync(statusOn, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  const c = runner.context({ env: { ...ctx.env, HOME: home, RIVET_AGENT_FILE: agentFile }, home, socket: "rivet-chat-test", bins: { claude: ctx.bins.claude, codex: limited, copilot: limited, "copilot-status": statusOn } });
+  assert.equal(runner.create(c, { name: "lim-1", cwd: workdir }).provider, "codex");
+  await waitFor(() => /usage limit/.test(runner.read(c, "lim-1")));
+  const ON = { claude: { code: 0, lines: ['{"loggedIn": true}'] }, chatgpt: { code: 0, lines: ["Logged in using ChatGPT"] }, copilot: { code: 0, lines: [] } };
+  const OUT = { claude: { code: 1, lines: ['{"loggedIn": false}'] }, chatgpt: { code: 1, lines: ["Not logged in"] }, copilot: { code: 1, lines: ["Not connected"] } };
+  const reader = (answers, statuses = []) => Object.assign((_ctx, plan) => (statuses.push(plan), answers[plan]), { statuses });
+  const posts = [];
+  const post = (ask) => posts.push(ask);
+
+  const none = reader(OUT);
+  assert.deepEqual(await runner.limitCheck(c, { post, status: none }), []);
+  assert.deepEqual(none.statuses, ["claude", "copilot"], "each other plan, in their order");
+  const unknown = reader({ claude: OUT.claude, copilot: { code: 2, lines: ["Not connected"] } });
+  assert.deepEqual(await runner.limitCheck(c, { post, status: unknown }), [], "a Copilot it cannot tell about is not offered");
+  assert.deepEqual(posts, []);
+
+  const copilotOnly = reader({ ...OUT, copilot: ON.copilot });
+  const asked = await runner.limitCheck(c, { post, status: copilotOnly });
+  assert.deepEqual(copilotOnly.statuses, ["claude", "copilot"]);
+  assert.deepEqual(asked.map((ask) => [ask.name, ask.plan, ask.until]), [["lim-1", "chatgpt", "3:05 pm"]]);
+  assert.equal(asked[0].text, "ChatGPT is at its limit until 3:05 pm. Chat lim-1 waits for it. GitHub Copilot is ready: ask your agent to start a new chat on GitHub Copilot. New chats start on the plan that goes first: change it on the Plans page.");
+  assert.deepEqual(posts, asked);
+  assert.deepEqual(await runner.limitCheck(c, { post, status: copilotOnly }), [], "asked once");
+  runner.withRegistry(c, (doc) => void delete doc.chats["lim-1"].limitAsked);
+  const bothOn = reader(ON);
+  const again = await runner.limitCheck(c, { post, status: bothOn });
+  assert.deepEqual(bothOn.statuses, ["claude"], "Claude comes first, and Copilot's status is not read");
+  assert.match(again[0].text, /Claude is ready: ask your agent to start a new chat on Claude\./);
+  assert.equal(runner.list(c).find((one) => one.name === "lim-1").provider, "codex", "never moved to another plan");
+  runner.close(c, "lim-1");
+
+  // A Copilot chat whose screen shows another plan's limit words: Copilot's limit is not read, so no status is and no card is made.
+  assert.equal(runner.create(c, { name: "lim-2", cwd: workdir, provider: "copilot" }).provider, "copilot");
+  await waitFor(() => /usage limit/.test(runner.read(c, "lim-2")));
+  assert.deepEqual(await runner.limitCheck(c, { post: () => assert.fail("a Copilot chat posts nothing"), status: () => assert.fail("nor reads a status") }), []);
+  assert.equal(runner.readRegistry(c).chats["lim-2"].limitAsked, undefined);
+  runner.close(c, "lim-2");
 });
 
 test("projectLists: RIVET_PROJECTS_FILE's list, else one project per work clone, each its RIVET_REPOS repo", () => {

@@ -5,6 +5,7 @@ import type { ServedNeed } from "../src/shared/board.js";
 import type { ChatMessage } from "../src/shared/command.js";
 import { answerText, TEAM_ROOM_ID, UPDATES_ID } from "../src/shared/conversations.js";
 import { stopText } from "../web/src/views/thing.js";
+import { hasUnsent } from "../web/src/new-build.js";
 import { fakeServer, type FakeConversation, type FakeServer } from "./conversations-fake.js";
 
 // The Chat tab: one conversation with Rivet, with no page per thing.
@@ -622,14 +623,73 @@ describe("a thing's lines in Chat", () => {
   });
 
   it("an ask's Done card reads Outcome in its bubble; another Got it card still reads Decision", async () => {
-    server.messages.push(rivet("p5", "k1", 46, { text: "Done: Boss reel", posted: { id: "ask-a-1000-done", kind: "decision", title: "Done: Boss reel" } }));
+    server.messages.push(rivet("p5", "k1", 46, { text: "Done: Boss reel", posted: { id: "ask-a-10-done", kind: "decision", title: "Done: Boss reel" } }));
     server.messages.push(rivet("p6", "g1", 46, { text: "Good morning", posted: { id: "morning-2026-11-24", kind: "decision", title: "Good morning" } }));
     await onChat();
     expect(root.querySelector('.chat-msg[data-id="p5"] .chat-posted-kind')!.textContent).toBe("Outcome");
     expect(root.querySelector('.chat-msg[data-id="p6"] .chat-posted-kind')!.textContent).toBe("Decision");
   });
 
-  describe("a card answered in its chat (inChat, a-1012)", () => {
+  it("a Done card as the server posts it reads Outcome with its card on the board, at load and on the stream (a-12)", async () => {
+    // A Done line and its card in the shape the server posts them: what is done as the line's ask, Got it on the board.
+    const done = (ask: string) => ({ id: `ask-${ask}-done`, kind: "decision", title: "Done: Results page: a tidy-up of the…", ask: "Results page tidied; a still sent" });
+    const card = (ask: string) => ({ ...done(ask), ask: `You asked: Results page: a tidy-up of the rows\nDone: ${done(ask).ask}`, options: [{ label: "Got it" }], push: "fyi", rev: "r1" }) as unknown as ServedNeed;
+    const kind = (id: string) => root.querySelector(`.chat-msg[data-id="${id}"] .chat-posted-kind`)!.textContent;
+    server.messages.push(rivet("p7", "k1", 46, { text: done("a-10").title, posted: done("a-10") }));
+    board([card("a-10")]);
+    await onChat();
+    expect(kind("p7")).toBe("Outcome");
+    // The next ask closes while Chat is open: its card is on the board as its line arrives.
+    board([card("a-10"), card("a-11")]);
+    fire("message", rivet("p8", "k1", 47, { text: done("a-11").title, posted: done("a-11") }));
+    await settle();
+    expect(kind("p8")).toBe("Outcome");
+    expect([...root.querySelectorAll(".chat-posted-kind")].filter((el) => el.textContent === "Decision")).toEqual([]);
+  });
+
+  it("a draft left in the box holds no new build back: it is saved as typed and is in the box again after the reload (a-12)", async () => {
+    await onChat();
+    expect(hasUnsent(document)).toBe(false);
+    type("Half a message, left here for days");
+    // The box holds exactly what is saved, so a reload loses nothing.
+    expect(localStorage.getItem("rivet.chat.draft")).toBe(box().value);
+    expect(hasUnsent(document)).toBe(false);
+    // Words in the box that are not the saved ones would be lost, so they still hold it.
+    box().value = "Typed, not saved";
+    expect(hasUnsent(document)).toBe(true);
+    type("Half a message, left here for days");
+    // The reload: the page is gone, and Chat mounts again from what the phone kept.
+    chat.unmount();
+    root.replaceChildren();
+    chat.mount(root);
+    await settle();
+    expect(box().value).toBe("Half a message, left here for days");
+    expect(hasUnsent(document)).toBe(false);
+  });
+
+  it("a send whose answer was lost holds the new build: the page alone knows it went, and a reload would send it twice (a-12)", async () => {
+    await onChat();
+    // The server answers 503: the words stay in the box, saved, and the next Send is a retry under the same clientId.
+    server.failWith = 503;
+    send("Ship it");
+    await settle();
+    expect(box().value).toBe("Ship it");
+    expect(localStorage.getItem("rivet.chat.draft")).toBe("Ship it");
+    expect(hasUnsent(document)).toBe(true);
+    // Other words in the box are not that send, and a saved draft of them holds nothing.
+    type("Something else");
+    expect(hasUnsent(document)).toBe(false);
+    // The retry is answered: nothing is out, and the box is empty.
+    server.failWith = null;
+    send("Ship it");
+    await settle();
+    expect(server.posted.filter((body) => body.text === "Ship it")).toHaveLength(1);
+    expect(hasUnsent(document)).toBe(false);
+    type("Ship it");
+    expect(hasUnsent(document)).toBe(false);
+  });
+
+  describe("a card answered in its chat (inChat, a-12)", () => {
     const CARD = {
       id: "note-1",
       kind: "decision",

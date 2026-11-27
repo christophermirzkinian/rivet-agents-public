@@ -119,6 +119,18 @@ test("--verify of an unknown reply exits 1", async () => {
   assert.match(r.stderr, /no such reply/);
 });
 
+test("a value flag never takes the next flag as its value",async () => {
+  const media = await run(["--media", "pr2022-staging", "--before", "--after", "/x.png", "board.json"]);
+  assert.notEqual(media.code, 0);
+  assert.match(media.stderr, /--before needs a file/);
+  const id = await run(["--handled", "--replace", "board.json"]);
+  assert.equal(id.code, 2, id.stderr);
+  assert.match(id.stderr, /--handled needs a reply id/);
+  const version = await run(["board.json", "--if-match", "--replace"]);
+  assert.equal(version.code, 2, version.stderr);
+  assert.match(version.stderr, /--if-match needs a version/);
+});
+
 test("--media gives each upload and the board PUT after them their own timeouts", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rivet-media-"));
   const board = path.join(dir, "board.json");

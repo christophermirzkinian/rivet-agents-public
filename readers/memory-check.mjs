@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { takeUnits } from "../bridge/lib/text-units.mjs";
 import { formatLog, makeExec, resolveBin } from "../bridge/lib/config.mjs";
 import { NO_RUN } from "../bridge/lib/scheduled-run.mjs";
 import { zoneDay } from "../bridge/lib/spend.mjs";
@@ -158,7 +159,7 @@ export function batchPrompt(batch) {
       `Description: ${redact(n.description)}`,
       `Not found on main: ${n.gone.map((g) => `${g.name} (${g.kind})`).join(", ")}`,
       "Where the note names them (redacted):",
-      context(redact(n.body), n.gone).slice(0, NOTE_CHARS),
+      takeUnits(context(redact(n.body), n.gone), NOTE_CHARS),
       "",
     );
   }
@@ -514,7 +515,13 @@ async function pass(repo, memoryDir, dryRun, log) {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  runReader(JOB, main).then((code) => {
-    process.exitCode = code;
-  });
+  const unexpected = process.argv.slice(2).find((arg) => arg !== "--dry-run");
+  if (unexpected !== undefined) {
+    console.error(`usage: memory-check.mjs [--dry-run]: unexpected argument ${JSON.stringify(unexpected)}`);
+    process.exitCode = 2;
+  } else {
+    runReader(JOB, main).then((code) => {
+      process.exitCode = code;
+    });
+  }
 }

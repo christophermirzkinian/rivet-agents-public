@@ -60,16 +60,22 @@ const line = (text: string): string => {
   return folded.length > MAX_DONE_ITEM ? `${folded.slice(0, MAX_DONE_ITEM - 1)}…` : folded;
 };
 
+/** What a done card says is done: the closer's items, else the move's note, else the ask's last why. */
+export function doneItems(ask: Pick<Ask, "why">, details?: string | DoneDetails): string[] {
+  const { note, done } = typeof details === "string" ? { note: details } : (details ?? {});
+  const said = (done ?? []).map(line).filter(Boolean).slice(0, MAX_DONE_ITEMS);
+  // The note and the why were written for another reader and passed no word rule: one the card may not say is left out.
+  return said.length ? said : [note, ask.why].map((text) => line(text ?? "")).filter((text) => text && !NOT_CARD_COPY.test(text)).slice(0, 1);
+}
+
 /**
  * "Done: <short title>" in the ask's conversation. Its text is "You asked: <his words, one short line>", then what is
  * done: the closer's items, else the move's own note, else the ask's last why; one sits on the Done line, more are "- "
  * lines under it. With none of them the card still says what was asked.
  */
 export function doneCard(ask: Ask, title: string, details?: string | DoneDetails): { id: string; media?: Media } & Record<string, unknown> {
-  const { note, done, media } = typeof details === "string" ? { note: details } : (details ?? {});
-  const said = (done ?? []).map(line).filter(Boolean).slice(0, MAX_DONE_ITEMS);
-  // The note and the why were written for another reader and passed no word rule: one the card may not say is left out.
-  const items = said.length ? said : [note, ask.why].map((text) => line(text ?? "")).filter((text) => text && !NOT_CARD_COPY.test(text)).slice(0, 1);
+  const media = typeof details === "string" ? undefined : details?.media;
+  const items = doneItems(ask, details);
   return {
     id: doneCardId(ask.id),
     kind: DECISION,

@@ -135,7 +135,7 @@ export function register(router: Router): void {
   const { config, store, bridge, push, requireSession, now, logger, addUpdate } = router.deps;
   const commands = new CommandStore(config.dataDir);
   router.deps.ownerLines((id) => commands.getChatMessage(id)?.from === "owner");
-  const media = new MediaStore(config.dataDir, commands, () => boardMedia());
+  const media = new MediaStore(config.dataDir, commands, () => boardMedia(), undefined, undefined, config.sendCapBytes, config.uploadIdleMs);
   const leases = new LogLeases();
   const { schedules } = router.deps;
   /** Chat streams and the request that opened each, so its session is checked again on every write. */

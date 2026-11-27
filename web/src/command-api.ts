@@ -61,6 +61,16 @@ export function heardCancelled(ids: readonly string[]): void {
   for (const listener of cancelHeard) listener(ids);
 }
 
+/**
+ * A Chat send of these words is out or its answer was lost, so its clientId, held here alone, is what makes the next
+ * Send a retry of it and never a second message (sendChat's key starts with its words).
+ */
+export function chatSendOut(words: string): boolean {
+  const start = `chat\n${words.trim()}\n`;
+  for (const key of unresolved.keys()) if (key.startsWith(start)) return true;
+  return false;
+}
+
 export async function once<T extends { id: string }>(key: string, send: (clientId: string) => Promise<T>): Promise<T> {
   let id = unresolved.get(key);
   if (!id) {

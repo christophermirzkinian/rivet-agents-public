@@ -132,15 +132,15 @@ export function parseArgs(argv) {
     else if (a === "--card") o.card = true;
     else if (a === "--ask") {
       const value = argv[++i];
-      if (value === undefined || !/^[a-z0-9-]{1,40}$/.test(value)) throw new Error("--ask takes an ask id, as a-1");
+      if (value === undefined || value.startsWith("--") || !/^[a-z0-9-]{1,40}$/.test(value)) throw new Error("--ask takes an ask id, as a-1");
       o.ask = value;
     } else if (a === "--chat") {
       const value = argv[++i];
-      if (value === undefined || !isChatName(value)) throw new Error("--chat takes a chat name");
+      if (value === undefined || value.startsWith("--") || !isChatName(value)) throw new Error("--chat takes a chat name");
       o.chat = value;
     } else if (a === "--pr" || a === "--repo") {
       const value = argv[++i];
-      if (value === undefined) throw new Error(`${a} needs a value`);
+      if (value === undefined || value.startsWith("--")) throw new Error(`${a} needs a value`);
       if (a === "--repo") {
         if (!REPO_RE.test(value)) throw new Error("--repo takes owner/name");
         o.repo = value;
@@ -151,7 +151,7 @@ export function parseArgs(argv) {
     }
     else if (a === "--file") {
       const value = argv[++i];
-      if (value === undefined) throw new Error(`${a} needs a value`);
+      if (value === undefined || value.startsWith("--")) throw new Error(`${a} needs a value`);
       if (o.file !== undefined) throw new Error("one --file at most");
       if (!path.isAbsolute(value) || !/\.pdf$/i.test(value)) throw new Error("--file takes the absolute path of a pdf");
       o.file = value;

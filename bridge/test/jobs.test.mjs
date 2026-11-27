@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { execFileSync } from "node:child_process";
+import childProcess, { execFileSync } from "node:child_process";
+import { EventEmitter } from "node:events";
 import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -41,6 +43,7 @@ test("the Mac takes only a job action the server would have made", () => {
   assert.deepEqual(validJobAction(TASK), TASK);
   assert.deepEqual(validJobAction({ op: "pause", id: ID }), { op: "pause", id: ID });
   assert.deepEqual(validJobAction({ op: "run", id: ID, plan: "chatgpt" }), { op: "run", id: ID, plan: "chatgpt" });
+  assert.deepEqual(validJobAction({ op: "run", id: ID, plan: "copilot" }), { op: "run", id: ID, plan: "copilot" });
   assert.deepEqual(validJobAction({ op: "run", id: ID, plan: "claude" }), { op: "run", id: ID, plan: "claude" });
   assert.deepEqual(validJobAction({ ...CHECK, spec: { ...CHECK.spec, check: { ...CHECK.spec.check, where: "mac" } } }), CHECK, "an older job's where is dropped");
   for (const bad of [
@@ -127,6 +130,39 @@ test("a job's LaunchAgent: its label, node and job-run with the job id, the loca
   assert.throws(() => programArgs({ nodeBin: NODE, jobRun: "/x/$(id)/job-run.mjs" }, ID, "0 9 * * 1"));
   assert.throws(() => programArgs({ nodeBin: NODE, jobRun: JOB_RUN }, "j-../../x", "0 9 * * 1"));
   for (const cron of ["0 9 * * 1; id", "0 9 * *", "*/5 */2 * * 1-5", "0 9 * * 1 ", undefined]) assert.throws(() => programArgs({ nodeBin: NODE, jobRun: JOB_RUN }, ID, /** @type {any} */ (cron)), String(cron));
+});
+
+test("a job's LaunchAgent keeps its original environment when RIVET_URL is unset or empty", () => {
+  const deps = { nodeBin: NODE, jobRun: JOB_RUN, env: { PATH: "/bin", HOME: "/h" } };
+  const text = plistText(deps, TASK);
+  assert.equal(text.match(/  <key>EnvironmentVariables<\/key>\n  <dict>[\s\S]*?\n  <\/dict>/)?.[0], [
+    "  <key>EnvironmentVariables</key>",
+    "  <dict>",
+    "    <key>PATH</key>",
+    "    <string>/bin</string>",
+    "    <key>HOME</key>",
+    "    <string>/h</string>",
+    "  </dict>",
+  ].join("\n"));
+  assert.equal(plistText({ ...deps, env: { ...deps.env, RIVET_URL: "" } }, TASK), text, "an empty URL changes no bytes");
+});
+
+test("a job's LaunchAgent inherits a non-empty RIVET_URL as one XML-escaped environment value", () => {
+  const url = "https://jobs.example.test/?a=1&b=<tag>\"'</string><key>RunAtLoad</key><true/>";
+  const deps = { nodeBin: NODE, jobRun: JOB_RUN, env: { PATH: "/bin", HOME: "/h" } };
+  const text = plistText({ ...deps, env: { ...deps.env, RIVET_URL: url } }, TASK);
+  assert.equal(text, plistText(deps, TASK).replace("    <string>/h</string>\n", [
+    "    <string>/h</string>",
+    "    <key>RIVET_URL</key>",
+    "    <string>https://jobs.example.test/?a=1&amp;b=&lt;tag&gt;&quot;&apos;&lt;/string&gt;&lt;key&gt;RunAtLoad&lt;/key&gt;&lt;true/&gt;</string>",
+    "",
+  ].join("\n")), "only the URL's key and escaped value are added");
+  if (fs.existsSync(PLUTIL_BIN)) {
+    const plist = plistJson(text);
+    assert.deepEqual(plist.EnvironmentVariables, { ...deps.env, RIVET_URL: url });
+    assert.equal(plist.RunAtLoad, undefined);
+  }
+  assert.throws(() => plistText({ ...deps, env: { ...deps.env, RIVET_URL: "https://jobs.example.test/\n" } }, TASK), /control character/);
 });
 
 test("a job's chat: claude -p on Opus that can read and report, and never merge, deploy, edit, commit or push", () => {
@@ -336,6 +372,27 @@ test("makes, switches and removes only the job's own LaunchAgent, with fixed lau
   }
 });
 
+test("setting an installed job again rewrites its plist when the bridge's RIVET_URL changes", async () => {
+  const stub = launchdStub();
+  const TARGET = `gui/501/${LABEL}`;
+  try {
+    const original = plistText(stub.deps, TASK);
+    for (const url of [undefined, "https://first.example.test", "https://second.example.test", ""]) {
+      if (url === undefined) delete stub.deps.env.RIVET_URL;
+      else stub.deps.env.RIVET_URL = url;
+      stub.calls.length = 0;
+      assert.equal((await runJobAction(stub.deps, TASK)).status, "succeeded");
+      const text = fs.readFileSync(stub.plist, "utf8");
+      assert.equal(text, plistText(stub.deps, TASK));
+      if (url) assert.ok(text.includes(`    <key>RIVET_URL</key>\n    <string>${url}</string>`));
+      else assert.equal(text, original);
+      assert.deepEqual(stub.launchctl(), [["bootout", TARGET], ["print", TARGET], ["enable", TARGET], ["bootstrap", "gui/501", stub.plist]]);
+    }
+  } finally {
+    stub.cleanup();
+  }
+});
+
 test("an unload waits for launchd to drop the job, and a look launchctl could not make is never taken for gone", async () => {
   const TARGET = `gui/501/${LABEL}`;
   const stubs = [];
@@ -412,6 +469,82 @@ test("Ops › Schedules leaves the jobs' LaunchAgents to Ops › Scheduled", asy
 });
 
 // job-run.mjs
+
+function jobChild(t) {
+  const child = Object.assign(new EventEmitter(), { stdout: new EventEmitter(), stderr: new EventEmitter() });
+  t.mock.method(childProcess, "spawn", () => child);
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  return child;
+}
+
+test("job-run: the collector preserves UTF-8 across interleaved stdout and stderr chunks", () => {
+  for (const [stdout, stderr] of [["€", "😀"], ["😀", "€"]]) {
+    const a = Buffer.from(stdout);
+    const b = Buffer.from(stderr);
+    for (let i = 1; i < a.length; i++) for (let j = 1; j < b.length; j++) {
+      const out = outputCollector();
+      out.take(a.subarray(0, i));
+      out.take(b.subarray(0, j), "stderr");
+      out.take(Buffer.concat([a.subarray(i), Buffer.from("\r\n")]));
+      out.take(b.subarray(j), "stderr");
+      const lines = out.end(["done"]);
+      assert.deepEqual(lines, [stdout, stderr, "done"]);
+      assert.ok(lines.every((line) => !line.includes("\uFFFD")));
+    }
+  }
+});
+
+for (const view of ["kept", "watch"]) test(`job-run: UTF-8 ${view} lines survive interleaved stdout and stderr chunks`, async (t) => {
+  const child = jobChild(t);
+  const seen = [];
+  const result = spawnRun(process.env)("stub", [], { cwd: os.tmpdir(), timeoutMs: 10_000, watch: (stream, line) => seen.push([stream, line]) });
+  const stdout = Buffer.from("€\r\n");
+  const stderr = Buffer.from("😀");
+  child.stdout.emit("data", stdout.subarray(0, 1));
+  child.stderr.emit("data", stderr.subarray(0, 2));
+  child.stdout.emit("data", stdout.subarray(1));
+  child.stderr.emit("data", stderr.subarray(2));
+  const beforeClose = seen.slice();
+  child.emit("close", 0);
+  const ran = await result;
+  assert.equal(ran.code, 0);
+  if (view === "kept") {
+    assert.deepEqual(ran.lines, ["€", "😀"]);
+    assert.ok(ran.lines.every((line) => !line.includes("\uFFFD")));
+  } else {
+    assert.deepEqual(beforeClose, [["stdout", "€"]], "the unterminated stderr line waits for close");
+    assert.deepEqual(seen, [["stdout", "€"], ["stdout", ""], ["stderr", "😀"]]);
+    assert.ok(seen.every(([, line]) => !line.includes("\uFFFD")));
+  }
+});
+
+test("job-run: closing flushes incomplete UTF-8 from both collector and watch decoders", async (t) => {
+  const child = jobChild(t);
+  const seen = [];
+  const result = spawnRun(process.env)("stub", [], { cwd: os.tmpdir(), timeoutMs: 10_000, watch: (stream, line) => seen.push([stream, line]) });
+  child.stdout.emit("data", Buffer.from([0xe2, 0x82]));
+  child.stderr.emit("data", Buffer.from([0xf0, 0x9f]));
+  assert.deepEqual(seen, []);
+  child.emit("close", 0);
+  assert.deepEqual((await result).lines, ["\uFFFD\uFFFD"]);
+  assert.deepEqual(seen, [["stdout", "\uFFFD"], ["stderr", "\uFFFD"]]);
+});
+
+test("job-run: a raw run keeps split UTF-8 stdout bytes unchanged and ignores stderr", async (t) => {
+  const child = jobChild(t);
+  const result = spawnRun(process.env)("stub", [], { cwd: os.tmpdir(), timeoutMs: 10_000, raw: true });
+  const stdout = Buffer.from(`€😀\r\n\0${"x".repeat(600)}\n`);
+  child.stdout.emit("data", stdout.subarray(0, 1));
+  child.stderr.emit("data", Buffer.from("ignored 😀\n"));
+  child.stdout.emit("data", stdout.subarray(1, 5));
+  child.stderr.emit("data", Buffer.from([0xff]));
+  child.stdout.emit("data", stdout.subarray(5));
+  child.emit("close", 0);
+  const ran = await result;
+  assert.equal(ran.code, 0);
+  assert.deepEqual(Buffer.from(ran.lines.join("\n"), "utf8"), stdout);
+});
 
 /** What spawnRun gives for this output: the fakes print raw lines, as a check does. */
 function printed(result) {

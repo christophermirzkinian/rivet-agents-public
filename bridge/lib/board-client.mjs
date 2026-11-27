@@ -47,7 +47,7 @@ export function mediaFlag(argv, i, m) {
   }
   if (a === "--before" || a === "--after" || a === "--poster") {
     const value = argv[i + 1];
-    if (value === undefined) throw new Error(`${a} needs a file`);
+    if (value === undefined || value.startsWith("--")) throw new Error(`${a} needs a file`);
     m[/** @type {"before" | "after" | "poster"} */ (a.slice(2))] = value;
     return i + 1;
   }

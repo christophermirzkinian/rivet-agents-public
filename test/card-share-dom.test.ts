@@ -334,7 +334,7 @@ describe("Share on a card", () => {
     expect(flashed).toEqual(["Copied"]);
   });
 
-  it("sends a card answered in its chat as written (a-1012)", () => {
+  it("sends a card answered in its chat as written (a-12)", () => {
     expect(cardShareText({ title: "Rivet lost the file", ask: "Rivet said so", inChat: { label: "To the team" } })).toBe("Rivet lost the file\n\nRivet said so");
     expect(cardShareText({ title: "Rivet lost the file" })).toBe("Rivet lost the file");
   });

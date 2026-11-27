@@ -4,7 +4,7 @@ import { takesDecision, threadKey } from "../src/shared/answers.js";
 import { boardSchema, needSchema } from "../src/shared/board.js";
 import type { ChatPage } from "../src/shared/command.js";
 import { UPDATES_ID } from "../src/shared/conversations.js";
-import { MAX_CARDS, needRev, openBoard, makeCardRoom, UPDATE_KEEP_MS, withoutHandled, withServerFields } from "../src/server/http.js";
+import { HANDLED_DROP_MS, MAX_CARDS, needRev, openBoard, makeCardRoom, UPDATE_KEEP_MS, withoutHandled, withServerFields } from "../src/server/http.js";
 import { boardPayloads, cardPayload, needLevel } from "../src/server/push.js";
 import { bearer, BOARD_TOKEN, browser, fakeClock, putBoard, revOf, startServer, type TestServer } from "./helpers.js";
 
@@ -26,10 +26,11 @@ describe("the update card's shape", () => {
     }
   });
 
-  it("keeps thread, tag and comments to update cards", () => {
-    for (const news of [{ thread: "main" }, { tag: "Merged" }, { comments: [] }]) {
+  it("keeps thread and tag to update cards; any card takes the lines under it", () => {
+    for (const news of [{ thread: "main" }, { tag: "Merged" }]) {
       expect(needSchema.safeParse({ ...question, ...news }).success, JSON.stringify(news)).toBe(false);
     }
+    expect(needSchema.safeParse({ ...question, comments: [{ from: "owner", text: "why?", at: AT }] }).success).toBe(true);
   });
 
   it("takes Seen or a comment, and only it takes Seen", () => {
@@ -234,7 +235,15 @@ describe("update cards on the board", () => {
     expect(((await res.json()) as { item: { comments: unknown[] } }).item.comments).toEqual([{ from: "rivet", text: "understood", at: expect.stringMatching(/^\d{4}-\d\d-\d\dT/) }]);
     expect(await revOf(server.base, cookie, "u1")).not.toBe(before);
     expect((await note("u1", { text: "x" }, browser(cookie))).status).toBe(401);
-    expect((await note("q1", { text: "x" })).status).toBe(409);
+    // A card waiting on him takes a line too, at the same revision; a Got it card takes none.
+    const q1 = await revOf(server.base, cookie, "q1");
+    expect((await note("q1", { text: "x" })).status).toBe(201);
+    expect(await revOf(server.base, cookie, "q1")).toBe(q1);
+    const stored = server.app.store.getBoard()!;
+    expect(server.app.store.putBoard({ ...stored.board, needs: [...stored.board.needs, needSchema.parse({ id: "g1", kind: "decision", title: "Shipped", options: [{ label: "Got it" }] })] }, stored.version)).toBeTruthy();
+    const gotIt = await note("g1", { text: "x" });
+    expect(gotIt.status).toBe(409);
+    expect(((await gotIt.json()) as { error: string }).error).toBe("card g1 is a Got it card: answer in its chat");
     expect((await note("nope", { text: "x" })).status).toBe(404);
     expect((await note("u1", { text: " " })).status).toBe(400);
   });
@@ -305,6 +314,23 @@ describe("update cards on the board", () => {
     expect(withoutHandled(server.app.store, stored, soon)).toBeNull();
     const kept = withoutHandled(server.app.store, stored, new Date(Date.now() + UPDATE_KEEP_MS + 60_000));
     expect(kept!.needs.map((need) => need.id)).toEqual(["q1"]);
+  });
+
+  it("drops a card with options for a handled comment, as it does a question: the comment is its answer", () => {
+    const store = server.app.store;
+    const pick = { id: "pick-1", kind: "decision", title: "Which layout?", ask: "A or B?", options: [{ label: "A" }, { label: "B" }] };
+    const asked = { id: "ask-1", kind: "question", title: "What colour?", ask: "Say a colour." };
+    store.putBoard(boardSchema.parse({ ...BASE, needs: [pick, asked] }), null);
+    const board = store.getBoard()!.board;
+    const comment = (id: string, text: string) => {
+      const need = board.needs.find((one) => one.id === id)!;
+      return store.markHandled(store.addReply({ clientId: `client-${id}-comment`, itemId: id, itemTitle: need.title, decision: "comment", text, rev: needRev(need), item: need }).id);
+    };
+    const later = () => new Date(Date.now() + HANDLED_DROP_MS + 60_000);
+    comment("pick-1", "Why A?");
+    expect(withoutHandled(store, board, later())!.needs.map((need) => need.id)).toEqual(["ask-1"]);
+    comment("ask-1", "Blue");
+    expect(withoutHandled(store, board, later())!.needs).toEqual([]);
   });
 
   it("answers a card written into a full board with that card, after making room", async () => {

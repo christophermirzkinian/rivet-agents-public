@@ -64,7 +64,7 @@ describe("needRev and a card's proof", () => {
     expect(needRev({ ...card, askId: undefined } as typeof card)).toBe(needRev(card));
   });
 
-  it("a card answered in its chat pins that; every other card keeps the revision it had (a-1012)", () => {
+  it("a card answered in its chat pins that; every other card keeps the revision it had (a-12)", () => {
     const card = { id: "q", kind: "decision", title: "T", ask: "A", options: [{ label: "Send", recommended: true }, { label: "Not now" }] } as Parameters<typeof needRev>[0];
     expect(needRev(card)).toBe("a85bbaaf7da5ac21");
     const plain = { ...card, options: [{ label: "Send" }, { label: "Not now" }] };

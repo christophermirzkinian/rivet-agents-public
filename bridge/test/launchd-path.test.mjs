@@ -33,3 +33,38 @@ test("a launchd PATH puts ~/.local/bin first, so a shim there wins over Homebrew
   assert.equal(run(shim), shim);
   assert.equal(run("/opt/homebrew/bin:/usr/bin"), "/opt/homebrew/bin:/usr/bin");
 });
+
+test("a launchd PATH drops any checkout's .claude/bin, repeated or with a trailing slash", () => {
+  const home = "/home/robot";
+  const run = (entries) => execFileSync("/bin/bash", ["-c", `. "$1"; launchd_path "$2"`, "test", SCRIPT, entries.join(":")], { encoding: "utf8", env: { HOME: home } });
+  assert.equal(
+    run([
+      `${home}/workspaces/example-repo/monitor/.claude/bin`,
+      `${home}/workspaces/example-repo/monitor/.claude/bin`,
+      `${home}/runner/wt/credit-issue-sweep-2026-11-25T12-30-00-512Z/.claude/bin`,
+      "/srv/checkout/.claude/bin/",
+      "/srv/checkout/.claude/bin//",
+      `${home}/Documents/`,
+      "/opt/homebrew/bin",
+      "/opt/homebrew/bin/",
+      "/usr/bin",
+    ]),
+    "/opt/homebrew/bin:/usr/bin",
+  );
+});
+
+test("a launchd PATH drops Codex's per-run temp dirs and its package's codex-path helper dir", () => {
+  const home = "/home/robot";
+  const run = (entries) => execFileSync("/bin/bash", ["-c", `. "$1"; launchd_path "$2"`, "test", SCRIPT, entries.join(":")], { encoding: "utf8", env: { HOME: home } });
+  assert.equal(
+    run([
+      `${home}/accounts/1b9a11f1/home/tmp/arg0/codex-arg0JnmtD5`,
+      `${home}/accounts/1b9a11f1/home/tmp/arg0/codex-arg0FJ6PYe/`,
+      `${home}/.nvm/versions/node/v24.13.1/lib/node_modules/@openai/codex/vendor/aarch64-apple-darwin/codex-path`,
+      "/opt/homebrew/bin",
+      `${home}/tmp/bin`,
+      "/usr/bin",
+    ]),
+    `/opt/homebrew/bin:${home}/tmp/bin:/usr/bin`,
+  );
+});

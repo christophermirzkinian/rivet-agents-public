@@ -1,16 +1,18 @@
-import { FILE_EXTENSIONS, fileTypeOf, isAvType, isBigType, MAX_AV_BYTES, MAX_CHAT_FILES, type FileRef } from "../../../src/shared/board.js";
-import { MAX_CHAT_IMAGES, MAX_FILE_BYTES, type ChatFile } from "../../../src/shared/command.js";
+import { FILE_EXTENSIONS, fileTypeOf, isAvType, MAX_CHAT_FILES, MAX_SEND_BYTES, type FileRef } from "../../../src/shared/board.js";
+import { MAX_CHAT_IMAGES, type ChatFile } from "../../../src/shared/command.js";
 import { ApiError, uploadFile, uploadImage } from "../api.js";
 import { agentNoun } from "../cloud-agent.js";
 import { button, describe, h, keepFocus, svg } from "../dom.js";
 import { prepareImage } from "../image.js";
-import { fetchDocument, fileSize, openDocument, previewKind } from "./documents.js";
+import { fetchDocument, fileSize, openDocument, previewKind, VIEWER_MAX_BYTES } from "./documents.js";
 import { openImages } from "./lightbox.js";
 
 // The attach button and its preview, for the Chat composer, the card answer sheet and the desktop comment box alike:
 // several photos and several files. A photo is prepared and uploaded as soon as it is picked, and a file uploaded as
 // it is, so Send only has to name them. State lives with the caller, so a view that is rebuilt (the card sheet) shows
 // the same attachments again.
+
+export { VIEWER_MAX_BYTES };
 
 /** A paper clip: the button takes photos and documents alike. */
 const CLIP =
@@ -22,9 +24,8 @@ const PHOTO =
 export const PHOTO_FAILED = "The photo didn't upload. Try again or remove it.";
 export const FILE_FAILED = "The file didn't upload. Try again or remove it.";
 export const FILE_REFUSED = "That file type can't be sent. Attach photos, videos, music, PDFs, text files, Office documents, emails, ZIPs or GLB models.";
-export const FILE_TOO_BIG = "That file is over 25 MB. Send a smaller one.";
-export const AV_TOO_BIG = "That video or sound file is over 100 MB. Send a shorter one.";
-export const BIG_TOO_BIG = "That file is over 100 MB. Send a smaller one.";
+export const FILE_TOO_BIG = "That file is over 500 MB. Send a smaller one.";
+export const AV_TOO_BIG = "That video or sound file is over 500 MB. Send a shorter one.";
 
 /** What the picker offers: photos, and the documents, videos and sound the server takes, by extension and by type (iOS lists both). */
 export const ACCEPT = ["image/*", ...Object.keys(FILE_EXTENSIONS).map((extension) => `.${extension}`), ...new Set(Object.values(FILE_EXTENSIONS))].join(",");
@@ -40,8 +41,7 @@ export function sortPick(file: File): { kind: "photo" } | { kind: "file" } | { k
   // Some pickers give a photo no type, or a generic one: its extension says it is a photo, and the redraw checks it is.
   if (type !== "image/gif" && (file.type.startsWith("image/") || PHOTO_EXTENSION.test(file.name))) return { kind: "photo" };
   if (!type) return { kind: "refused", reason: FILE_REFUSED };
-  if (isBigType(type)) return file.size > MAX_AV_BYTES ? { kind: "refused", reason: isAvType(type) ? AV_TOO_BIG : BIG_TOO_BIG } : { kind: "file" };
-  return file.size > MAX_FILE_BYTES ? { kind: "refused", reason: FILE_TOO_BIG } : { kind: "file" };
+  return file.size > MAX_SEND_BYTES ? { kind: "refused", reason: isAvType(type) ? AV_TOO_BIG : FILE_TOO_BIG } : { kind: "file" };
 }
 
 const DOC =
@@ -212,7 +212,7 @@ export function photosControl(state: PhotosState, options: { onChange(): void; o
   /** Whether a photo the browser could not draw can go as a file instead: a HEIC or HEIF, with room for one more file. */
   const asFile = (file: File) => {
     const type = fileTypeOf(file.name);
-    return (type === "image/heic" || type === "image/heif") && file.size <= MAX_FILE_BYTES && count(true) < MAX_CHAT_FILES;
+    return (type === "image/heic" || type === "image/heif") && file.size <= MAX_SEND_BYTES && count(true) < MAX_CHAT_FILES;
   };
 
   async function load(photo: Photo, file: File, signal: AbortSignal): Promise<void> {
@@ -556,11 +556,14 @@ export function fileLink(file: ChatFile, share: () => boolean = () => true): HTM
   const type = fileTypeOf(file.name);
   const sized = typeof file.bytes === "number" && file.bytes > 0 ? file.bytes : undefined;
   const link = h("a", { class: "chat-file", attrs: { href, target: "_blank", rel: "noopener", "data-use": "chat.msg.file" } }, fileChip(file.name, sized));
-  if (type && previewKind(type)) {
+  // The viewer reads a document whole into the phone's memory, so one known to be over VIEWER_MAX_BYTES follows its
+  // link instead. A chat line's own file carries no size: fetchDocument refuses to read that one past the same cap,
+  // and the viewer says it is too big to open here.
+  if (type && previewKind(type) && (sized ?? 0) <= VIEWER_MAX_BYTES) {
     link.addEventListener("click", (event) => {
       if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       event.preventDefault();
-      openDocument(file.name, type, () => fetchDocument(href, file.name, type), share);
+      openDocument(file.name, type, () => fetchDocument(href, file.name, type, undefined, VIEWER_MAX_BYTES), share);
     });
   }
   return link;

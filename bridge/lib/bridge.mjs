@@ -741,34 +741,43 @@ export function createBridge(deps) {
       // Yields first so `worker` is assigned before this clears it; a stale promise
       // left in `worker` spins finish() forever and freezes the whole bridge.
       await null;
-      while (queue.length > 0 && !failure && !stop?.aborted) {
-        const next = takeNext();
-        if (next.event === "late-ask") {
-          await processLateAsk(next.raw);
-          continue;
+      try {
+        while (queue.length > 0 && !failure && !stop?.aborted) {
+          const next = takeNext();
+          // Unacked alerts are resent by the server. Keep the queue moving.
+          try {
+            if (next.event === "late-ask") {
+              await processLateAsk(next.raw);
+              continue;
+            }
+            if (next.event === "ops-pickup") {
+              await processOpsPickup(next.raw, next.at);
+              continue;
+            }
+          } catch (err) {
+            log("process-failed", { event: next.event, error: short(err) });
+            continue;
+          }
+          let result;
+          try {
+            const family = actions.get(next.event);
+            if (family) result = await family.handle(next.event, next.raw, { deps, listTerminals, sendLine });
+            else result = next.event === "reopen" ? await processReopen(next.raw) : await processReply(next.raw);
+          } catch (err) {
+            log("process-failed", { event: next.event, error: short(err) });
+            result = "delivery-failed";
+          }
+          const failed = result === "delivery-failed" || result === "ack-failed";
+          if (next.event === "chat") chatFailing = failed;
+          if (failed) {
+            failure = result;
+            queue.length = 0;
+            close();
+          }
         }
-        if (next.event === "ops-pickup") {
-          await processOpsPickup(next.raw, next.at);
-          continue;
-        }
-        let result;
-        try {
-          const family = actions.get(next.event);
-          if (family) result = await family.handle(next.event, next.raw, { deps, listTerminals, sendLine });
-          else result = next.event === "reopen" ? await processReopen(next.raw) : await processReply(next.raw);
-        } catch (err) {
-          log("process-failed", { error: short(err) });
-          result = "delivery-failed";
-        }
-        const failed = result === "delivery-failed" || result === "ack-failed";
-        if (next.event === "chat") chatFailing = failed;
-        if (failed) {
-          failure = result;
-          queue.length = 0;
-          close();
-        }
+      } finally {
+        worker = null;
       }
-      worker = null;
     };
     /** @param {string} event @param {unknown} raw */
     const enqueue = (event, raw) => {

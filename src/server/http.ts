@@ -56,8 +56,8 @@ import { createAuth, type Auth } from "./auth.js";
 import { sha256, type Config } from "./config.js";
 import { BridgeChannel, FEATURES_HEADER, parseFeatures } from "./events.js";
 import { withBodyBudget } from "./bodyBudget.js";
-import { BodyBudgetRefused, decodeSegment, hasBearer, HttpError, json, readJson, requireBearer, requireSameOrigin } from "./httputil.js";
-import { sameFiles, storedFiles } from "./media.js";
+import { BodyBudgetRefused, declaresBody, decodeSegment, hasBearer, HttpError, json, readJson, requireBearer, requireSameOrigin } from "./httputil.js";
+import { BODY_TIMEOUT_MS, sameFiles, SEND_TIMEOUT_MS, storedFiles } from "./media.js";
 import { newNeeds, PushService, subscriptionSchema, unsubscribeSchema, type PushSender } from "./push.js";
 import { QuietStore } from "./quiet.js";
 import { announceReopen } from "./routes/answered.js";
@@ -185,11 +185,13 @@ export function createApp(
   router.onClose(() => behaviours.close());
   const mediaSize = mediaSizeReader(join(config.dataDir, "media"));
   registerRoutes(router);
+  keepCommented();
 
-  // A 100 MB video from a phone on a slow uplink takes longer than Node's 300 s default to arrive, so the request
-  // timeout stays long for the media uploads; readJson cuts a JSON body at its own deadline and charges it to the body
-  // budget. Headers still arrive inside 10 s, checked every second.
-  const serverOptions = { requestTimeout: 20 * 60 * 1000, headersTimeout: 10_000, connectionsCheckingInterval: 1_000 };
+  // A 500 MB file from a phone on a slow uplink takes far longer than Node's 300 s default to arrive, so the request
+  // timeout is the hour a sent file gets (Node has one timeout for every route); every other request is cut at twenty
+  // minutes in handle(), the media store cuts a photo or a card's media at twenty minutes itself, and readJson cuts a
+  // JSON body at its own deadline and charges it to the body budget. Headers still arrive inside 10 s, checked every second.
+  const serverOptions = { requestTimeout: SEND_TIMEOUT_MS, headersTimeout: 10_000, connectionsCheckingInterval: 1_000 };
   const server = createServer(serverOptions, withBodyBudget((request, response) => {
     setSecurityHeaders(response);
     return handle(request, response).catch((error: unknown) => {
@@ -241,6 +243,16 @@ export function createApp(
     const url = new URL(request.url ?? "/", "http://localhost");
     const path = url.pathname;
     const method = request.method ?? "GET";
+
+    // The server's request timeout is the hour a sent file gets. Every other request that declares a body still has
+    // twenty minutes for it to finish arriving, as it had before that hour: then its connection closes. A request
+    // with no body (an event stream, a download) is never timed here, and the watch ends once the body has been read.
+    if (!(method === "POST" && path === "/api/files") && declaresBody(request)) {
+      const late = setTimeout(() => request.destroy(), BODY_TIMEOUT_MS);
+      late.unref();
+      const done = () => clearTimeout(late);
+      request.once("end", done).once("close", done);
+    }
 
     if (path === "/healthz") {
       json(response, 200, { ok: true });
@@ -896,7 +908,9 @@ export function createApp(
     // device) is refused with that answer, never recorded and relayed beside it, ahead of any refusal that
     // could change (a photo the bridge cannot take). Seen on an update card is no answer, so one comment can follow
     // it; a second there is refused even when the board was too full to show the first (its rev unchanged).
-    const answered = isUpdate(need) && body.decision === "comment" ? store.firstReplyAt(need.id, body.rev, "comment") : store.firstReplyAt(need.id, body.rev);
+    // A comment on any other card is its answer: a pick after it is refused until Answer again. A pick recorded after
+    // one already is the answer it is refused with (answerOfRecord).
+    const answered = isUpdate(need) && body.decision === "comment" ? store.firstReplyAt(need.id, body.rev, "comment") : answerOfRecord(need.id, body.rev);
     if (answered) {
       json(response, 409, { error: "This card was already answered.", answered });
       return;
@@ -1006,13 +1020,17 @@ export function createApp(
     json(response, 201, reply);
   }
 
-  /** Puts a line under an update card, oldest dropped past MAX_COMMENTS; its new revision shows the card as new again. */
+  /**
+   * Puts a line under a card, oldest dropped past MAX_COMMENTS. On an update card its new revision shows the card as new
+   * again; any other card keeps its revision (needRev), so a pick read before the line still lands.
+   */
   function addComment(id: string, comment: CardComment, ifMatch: number | null = null): { version: number; updatedAt: string; item: ServedNeed } {
     const stored = store.getBoard();
     if (ifMatch !== null && ifMatch !== (stored?.version ?? 0)) throw new HttpError(409, "board version is stale");
     const index = stored?.board.needs.findIndex((need) => need.id === id) ?? -1;
     if (!stored || index < 0) throw new HttpError(404, "no such card");
-    if (!isUpdate(stored.board.needs[index]!)) throw new HttpError(409, `card ${id} is not an update card`);
+    // A news card answers nothing and goes in one tap: a line under it would never be read.
+    if (isGotIt(stored.board.needs[index]!)) throw new HttpError(409, `card ${id} is a Got it card: answer in its chat`);
     const needs = [...stored.board.needs];
     const need = { ...needs[index]!, comments: [...(needs[index]!.comments ?? []), comment].slice(-MAX_COMMENTS) };
     needs[index] = need;
@@ -1037,10 +1055,44 @@ export function createApp(
   }
 
   /**
+   * The answer of record to a card's revision: the first reply to it, or, where that is a comment with a pick after it
+   * (rows from when a comment left a card open and the pick was relayed), that pick, as store.cardAnswer reads them.
+   * Null when it has none.
+   */
+  function answerOfRecord(id: string, rev: string): Reply | null {
+    const replies = store.repliesAt(id, rev);
+    const first = replies[0] ?? null;
+    return (first?.decision === "comment" ? replies.find((reply) => reply.decision !== "comment") : undefined) ?? first;
+  }
+
+  /**
+   * Keeps as answered each card on the board whose answer is a comment but which was never kept: a comment from when
+   * one left the card open, so kept nothing and took no ask. Such a card now leaves the board once that comment is
+   * handled (withoutHandled), and without this it would be on no Answered list and Answer again would not find it.
+   * Run at each start, before any write can drop a card; a card already kept is left alone. A card that fails is
+   * logged and the rest go on: this never stops the server starting.
+   */
+  function keepCommented(): void {
+    for (const need of store.getBoard()?.board.needs ?? []) {
+      try {
+        if (need.id.startsWith(SCHEDULE_CARD_PREFIX) || !keepsAnswer(need)) continue;
+        const rev = needRev(need);
+        const reply = answerOfRecord(need.id, rev);
+        const kept = store.keptAnsweredCard(need.id);
+        if (reply?.decision !== "comment" || (kept && (kept.rev === rev || kept.answeredAt >= reply.at))) continue;
+        store.keepAnswered(need, rev, reply.id, reply.at);
+        if (need.askId) linkAsk(need.askId, need.id);
+      } catch (error) {
+        logger.error(`[board] card ${need.id} not kept as answered at start: ${error instanceof Error ? error.message : "error"}`);
+      }
+    }
+  }
+
+  /**
    * Reopen (Answer again): the answered card at `rev` becomes a new revision of itself, back on the open deck,
-   * so your next answer is recorded on that one and relayed as a change, while the first answer to `rev` stays its
-   * answer of record. A card that has left the board comes back from the answered cards the server keeps 30 days
-   *, and the bridge tells Rivet's chat of the Reopen.
+   * so your next answer is recorded on that one and relayed as a change, while the answer of record to `rev`
+   * (answerOfRecord) stays its answer. A card that has left the board comes back from the answered cards the server
+   * keeps 30 days, and the bridge tells Rivet's chat of the Reopen.
    */
   function answerAgain(id: string, rev: string): { version: number; updatedAt: string; item: ServedNeed } {
     if (isRetiredCard(id)) throw new HttpError(409, "Rivet no longer asks this; there is nothing to answer again");
@@ -1054,7 +1106,7 @@ export function createApp(
     if (kept && kept.rev !== rev) throw new HttpError(409, "this card changed; look again");
     const need = onBoard ?? kept!.card;
     if (isUpdate(need)) throw new HttpError(400, "an update card takes a comment instead");
-    const first = store.firstReplyAt(id, rev);
+    const first = answerOfRecord(id, rev);
     if (!first) throw new HttpError(409, "this card has no answer to change yet");
     // A merge an answer started is under way the moment it lands: no later answer can take it back while it runs. Once
     // its PR has merged, a new answer is a follow-up.
@@ -1300,9 +1352,16 @@ export function withServerFields(stored: Board | null, board: unknown, at: strin
   };
   const words = (value: unknown) => (typeof value === "string" && value.trim() ? value : undefined);
   const before = new Map((stored?.needs ?? []).filter(isUpdate).map((need) => [need.id, need]));
+  // Any other card's lines (rivet card note): the stored card's alone, as above.
+  const lines = new Map((stored?.needs ?? []).filter((need) => !isUpdate(need) && need.comments?.length).map((need) => [need.id, need.comments!]));
   return {
     ...(board as object),
     needs: needs.map((row: Record<string, unknown> | null) => {
+      if (row !== null && typeof row === "object" && row.kind !== UPDATE) {
+        const { comments: _sent, ...rest } = row;
+        const kept = lines.get(row.id as string);
+        return kept ? { ...rest, comments: kept } : rest;
+      }
       if (row?.kind !== UPDATE) return row;
       // seen is served, never stored: a board read and written back must not keep a card seen past a new comment.
       const kept = before.get(row.id as string);
@@ -1445,7 +1504,8 @@ export function needRev(need: Need): string {
     ...(need.evidence ? { evidence: need.evidence } : {}),
     // An update card's: a new comment (Rivet's answer) is a new revision, so the card shows as new again after Seen.
     ...pick(need, ["thread", "tag"]),
-    ...(need.comments ? { comments: need.comments } : {}),
+    // Only an update card's: on any other card a line is no change to what you answer.
+    ...(need.comments && isUpdate(need) ? { comments: need.comments } : {}),
     // Absent on every other card, so their revs are unchanged: without it the words would no longer be shown as they are.
     ...(need.inChat ? { inChat: need.inChat } : {}),
     // Answer again: a new revision for a new answer, while the first answer to the one before stays of record.

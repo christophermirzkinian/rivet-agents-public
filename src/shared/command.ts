@@ -465,8 +465,6 @@ export const MAX_MEDIA_BYTES = 25 * 1024 * 1024;
 /** What you may attach: the phone redraws every photo as one of these. */
 export const IMAGE_TYPES = ["image/jpeg", "image/png"] as const satisfies readonly MediaType[];
 export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
-/** Each document you attach; the types are FILE_TYPES (board.ts, beside attachmentName). */
-export const MAX_FILE_BYTES = MAX_MEDIA_BYTES;
 
 /** How long a picked-up failure has before it counts as late, and the reason the board shows. */
 export const PICKUP_DUE_MINUTES = 60;

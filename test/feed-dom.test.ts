@@ -1030,6 +1030,23 @@ describe("a photo with a card answer", () => {
     });
   });
 
+  it("a photo comment on a choice card takes it off the deck, and its words and photo clear as for any answer", async () => {
+    needs = [{ ...need("m", "m1"), kind: "decision", options: [{ label: "Ship it" }, { label: "Change it" }] }, need("b", "b1")];
+    await signIn();
+    pickPhoto();
+    await settle(0);
+    await settle(0);
+    say("This screen");
+    root.querySelector<HTMLButtonElement>(".actions .say-send")!.click();
+    expect(topId()).toBe("b");
+    flushHeld();
+    await settle(0);
+    expect(posts.map((post) => post.body)).toMatchObject([{ itemId: "m", decision: "comment", text: "This screen", image: IMAGE }]);
+    expect(topId()).toBe("b");
+    expect(cardState("m").text).toBe("");
+    expect(cardState("m").attach.photos).toEqual([]);
+  });
+
   it("a photo waiting to send opens full screen from its preview, from the local copy", async () => {
     let previews = 0;
     vi.mocked(URL.createObjectURL).mockImplementation(() => `blob:preview-${++previews}`);
@@ -1412,23 +1429,36 @@ describe("card media", () => {
   });
 
   it("re-checks a card's scrolling when it is resized, as on a rotation", async () => {
-    const observed: (() => void)[] = [];
+    const observed = new Map<Element, (() => void)[]>();
     vi.stubGlobal(
       "ResizeObserver",
       class {
-        constructor(callback: () => void) {
-          observed.push(callback);
+        constructor(private readonly callback: () => void) {}
+        observe(element: Element): void {
+          observed.set(element, [...(observed.get(element) ?? []), this.callback]);
         }
-        observe(): void {}
         disconnect(): void {}
       },
     );
     needs = [{ ...need("a", "a1"), media: { kind: "video", after: clip("a") } }];
-    await signIn();
-    const body = root.querySelector<HTMLElement>(".card.top .card-body")!;
-    Object.defineProperty(body, "scrollHeight", { configurable: true, value: 900 });
-    Object.defineProperty(body, "clientHeight", { configurable: true, value: 300 });
-    for (const callback of observed) callback();
+    // The real phone shell opens the sheet; mountCards() mounts a pane, which does not observe resizes.
+    await signIn(true);
+    await settle(0);
+    const card = document.querySelector<HTMLElement>(".decide-sheet .card.top")!;
+    const callbacks = observed.get(card) ?? [];
+    expect(callbacks.length).toBeGreaterThan(0);
+    Object.defineProperty(card, "clientHeight", { configurable: true, value: 300 });
+    Object.defineProperty(card, "scrollHeight", { configurable: true, value: 300 });
+    for (const callback of callbacks) callback();
+    expect(card.classList.contains("has-more")).toBe(false);
+
+    Object.defineProperty(card, "scrollHeight", { configurable: true, value: 900 });
+    for (const callback of callbacks) callback();
+    expect(card.classList.contains("has-more")).toBe(true);
+
+    Object.defineProperty(card, "scrollHeight", { configurable: true, value: 300 });
+    for (const callback of callbacks) callback();
+    expect(card.classList.contains("has-more")).toBe(false);
   });
 
   it("a tap on a clip never opens full screen; the Full screen button opens the one showing", async () => {
@@ -2516,6 +2546,20 @@ describe("voice typing", () => {
       { itemId: "m", decision: "choice", choice: "Mix or tweak", text: "Spoken for m please" },
       { itemId: "q", decision: "comment", text: "Spoken for q please" },
     ]);
+  });
+
+  it("a comment on a choice card answers it: the card leaves the deck with its typed words, and the next card is in front", async () => {
+    needs = [{ ...need("m", "m1"), kind: "decision", options: [{ label: "Ship it" }, { label: "Mix or tweak", text: true }] }, need("b", "b1")];
+    await signIn();
+    say("Why this mix?");
+    root.querySelector<HTMLButtonElement>(".actions .say-send")!.click();
+    expect(topId()).toBe("b");
+    flushHeld();
+    await settle(TAP_LOCK_MS + 50);
+    expect(posts.map((post) => post.body)).toMatchObject([{ itemId: "m", decision: "comment", text: "Why this mix?" }]);
+    expect(topId()).toBe("b");
+    expect(root.querySelector('.card[data-id="m"]')).toBeNull();
+    expect(cardState("m").text).toBe("");
   });
 
   it("Send while listening stops the mic and sends what is in the box", async () => {

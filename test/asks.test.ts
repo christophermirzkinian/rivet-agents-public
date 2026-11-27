@@ -10,6 +10,8 @@ import {
   askPatchSchema,
   doneCardParts,
   doneCardText,
+  EMPTY_DONE_REFUSAL,
+  emptyDoneLine,
   FINISHED_STAGES,
   MAX_ASK_CHAT,
   MAX_ASK_NOTE,
@@ -18,6 +20,7 @@ import {
   MAX_DONE_ITEMS,
   MAX_ASK_WORDS,
   MAX_ASKS,
+  MIN_DONE_WORDS,
   type Ask,
   type AsksResponse,
 } from "../src/shared/asks.js";
@@ -35,6 +38,8 @@ import { askRows } from "../web/src/views/your-asks.js";
 import { bearer, BOARD_TOKEN, BRIDGE_TOKEN, browser, EXAMPLE_BOARD, fakeClock, putBoard, revOf, startServer, type TestServer } from "./helpers.js";
 
 const START = Date.parse("2026-10-01T02:00:00.000Z");
+/** What a caller's move to done says is done: 6 words or more, as its Done card needs. */
+const SAID = "The banner chart now shows a week";
 
 let server: TestServer;
 let cookie: string;
@@ -220,14 +225,19 @@ describe("asks", () => {
       notifyNewNeeds.mockRestore();
     });
 
-    it("set --stage done posts it too: its Done line is this move's note, folded to one short line, never an older note; with none it is what he asked alone, never Finished.", async () => {
+    it("set --stage done posts it too: its Done line is this move's note, folded to one short line, never an older note; with none a caller's move is refused with 400, never Finished.", async () => {
       await create({ id: "a-10", words: "Lobby chart", repo: "example-org/other-repo" });
       await create({ id: "a-11", words: "Long one" });
-      await patch("a-10", { note: "an older note" });
-      await patch("a-10", { stage: "done" });
+      await patch("a-10", { note: "an older note that is long enough" });
+      const refused = await send("PATCH", "/api/asks/a-10", { stage: "done" });
+      expect(refused.status).toBe(400);
+      expect(((await refused.json()) as { error: string }).error).toBe(EMPTY_DONE_REFUSAL);
+      expect((await get("a-10")).stage).toBe("queued");
+      expect(await needs()).toEqual([]);
+      await patch("a-10", { stage: "done", note: SAID });
       await patch("a-11", { stage: "done", note: `first line\n\n  ${"word ".repeat(60)}` });
       const cards = await needs();
-      expect(cards.find((card) => card.id === "ask-a-10-done")).toMatchObject({ ask: "You asked: Lobby chart", repo: "example-org/other-repo" });
+      expect(cards.find((card) => card.id === "ask-a-10-done")).toMatchObject({ ask: `You asked: Lobby chart\nDone: ${SAID}`, repo: "example-org/other-repo" });
       for (const card of cards) expect(card.ask).not.toContain("Finished.");
       const [asked, line, ...more] = (cards.find((card) => card.id === "ask-a-11-done")!.ask as string).split("\n");
       expect(asked).toBe("You asked: Long one");
@@ -249,14 +259,42 @@ describe("asks", () => {
       expect((await cardOf("a-31"))!.ask).toBe("You asked: Smaller chips\nDone: The chips are smaller on the Lab.");
     });
 
+    it("a caller's move to done whose Done line is under 6 words, or only answered or done, is refused with 400 and posts nothing", async () => {
+      await create({ id: "a-90", words: "Say what is done" });
+      for (const body of [
+        { stage: "done", note: "answered" },
+        { stage: "done", note: "Done." },
+        { stage: "done", note: "The chart shows a week" },
+        { stage: "done", note: "Done. Fixed. Closed. Finished. Answered. Done." },
+        { stage: "done" },
+        // The done items are the line, so a long note does not cover a short item.
+        { stage: "done", done: ["Chart"], note: SAID },
+      ]) {
+        const refused = await send("PATCH", "/api/asks/a-90", body);
+        expect(refused.status, JSON.stringify(body)).toBe(400);
+        expect(((await refused.json()) as { error: string }).error).toBe(EMPTY_DONE_REFUSAL);
+      }
+      expect((await get("a-90")).stage).toBe("queued");
+      expect(await needs()).toEqual([]);
+    });
+
+    it("a move to done with a note of 6 words or more is 200 and the note is the Done line; so are done items of 6 words or more between them", async () => {
+      await create({ id: "a-91", words: "Note close" });
+      await create({ id: "a-92", words: "Items close" });
+      await patch("a-91", { stage: "done", note: SAID });
+      await patch("a-92", { stage: "done", done: ["Chart shows a week", "Totals per day"] });
+      expect((await cardOf("a-91"))!.ask).toBe(`You asked: Note close\nDone: ${SAID}`);
+      expect((await cardOf("a-92"))!.ask).toBe("You asked: Items close\nDone:\n- Chart shows a week\n- Totals per day");
+    });
+
     it("the closer's done items are what is done: one on the Done line, two or three as - lines, before the note", async () => {
       for (const id of ["a-32", "a-33", "a-34"]) await create({ id, words: `Ask ${id}` });
       await patch("a-32", { stage: "done", done: ["The banner chart shows a week"], note: "not this" });
-      await patch("a-33", { stage: "done", done: ["One", "Two"] });
-      await patch("a-34", { stage: "done", done: ["One", "Two", "Three"], note: "not this" });
+      await patch("a-33", { stage: "done", done: ["One more chart", "Two more totals"] });
+      await patch("a-34", { stage: "done", done: ["One more chart", "Two more totals", "Three more days"], note: "not this" });
       expect((await cardOf("a-32"))!.ask).toBe("You asked: Ask a-32\nDone: The banner chart shows a week");
-      expect((await cardOf("a-33"))!.ask).toBe("You asked: Ask a-33\nDone:\n- One\n- Two");
-      expect((await cardOf("a-34"))!.ask).toBe("You asked: Ask a-34\nDone:\n- One\n- Two\n- Three");
+      expect((await cardOf("a-33"))!.ask).toBe("You asked: Ask a-33\nDone:\n- One more chart\n- Two more totals");
+      expect((await cardOf("a-34"))!.ask).toBe("You asked: Ask a-34\nDone:\n- One more chart\n- Two more totals\n- Three more days");
       // The items are the card's alone: the ask keeps none of them.
       expect(JSON.stringify(await get("a-34"))).not.toContain("Three");
     });
@@ -264,14 +302,14 @@ describe("asks", () => {
     it("what he asked is folded to one line and clipped to 160 with an ellipsis", async () => {
       await create({ id: "a-35", words: `Make it\n\n  bigger   and ${"wider ".repeat(60)}` });
       await create({ id: "a-36", words: "Two\nlines" });
-      await patch("a-35", { stage: "done", done: ["Bigger"] });
-      await patch("a-36", { stage: "done" });
+      await patch("a-35", { stage: "done", done: ["Bigger cards on every table now"] });
+      await patch("a-36", { stage: "done", note: SAID });
       const [asked, done] = ((await cardOf("a-35"))!.ask as string).split("\n");
       expect(asked).toMatch(/^You asked: Make it bigger and wider wider /);
       expect(asked!.slice("You asked: ".length)).toHaveLength(160);
       expect(asked!.endsWith("…")).toBe(true);
-      expect(done).toBe("Done: Bigger");
-      expect((await cardOf("a-36"))!.ask).toBe("You asked: Two lines");
+      expect(done).toBe("Done: Bigger cards on every table now");
+      expect((await cardOf("a-36"))!.ask).toBe(`You asked: Two lines\nDone: ${SAID}`);
     });
 
     it("done and doneMedia are refused with 400 unless the same write moves the ask to done, and so are a 4th item, a two-line item and media that is not one still or clip", async () => {
@@ -321,9 +359,9 @@ describe("asks", () => {
       server = await startServer({}, { now: clock.now, logs });
       await create({ id: "a-39", words: "Lost still" });
       const missing = "b".repeat(64);
-      await patch("a-39", { stage: "done", done: ["Shipped"], doneMedia: { kind: "stills", stills: [{ sha256: missing, type: "image/png" }] } });
+      await patch("a-39", { stage: "done", done: [SAID], doneMedia: { kind: "stills", stills: [{ sha256: missing, type: "image/png" }] } });
       const card = (await cardOf("a-39"))!;
-      expect(card.ask).toBe("You asked: Lost still\nDone: Shipped");
+      expect(card.ask).toBe(`You asked: Lost still\nDone: ${SAID}`);
       expect(card.media).toBeUndefined();
       expect(logs.filter((line) => line.includes("ask-a-39-done"))).toEqual([expect.stringMatching(/done card ask-a-39-done posted without its media: .*bbbbbbbbbbbb.* not on the server/)]);
     });
@@ -408,9 +446,9 @@ describe("asks", () => {
 
     it("done or doneMedia on an ask that is already done is refused with 400 and posts no second card; a plain move to done again is still 200", async () => {
       await create({ id: "a-44", words: "Closed once" });
-      await patch("a-44", { stage: "done", done: ["First"] });
+      await patch("a-44", { stage: "done", done: [SAID] });
       const first = await needs();
-      expect(first.map((card) => card.ask)).toEqual(["You asked: Closed once\nDone: First"]);
+      expect(first.map((card) => card.ask)).toEqual([`You asked: Closed once\nDone: ${SAID}`]);
       const version = (await get("a-44")).version;
       for (const body of [
         { stage: "done", done: ["Second"] },
@@ -466,7 +504,7 @@ describe("asks", () => {
       const of = vi.spyOn(ShortTitles.prototype, "of").mockImplementation(() => {
         throw new Error("titles down");
       });
-      await patch("a-15", { stage: "done" });
+      await patch("a-15", { stage: "done", note: SAID });
       of.mockRestore();
       expect((await get("a-15")).stage).toBe("done");
       expect(await needs()).toEqual([]);
@@ -475,12 +513,12 @@ describe("asks", () => {
 
     it("comes once per ask: a second done, done to live to done, and after Got it post nothing more", async () => {
       await create({ id: "a-12", words: "Once only" });
-      await patch("a-12", { stage: "done" });
+      await patch("a-12", { stage: "done", note: SAID });
       const first = await needs();
       expect(first.map((card) => card.id)).toEqual(["ask-a-12-done"]);
       await patch("a-12", { stage: "done", note: "again" });
       await patch("a-12", { stage: "shipped" });
-      await patch("a-12", { stage: "done", note: "back" });
+      await patch("a-12", { stage: "done", note: "Back on the Lab after the fix" });
       expect(await needs()).toEqual(first);
       // Tapped Got it, the card leaves; another done does not bring it back.
       const answer = await fetch(`${server.base}/api/replies`, {
@@ -491,7 +529,7 @@ describe("asks", () => {
       expect(answer.status).toBe(201);
       expect(await needs()).toEqual([]);
       await patch("a-12", { stage: "shipped" });
-      await patch("a-12", { stage: "done" });
+      await patch("a-12", { stage: "done", note: SAID });
       expect(await needs()).toEqual([]);
     });
 
@@ -503,7 +541,7 @@ describe("asks", () => {
       const putBoard = vi.spyOn(server.app.store, "putBoard").mockImplementation(() => {
         throw new Error("disk full");
       });
-      await patch("a-13", { stage: "done" });
+      await patch("a-13", { stage: "done", note: SAID });
       putBoard.mockRestore();
       expect((await get("a-13")).stage).toBe("done");
       expect(logs).toContainEqual(expect.stringContaining("done card ask-a-13-done failed: disk full"));
@@ -522,7 +560,7 @@ describe("asks", () => {
     await create({ id: "a-12", words: "Late one", due: new Date(clock.now().getTime() + 60_000).toISOString() });
     clock.advance(120_000);
     expect(asksPastDue(await list(), clock.now()).map((ask) => ask.id)).toEqual(["a-12"]);
-    expect((await send("PATCH", "/api/asks/a-12", { stage: "done" })).status).toBe(200);
+    expect((await send("PATCH", "/api/asks/a-12", { stage: "done", note: SAID })).status).toBe(200);
     expect(asksPastDue(await list(), clock.now())).toEqual([]);
     clock.advance(3_600_000);
     expect(asksPastDue(await list(), clock.now())).toEqual([]);
@@ -723,12 +761,21 @@ describe("the CLI's side of asks", () => {
       MAX_ASK_WHY: number;
       MAX_DONE_ITEMS: number;
       MAX_DONE_ITEM: number;
+      MIN_DONE_WORDS: number;
+      EMPTY_DONE_REFUSAL: string;
+      emptyDoneLine(text: string | undefined): boolean;
     };
     expect([...lib.ASK_STAGES]).toEqual([...ASK_STAGES]);
     expect([...lib.FINISHED_STAGES]).toEqual([...FINISHED_STAGES]);
     expect([...lib.ASK_WHO]).toEqual([...ASK_WHO]);
     expect([lib.MAX_ASK_WORDS, lib.MAX_ASK_NOTE, lib.MAX_ASK_CHAT, lib.MAX_ASK_WHY]).toEqual([MAX_ASK_WORDS, MAX_ASK_NOTE, MAX_ASK_CHAT, MAX_ASK_WHY]);
     expect([lib.MAX_DONE_ITEMS, lib.MAX_DONE_ITEM]).toEqual([MAX_DONE_ITEMS, MAX_DONE_ITEM]);
+    expect([lib.MIN_DONE_WORDS, lib.EMPTY_DONE_REFUSAL]).toEqual([MIN_DONE_WORDS, EMPTY_DONE_REFUSAL]);
+    for (const text of [undefined, "", "answered", "Done.", "the chart shows a week", "done done done fixed closed finished", SAID, "Chart: shows—a week, per day!", "done / done / done / done", "(done) (done) (done) (done) (done) (done)", "Shipped the Windows app, signed and tested"]) {
+      expect(lib.emptyDoneLine(text), String(text)).toBe(emptyDoneLine(text));
+    }
+    // A slash or bracket is no word.
+    expect([emptyDoneLine("done / done / done / done"), emptyDoneLine("(done) (done) (done) (done) (done) (done)"), emptyDoneLine("Shipped the Windows app, signed and tested")]).toEqual([true, true, false]);
   });
 
   const cli = () => {
@@ -742,15 +789,15 @@ describe("the CLI's side of asks", () => {
     const { call, out } = cli();
     const needs = async () => ((await (await send("GET", "/api/board")).json()) as { board: { needs: { id: string; ask?: string; pr?: number }[] } | null }).board?.needs ?? [];
     for (const id of ["a-13", "a-14", "a-15"]) await create({ id, words: `Close ${id}`, prs: [4051] });
-    expect(await call(["ask", "set", "a-13", "--stage", "done"])).toBe(0);
-    expect(await call(["ask", "close", "a-14", "done", "--note", "shipped to the Lab"])).toBe(0);
+    expect(await call(["ask", "set", "a-13", "--stage", "done", "--why", SAID])).toBe(0);
+    expect(await call(["ask", "close", "a-14", "done", "--note", "shipped to the Lab for testing today"])).toBe(0);
     expect(await call(["ask", "close", "a-15", "shipped"])).toBe(0);
     expect(out.stderr).toBe("");
     expect(await Promise.all(["a-13", "a-14", "a-15"].map(async (id) => (await get(id)).stage))).toEqual(["done", "done", "shipped"]);
     const cards = await needs();
     expect(cards.map((card) => card.id).sort()).toEqual(["ask-a-13-done", "ask-a-14-done"]);
-    expect(cards.find((card) => card.id === "ask-a-13-done")?.ask).toBe("You asked: Close a-13");
-    expect(cards.find((card) => card.id === "ask-a-14-done")?.ask).toBe("You asked: Close a-14\nDone: shipped to the Lab");
+    expect(cards.find((card) => card.id === "ask-a-13-done")?.ask).toBe(`You asked: Close a-13\nDone: ${SAID}`);
+    expect(cards.find((card) => card.id === "ask-a-14-done")?.ask).toBe("You asked: Close a-14\nDone: shipped to the Lab for testing today");
     expect(cards.every((card) => card.pr === undefined)).toBe(true);
   });
 

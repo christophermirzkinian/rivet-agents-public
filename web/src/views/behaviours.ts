@@ -16,7 +16,7 @@ import * as api from "../api.js";
 import { button, describe, h } from "../dom.js";
 import { onSessionReset, setSignedInByCode, signedInByCode, StaleSession } from "../session.js";
 import { changed, sameSession, signedOut } from "../state.js";
-import { cacheChatPref, syncChatPrefs } from "./chat-prefs.js";
+import { cacheChatPref, chatPicksMark, chatPrefsMark, syncChatPrefs } from "./chat-prefs.js";
 import { flash } from "./toast.js";
 
 // Settings › Behaviours: what Rivet does by itself, grouped, each row with its switch. Live rows save to
@@ -55,10 +55,12 @@ export async function loadBehaviours(timed = false): Promise<void> {
   const current = sameSession();
   const mine = ++turn;
   const before = rows;
+  // A Chat pick made while this list is out keeps its preference.
+  const prefsMark = chatPrefsMark();
   const [list, delay] = await Promise.allSettled([api.getBehaviours(), api.getChatSendDelay()]);
   if (!current() || mine !== turn) return;
   if (list.status === "fulfilled") {
-    const synced = await syncChatPrefs(list.value.behaviours);
+    const synced = await syncChatPrefs(list.value.behaviours, prefsMark);
     if (!current() || mine !== turn) return;
     rows = synced;
     loadError = null;
@@ -122,7 +124,7 @@ function lostSafety(before: BehaviourRow[] | null, after: BehaviourRow[] | null)
   return (after ?? []).some((row) => (row.switch?.state === "stopped" || row.switch?.state === "offline") && was.get(row.id) !== row.switch.state);
 }
 
-/** What a row the server keeps from a window a device code alone signed in reads under its line (a-1010). */
+/** What a row the server keeps from a window a device code alone signed in reads under its line (a-10). */
 export const BEHAVIOUR_NEEDS_PASSKEY = "Change this from a phone or computer signed in with a passkey.";
 const locked = (row: BehaviourRow) => signedInByCode() === true && row.preference !== true && (row.control === "live" || row.control === "switch");
 
@@ -142,12 +144,13 @@ function saveRow(row: BehaviourRow, value: BehaviourValue): void {
   const isSwitch = row.control === "switch";
   if (!isSwitch) swap({ ...row, value });
   changed();
+  const picksMark = chatPicksMark();
   api.putBehaviour(row.id, value).then(
     (saved) => {
       if (!current()) return;
       turn += 1;
       swap(saved);
-      cacheChatPref(saved);
+      cacheChatPref(saved, picksMark);
       flash(saved.done ? doneToast(saved.name, saved.done, saved.switch) : "Saved.");
     },
     (error: unknown) => {

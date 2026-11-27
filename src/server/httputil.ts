@@ -34,10 +34,15 @@ export class BodyBudgetRefused extends HttpError {
 
 /**
  * The whole of a JSON body arrives inside this, measured from when its route
- * starts reading it: the server's own request timeout is 20 minutes, for the
- * media uploads, which do not read through here.
+ * starts reading it: the server's own request timeout is an hour, for a sent
+ * file, and the media uploads do not read through here.
  */
 export const JSON_BODY_DEADLINE_MS = 15_000;
+
+/** The request's headers say a body follows: a length over zero, or chunks. */
+export function declaresBody(request: IncomingMessage): boolean {
+  return request.headers["transfer-encoding"] !== undefined || Number(request.headers["content-length"] ?? 0) > 0;
+}
 
 export function json(response: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}): void {
   const payload = JSON.stringify(body);

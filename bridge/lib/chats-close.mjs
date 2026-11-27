@@ -56,6 +56,8 @@ const O_EXLOCK = 0x20;
 export const CRON_DEADLINE_MS = 10 * 60_000;
 // The merged heads change only as PRs merge: one read each half hour is enough to tell a squash-merged chat.
 const MERGED_MAX_AGE_MS = 30 * 60_000;
+export const GIT_TIMEOUT_MS = 10_000;
+export const GIT_STUCK_LIMIT = 2;
 const RIVET_CLI = fileURLToPath(new URL("../../scripts/rivet.mjs", import.meta.url));
 // A process from the chat's tree (or under one) matching this holds an owner sign-in.
 const SIGN_IN = /qemu-system|\bemulator(64)?\b|Simulator\.app|simctl|launchd_sim|chrome|chromium|firefox|webkit|msedge|playwright|puppeteer/i;
@@ -407,7 +409,7 @@ export const realIo = (home, bins = {}, { deadline = Infinity, onDeadline = () =
     if (left <= 0) onDeadline();
     // A #! script runs through its interpreter, as the bridge's own calls do (config.mjs scriptCommand).
     const c = bins[cmd] ? scriptCommand(bins[cmd], args) : { file: cmd, args };
-    return String(execFileSync(c.file, c.args, { encoding: "utf8", maxBuffer: 64 << 20, stdio: ["ignore", "pipe", "pipe"], ...opts, timeout: Math.min(60_000, left), killSignal: "SIGKILL" }));
+    return String(execFileSync(c.file, c.args, { encoding: "utf8", maxBuffer: 64 << 20, stdio: ["ignore", "pipe", "pipe"], ...opts, timeout: Math.min(Number(opts.timeout) > 0 ? Number(opts.timeout) : 60_000, 60_000, left), killSignal: "SIGKILL" }));
   },
   now: () => Date.now(),
   read: (/** @type {string} */ p) => fs.readFileSync(p, "utf8"),
@@ -433,6 +435,7 @@ export const realIo = (home, bins = {}, { deadline = Infinity, onDeadline = () =
 });
 
 const LEFTOVER_WAIT_MS = 3_000;
+const REAP_WAIT_MS = 1_000;
 
 /** `ps -axo pid=,ppid=,tty=,command=`; tty is "??" (macOS) or "?" (Linux) with no controlling terminal.
  * @param {string} text @returns {(Proc & { tty: string })[]} */
@@ -458,7 +461,7 @@ export const spareLeftover = (command) => SPARE_BIN_RE.test(path.basename(comman
  * By exact pid: SIGTERM, then SIGKILL for one still there after LEFTOVER_WAIT_MS. Never pid 1, this process or an
  * ancestor of it. An open chat (`others`) at the same folder leaves everything ("shared"); one nested inside keeps its
  * own, and one enclosing this folder spares nothing. Nothing when the folder is no absolute path three folders deep, is
- * home or above it, or ps/lsof cannot be read (null). Returns what it signalled.
+ * home or above it, or ps/lsof cannot be read (null). Returns only targets no longer running.
  * @param {Io} io @param {string} dir @param {string[]} others
  * @returns {Proc[] | null | "shared"}
  */
@@ -520,12 +523,16 @@ export function endLeftovers(io, dir, others) {
   while (found.some(running) && Date.now() < until) io.pause(50);
   // Read again before the SIGKILL: a pid that ended since may be another process's now.
   const still = new Set((found.some(running) ? read() ?? [] : []).map((p) => p.pid));
-  for (const p of found.filter((f) => still.has(f.pid) && running(f))) {
+  const killed = found.filter((f) => still.has(f.pid) && running(f));
+  for (const p of killed) {
     try {
       io.kill(p.pid, "SIGKILL");
     } catch {}
   }
-  return found;
+  // A killed process can still answer kill(0) until it is reaped; wait a moment before judging what ended.
+  const reaped = Date.now() + REAP_WAIT_MS;
+  while (killed.some(running) && Date.now() < reaped) io.pause(50);
+  return found.filter((p) => !running(p));
 }
 
 /** @typedef {ReturnType<typeof realIo>} Io */
@@ -681,7 +688,20 @@ async function gatherAndClose({ st, io, cfg, home, tmp, now, line, result }) {
   }
   const wtByPath = new Map(worktrees.map((w) => [w.path, w]));
 
-  const git = (/** @type {string} */ p, /** @type {string[]} */ ...args) => io.run("git", ["-C", p, ...args]).trim();
+  // A git call takes milliseconds; one that hangs (a launchd job's git under ~/Documents blocks in open()) is
+  // killed at GIT_TIMEOUT_MS so the pass ends before the bridge kills it and orphans the git. After GIT_STUCK_LIMIT
+  // timeouts the pass stops calling git: every chat left has no git reading, and a chat with none is kept.
+  let gitTimeouts = 0;
+  const git = (/** @type {string} */ p, /** @type {string[]} */ ...args) => {
+    if (gitTimeouts >= GIT_STUCK_LIMIT) throw new Error("git stuck this pass");
+    try {
+      return io.run("git", ["-C", p, ...args], { timeout: GIT_TIMEOUT_MS }).trim();
+    } catch (e) {
+      const err = /** @type {NodeJS.ErrnoException & { signal?: string }} */ (e);
+      if (err?.code === "ETIMEDOUT" || err?.signal === "SIGKILL") gitTimeouts += 1;
+      throw e;
+    }
+  };
   /** @type {Context} */
   const ctx = { now, protected: cfg.protected, protectedFolder: cfg.protectedFolder, keepList, cards, boardChats, asks, heldPrs, merged: new Map(), openPrs: new Map() };
   const fetched = new Set();

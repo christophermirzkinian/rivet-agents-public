@@ -4,8 +4,8 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
 import { pipeline } from "node:stream";
 
-import { attachmentName, FILE_TYPES, fileTypeOf, isAvType, isBigType, MAX_AV_BYTES, pdfFileName, type FileRef, type FileType } from "../shared/board.js";
-import { IMAGE_TYPES, MAX_FILE_BYTES, MAX_IMAGE_BYTES, MAX_MEDIA_BYTES, MEDIA_SHA_PATTERN, MEDIA_TYPES, type MediaType } from "../shared/command.js";
+import { attachmentName, FILE_TYPES, fileTypeOf, isAvType, isBigType, MAX_SEND_BYTES, pdfFileName, type FileRef, type FileType } from "../shared/board.js";
+import { IMAGE_TYPES, MAX_IMAGE_BYTES, MAX_MEDIA_BYTES, MEDIA_SHA_PATTERN, MEDIA_TYPES, type MediaType } from "../shared/command.js";
 import type { CommandStore } from "./commandstore.js";
 import { HttpError, json } from "./httputil.js";
 import { redactorChanges, TEXT_DOCUMENT_MAX, TEXT_DOCUMENT_TOO_BIG, textDocumentRefusal } from "./redact.js";
@@ -23,14 +23,24 @@ export const MEDIA_GRACE_MS = 15 * 60 * 1000;
 const NO_ROOM = "no room for media: the board's own clips and the last 15 minutes' uploads fill the store";
 
 const IMAGE_TOO_BIG = "The image is over 8 MB. Pick a smaller one or take a screenshot of it.";
-const FILE_TOO_BIG = "The file is over 25 MB. Send a smaller one.";
-const AV_TOO_BIG = "The video or sound file is over 100 MB. Send a shorter one.";
-const BIG_TOO_BIG = "The file is over 100 MB. Send a smaller one.";
+const FILE_TOO_BIG = "The file is over 500 MB. Send a smaller one.";
+const AV_TOO_BIG = "The video or sound file is over 500 MB. Send a shorter one.";
+/**
+ * How long a body may take to arrive. A file the owner sends gets the hour the server allows any request
+ * (SEND_TIMEOUT_MS: 500 MB on a slow phone line); a photo and a card's media, small, keep twenty minutes.
+ */
+export const SEND_TIMEOUT_MS = 60 * 60 * 1000;
+export const BODY_TIMEOUT_MS = 20 * 60 * 1000;
+/** An upload that sends no bytes for this long has stopped (a phone that left its network): it is cut, and gives back its slot. */
+export const UPLOAD_IDLE_MS = 2 * 60 * 1000;
 const AV_BUSY = "Another big file is still uploading. Send this one when it's done.";
 /** Token-sent text documents read at once: each holds up to TEXT_DOCUMENT_MAX of text in memory until it ends. */
 export const MAX_TEXT_UPLOADS = 4;
 const TEXT_BUSY = "Other text files are still uploading. Send this one when they're done.";
-/** Big uploads (BIG_TYPES) at once: the app sends one at a time, and each may hold 100 MB of disk while it streams. */
+/**
+ * Big uploads at once (a BIG_TYPES file, or any file over MAX_MEDIA_BYTES or of no stated length): the app sends
+ * one at a time, and each may hold MAX_SEND_BYTES of disk while it streams.
+ */
 export const MAX_AV_UPLOADS = 2;
 const KINDS = "photos, videos, music, PDFs, text files, Office documents, emails, ZIPs or GLB models";
 const FILE_REFUSED = `That file type can't be sent. Attach ${KINDS}.`;
@@ -200,6 +210,8 @@ export class MediaStore {
     private readonly inUse: () => Set<string>,
     private readonly capBytes = MEDIA_CAP_BYTES,
     private readonly now: () => number = Date.now,
+    private readonly sendCapBytes = MAX_SEND_BYTES,
+    private readonly idleMs = UPLOAD_IDLE_MS,
   ) {
     this.dir = join(dataDir, "media");
     mkdirSync(this.dir, { recursive: true });
@@ -346,10 +358,14 @@ export class MediaStore {
     }
     const type = fileTypeOf(raw);
     if (!type) throw new HttpError(415, FILE_REFUSED);
-    const av = isBigType(type);
-    const [maxBytes, tooBig] = av ? [MAX_AV_BYTES, isAvType(type) ? AV_TOO_BIG : BIG_TOO_BIG] : [MAX_FILE_BYTES, FILE_TOO_BIG];
-    const declared = Number(request.headers["content-length"] ?? 0);
+    const [maxBytes, tooBig] = [this.sendCapBytes, isAvType(type) ? AV_TOO_BIG : FILE_TOO_BIG];
+    const length = request.headers["content-length"];
+    const declared = Number(length ?? 0);
     if (declared > maxBytes) throw new HttpError(413, tooBig);
+    // A file that says it is bigger than the room left is refused before it is streamed, not an hour later.
+    if (declared > this.room()) throw new HttpError(507, NO_ROOM);
+    // Any type may now be big: one that says it is small (and is held to that by the HTTP parser) is not counted.
+    const av = isBigType(type) || length === undefined || declared > MAX_MEDIA_BYTES;
     if (av && this.avUploads >= MAX_AV_UPLOADS) {
       // The body is left unread, so the connection cannot be reused.
       response.setHeader("connection", "close");
@@ -390,6 +406,7 @@ export class MediaStore {
         return this.file(body.sha);
       },
       text ? (chunk) => text.chunk(chunk) : undefined,
+      SEND_TIMEOUT_MS,
     );
     if (existed) this.store.touchMedia(sha, this.now());
     else {
@@ -405,6 +422,36 @@ export class MediaStore {
    * `inspect` sees every chunk as it arrives and throws to refuse the body.
    */
   private async receive(
+    request: IncomingMessage,
+    maxBytes: number,
+    tooBig: string,
+    keep: (body: { head: Buffer; size: number; sha: string }) => string | null,
+    inspect?: (chunk: Buffer) => void,
+    timeoutMs = BODY_TIMEOUT_MS,
+  ): Promise<{ size: number; sha: string }> {
+    // The server's own request timeout is the longest any route may take (SEND_TIMEOUT_MS); a body still arriving
+    // after this route's share is cut the same way, by closing the connection.
+    const late = setTimeout(() => request.destroy(new HttpError(408, "the upload took too long")), timeoutMs);
+    late.unref();
+    // No bytes for idleMs: the sender has gone, and its slot must not wait out the whole deadline for it.
+    let heard = Date.now();
+    const idle = setInterval(() => {
+      if (Date.now() - heard >= this.idleMs) request.destroy(new HttpError(408, "the upload stopped"));
+    }, Math.max(10, Math.min(this.idleMs / 4, 15_000)));
+    idle.unref();
+    const seen = (chunk: Buffer) => {
+      heard = Date.now();
+      inspect?.(chunk);
+    };
+    try {
+      return await this.receiveBody(request, maxBytes, tooBig, keep, seen);
+    } finally {
+      clearTimeout(late);
+      clearInterval(idle);
+    }
+  }
+
+  private async receiveBody(
     request: IncomingMessage,
     maxBytes: number,
     tooBig: string,

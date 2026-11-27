@@ -1,8 +1,8 @@
 // What a card may hold: the fields the app draws or the server reads. The server's schema keeps a field it does not know
-// (rivet/src/shared/board.ts needSchema is passthrough, so a stored card always reads), and the app draws none of them:
-// on 25 Nov 2026 four cards went up with their words in `heading` and `bullets`, their pictures in each option's `image`
-// and the ask's id as their `ask`, and the owner saw no description and no pictures. So a write that brings one is
-// refused, on the sending CLI and on the server, naming the field and what to use instead.
+// (rivet/src/shared/board.ts needSchema is passthrough, so a stored card always reads), and the app draws none of them: words
+// in `heading` and `bullets`, pictures in each option's `image` and an ask's id as the `ask` show as no description and no
+// pictures. So a write that brings one is refused, on the sending CLI and on the server, naming the field and what to use
+// instead.
 
 /** needSchema's own fields (test/card-fields.test.ts holds the lists to it). */
 export const CARD_FIELDS = [
@@ -80,7 +80,7 @@ function unknownFields(row, stored, known, allowed, same) {
 const words = (text) => String(text ?? "").replace(/[^\p{L}\p{N}]+/gu, " ").trim().toLowerCase();
 
 /**
- * An ask's id and nothing said about it: "a-1014", "Ask a-1014, option B", or the id and one of the card's option labels.
+ * An ask's id and nothing said about it: "a-14", "Ask a-14, option B", or the id and one of the card's option labels.
  * @param {unknown} ask @param {unknown[]} [labels]
  */
 export function isAskIdOnly(ask, labels = []) {

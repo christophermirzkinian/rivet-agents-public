@@ -157,9 +157,9 @@ describe("Answered and Reopen", () => {
     expect(cards["plan-dismissed"]!.ask).toBeUndefined();
     expect(cards["plan-dismissed"]!.done).toBe(true);
 
-    expect((await asks("PATCH", "/a-under", { stage: "done", note: "merged in PR 7001" })).status).toBe(200);
+    expect((await asks("PATCH", "/a-under", { stage: "done", note: "The plan is merged in PR 7001" })).status).toBe(200);
     cards = await byId();
-    expect(cards["plan-under"]!.ask).toMatchObject({ state: "done", stage: "done", note: "merged in PR 7001" });
+    expect(cards["plan-under"]!.ask).toMatchObject({ state: "done", stage: "done", note: "The plan is merged in PR 7001" });
     expect(cards["plan-under"]!.done).toBe(true);
 
     expect((await asks("PATCH", "/a-under", { stage: "parked", note: "The owner dropped it" })).status).toBe(200);
@@ -182,7 +182,7 @@ describe("Answered and Reopen", () => {
 
     clock.advance(31 * 24 * 3600_000);
     expect((await answered()).cards.map((entry) => [entry.card.id, entry.ask?.state])).toEqual([["plan-long", "underWay"]]);
-    expect((await asks("PATCH", "/a-long", { stage: "done" })).status).toBe(200);
+    expect((await asks("PATCH", "/a-long", { stage: "done", note: "The long plan is built and merged" })).status).toBe(200);
     expect((await answered()).cards).toEqual([]);
     expect(server.app.store.keptAnsweredCard("plan-long")).toBeNull();
   });

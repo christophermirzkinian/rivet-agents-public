@@ -44,6 +44,7 @@ import { agentName } from "../cloud-agent.js";
 import { accountLines, machinesHead, machinesWorstFirst, usageLead } from "../reading-figures.js";
 import { leadFigure, readingFrame, readingView } from "./reading.js";
 import { onSessionReset } from "../session.js";
+import { latestRead } from "../latest-read.js";
 
 export { HOLD_WORDS } from "../../../src/shared/pr-holds.js";
 
@@ -78,6 +79,7 @@ let holding = false;
 /** The schedules Machines lists, read while its pill is on. */
 let schedules: SchedulesResponse | null = null;
 let schedulesError: string | null = null;
+const scheduleReads = latestRead();
 
 /** Opens the page holding one section (search results use this); a section with no page left opens Plan. */
 export function focusSection(section: string): void {
@@ -136,13 +138,14 @@ export function refresh(): Promise<unknown> {
 
 async function loadSchedules(): Promise<void> {
   const current = sameSession();
+  const latest = scheduleReads.start();
   try {
     const next = await scheduleApi.get();
-    if (!current()) return;
+    if (!current() || !latest()) return;
     schedules = next;
     schedulesError = null;
   } catch (failure) {
-    if (!current()) return;
+    if (!current() || !latest()) return;
     schedulesError = failure instanceof Error ? failure.message : "Couldn't read the schedules.";
   }
   if (root && (app.opsPage === "machines" || app.opsPage === "plan")) renderOps(root);

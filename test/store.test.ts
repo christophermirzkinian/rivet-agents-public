@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { yesKey } from "../src/server/asks/waits.js";
 import { CommandStore } from "../src/server/commandstore.js";
 import { Store } from "../src/server/store.js";
-import { NO_REPO } from "../src/shared/board.js";
+import { NO_REPO, type Need } from "../src/shared/board.js";
 
 const HOME = "example-org/example-repo";
 const nodeRequire = createRequire(import.meta.url);
@@ -182,6 +182,36 @@ describe("store migration", () => {
     const wide = { ids: ["card-0"], prs: [...many, ...many.slice(0, 10), { repo: HOME.toUpperCase(), number: 3287 }], chats: many.map((pr) => ({ repo: NO_REPO, chat: `chat-${pr.number}` })) };
     expect(store.repliesLinked(wide, 500)).toHaveLength(500);
     expect(store.repliesLinked(wide, 1_000)).toHaveLength(519);
+    store.close();
+  });
+});
+
+describe("a comment then a pick recorded at one revision", () => {
+  const pick = { id: "pick-1", kind: "decision", title: "Which layout?", ask: "A or B?", options: [{ label: "A" }, { label: "B" }] } as Need;
+  const asked = { id: "ask-1", kind: "question", title: "What colour?", ask: "Say a colour." } as Need;
+  const reply = (store: Store, need: Need, rev: string, decision: "comment" | "choice", extra: { text?: string; choice?: string }) =>
+    store.addReply({ clientId: `client-${need.id}-${rev}-${decision}-${Math.random()}`, itemId: need.id, itemTitle: need.title, decision, rev, item: need, ...extra });
+
+  it("cardAnswer: a comment then a pick at one showing is answered by the pick; comments alone by the first", () => {
+    const store = new Store(mkdtempSync(join(tmpdir(), "rivet-store-")));
+    const since = new Date(Date.now() - 60_000).toISOString();
+    reply(store, pick, "r1", "comment", { text: "Why A?" });
+    reply(store, pick, "r1", "choice", { choice: "A" });
+    expect(store.cardAnswer(pick.id, pick.title, since)).toMatchObject({ decision: "choice", choice: "A" });
+    reply(store, asked, "r1", "comment", { text: "Blue" });
+    reply(store, asked, "r1", "comment", { text: "Or green" });
+    expect(store.cardAnswer(asked.id, asked.title, since)).toMatchObject({ decision: "comment", text: "Blue" });
+    store.close();
+  });
+
+  it("answerTimes, answeredCards and handledCards count a comment as the card's answer", () => {
+    const store = new Store(mkdtempSync(join(tmpdir(), "rivet-store-")));
+    const comment = reply(store, pick, "r1", "comment", { text: "Why A?" });
+    expect(store.answerTimes([pick.id]).get("pick-1\nr1")).toBe(comment.at);
+    expect([...store.answeredCards([pick.id])]).toEqual(["pick-1\nr1"]);
+    expect(store.firstReplyAt(pick.id, "r1")).toMatchObject({ decision: "comment", text: "Why A?" });
+    store.markHandled(comment.id);
+    expect([...store.handledCards([pick.id], new Date(Date.now() + 60_000).toISOString())]).toEqual(["pick-1\nr1"]);
     store.close();
   });
 });
@@ -365,6 +395,14 @@ describe("wait yeses", () => {
     expect([...store.waitYeses()]).toEqual([[OK_KEY, early.at]]);
     answer("wait-ok-0123456789ac-a", "decision", "choice", "Yes", 2484, {}, UNMARKED_ANSWERS_UNTIL);
     expect([...store.waitYeses()]).toEqual([[OK_KEY, early.at]]);
+    close();
+  });
+
+  it("a comment on a PR's other Your OK card is no merge yes or no, so it ends no earlier yes", () => {
+    const { store, answer, close } = setup();
+    const ok = answer("wait-ok-0123456789ab-a", "decision", "choice", "Yes");
+    answer("wait-ok-0123456789ab-b", "decision", "comment" as never);
+    expect([...store.waitYeses()]).toEqual([[OK_KEY, ok.at]]);
     close();
   });
 });

@@ -891,6 +891,50 @@ test("an unexpected processing error ends the connection instead of crashing", a
   assert.ok(h.logs.some((l) => l.startsWith("process-failed")));
 });
 
+for (const [event, raw, key] of /** @type {[string, Record<string, unknown>, string][]} */ ([
+  ["late-ask", { id: "l_disk", kind: "ask", key: "a-9", dueAt: "2026-10-24T08:00:00.000Z" }, "late-ask-l_disk"],
+  ["ops-pickup", { id: "p_disk", kind: "ci", key: "ci.yml", repo: "example-org/example-repo" }, "ops-pickup-p_disk"],
+])) {
+  test(`an unexpected ${event} state error is logged without rejecting or stalling the SSE worker`, { timeout: 5_000 }, async (t) => {
+    const stream = deafStream();
+    const h = harness({ events: stream.response });
+    const put = h.state.put.bind(h.state);
+    h.state.put = (/** @type {any} */ entry) => {
+      if (entry.id === key) throw new Error("ENOSPC: disk full");
+      put(entry);
+    };
+    /** @type {unknown[]} */
+    const unhandled = [];
+    const onUnhandled = (/** @type {unknown} */ err) => unhandled.push(err);
+    process.on("unhandledRejection", onUnhandled);
+    const done = h.bridge.connectOnce();
+    // Observe the connection promise too; the worker must not reject while the stream is still open.
+    done.catch(() => {});
+    t.after(async () => {
+      stream.end();
+      await done.catch(() => {});
+      process.off("unhandledRejection", onUnhandled);
+    });
+    await settle();
+    const next = (/** @type {string} */ id) => `event: reply\ndata: ${JSON.stringify(reply({ id }, { pr: undefined }))}\n\n`;
+    stream.push(`event: ${event}\ndata: ${JSON.stringify(raw)}\n\n${next("r_after_disk")}`);
+    // Keep the stream open across event-loop turns so finish() cannot hide an unhandled worker rejection.
+    await settle();
+    assert.deepEqual(unhandled, []);
+    assert.ok(h.logs.includes(`process-failed ${JSON.stringify({ event, error: "ENOSPC: disk full" })}`), h.logs.join("\n"));
+    assert.deepEqual(h.acks.map((ack) => ack.id), ["r_after_disk"]);
+    assert.equal(stream.cancelled, false);
+    assert.deepEqual(h.lateAskAcks, []);
+    // A later arrival must start another drain after the queue empties.
+    stream.push(next("r_after_empty"));
+    await settle();
+    assert.deepEqual(h.acks.map((ack) => ack.id), ["r_after_disk", "r_after_empty"]);
+    stream.end();
+    assert.deepEqual(await done, { status: "ended", connected: true });
+    assert.deepEqual(unhandled, []);
+  });
+}
+
 test("a runner error's stderr never reaches the log", async () => {
   const h = harness();
   const bridge = createBridge({

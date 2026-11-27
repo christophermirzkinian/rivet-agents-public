@@ -175,9 +175,10 @@ export const RUN_RESULTS = ["running", "green", "red", "skipped", "missed"] as c
 export type RunResult = (typeof RUN_RESULTS)[number];
 
 /** The plans a hosted agent's job chat runs on (bridge/lib/job-drivers.mjs PLANS). */
-export const PLANS = ["claude", "chatgpt"] as const;
+export const PLANS = ["claude", "chatgpt", "copilot"] as const;
 export type Plan = (typeof PLANS)[number];
-export const PLAN_NAMES: Record<Plan, string> = { claude: "Claude", chatgpt: "ChatGPT" };
+export const PLAN_NAMES: Record<Plan, string> = { claude: "Claude", chatgpt: "ChatGPT", copilot: "GitHub Copilot" };
+/** The plan a limit offers when its report names none: a report from before there was a third plan, or an older bridge. */
 export const otherPlan = (plan: Plan): Plan => (plan === "claude" ? "chatgpt" : "claude");
 
 /** The bridge's run report: `start` asks whether the run may go; the rest finish it. */
@@ -208,17 +209,28 @@ export const runReportSchema = z
 export type RunReport = z.infer<typeof runReportSchema>;
 
 /**
- * A chat that stopped on its plan's usage limit. A task's comes only while the other plan is connected; a look's comes
- * either way, with `connected` saying whether its check's card can ask to use the other plan and `first` the plan that
- * goes first, which a fix chat opens on. `outside`: what a task's words need that a ChatGPT job run can't see, so its
- * card doesn't offer ChatGPT.
+ * A chat that stopped on its plan's usage limit. A task's comes only while another plan is connected; a look's comes
+ * either way, with `connected` saying whether its check's card can ask to use another plan and `first` the plan that
+ * goes first, which a fix chat opens on. `other` is the connected plan the card offers (limitOther reads a report
+ * with none). `outside`: what a task's words need that the offered plan's job run can't see, so its card doesn't
+ * offer it.
  */
 export const planLimitSchema = z
-  .object({ plan: z.enum(PLANS), until: plain(40).optional(), connected: z.boolean().optional(), first: z.enum(PLANS).optional(), outside: plain(40).optional() })
-  .strict();
+  .object({
+    plan: z.enum(PLANS),
+    until: plain(40).optional(),
+    connected: z.boolean().optional(),
+    first: z.enum(PLANS).optional(),
+    other: z.enum(PLANS).optional(),
+    outside: plain(40).optional(),
+  })
+  .strict()
+  .refine((limit) => limit.other !== limit.plan, "a limit offers another plan than its own");
 export type PlanLimit = z.infer<typeof planLimitSchema>;
-/** The limit card's option that runs the job once on the other plan (bridge/lib/job-drivers.mjs limitAsk asks it). */
-export const planSwitchLabel = (limited: Plan): string => `Use ${PLAN_NAMES[otherPlan(limited)]}`;
+/** The plan a limit's card offers. */
+export const limitOther = (limit: Pick<PlanLimit, "plan" | "other">): Plan => limit.other ?? otherPlan(limit.plan);
+/** The limit card's option that runs the job once on the plan it offers (bridge/lib/job-drivers.mjs limitAsk asks it). */
+export const planSwitchLabel = (limited: Plan, other: Plan = otherPlan(limited)): string => `Use ${PLAN_NAMES[other]}`;
 /** The hosted agent's page where its plans are connected and the first one picked (rivet-agents runtime). */
 export const PLANS_PATH = "/cloud/plans";
 

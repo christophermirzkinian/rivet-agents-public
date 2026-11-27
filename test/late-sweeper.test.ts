@@ -472,7 +472,7 @@ describe("late work end to end: the CLI, the status route, the sweeper and what 
     };
     expect(await cli(["fix", "machine", "phone-1", "--by", "rivet"], { runner })).toBe(0);
     expect(await list()).toEqual(before);
-    // Anyone else asking for the fix goes on, as a person may mean to re-open it.
+    // Anyone else asking for the fix goes on, as a person may mean to re-open it: on to reading the runner's chats.
     expect(await cli(["fix", "machine", "phone-1", "--by", "monitor"], { runner })).toBe(1);
     expect(stderr).toMatch(/unexpected ps/);
   });
@@ -482,7 +482,8 @@ describe("late work end to end: the CLI, the status route, the sweeper and what 
     const parkedAt = (await list())[0]!.updatedAt;
     clock.advance(60_000);
     expect(await cli(["fix", "machine", "phone-1"], { runner: noChat })).toBe(1);
-    expect(stderr).toMatch(/the chat runner could not open/);
+    expect(stderr).toMatch(/the chat runner could not open fix-machine-phone-1: disk full/);
+    expect(stderr).not.toMatch(/still names/);
     expect((await list())[0]).toMatchObject({ state: "parked", updatedAt: parkedAt });
     // A restored time is only ever an older one, and only a parked record's.
     const late = { state: "parked", restore: { updatedAt: new Date(clock.now().getTime() + 3_600_000).toISOString() } };
@@ -495,7 +496,7 @@ describe("late work end to end: the CLI, the status route, the sweeper and what 
     await goLate();
     const { version: _version, updatedAt: _updatedAt, ...before } = (await list())[0]!;
     expect(await cli(["fix", "ci", "ci"], { runner: noChat })).toBe(1);
-    expect(stderr).toMatch(/the chat runner could not open/);
+    expect(stderr).toMatch(/the chat runner could not open fix-ci-ci: disk full/);
     expect(stderr).not.toMatch(/still names/);
     // A put cannot clear `by`: a record that had none goes back naming the fix's writer.
     const { version: _v, updatedAt: _u, by, ...after } = (await list())[0]!;
@@ -515,7 +516,7 @@ describe("late work end to end: the CLI, the status route, the sweeper and what 
     const { version: _version, updatedAt: _updatedAt, ...before } = (await list())[0]!;
     expect(before).toMatchObject({ state: "fixed", askedForTimeAt: at(40), dueHistory });
     expect(await cli(["fix", "ci", "ci"], { runner: noChat })).toBe(1);
-    expect(stderr).toMatch(/the chat runner could not open/);
+    expect(stderr).toMatch(/the chat runner could not open fix-ci-ci: disk full/);
     expect(stderr).not.toMatch(/still names/);
     const { version: _v, updatedAt: _u, by: _by, ...after } = (await list())[0]!;
     expect(after).toEqual(before);

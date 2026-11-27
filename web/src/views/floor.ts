@@ -2,7 +2,7 @@ import "./progress.css";
 import "./floor.css";
 
 import { when } from "../../../src/shared/when.js";
-import { agentName, needsPlan } from "../cloud-agent.js";
+import { agentName, needsPlan, planNames } from "../cloud-agent.js";
 import { h, ICONS, keepFocus, svg } from "../dom.js";
 import { opsData, watchOps } from "../ops-data.js";
 import { rivet, setMood, type Mood } from "../rivet/rivet.js";
@@ -45,7 +45,8 @@ export function mount(el: HTMLElement, wide = false): void {
   setOpsPage("plan");
   ops.mount(plan);
   const paint = () => {
-    const name = needsPlan() ? agentName() : null;
+    // The box is rebuilt when the agent's name or the plans its title names change.
+    const name = needsPlan() ? `${agentName()}\n${planNames()}` : null;
     if (name !== connectFor) {
       connectFor = name;
       const refocus = keepFocus(connect);

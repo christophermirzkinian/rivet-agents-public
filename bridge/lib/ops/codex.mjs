@@ -193,6 +193,7 @@ export function readCodexAccount(codexBin, home, opts = {}) {
       if (child.stdin && !child.stdin.destroyed) child.stdin.write(`${JSON.stringify(message)}\n`);
     };
     let buffer = "";
+    child.stdout?.setEncoding?.("utf8");
     child.stdout?.on("data", (data) => {
       buffer += String(data);
       if (buffer.length > 1024 * 1024) return finish();

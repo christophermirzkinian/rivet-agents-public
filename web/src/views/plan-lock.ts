@@ -1,6 +1,6 @@
 // A hosted agent with no plan connected (cloud-agent.ts needsPlan): the home screen's box that says to connect one, and what
 // a locked message box shows. On the owner's own machine none of it is ever drawn.
-import { agentName, CONNECT_PATH, connectPlan, LOCKED_LINE, needsPlan } from "../cloud-agent.js";
+import { agentName, CONNECT_PATH, connectPlan, LOCKED_LINE, needsPlan, planNames } from "../cloud-agent.js";
 import { stopDictation } from "../dictation.js";
 import { button, h, svg } from "../dom.js";
 import { subscribe } from "../state.js";
@@ -16,7 +16,7 @@ export function planBox(): HTMLElement {
   return h(
     "section",
     { class: "noplan-box", attrs: { "aria-labelledby": "noplan-title" } },
-    h("h2", { class: "noplan-title", attrs: { id: "noplan-title" } }, "Connect Claude or ChatGPT to start"),
+    h("h2", { class: "noplan-title", attrs: { id: "noplan-title" } }, `Connect ${planNames()} to start`),
     h("p", { class: "noplan-words" }, `${agentName()} can't take jobs until one is connected. It takes about a minute.`),
     button("Connect now", connectPlan, "primary big", false, "cloud.connect-band"),
   );
@@ -24,7 +24,29 @@ export function planBox(): HTMLElement {
 
 /** Under a locked message box: the line is the way to Connect. `mark` where the box itself carries no lock. */
 export function lockedLine(mark = false): HTMLElement {
-  return h("a", { class: "noplan-line", attrs: { href: CONNECT_PATH, "data-use": "cloud.connect-band" } }, mark ? lockMark() : null, LOCKED_LINE);
+  const words = document.createTextNode(LOCKED_LINE);
+  const line = h("a", { class: "noplan-line", attrs: { href: CONNECT_PATH, "data-use": "cloud.connect-band" } }, mark ? lockMark() : null, words);
+  lineWords.set(line, words);
+  keepWords(new WeakRef(line));
+  return line;
+}
+
+/** Each line's words, for as long as the line lives. Being a key here also marks the line as in use, so a browser never
+ *  swaps the object behind a line that is still on the page for a new one, which would empty the weak hold below. */
+const lineWords = new WeakMap<HTMLElement, Text>();
+
+/**
+ * The words name the plans of the last plans read, which may come after the line is built: each redraw sets them. A
+ * sheet takes its line off the page and puts it back, so being off the page ends nothing; the listener goes once
+ * nothing holds the line any more, and it holds the line only weakly so that it never keeps a dropped line alive.
+ */
+function keepWords(ref: WeakRef<HTMLElement>): void {
+  const stop = subscribe(() => {
+    const line = ref.deref();
+    const words = line && lineWords.get(line);
+    if (!words) return stop();
+    if (words.data !== LOCKED_LINE) words.data = LOCKED_LINE;
+  });
 }
 
 /**

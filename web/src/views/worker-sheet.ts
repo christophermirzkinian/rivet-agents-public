@@ -12,6 +12,7 @@ import * as cmd from "../command-api.js";
 import { stopDictation, withMic } from "../dictation.js";
 import { button, describe, h, inertBehind, keepFocus } from "../dom.js";
 import { enterScreen, leaveScreen } from "../usage.js";
+import { latestRead } from "../latest-read.js";
 import { STATE_WORDS } from "../crew-words.js";
 import { app, MAC_WAITS, crewLapsed, macOffline, signedOut, subscribe } from "../state.js";
 import { discussButton, discussPrefix, tooLong } from "./discuss.js";
@@ -94,6 +95,7 @@ export function liveLog(
   render: (logs: LogsResponse) => void,
   slow: (why: string) => void = () => {},
 ): { stop(): void } {
+  const reads = latestRead();
   let stopped = false;
   let etag: string | null = null;
   // Whether the newest read has lines; without them the poll is quick, and LOG_SLOW_MS after `since` it says why not.
@@ -121,10 +123,15 @@ export function liveLog(
     );
   const inFront = () => document.visibilityState === "visible";
   // Closed or hidden by the time a lease lands: nothing to read it.
-  const poll = () =>
-    (stopped || !inFront() ? Promise.resolve(null) : cmd.getLogsIfChanged(worker.repo, worker.chat, etag)).then(
+  // One read at a time: a poll while one is out joins it, so reads slower than the tick still land in turn.
+  let pending: Promise<void> | null = null;
+  const poll = (): Promise<void> => {
+    if (stopped || !inFront()) return Promise.resolve();
+    if (pending) return pending;
+    const current = reads.start();
+    pending = cmd.getLogsIfChanged(worker.repo, worker.chat, etag).then(
       (next) => {
-        if (stopped) return;
+        if (stopped || !current()) return;
         failed = null;
         if (next) {
           etag = next.etag;
@@ -137,11 +144,15 @@ export function liveLog(
         check();
       },
       (error: unknown) => {
-        if (stopped) return;
+        if (stopped || !current()) return;
         failed = actionError(error);
         check();
       },
-    );
+    ).finally(() => {
+      pending = null;
+    });
+    return pending;
+  };
   void lease().then(poll);
   // Hidden, the log goes unread: no lease or poll until the app is in front again, which leases and reads at once.
   const renew = window.setInterval(() => inFront() && void lease(), LEASE_RENEW_MS);
@@ -160,6 +171,7 @@ export function liveLog(
   return {
     stop() {
       stopped = true;
+      reads.invalidate();
       document.removeEventListener("visibilitychange", back);
       window.clearInterval(renew);
       window.clearInterval(tick);
